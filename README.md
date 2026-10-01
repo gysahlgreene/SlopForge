@@ -1,11 +1,12 @@
 # SlopForge
 
 <p align="center">
-  <img alt="SlopForge" src="https://img.shields.io/badge/Local-first-AI%20game%20asset%20tool-7c3aed?style=for-the-badge" />
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10--3.14-3776ab?style=for-the-badge&logo=python" />
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" />
-  <img alt="ComfyUI" src="https://img.shields.io/badge/ComfyUI-2D%20generation-ff6b6b?style=for-the-badge" />
-  <img alt="Blender" src="https://img.shields.io/badge/Blender-3D%20post-process-fb8c00?style=for-the-badge" />
+  <img alt="Slop" src="https://img.shields.io/badge/slop-forged%20locally-7c3aed?style=for-the-badge" />
+  <img alt="Art direction" src="https://img.shields.io/badge/art%20direction-YAML-6b7280?style=for-the-badge" />
+  <img alt="PBR" src="https://img.shields.io/badge/PBR-vibes%20based-fb8c00?style=for-the-badge" />
+  <img alt="Human approval" src="https://img.shields.io/badge/human%20approval-required-ff6b6b?style=for-the-badge" />
 </p>
 
 SlopForge is a local-first tool that uses ComfyUI and Blender to generate 2D art and 3D props from descriptions and project style settings, then exports approved assets into a Unity project.
