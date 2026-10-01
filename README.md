@@ -136,7 +136,7 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Agent integration
 
-Agents can invoke the same command manually. Optional generic Continue rules are in `templates/continue/`. They tell an agent to inspect the manifest and existing assets, use Unity geometry for simple references, and work inside the SlopForge project structure.
+`slopforge init` installs agent instructions for Codex, Claude Code, and Continue. Agents invoke the same CLI as developers; the instructions guide them to inspect the manifest, style, and existing assets, review candidates, and verify approved outputs.
 
 ## Configuration and diagnostics
 

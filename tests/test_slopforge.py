@@ -61,9 +61,27 @@ class SlopForgeTests(unittest.TestCase):
         self.assertTrue((target / "ai/styles/default/references/approved").is_dir())
         self.assertTrue((target / "ai/workflows").is_dir())
         self.assertTrue((target / "Assets/Art/Generated/Models").is_dir())
+        self.assertTrue((target / "AGENTS.md").is_file())
+        self.assertTrue((target / "CLAUDE.md").is_file())
+        self.assertTrue((target / ".continue/rules/asset-generation.md").is_file())
         self.assertFalse((target / "slopforge").exists())
         with self.assertRaises(FileExistsError):
             init_project(target)
+
+    def test_init_installs_agent_instructions_without_overwriting_existing_ones(self):
+        target = Path(self.temp.name) / "agent-game"
+        (target / "Assets").mkdir(parents=True)
+        (target / "AGENTS.md").write_text("Keep my project instructions.\n")
+        continue_rules = target / ".continue/rules"
+        continue_rules.mkdir(parents=True)
+        (continue_rules / "art-direction.md").write_text("Keep my Continue rule.\n")
+
+        init_project(target)
+
+        self.assertEqual((target / "AGENTS.md").read_text(), "Keep my project instructions.\n")
+        self.assertEqual((target / "CLAUDE.md").read_text().strip(), "@AGENTS.md")
+        self.assertEqual((continue_rules / "art-direction.md").read_text(), "Keep my Continue rule.\n")
+        self.assertTrue((continue_rules / "asset-generation.md").is_file())
 
     def test_project_root_discovery_walks_up_for_project_config(self):
         nested = self.root / "Assets/Scenes/Levels"

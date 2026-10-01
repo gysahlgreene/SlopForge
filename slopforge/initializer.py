@@ -21,6 +21,7 @@ def init_project(target, force=False):
     project_dirs = [
         "ai/assets", "ai/assets/candidates", "ai/workflows", "ai/asset_types",
         "ai/styles/default/references/approved", "ai/styles/default/references/candidates",
+        ".continue/rules",
         "Assets/Art/Generated/Icons", "Assets/Art/Generated/UI", "Assets/Art/Generated/Props",
         "Assets/Art/Generated/Portraits", "Assets/Art/Generated/Models", "Assets/Art/Generated/Decals",
         "Assets/Art/Generated/Concepts", "Assets/Art/Generated/Textures",
@@ -43,4 +44,10 @@ def init_project(target, force=False):
         destination = target / "ai/asset_types" / path.name
         if force or not destination.exists():
             shutil.copy2(path, destination)
+    agent_files = [(source / name, target / name) for name in ("AGENTS.md", "CLAUDE.md")]
+    agent_files.extend((path, target / ".continue/rules" / path.name)
+                       for path in (source / "continue").glob("*.md"))
+    for source_file, destination in agent_files:
+        if not destination.exists():
+            shutil.copy2(source_file, destination)
     return target

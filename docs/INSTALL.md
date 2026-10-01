@@ -18,7 +18,7 @@ On macOS, `scripts/install-macos.sh` creates `.venv`, upgrades pip, and installs
 
 ## Initialize a Unity project
 
-The target must already have an `Assets/` directory. Initialization installs only project configuration, manifest, taxonomy, neutral style data, and generated-output folders. It does not copy the toolkit into the Unity project.
+The target must already have an `Assets/` directory. Initialization installs project configuration, manifest, taxonomy, neutral style data, generated-output folders, and agent instructions for Codex, Claude Code, and Continue. Existing agent instruction files are preserved. It does not copy the toolkit into the Unity project.
 
 ```sh
 slopforge init ~/UnityProjects/MyGame

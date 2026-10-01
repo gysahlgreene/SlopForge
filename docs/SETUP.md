@@ -96,14 +96,7 @@ Approval runs background isolation, clean white-background preparation, Hunyuan3
 
 Install Continue and configure its LLM/provider using [Continue's documentation](https://docs.continue.dev/). This is separate from ComfyUI and SlopForge. The LLM plans/calls tools, while ComfyUI generates images/models. Configure a local or hosted provider in Continue; there is no required model/provider and SlopForge does not read its credentials. The agent needs terminal access and permission to run the SlopForge executable.
 
-Copy the generic rules into the project's Continue rules directory:
-
-```sh
-mkdir -p "$HOME/UnityProjects/MyGame/.continue/rules"
-cp templates/continue/*.md "$HOME/UnityProjects/MyGame/.continue/rules/"
-```
-
-If your Continue setup uses the user-level rules directory, copy them there instead. Start the agent with SlopForge's venv active, or call `<SlopForge checkout>/.venv/bin/slopforge` by full path. The rules guide the agent to inspect/reuse assets, follow project style, review candidates, and verify outputs; they do not configure model inference.
+`slopforge init` adds project instructions for Codex (`AGENTS.md`), Claude Code (`CLAUDE.md`), and Continue (`.continue/rules/`). Existing instruction files are left untouched. Start the agent with SlopForge's venv active, or call `<SlopForge checkout>/.venv/bin/slopforge` by full path. These instructions guide asset workflow; they do not configure model inference.
 
 ## Configuration and checks
 

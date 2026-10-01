@@ -8,6 +8,6 @@ slopforge --project /path/to/unity-project candidates inventory_key
 slopforge --project /path/to/unity-project approve inventory_key 1
 ```
 
-Copy `templates/continue/asset-generation.md` and `templates/continue/art-direction.md` into an agent's project rules when useful. For Continue, the project rule directory is `.continue/rules/`; the rules are generic templates and do not depend on a user's global Continue setup. The agent must be able to run the SlopForge CLI in a shell, either from its activated venv or by executable path.
+`slopforge init` installs `AGENTS.md` for Codex and other agents, a `CLAUDE.md` that imports it, and the Continue rules under `.continue/rules/`. Existing instruction files are preserved. The agent must be able to run the SlopForge CLI in a shell, either from its activated venv or by executable path.
 
-Agent guidance should be to inspect the manifest and existing assets first, reuse when appropriate, make simple geometry in Unity, choose the correct 2D/3D asset type, rely on project style injection, review candidates before approval, and verify output files. A flat image is not a substitute for physical 3D geometry unless intentionally used as a billboard, decal, or screen. Let Unity manage `.meta` files and use supported tools rather than hand-editing scenes or prefabs.
+The shared instructions tell agents to inspect the manifest, active style, and existing assets; reuse suitable assets; generate and review candidates; get the user's choice before approval; and verify the output. They also cover Unity-native geometry and keeping `.meta` files and scene/prefab edits in Unity-supported tools.
