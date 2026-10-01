@@ -18,6 +18,46 @@ semantic description
 → Unity-ready PNG or FBX
 ```
 
+## Alien Terminal example
+
+These images show one prop moving through the 3D pipeline: concept, background removal, prepared model input, and Blender output.
+
+<table>
+  <tr>
+    <th>Concept</th>
+    <th>Background removed</th>
+    <th>Blender output</th>
+  </tr>
+  <tr>
+    <td><img src="img/alien-terminal-concept.png" alt="Alien Terminal concept" width="100%" /></td>
+    <td><img src="img/alien-terminal-cutout.png" alt="Alien Terminal with background removed" width="100%" /></td>
+    <td><img src="img/alien-terminal-preview.png" alt="Blender render of the processed Alien Terminal model" width="100%" /></td>
+  </tr>
+</table>
+
+Texture-to-mesh mapping is WIP. The Alien Terminal preview shows visible stretching and misplaced texture details.
+
+<details>
+  <summary>Generated material maps</summary>
+  <table>
+    <tr>
+      <th>Base color</th>
+      <th>Normal</th>
+      <th>Roughness</th>
+      <th>Metallic</th>
+      <th>Emission</th>
+    </tr>
+    <tr>
+      <td><img src="img/alien-terminal-basecolor.png" alt="Base color map" width="100%" /></td>
+      <td><img src="img/alien-terminal-normal.png" alt="Normal map" width="100%" /></td>
+      <td><img src="img/alien-terminal-roughness.png" alt="Roughness map" width="100%" /></td>
+      <td><img src="img/alien-terminal-metallic.png" alt="Metallic map" width="100%" /></td>
+      <td><img src="img/alien-terminal-emission.png" alt="Emission map" width="100%" /></td>
+    </tr>
+  </table>
+  <p>Material maps are heuristic outputs; their quality varies by asset.</p>
+</details>
+
 ## What can SlopForge make?
 
 - 2D icons and props
@@ -106,7 +146,7 @@ Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `
 ## Current limitations
 
 - Reference images are organized and recorded but are not used as visual conditioning.
-- The PBR maps are a heuristic/generated v1 approach, not physically accurate scans.
+- Texture-to-mesh mapping is WIP: generated textures can stretch or land on the wrong parts of a mesh. PBR maps are heuristic outputs.
 - Hunyuan3D and Blender results depend on local models, nodes, and hardware; the 3D pipeline remains experimental.
 - Model weights are not included. Known source links and expected ComfyUI destinations are documented, but availability and model terms should be checked upstream.
 - SlopForge is MIT licensed. Separately installed model weights and ComfyUI custom nodes have their own terms; see `THIRD_PARTY_NOTICES.md`.
