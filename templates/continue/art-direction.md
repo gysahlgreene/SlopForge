@@ -1,0 +1,3 @@
+# Project art direction
+
+The canonical visual style is `ai/styles/<active_style>/style.yaml`; generated assets are recorded in `ai/assets/manifest.json`. Read both before planning artwork. SlopForge injects the project style automatically. Keep results consistent with the configured palette, materials, shape language, surface treatment, lighting, and type-specific rules. Approved references belong in the active style's `references/approved/`; candidates belong in `references/candidates/`. Current workflows do not consume references for visual conditioning. Do not change the canonical style just to excuse an inconsistent generation.

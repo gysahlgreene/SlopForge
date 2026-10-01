@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slopforge"
+version = "0.2.0"
+description = "A local-first AI game-asset slop generator powered by ComfyUI and Blender"
+license = {file = "LICENSE"}
+requires-python = ">=3.10,<3.15"
+dependencies = ["numpy", "Pillow", "PyYAML", "rembg[cpu]"]
+
+[project.scripts]
+slopforge = "slopforge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["slopforge*"]
+
+[tool.setuptools.data-files]
+"share/slopforge/workflows" = ["workflows/*.json"]
+"share/slopforge/processing" = ["processing/*.py"]
+"share/slopforge/blender" = ["blender/*.py"]
+"share/slopforge/templates" = ["templates/project.yaml", "templates/manifest.json"]
+"share/slopforge/templates/style" = ["templates/style/style.yaml"]
+"share/slopforge/templates/asset_types" = ["templates/asset_types/*.yaml"]
+"share/slopforge/templates/continue" = ["templates/continue/*.md"]

@@ -1,0 +1,38 @@
+project:
+  name: Unity Project
+  engine: unity
+
+asset_pipeline:
+  active_style: default
+  output_root: Assets/Art/Generated
+  candidate_root: ai/assets/candidates
+  manifest: ai/assets/manifest.json
+
+  defaults:
+    image_candidates: 4
+    model_candidates: 2
+
+  model_budgets:
+    prop_faces: 30000
+    hero_prop_faces: 60000
+    architecture_faces: 60000
+    collectible_faces: 20000
+
+  workflows:
+    image: image_text2img_api.json
+
+  conditioning:
+    strategy: text_only
+    max_references: 3
+    strength: 0.65
+
+  tools:
+    comfy_url: http://127.0.0.1:8188
+    comfy_home: null
+    blender: null
+    asset_python: null
+    hunyuan_checkpoint: hunyuan3d-dit-v2_fp16.safetensors
+
+  overwrite_existing: false
+  retain_sources: true
+  retain_blend_preview: true

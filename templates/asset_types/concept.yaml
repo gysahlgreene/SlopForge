@@ -1,0 +1,8 @@
+name: concept
+pipeline: image
+output_folder: Concepts
+format: PNG
+requirements:
+  - exploratory illustration is acceptable
+  - communicate the requested subject and idea clearly
+avoid: []

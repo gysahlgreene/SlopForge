@@ -1,0 +1,35 @@
+name: Cozy Fantasy
+version: 1
+identity:
+  genre: cozy hand-painted fantasy adventure
+  rendering: hand-painted stylized game art with broad soft forms
+  mood: [warm, welcoming, curious]
+  detail_level: medium
+shape_language:
+  preferred: [rounded chunky forms, friendly proportions, clear large silhouettes]
+  avoid: [neon sci-fi, sharp military silhouettes, photorealistic grime]
+palette:
+  meadow_green: {hex: "#738B52", usage: foliage and cloth accents}
+  warm_clay: {hex: "#B96F4E", usage: pottery and warm accents}
+  oat: {hex: "#E2C99B", usage: light fabric and stone}
+  walnut: {hex: "#68452F", usage: wood and dark trim}
+materials:
+  painted_wood: {description: warm matte wood with broad painted grain, roughness: high, metallic: low}
+  river_stone: {description: softly worn earthy stone, roughness: high, metallic: none}
+  aged_brass: {description: muted warm brass used as a small accent, roughness: medium, metallic: high}
+surface_language:
+  preferred: [visible broad brush texture, gentle edge wear, simple hand-painted motifs]
+  avoid: [neon emission, tiny random scratches, high-gloss plastic]
+lighting:
+  ambient: warm afternoon light
+  key: soft diffuse golden light
+  contrast: gentle and readable
+  avoid: [cold blue-black lighting, harsh spotlights]
+asset_rules:
+  model: [use rounded chunky forms and clear silhouettes]
+  prop: [make the material and purpose readable at game distance]
+  icon: [center one object and keep its silhouette simple]
+  ui: [leave open areas for in-game text]
+  portrait: [use warm light and an expressive face]
+material_generation:
+  rules: [surface texture only, broad hand-painted detail, no standalone objects or perspective]

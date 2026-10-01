@@ -1,0 +1,9 @@
+name: portrait
+pipeline: image
+output_folder: Portraits
+format: PNG
+requirements:
+  - frame one clear subject
+  - make the face and expression readable
+  - avoid unrelated lettering
+avoid: [contact sheets, multiple subjects unless requested]

@@ -1,0 +1,34 @@
+.venv/
+.asset-tools-venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.coverage
+.env
+.env.*
+!.env.example
+
+# Unity projects
+Library/
+Temp/
+Logs/
+Obj/
+Build/
+Builds/
+UserSettings/
+Assets/Art/Generated/
+ai/assets/candidates/
+ai/styles/*/references/candidates/
+
+# Local models and generated 3D assets
+*.safetensors
+*.ckpt
+*.gguf
+*.onnx
+*.glb
+*.fbx
+*.blend
