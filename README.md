@@ -35,7 +35,8 @@ These images show one prop moving through the 3D pipeline: concept, background r
   </tr>
 </table>
 
-Texture-to-mesh mapping is WIP. The Alien Terminal preview shows visible stretching and misplaced texture details.
+> [!NOTE]
+> Texture-to-mesh mapping is WIP. The Alien Terminal preview shows visible stretching and misplaced texture details.
 
 <details>
   <summary>Generated material maps</summary>
