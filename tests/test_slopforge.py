@@ -29,6 +29,7 @@ from processing.comfy_generate_3d import make_workflow
 from processing.comfy_status import prompt_failure
 from slopforge.doctor import run_doctor
 from slopforge.pipelines.model import model_paths
+from slopforge.pipelines.model import approve as approve_model
 
 
 def make_project(root):
@@ -128,6 +129,142 @@ class SlopForgeTests(unittest.TestCase):
                                                 "candidates": {"items": [{"number": 1}], "selected": None}}
         save_manifest(path, manifest)
         self.assertEqual(load_manifest(path)["assets"]["icon:potion"]["candidates"]["items"], [{"number": 1}])
+
+    def test_approval_records_selected_candidate_provenance(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["icon"]
+        manifest = {"assets": {"icon:potion": new_record("icon", "potion", "Potion", style, {"strategy": "text_only"})}}
+
+        def backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (16, 16), "red").save(destination)
+            metadata.write_text(json.dumps({"seed": seed, "model": "fixture", "prompt_id": str(seed)}))
+
+        generated = generate_candidates(self.root, config, recipe, style, "potion", "Potion", 2,
+                                        manifest, "icon:potion", backend)
+        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
+        self.assertEqual(manifest["assets"]["icon:potion"]["generator"], generated[0]["generator"])
+
+    def test_cli_auto_approval_keeps_first_candidate_provenance(self):
+        def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
+            Image.new("RGB", (16, 16), "red").save(destination)
+            metadata.write_text(json.dumps({"workflow": "fixture.json", "seed": seed,
+                                            "model": "fixture", "prompt_id": str(seed)}))
+
+        with patch("slopforge.pipelines.image.generate_image", side_effect=backend), redirect_stdout(StringIO()):
+            result = cli_main(["--project", str(self.root), "generate", "icon", "potion", "Health potion",
+                               "--count", "2", "--auto-approve"])
+        self.assertEqual(result, 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:potion"]
+        self.assertEqual(record["status"], "ready")
+        self.assertEqual(record["generator"], record["candidates"]["items"][0]["generator"])
+        self.assertEqual(record["description"], "Health potion")
+        self.assertEqual(record["candidates"]["selected"], 1)
+
+    def test_corrupt_candidate_cannot_replace_approved_image(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["icon"]
+        record = new_record("icon", "potion", "Potion", style, {"strategy": "text_only"})
+        manifest = {"assets": {"icon:potion": record}}
+
+        def backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (16, 16), "red").save(destination)
+
+        generated = generate_candidates(self.root, config, recipe, style, "potion", "Potion", 2,
+                                        manifest, "icon:potion", backend)
+        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
+        final = output_path(self.root, config, recipe, "potion")
+        original = final.read_bytes()
+        (self.root / generated[1]["path"]).write_bytes(b"corrupted after generation")
+        with self.assertRaisesRegex(ValueError, "invalid image"):
+            approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 2, force=True)
+        self.assertEqual(final.read_bytes(), original)
+        self.assertEqual(record["candidates"]["selected"], 1)
+        self.assertEqual(record["status"], "ready")
+        self.assertEqual(list(final.parent.glob(".potion.png.*")), [])
+
+    def test_older_image_approval_restores_original_description_and_style(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["icon"]
+        record = new_record("icon", "potion", "Health potion", style, {"strategy": "text_only"})
+        manifest = {"assets": {"icon:potion": record}}
+
+        def backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (16, 16), "red").save(destination)
+
+        generate_candidates(self.root, config, recipe, style, "potion", "First styled prompt", 1,
+                            manifest, "icon:potion", backend, semantic_description="Health potion")
+        style["name"], style["version"] = "Different", 2
+        record.update(description="Mana potion", style="Different", style_version=2)
+        generate_candidates(self.root, config, recipe, style, "potion", "Second styled prompt", 1,
+                            manifest, "icon:potion", backend, semantic_description="Mana potion")
+        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
+        self.assertEqual((record["description"], record["style"], record["style_version"]),
+                         ("Health potion", "Plain", 1))
+
+    def test_material_prompt_requests_surface_instead_of_physical_prop(self):
+        style = load_style(self.root, load_project(self.root))
+        recipe = load_taxonomy(self.root)["prop"]
+        prompt = build_prompt(style, recipe, "Ancient relic", mode="material")
+        self.assertIn("flat material surface", prompt)
+        self.assertIn("no standalone object", prompt)
+        self.assertNotIn("isolated object", prompt)
+        self.assertIn("Ancient relic", prompt)
+        self.assertIn("fantasy", prompt)
+
+    def test_model_approval_rejects_changed_style_before_processing(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["prop"]
+        record = new_record("prop", "relic", "Relic", style, {"strategy": "text_only"})
+        manifest = {"assets": {"prop:relic": record}}
+
+        def backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (16, 16), "red").save(destination)
+
+        generate_candidates(self.root, config, recipe, style, "relic", "Relic", 1,
+                            manifest, "prop:relic", backend)
+        style["identity"]["rendering"] = "photorealistic"
+        with patch("slopforge.pipelines.model.subprocess.run", side_effect=AssertionError("Processing started before style check")), \
+                self.assertRaisesRegex(ValueError, "style.*changed"):
+            approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1)
+        self.assertFalse(model_paths(self.root, config, "relic")["directory"].exists())
+
+    def test_model_approval_accepts_original_and_legacy_style(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["prop"]
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                record = new_record("prop", "relic", "Relic", style, {"strategy": "text_only"})
+                manifest = {"assets": {"prop:relic": record}}
+
+                def backend(_prompt, destination, seed, metadata):
+                    Image.new("RGB", (16, 16), "red").save(destination)
+
+                generate_candidates(self.root, config, recipe, style, "relic", "Relic", 1,
+                                    manifest, "prop:relic", backend)
+                if legacy:
+                    record["candidates"]["items"][0].pop("style")
+                with patch("slopforge.pipelines.model.subprocess.run", side_effect=RuntimeError("inference disabled")), \
+                        self.assertRaisesRegex(RuntimeError, "inference disabled"):
+                    approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1, force=True)
+                self.assertEqual(record["status"], "failed")
+                self.assertEqual(record["candidates"]["selected"], 1)
+
+    def test_force_init_preserves_manifest_history(self):
+        target = Path(self.temp.name) / "new-game"
+        (target / "Assets").mkdir(parents=True)
+        init_project(target)
+        manifest_path = target / "ai/assets/manifest.json"
+        manifest = load_manifest(manifest_path)
+        manifest["assets"]["icon:potion"] = {"name": "potion", "status": "ready", "candidates": {"items": [{"number": 1}]}}
+        save_manifest(manifest_path, manifest)
+        original = manifest_path.read_bytes()
+        init_project(target, force=True)
+        self.assertEqual(manifest_path.read_bytes(), original)
 
     def test_short_cli_and_explicit_forms_parse(self):
         self.assertTrue(parse_args(["model", "terminal", "wall object"]).auto_approve)

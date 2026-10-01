@@ -25,7 +25,7 @@ def parser():
 
     init = sub.add_parser("init", help="Initialize SlopForge configuration in a Unity project")
     init.add_argument("target", type=Path)
-    init.add_argument("--force", action="store_true", help="Replace managed configuration files")
+    init.add_argument("--force", action="store_true", help="Replace managed configuration files; preserve existing asset manifest")
 
     generate = sub.add_parser("generate", help="Generate candidates for an asset")
     generate.add_argument("asset_type")

@@ -33,7 +33,7 @@ def init_project(target, force=False):
     if force or not (target / "ai/project.yaml").exists():
         (target / "ai/project.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
     manifest = json.loads((source / "manifest.json").read_text())
-    if force or not (target / "ai/assets/manifest.json").exists():
+    if not (target / "ai/assets/manifest.json").exists():
         (target / "ai/assets/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     style_source = source / "style/style.yaml"
     style_target = target / "ai/styles/default/style.yaml"

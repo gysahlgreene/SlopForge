@@ -24,7 +24,7 @@ The target must already have an `Assets/` directory. Initialization installs onl
 slopforge init ~/UnityProjects/MyGame
 ```
 
-Existing managed files are not overwritten. Pass `--force` to replace them explicitly. The standalone toolkit can then target the project from any working directory:
+Existing managed files are not overwritten. Pass `--force` to replace configuration, taxonomy, and the default style explicitly. An existing asset manifest is always preserved, including candidate history and approvals. Back up customized configuration before using `--force`. The standalone toolkit can then target the project from any working directory:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate icon example "Simple inventory icon"

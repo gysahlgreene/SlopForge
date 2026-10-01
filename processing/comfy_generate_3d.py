@@ -218,7 +218,7 @@ def main():
         print(json.dumps(result, indent=2), file=sys.stderr)
         sys.exit(1)
 
-    print(f"Queued 3D generation: {prompt_id}")
+    print(f"Queued 3D generation: {prompt_id}", flush=True)
 
     deadline = time.time() + 3600
 

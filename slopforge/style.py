@@ -1,3 +1,4 @@
+import hashlib
 import re
 from pathlib import Path
 
@@ -5,6 +6,12 @@ import yaml
 
 
 REQUIRED = ("name", "version", "identity", "shape_language", "palette", "materials", "surface_language", "lighting", "asset_rules", "material_generation")
+
+
+def style_identity(style):
+    data = {key: value for key, value in style.items() if not key.startswith("_")}
+    digest = hashlib.sha256(yaml.safe_dump(data, sort_keys=True).encode()).hexdigest()
+    return {"key": style.get("_key"), "name": style["name"], "version": style["version"], "sha256": digest}
 
 
 def load_style(project_root, config=None):
@@ -43,9 +50,9 @@ def build_prompt(style, asset_type, description, mode="asset"):
     materials = "\n".join(f"- {key}: {value.get('description', '')}" for key, value in style["materials"].items())
     if mode == "material":
         rules = style["material_generation"].get("rules", [])
-        requirements = asset_type.get("requirements", [])
-        avoid = asset_type.get("avoid", [])
-        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a material surface consistent with this style."
+        requirements = asset_type.get("requirements", []) if asset_type.get("pipeline") != "model" else []
+        avoid = asset_type.get("avoid", []) if asset_type.get("pipeline") != "model" else []
+        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
     rules = asset_type.get("requirements", [])
     avoid = asset_type.get("avoid", [])
     project_rules = style["asset_rules"].get(asset_type["name"], [])

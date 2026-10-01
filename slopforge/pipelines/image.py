@@ -20,7 +20,8 @@ def generate(project_root, config, asset_type, style, name, description, count, 
         return generate_image(project_root, config, workflow_path, prompt_text, destination,
                               f"slopforge/{asset_type['name']}/{name}/candidate_{seed}", seed, metadata)
 
-    candidates = generate_candidates(project_root, config, asset_type, style, name, prompt, count, manifest, key, backend)
+    candidates = generate_candidates(project_root, config, asset_type, style, name, prompt, count, manifest, key, backend,
+                                     semantic_description=description)
     record = manifest["assets"][key]
     record["description"] = description
     record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}

@@ -11,7 +11,7 @@ from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..manifest import save_manifest
 from ..paths import resolve_workflow, tool_root
-from ..style import build_prompt
+from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..validation import summarize_validation, validate_image, validate_model_outputs
 
@@ -42,7 +42,8 @@ def generate(project_root, config, asset_type, style, name, description, count, 
         return generate_image(root, config, workflow_path, prompt_text, destination,
                               f"slopforge/{asset_type['name']}/{name}/concept_{seed}", seed, metadata)
 
-    result = generate_candidates(root, config, asset_type, style, name, prompt, count, manifest, key, backend)
+    result = generate_candidates(root, config, asset_type, style, name, prompt, count, manifest, key, backend,
+                                 semantic_description=description)
     record = manifest["assets"][key]
     record["description"] = description
     record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
@@ -56,6 +57,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Candidate {number} is not valid for {asset['name']}")
+    expected_style = candidate.get("style")
+    if ((expected_style and expected_style != style_identity(style)) or
+            (not expected_style and (asset.get("style"), asset.get("style_version")) != (style["name"], style["version"]))):
+        raise ValueError("Candidate style has changed; activate the original unchanged style pack or generate new candidates before 3D approval")
     conditioning = resolve_conditioning(root, config, style)
     ensure_supported(conditioning)
     paths = model_paths(root, config, asset["name"])
@@ -68,6 +73,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     candidate["approval"] = "approved"
     asset["candidates"]["selected"] = number
     asset["status"] = "processing"
+    asset["description"] = candidate.get("description", asset["description"])
+    asset["style"], asset["style_version"] = style["name"], style["version"]
     asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix()}
     pipeline = config["asset_pipeline"]
     save_manifest(root / pipeline["manifest"], manifest)
@@ -78,6 +85,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     workflow_path = resolve_workflow(root, workflow)
     python = python_executable(root, config)
     try:
+        print("3D stage: background removal and isolated reconstruction input...", flush=True)
         subprocess.run([python, str(tool_root() / "processing/prepare_3d_input.py"), "--input", str(paths["concept"]),
                         "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"])], check=True)
         cutout_check = validate_image(paths["cutout"], expected_format="PNG", require_alpha=True, report_path=paths["cutout"].relative_to(root))
@@ -87,24 +95,29 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
 
         model_metadata = paths["directory"] / "model_generation.json"
         mesh_seed = secrets.randbits(32)
+        print("3D stage: Hunyuan3D mesh generation...", flush=True)
         generate_model(root, config, paths["input_3d"], asset["name"], paths["glb"], model_metadata, mesh_seed)
         mesh_info = json.loads(model_metadata.read_text())
 
         material_prompt = build_prompt(style, asset_type, prompt, mode="material")
         material_metadata = paths["directory"] / "material_generation.json"
         material_seed = secrets.randbits(32)
+        print("3D stage: material base-colour generation...", flush=True)
         generate_image(root, config, workflow_path, material_prompt, paths["basecolor"],
                        f"slopforge/{asset_type['name']}/{asset['name']}/material", material_seed, material_metadata)
         base_check = validate_image(paths["basecolor"], expected_format="PNG", report_path=paths["basecolor"].relative_to(root))
         if base_check["status"] == "failed":
             raise ValueError(f"Base colour validation failed: {base_check['errors']}")
 
+        print("3D stage: v1 heuristic PBR maps...", flush=True)
         subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["basecolor"]),
                         "--prompt", prompt, "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
                         "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
         face_budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
         textures = [paths[name] for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+        print("3D stage: Blender cleanup, UVs, materials, BLEND and FBX export...", flush=True)
         process_model(root, config, paths["glb"], paths["fbx"], paths["blend"], textures, face_budget)
+        print("3D stage: mesh and output validation...", flush=True)
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         output_validation = validate_model_outputs({name: paths[name] for name in
             ("glb", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "emission")}, inspection, face_budget, root)
