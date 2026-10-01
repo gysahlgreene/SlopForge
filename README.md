@@ -38,7 +38,6 @@ These images show one prop moving through the 3D pipeline: concept, background r
 > [!NOTE]
 > Texture-to-mesh mapping is WIP. The Alien Terminal preview shows visible stretching and misplaced texture details.
 
-<details>
   <summary>Generated material maps</summary>
   <table>
     <tr>
@@ -57,7 +56,6 @@ These images show one prop moving through the 3D pipeline: concept, background r
     </tr>
   </table>
   <p>Material maps are heuristic outputs; their quality varies by asset.</p>
-</details>
 
 ## What can SlopForge make?
 
