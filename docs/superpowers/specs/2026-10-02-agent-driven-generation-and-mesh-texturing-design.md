@@ -2,7 +2,7 @@
 
 ## Status
 
-Design proposal for review. No implementation is included in this change.
+Implemented locally. Unit and Blender integration checks cover prompt pass-through, candidate provenance, material baking, bounds-framed mesh views, and reuse of the saved mesh. A real ComfyUI and Blender material iteration was visually reviewed on `sloptest_relic`; Unity import and a separate in-game prop review remain outstanding.
 
 ## Intent
 
@@ -20,7 +20,7 @@ The agent uses its host environment and model. SlopForge does not add an LLM, AP
 - `slopforge/style.py` expands a short description into a long, labeled prompt containing the style pack and taxonomy rules. The exact resulting prompt is recorded on candidates, but there is no direct way to submit an agent-authored final prompt unchanged.
 - `processing/comfy_generate.py` assigns the positive prompt to the workflow's first `CLIPTextEncode`. The bundled workflow connects its negative input to `ConditioningZeroOut`, so the script's default negative prompt has no effect in that workflow.
 - Model generation uses the selected concept to generate a GLB, then Blender joins and unwraps the mesh with Smart UV Project. A single square base-color image is assigned across the resulting UV atlas. This can stretch or scatter texture details across unrelated islands.
-- The current uncommitted edits instead build a flat base color from the isolated concept's median foreground color. This avoids treating a full object view as an atlas, but removes surface detail. These edits are the baseline and must be preserved while implementing the design.
+- The implementation builds material candidates from a generated surface image, projects that material across the mesh, bakes the result to the saved UV atlas, and renders front, side, and rear previews. It does not project concept art into the material. Normal maps derive from surface luminance; roughness, metallic, and emission remain prompt-guided heuristics.
 - The existing model approval path runs the entire 3D pipeline and writes final outputs in one operation. It does not offer a mesh-level material review and texture-only iteration before final approval.
 - Candidate records already capture seeds, prompts, styles, and available model/workflow metadata. The new flow should extend this record rather than introduce a separate provenance system.
 

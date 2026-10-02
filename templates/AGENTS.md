@@ -1,7 +1,9 @@
 # Working in this Unity project
 
-Before creating an asset, check `ai/project.yaml`, the active style in `ai/styles/`, `ai/assets/manifest.json`, and existing Unity assets. Reuse suitable assets when possible, and follow the active style; SlopForge adds it to generation prompts automatically.
+Before creating an asset, check `ai/project.yaml`, the active style in `ai/styles/`, `ai/assets/manifest.json`, and existing Unity assets. Reuse suitable assets when possible. You own creative direction: write a specific prompt for the configured image model instead of relying on a short description expanded by a generic template. Keep the short semantic description separate and pass the full prompt with `--image-prompt`.
 
-Generate candidates with `slopforge --project <project> generate <type> <name> "<description>"`, then inspect them with `candidates <name>`. Show the candidates and get the user's choice before running `approve <name> <number>`. Verify the approved output exists afterward.
+Generate candidates with `slopforge --project <project> generate <type> <name> "<semantic description>" --image-prompt "<specific prompt>"`. Inspect the images against the request and style, explain meaningful differences, and iterate the prompt when all candidates miss. Show the candidates and get the user's choice before approving one.
+
+For a 3D prop, pass `--material-prompt` when approving the concept. Describe a flat, evenly lit, repeatable surface swatch with fine-grain scale and the intended palette; exclude objects, perspective, borders, panels, and text. Review the saved front, side, and rear previews on the actual mesh, since the source image alone does not reveal projection seams or scale. If the material needs work, use `retexture <name> --material-prompt "<revised surface prompt>" --count 2`; this reuses the saved mesh. Compare the new previews with the request, then ask the user to choose and run `approve-texture <name> <number>`. Verify the approved FBX and material maps exist afterward. `candidates <name>` lists both concept and material candidates.
 
 Use Unity primitives for simple geometry. A generated flat image is not a physical prop unless it is intentionally a billboard, decal, or screen. Do not hand-edit Unity `.meta` files or scene/prefab YAML; let Unity import assets and use supported tools for scene changes.

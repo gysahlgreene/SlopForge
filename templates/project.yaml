@@ -11,6 +11,9 @@ asset_pipeline:
   defaults:
     image_candidates: 4
     model_candidates: 2
+    material_candidates: 2
+
+  material_scale: 3.0
 
   model_budgets:
     prop_faces: 30000

@@ -9,13 +9,13 @@
 SlopForge is a local-first tool that uses ComfyUI and Blender to generate 2D art and 3D props from descriptions and project style settings, then exports approved assets into a Unity project.
 
 ```text
-semantic description
-→ project art direction
+agent-authored image prompt + semantic description
 → ComfyUI concept candidates
 → background isolation
-→ 2D approval or Hunyuan3D
-→ Blender cleanup, UVs, scale, and PBR
-→ Unity-ready PNG or FBX
+→ 2D approval or Hunyuan3D mesh
+→ Blender cleanup, UVs, projected materials, and mesh previews
+→ texture iteration and approval
+→ Unity-ready PNG or FBX with material maps
 ```
 
 ## Alien Terminal example
@@ -36,7 +36,7 @@ These images show one prop moving through the 3D pipeline: concept, background r
 </table>
 
 > [!NOTE]
-> Texture-to-mesh mapping is WIP. The Alien Terminal preview shows visible stretching and misplaced texture details.
+> Generated 3D props use mesh-aware surface material projection and UV baking. Concept art is not baked into the material. Front, side, and rear renders expose coverage and seams. The normal map is derived from surface luminance; roughness, metallic, and emission remain heuristic, and textures are not guaranteed seamless.
 
   <summary>Generated material maps</summary>
   <table>
@@ -77,12 +77,13 @@ slopforge init ~/UnityProjects/MyGame
 
 For first-time setup on macOS, use `PYTHON_BIN=python3.12 ./scripts/install-macos.sh` and follow [docs/SETUP.md](docs/SETUP.md) for the route-specific dependencies.
 
-Run commands from the project root to discover `ai/project.yaml`, or pass the project explicitly:
+For a guided terminal walkthrough—from style and asset description through visual review and approval—run:
 
 ```sh
-slopforge --project ~/UnityProjects/MyGame generate icon health_potion \
-  "Health potion inventory icon"
+slopforge --project ~/UnityProjects/MyGame make
 ```
+
+The guided flow initializes SlopForge in an existing Unity project if needed. ComfyUI must be running for generated 2D and 3D assets. Experienced users can still use the individual commands below.
 
 ## Create a 2D asset
 
@@ -99,10 +100,19 @@ slopforge --project ~/UnityProjects/MyGame approve health_potion 2
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate prop alien_terminal \
-  "Wall-mounted terminal controlling sealed doors"
+  "Wall-mounted terminal controlling sealed doors" \
+  --image-prompt "A broad wall-mounted alien terminal, one recessed cyan display and three tactile controls, complete front three-quarter view, isolated on a plain neutral background, stylized painted sci-fi game prop."
 slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame approve alien_terminal 2
+slopforge --project ~/UnityProjects/MyGame approve alien_terminal 2 \
+  --material-prompt "Flat repeating surface swatch of aged charcoal metal, muted teal enamel, fine brushed grain, small cyan emissive accents; even lighting, no object or perspective."
+slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
+slopforge --project ~/UnityProjects/MyGame retexture alien_terminal \
+  --material-prompt "Flat surface swatch of worn ceramic and dark brass, subtle scratches, small-scale texture, even lighting, no object or perspective." --count 2
+slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
+slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 3
 ```
+
+Agents should inspect the actual front, side, and rear mesh previews, iterate material candidates with `retexture`, and get your choice before `approve-texture`. The guided `make` flow remains available for interactive use.
 
 ## Example projects and workflows
 

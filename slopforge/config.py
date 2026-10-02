@@ -9,7 +9,7 @@ DEFAULTS = {
     "output_root": "Assets/Art/Generated",
     "candidate_root": "ai/assets/candidates",
     "manifest": "ai/assets/manifest.json",
-    "defaults": {"image_candidates": 4, "model_candidates": 2},
+    "defaults": {"image_candidates": 4, "model_candidates": 2, "material_candidates": 2},
     "model_budgets": {"prop_faces": 30000, "hero_prop_faces": 60000, "architecture_faces": 60000, "collectible_faces": 20000},
     "workflows": {"image": "image_text2img_api.json"},
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors"},

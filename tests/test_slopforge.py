@@ -2,12 +2,12 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from slopforge.candidates import approve_image_candidate, generate_candidates
 from slopforge.config import load_project
@@ -24,11 +24,13 @@ from slopforge.backends.blender import process_model
 from slopforge.backends.comfyui import generate_image
 from slopforge.paths import tool_root
 from slopforge.pipelines.primitive import register_primitive
+from slopforge.pipelines import model
 from slopforge.validation import validate_model_outputs
 from processing.comfy_generate_3d import make_workflow
 from processing.comfy_status import prompt_failure
+from processing.make_pbr_maps import main as make_pbr_maps
 from slopforge.doctor import run_doctor
-from slopforge.pipelines.model import model_paths
+from slopforge.pipelines.model import material_candidate_paths, model_paths
 from slopforge.pipelines.model import approve as approve_model
 
 
@@ -82,6 +84,75 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual((target / "CLAUDE.md").read_text().strip(), "@AGENTS.md")
         self.assertEqual((continue_rules / "art-direction.md").read_text(), "Keep my Continue rule.\n")
         self.assertTrue((continue_rules / "asset-generation.md").is_file())
+
+    def test_make_guides_image_generation_review_and_approval(self):
+        project = Path(self.temp.name) / "fresh-unity-project"
+        (project / "Assets").mkdir(parents=True)
+        prompts = []
+        output = StringIO()
+
+        def answer(prompt):
+            prompts.append(prompt)
+            if "Style number:" in prompt:
+                return ""
+            if "Type number or name:" in prompt:
+                return "icon"
+            if "Short name" in prompt:
+                return "guided_potion"
+            if "Describe what" in prompt:
+                return "A small red healing potion"
+            if "Candidate number" in prompt:
+                return "2"
+            if "Approve candidate" in prompt:
+                return "y"
+            raise AssertionError(f"Unexpected prompt: {prompt}")
+
+        def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
+            Image.new("RGB", (16, 16), (seed % 255, 10, 20)).save(destination)
+            metadata.write_text(json.dumps({"seed": seed, "model": "fixture"}))
+
+        from slopforge.pipelines import image as image_pipeline
+        approve_image = image_pipeline.approve
+
+        def approve_with_warning(*args):
+            result = approve_image(*args)
+            result["status"] = "passed_with_warnings"
+            result["warnings"] = ["background is opaque; inspect the icon in Unity"]
+            manifest, key = args[3], args[4]
+            manifest["assets"][key]["validation"] = result
+            return result
+
+        with patch("builtins.input", side_effect=answer), \
+                patch("slopforge.cli._check_comfy", return_value=None, create=True), \
+                patch("slopforge.cli._open_candidates", create=True), \
+                patch("slopforge.pipelines.image.approve", side_effect=approve_with_warning), \
+                patch("slopforge.pipelines.image.generate_image", side_effect=backend), \
+                redirect_stdout(output):
+            result = cli_main(["--project", str(project), "make"])
+
+        record = load_manifest(project / "ai/assets/manifest.json")["assets"]["icon:guided_potion"]
+        self.assertEqual(result, 0)
+        self.assertEqual(record["candidates"]["selected"], 2)
+        self.assertEqual(record["status"], "ready")
+        self.assertTrue((project / "Assets/Art/Generated/Icons/guided_potion.png").is_file())
+        self.assertTrue((project / "AGENTS.md").is_file())
+        self.assertNotIn('"checks"', output.getvalue())
+        self.assertIn("Export completed with warnings", output.getvalue())
+        self.assertIn("background is opaque; inspect the icon in Unity", output.getvalue())
+        self.assertNotIn("Style number:", prompts)
+        self.assertIn("Using your only art style: Default", output.getvalue())
+        self.assertIn("Next", output.getvalue())
+
+    def test_make_ctrl_c_cancels_without_traceback(self):
+        error = StringIO()
+        with patch("slopforge.cli.discover_project_root", side_effect=FileNotFoundError), \
+                patch("builtins.input", side_effect=KeyboardInterrupt), redirect_stdout(StringIO()), \
+                redirect_stderr(error):
+            result = cli_main(["make"])
+
+        self.assertEqual(result, 130)
+        self.assertIn("Cancelled", error.getvalue())
+        self.assertNotIn("Traceback", error.getvalue())
 
     def test_project_root_discovery_walks_up_for_project_config(self):
         nested = self.root / "Assets/Scenes/Levels"
@@ -232,6 +303,31 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("Ancient relic", prompt)
         self.assertIn("fantasy", prompt)
 
+    def test_material_maps_are_derived_from_the_surface_and_emission_is_opt_in(self):
+        source = self.root / "surface.png"
+        Image.new("RGB", (32, 32), "gray").save(source)
+        pixels = [(value // 4, value // 2, value) for y in range(32) for x in range(32)
+                  for value in [40 + (x * 5 + y * 3) % 170]]
+        texture = Image.new("RGB", (32, 32))
+        texture.putdata(pixels)
+        texture.save(source)
+        outputs = {name: self.root / f"{name}.png" for name in ("normal", "roughness", "metallic", "emission")}
+        argv = ["make_pbr_maps.py", "--basecolor", str(source), "--prompt",
+                "weathered rough stone with tiny copper flecks"]
+        for name, path in outputs.items():
+            argv.extend((f"--{name}", str(path)))
+        with patch("sys.argv", argv):
+            make_pbr_maps()
+        self.assertGreater(max(ImageStat.Stat(Image.open(outputs["normal"])).stddev), 0)
+        self.assertGreater(ImageStat.Stat(Image.open(outputs["roughness"])).stddev[0], 0)
+        self.assertEqual(set(Image.open(outputs["metallic"]).getdata()), {12})
+        self.assertEqual(set(Image.open(outputs["emission"]).getdata()), {(0, 0, 0)})
+
+        argv[argv.index("--prompt") + 1] = "emissive blue stone"
+        with patch("sys.argv", argv):
+            make_pbr_maps()
+        self.assertTrue(any(pixel != (0, 0, 0) for pixel in Image.open(outputs["emission"]).getdata()))
+
     def test_model_approval_rejects_changed_style_before_processing(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
@@ -272,6 +368,124 @@ class SlopForgeTests(unittest.TestCase):
                 self.assertEqual(record["status"], "failed")
                 self.assertEqual(record["candidates"]["selected"], 1)
 
+    def test_model_approval_uses_agent_material_prompt_and_records_mesh_previews(self):
+        config, style = load_project(self.root), load_style(self.root)
+        recipe = load_taxonomy(self.root)["prop"]
+        record = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
+        manifest = {"assets": {"prop:relic": record}}
+
+        def concept_backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (64, 64), "gray").save(destination)
+            metadata.write_text(json.dumps({"workflow": "concept.json", "seed": seed, "model": "image-model"}))
+
+        generate_candidates(self.root, config, recipe, style, "relic", "Ancient relic", 1,
+                            manifest, "prop:relic", concept_backend)
+
+        authored_material_prompt = "Seamless brushed titanium, charcoal panels, cyan luminous insets."
+
+        def write_generated_image(_root, _config, _workflow, prompt, destination, _prefix, seed, metadata):
+            self.assertEqual(prompt, authored_material_prompt)
+            Image.new("RGB", (64, 64), (90, 100, 110)).save(destination)
+            metadata.write_text(json.dumps({"workflow": "material.json", "seed": seed, "model": "image-model"}))
+
+        def run_script(command, check):
+            if "prepare_3d_input.py" in command[1]:
+                Image.new("RGBA", (64, 64), (120, 120, 120, 255)).save(command[command.index("--cutout") + 1])
+                Image.new("RGB", (64, 64), "white").save(command[command.index("--output") + 1])
+            elif "make_pbr_maps.py" in command[1]:
+                for flag in ("--normal", "--roughness", "--metallic", "--emission"):
+                    Image.new("RGB", (64, 64), "gray").save(command[command.index(flag) + 1])
+
+        def generate_mesh(_root, _config, _image, _name, destination, metadata, seed):
+            destination.write_bytes(b"glb")
+            metadata.write_text(json.dumps({"workflow": "mesh.json", "seed": seed, "model": "mesh-model"}))
+
+        def process_mesh(_root, _config, _glb, fbx, blend, textures, _budget, **options):
+            fbx.write_bytes(b"fbx")
+            blend.write_bytes(b"blend")
+            Image.new("RGB", (64, 64), (90, 100, 110)).save(textures[0])
+            if not options["reuse_stage_mesh"]:
+                Path(options["stage_mesh"]).write_bytes(b"processed mesh")
+            Path(options["preview_dir"]).mkdir(parents=True, exist_ok=True)
+            for name in ("front", "side", "rear"):
+                Image.new("RGB", (16, 16), "gray").save(Path(options["preview_dir"]) / f"relic_{name}.png")
+
+        with patch("slopforge.pipelines.model.generate_image", side_effect=write_generated_image), \
+                patch("slopforge.pipelines.model.generate_model", side_effect=generate_mesh), \
+                patch("slopforge.pipelines.model.process_model", side_effect=process_mesh) as process, \
+                patch("slopforge.pipelines.model.inspect_model", return_value={
+                    "status": "passed", "errors": [], "warnings": [], "measured": {"face_count": 8, "uv_layers": 1}}), \
+                patch("slopforge.pipelines.model.subprocess.run", side_effect=run_script) as run_scripts:
+            result = approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1,
+                                  material_prompt=authored_material_prompt)
+
+        self.assertEqual(result["status"], "awaiting_texture_approval")
+        self.assertEqual(len(record["material_candidates"]["items"]), 2)
+        self.assertEqual(record["material_prompt"], authored_material_prompt)
+        self.assertEqual(record["generator"]["workflow"]["material"], "material.json")
+        self.assertEqual(Path(record["material_candidates"]["items"][0]["outputs"]["preview_front"]).name,
+                         "relic_front.png")
+        self.assertEqual(Path(process.call_args.kwargs["surface_source"]).name, "surface_source.png")
+        self.assertNotIn("concept", process.call_args.kwargs)
+        self.assertTrue(process.call_args.kwargs["reuse_stage_mesh"])
+        pbr_command = next(call.args[0] for call in run_scripts.call_args_list
+                           if "make_pbr_maps.py" in call.args[0][1])
+        self.assertEqual(Path(pbr_command[pbr_command.index("--basecolor") + 1]).name, "surface_source.png")
+        self.assertNotIn("--source", pbr_command)
+
+    def test_approved_material_candidate_replaces_outputs_and_marks_asset_ready(self):
+        config, style = load_project(self.root), load_style(self.root)
+        asset = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
+        asset["generator"] = {"workflow": {"concept": "concept.json", "mesh": "mesh.json", "material": None},
+                              "seed": {"concept": 1, "mesh": 2}}
+        manifest = {"assets": {"prop:relic": asset}}
+        candidate_paths = material_candidate_paths(self.root, config, "relic", 1)
+        keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "emission",
+                "preview_front", "preview_side", "preview_rear")
+        outputs = {}
+        for name in keys:
+            path = candidate_paths[name]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(name.encode())
+            outputs[name] = path.relative_to(self.root).as_posix()
+        asset["material_candidates"] = {"items": [{"number": 1, "status": "candidate", "prompt": "Brushed steel",
+                                                        "seed": 3, "outputs": outputs,
+                                                        "generator": {"workflow": "material.json", "model": "image-model"},
+                                                        "validation": {"status": "passed", "errors": [],
+                                                                       "warnings": [], "measured": {}}}],
+                                         "selected": None}
+
+        result = model.approve_texture(self.root, config, manifest, "prop:relic", 1)
+
+        final_paths = model_paths(self.root, config, "relic")
+        self.assertEqual(asset["status"], "ready")
+        self.assertEqual(asset["material_candidates"]["selected"], 1)
+        self.assertEqual(asset["material_prompt"], "Brushed steel")
+        self.assertEqual(result["status"], "passed")
+        for name in keys:
+            self.assertEqual(final_paths[name].read_bytes(), name.encode())
+
+    def test_retexture_rebuilds_missing_stage_mesh_for_older_approved_models(self):
+        root = self.root.resolve()
+        config, style = load_project(root), load_style(root)
+        asset = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
+        paths = model_paths(root, config, "relic")
+        paths["glb"].parent.mkdir(parents=True, exist_ok=True)
+        paths["glb"].write_bytes(b"existing glb")
+        paths["cutout"].write_bytes(b"existing cutout")
+        asset["status"] = "ready"
+        asset["source"] = {"glb": paths["glb"].relative_to(root).as_posix(),
+                           "cutout": paths["cutout"].relative_to(root).as_posix()}
+        asset["candidates"] = {"items": [{"number": 1}], "selected": 1}
+        manifest = {"assets": {"prop:relic": asset}}
+        failed = {"number": 1, "status": "failed", "error": "fixture failure"}
+        with patch("slopforge.pipelines.model._generate_material_candidate", return_value=failed) as generate:
+            candidates = model.retexture(root, config, load_taxonomy(root)["prop"], style,
+                                         manifest, "prop:relic", count=1)
+        self.assertEqual(candidates, [failed])
+        self.assertEqual(asset["source"]["processed_mesh"], paths["processed_mesh"].relative_to(root).as_posix())
+        self.assertEqual(generate.call_args.args[-1], paths["processed_mesh"])
+
     def test_force_init_preserves_manifest_history(self):
         target = Path(self.temp.name) / "new-game"
         (target / "Assets").mkdir(parents=True)
@@ -288,7 +502,50 @@ class SlopForgeTests(unittest.TestCase):
         self.assertTrue(parse_args(["model", "terminal", "wall object"]).auto_approve)
         explicit = parse_args(["generate", "icon", "potion", "red flask"])
         self.assertEqual(explicit.command, "generate")
+        authored = parse_args(["generate", "icon", "potion", "Red flask", "--image-prompt", "exact\nimage prompt"])
+        self.assertEqual(authored.image_prompt, "exact\nimage prompt")
         self.assertEqual(parse_args(["approve", "potion", "2"]).candidate, 2)
+        material = parse_args(["retexture", "terminal", "--material-prompt", "blue steel", "--count", "3"])
+        self.assertEqual((material.name, material.material_prompt, material.count), ("terminal", "blue steel", 3))
+        approved = parse_args(["approve-texture", "terminal", "4"])
+        self.assertEqual((approved.name, approved.candidate), ("terminal", 4))
+
+    def test_agent_image_prompt_is_sent_verbatim_and_keeps_asset_brief(self):
+        authored_prompt = "A hand-painted brass key, three-quarter view, deep teal enamel accents."
+        with patch("slopforge.pipelines.image.generate_image") as generate_image, redirect_stdout(StringIO()):
+            def write_candidate(_root, _config, _workflow, prompt, destination, _prefix, _seed, metadata):
+                self.assertEqual(prompt, authored_prompt)
+                Image.new("RGB", (16, 16), "gold").save(destination)
+                metadata.write_text(json.dumps({"workflow": "fixture.json", "model": "fixture"}))
+            generate_image.side_effect = write_candidate
+            result = cli_main(["--project", str(self.root), "generate", "icon", "brass_key",
+                               "An old key for the archive", "--image-prompt", authored_prompt, "--count", "1"])
+
+        self.assertEqual(result, 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:brass_key"]
+        self.assertEqual(record["description"], "An old key for the archive")
+        self.assertEqual(record["candidates"]["items"][0]["description"], "An old key for the archive")
+        self.assertEqual(record["candidates"]["items"][0]["prompt"], authored_prompt)
+
+    def test_agent_model_prompt_is_sent_verbatim_and_saved_as_candidate_provenance(self):
+        authored_prompt = "A broad, waist-high alien terminal with one recessed cyan display, front view."
+        config, style = load_project(self.root), load_style(self.root)
+        recipe = load_taxonomy(self.root)["prop"]
+        manifest = {"assets": {"prop:terminal": new_record("prop", "terminal", "Door control", style,
+                                                               {"strategy": "text_only"})}}
+
+        def write_candidate(_root, _config, _workflow, prompt, destination, _prefix, _seed, metadata):
+            self.assertEqual(prompt, authored_prompt)
+            Image.new("RGB", (16, 16), "slategray").save(destination)
+            metadata.write_text(json.dumps({"workflow": "fixture.json", "model": "fixture"}))
+
+        with patch("slopforge.pipelines.model.generate_image", side_effect=write_candidate):
+            model.generate(self.root, config, recipe, style, "terminal", "Door control", 1,
+                           manifest, "prop:terminal", generation_prompt=authored_prompt)
+
+        candidate = manifest["assets"]["prop:terminal"]["candidates"]["items"][0]
+        self.assertEqual(candidate["description"], "Door control")
+        self.assertEqual(candidate["prompt"], authored_prompt)
 
     def test_cli_dry_run_injects_project_style_without_generating(self):
         output = StringIO()
@@ -356,8 +613,17 @@ class SlopForgeTests(unittest.TestCase):
         config = load_project(self.root)
         config["asset_pipeline"]["tools"]["blender"] = "/usr/bin/blender"
         with patch("slopforge.backends.blender.subprocess.run") as run:
-            process_model(self.root, config, "in.glb", "out.fbx", "out.blend", [], 60000)
-        self.assertEqual(run.call_args.args[0][-2:], ["--face-budget", "60000"])
+            process_model(self.root, config, "in.glb", "out.fbx", "out.blend", [], 60000,
+                          surface_source="surface.png", preview_dir="previews",
+                          material_scale=4.0, stage_mesh="processed.blend", reuse_stage_mesh=True)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--face-budget") + 1], "60000")
+        self.assertEqual(command[command.index("--surface-source") + 1], "surface.png")
+        self.assertNotIn("--concept", command)
+        self.assertEqual(command[command.index("--preview-dir") + 1], "previews")
+        self.assertEqual(command[command.index("--material-scale") + 1], "4.0")
+        self.assertIn("--reuse-stage-mesh", command)
+        self.assertEqual(command[command.index("--") + 1], "processed.blend")
 
     def test_model_validation_reports_when_blender_inspection_did_not_run(self):
         paths = {}

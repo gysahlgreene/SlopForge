@@ -7,10 +7,10 @@ from ..paths import resolve_workflow
 from ..style import build_prompt
 
 
-def generate(project_root, config, asset_type, style, name, description, count, manifest, key):
+def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None):
     conditioning = resolve_conditioning(project_root, config, style)
     ensure_supported(conditioning)
-    prompt = build_prompt(style, asset_type, description, asset_type.get("prompt_mode", "asset"))
+    prompt = generation_prompt or build_prompt(style, asset_type, description, asset_type.get("prompt_mode", "asset"))
     workflow = config["asset_pipeline"]["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
@@ -24,6 +24,7 @@ def generate(project_root, config, asset_type, style, name, description, count, 
                                      semantic_description=description)
     record = manifest["assets"][key]
     record["description"] = description
+    record["generation_prompt"] = prompt
     record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
     record["generator"]["workflow"] = workflow
     return candidates

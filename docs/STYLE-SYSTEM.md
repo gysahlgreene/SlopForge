@@ -14,7 +14,7 @@ New candidates record the style-pack key, name, version, and a SHA-256 fingerpri
 
 Approving a 2D candidate restores that candidate's semantic description, style identity, and generator provenance to the asset record. Image approval validates a temporary copy before replacing the canonical output, so a corrupt candidate cannot overwrite the approved image.
 
-Material prompts request a flat surface without standalone objects, perspective, text, cast shadows, or baked lighting. Physical prop requirements remain in concept prompts. The normal, roughness, metallic, and emission maps are still the v1 heuristic approach; this does not make them physically accurate or guarantee seamless textures.
+Material prompts request a flat surface without standalone objects, perspective, text, cast shadows, or baked lighting. Physical prop requirements remain in concept prompts; concept art is not projected into the material. The normal map derives from the generated surface's luminance. Roughness, metallic, and emission use prompt-guided heuristics, so these maps are not physically accurate and textures are not guaranteed seamless.
 
 Put approved references under `ai/styles/<key>/references/approved/` and tentative images under `references/candidates/`. The current `text_only` conditioning records no references as used. Switching to `reference` is rejected until a workflow actually consumes reference images.
 

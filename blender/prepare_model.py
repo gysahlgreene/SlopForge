@@ -34,6 +34,7 @@ def get_args():
         textures[i] = Path(value).resolve()
 
     face_budget = TARGET_FACES
+    options = {}
     if "--face-budget" in args:
         index = args.index("--face-budget")
         try:
@@ -42,6 +43,13 @@ def get_args():
             raise SystemExit("--face-budget must be followed by a positive integer")
         if face_budget <= 0:
             raise SystemExit("--face-budget must be a positive integer")
+    for option in ("--surface-source", "--preview-dir", "--material-scale", "--stage-mesh-output"):
+        if option in args:
+            index = args.index(option)
+            try:
+                options[option] = args[index + 1]
+            except IndexError:
+                raise SystemExit(f"{option} requires a value")
 
     return (
         input_glb,
@@ -49,6 +57,11 @@ def get_args():
         output_blend,
         face_budget,
         *textures,
+        Path(options["--surface-source"]).resolve() if options.get("--surface-source") else None,
+        Path(options["--preview-dir"]).resolve() if options.get("--preview-dir") else None,
+        float(options.get("--material-scale", 3.0)),
+        Path(options["--stage-mesh-output"]).resolve() if options.get("--stage-mesh-output") else None,
+        "--reuse-stage-mesh" in args,
     )
 
 
@@ -95,6 +108,94 @@ def combined_bounds(objects):
     return minimum, maximum
 
 
+def bake_basecolor(obj, material, surface_path, destination, material_scale):
+    nodes, links = material.node_tree.nodes, material.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    coordinates = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (material_scale,) * 3
+    links.new(coordinates.outputs["Object"], mapping.inputs["Vector"])
+
+    surface = nodes.new("ShaderNodeTexImage")
+    surface.image = bpy.data.images.load(str(surface_path), check_existing=True)
+    surface.projection = "BOX"
+    surface.projection_blend = 0.15
+    surface.extension = "REPEAT"
+    links.new(mapping.outputs["Vector"], surface.inputs["Vector"])
+
+    links.new(surface.outputs["Color"], bsdf.inputs["Base Color"])
+
+    width, height = surface.image.size
+    target = bpy.data.images.new("Baked Base Color", width=width, height=height, alpha=False)
+    bake_node = nodes.new("ShaderNodeTexImage")
+    bake_node.image = target
+    nodes.active = bake_node
+    for node in nodes:
+        node.select = node == bake_node
+
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 1
+    scene.render.bake.margin = 8
+    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_clear=True, margin=8)
+    target.filepath_raw = str(destination)
+    target.file_format = "PNG"
+    target.save()
+
+    nodes.clear()
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    output = nodes.new("ShaderNodeOutputMaterial")
+    links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+    return bsdf
+
+
+def render_previews(obj, output_dir, prefix):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    scene = bpy.context.scene
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.render.resolution_x = 512
+    scene.render.resolution_y = 512
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.film_transparent = False
+    scene.view_settings.view_transform = "AgX"
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("Preview World")
+    scene.world.color = (0.42, 0.48, 0.55)
+
+    corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    bounds_min = Vector(tuple(min(point[axis] for point in corners) for axis in range(3)))
+    bounds_max = Vector(tuple(max(point[axis] for point in corners) for axis in range(3)))
+    target = (bounds_min + bounds_max) * 0.5
+    frame_scale = max(bounds_max - bounds_min) * 1.25
+    bpy.ops.object.camera_add(location=(0, -3, 1.5))
+    camera = bpy.context.object
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = frame_scale
+    camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
+    scene.camera = camera
+
+    for offset, energy, size in (((-3, -4, 4), 450, 4), ((3, -1, 2), 220, 3), ((0, 2, 3), 300, 3)):
+        location = target + Vector(offset)
+        bpy.ops.object.light_add(type="AREA", location=location)
+        light = bpy.context.object
+        light.data.energy = energy
+        light.data.shape = "DISK"
+        light.data.size = size
+        light.rotation_euler = (target - light.location).to_track_quat("-Z", "Y").to_euler()
+
+    views = {"front": Vector((0, -3, 0)), "side": Vector((3, 0, 0)), "rear": Vector((0, 3, 0))}
+    for name, direction in views.items():
+        camera.location = target + direction
+        camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
+        scene.render.filepath = str(output_dir / f"{prefix}_{name}.png")
+        bpy.ops.render.render(write_still=True)
+
+
 (
     input_glb,
     output_fbx,
@@ -105,6 +206,11 @@ def combined_bounds(objects):
     roughness_path,
     metallic_path,
     emission_path,
+    surface_source_path,
+    preview_dir,
+    material_scale,
+    stage_mesh_output,
+    reuse_stage_mesh,
 ) = get_args()
 
 
@@ -117,23 +223,18 @@ output_blend.parent.mkdir(parents=True, exist_ok=True)
 
 
 # -------------------------------------------------
-# START CLEAN
+# START CLEAN / REUSE PROCESSED MESH
 # -------------------------------------------------
 
-bpy.ops.wm.read_factory_settings(use_empty=True)
-
-
-# -------------------------------------------------
-# IMPORT GLB
-# -------------------------------------------------
-
-bpy.ops.import_scene.gltf(filepath=str(input_glb))
-
-mesh_objects = [
-    obj
-    for obj in bpy.context.scene.objects
-    if obj.type == "MESH"
-]
+if reuse_stage_mesh:
+    bpy.ops.wm.open_mainfile(filepath=str(input_glb))
+    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
+else:
+    if not input_glb.exists():
+        raise SystemExit(f"Input GLB missing: {input_glb}")
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=str(input_glb))
+    mesh_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
 
 if not mesh_objects:
     raise SystemExit("No mesh objects found.")
@@ -143,109 +244,84 @@ if not mesh_objects:
 # JOIN MESHES
 # -------------------------------------------------
 
-bpy.ops.object.select_all(action="DESELECT")
+if not reuse_stage_mesh:
+    bpy.ops.object.select_all(action="DESELECT")
 
-for obj in mesh_objects:
-    obj.select_set(True)
+    for obj in mesh_objects:
+        obj.select_set(True)
 
-bpy.context.view_layer.objects.active = mesh_objects[0]
+    bpy.context.view_layer.objects.active = mesh_objects[0]
 
-if len(mesh_objects) > 1:
-    bpy.ops.object.join()
+    if len(mesh_objects) > 1:
+        bpy.ops.object.join()
 
-obj = bpy.context.view_layer.objects.active
+    obj = bpy.context.view_layer.objects.active
+else:
+    obj = mesh_objects[0]
 
 
 # -------------------------------------------------
 # APPLY INITIAL TRANSFORMS
 # -------------------------------------------------
 
-bpy.ops.object.transform_apply(
-    location=False,
-    rotation=True,
-    scale=True,
-)
+if not reuse_stage_mesh:
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
 
 # -------------------------------------------------
 # CENTER + NORMALIZE SCALE
 # -------------------------------------------------
 
-minimum, maximum = combined_bounds([obj])
-
-size = maximum - minimum
-max_dimension = max(size.x, size.y, size.z, 1e-6)
-
-offset = Vector((
-    -(minimum.x + maximum.x) / 2.0,
-    -(minimum.y + maximum.y) / 2.0,
-    -minimum.z,
-))
-
-obj.location += offset
-
-obj.scale *= 1.0 / max_dimension
-
-bpy.ops.object.transform_apply(
-    location=False,
-    rotation=False,
-    scale=True,
-)
+if not reuse_stage_mesh:
+    minimum, maximum = combined_bounds([obj])
+    size = maximum - minimum
+    max_dimension = max(size.x, size.y, size.z, 1e-6)
+    offset = Vector((-(minimum.x + maximum.x) / 2.0, -(minimum.y + maximum.y) / 2.0, -minimum.z))
+    obj.location += offset
+    obj.scale *= 1.0 / max_dimension
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
 
 # -------------------------------------------------
 # GAME-READY DECIMATION
 # -------------------------------------------------
 
-face_count = len(obj.data.polygons)
-
-print(f"Input faces: {face_count}")
-
-if face_count > target_faces:
-    ratio = target_faces / face_count
-
-    modifier = obj.modifiers.new(
-        name="GameReadyDecimate",
-        type="DECIMATE",
-    )
-
-    modifier.decimate_type = "COLLAPSE"
-    modifier.ratio = ratio
-    modifier.use_collapse_triangulate = True
-
-    bpy.context.view_layer.objects.active = obj
-
-    bpy.ops.object.modifier_apply(
-        modifier=modifier.name
-    )
-
-print(f"Output faces: {len(obj.data.polygons)}")
+if not reuse_stage_mesh:
+    face_count = len(obj.data.polygons)
+    print(f"Input faces: {face_count}")
+    if face_count > target_faces:
+        modifier = obj.modifiers.new(name="GameReadyDecimate", type="DECIMATE")
+        modifier.decimate_type = "COLLAPSE"
+        modifier.ratio = target_faces / face_count
+        modifier.use_collapse_triangulate = True
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+    print(f"Output faces: {len(obj.data.polygons)}")
 
 
 # -------------------------------------------------
 # SMOOTH SHADING
 # -------------------------------------------------
 
-for polygon in obj.data.polygons:
-    polygon.use_smooth = True
+if not reuse_stage_mesh:
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
 
 
 # -------------------------------------------------
 # UV UNWRAP
 # -------------------------------------------------
 
-bpy.context.view_layer.objects.active = obj
-obj.select_set(True)
-
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.select_all(action="SELECT")
-
-bpy.ops.uv.smart_project(
-    angle_limit=1.15192,
-    island_margin=0.025,
-)
-
-bpy.ops.object.mode_set(mode="OBJECT")
+if not reuse_stage_mesh:
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.025)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    if stage_mesh_output:
+        stage_mesh_output.parent.mkdir(parents=True, exist_ok=True)
+        bpy.ops.wm.save_as_mainfile(filepath=str(stage_mesh_output))
 
 
 # -------------------------------------------------
@@ -267,13 +343,12 @@ if bsdf is None:
     raise SystemExit("Principled BSDF was not created.")
 
 
-# Base Color
+if surface_source_path:
+    if not surface_source_path.is_file():
+        raise SystemExit(f"Surface material image missing: {surface_source_path}")
+    bsdf = bake_basecolor(obj, material, surface_source_path, basecolor_path, material_scale)
 
-tex = load_texture(
-    nodes,
-    basecolor_path,
-    non_color=False,
-)
+tex = load_texture(nodes, basecolor_path, non_color=False)
 
 if tex is not None:
     socket = get_socket(bsdf, "Base Color")
@@ -378,6 +453,9 @@ bpy.ops.object.origin_set(
     type="ORIGIN_GEOMETRY",
     center="BOUNDS",
 )
+
+if preview_dir:
+    render_previews(obj, preview_dir, output_fbx.stem)
 
 
 # -------------------------------------------------
