@@ -9,6 +9,7 @@ description = "A local-first AI game-asset slop generator powered by ComfyUI and
 license = {file = "LICENSE"}
 requires-python = ">=3.10,<3.15"
 dependencies = ["numpy", "Pillow", "PyYAML", "rembg[cpu]"]
+dev-dependencies = ["pytest", "flake8", "black", "mypy"]
 
 [project.scripts]
 slopforge = "slopforge.cli:main"
@@ -24,3 +25,20 @@ include = ["slopforge*"]
 "share/slopforge/templates/style" = ["templates/style/style.yaml"]
 "share/slopforge/templates/asset_types" = ["templates/asset_types/*.yaml"]
 "share/slopforge/templates/continue" = ["templates/continue/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra -q"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
