@@ -1,5 +1,6 @@
 import importlib.util
 import importlib
+import json
 import os
 import shutil
 import sys
@@ -51,6 +52,18 @@ def run_doctor(project_root=None):
             report("PASS", "Asset taxonomy", f"{len(types)} types")
             workflow = resolve_workflow(root, config["asset_pipeline"]["workflows"]["image"])
             report("PASS", "Workflow", str(workflow))
+            model_workflow = config["asset_pipeline"]["workflows"].get("model")
+            if model_workflow:
+                model_path = resolve_workflow(root, model_workflow)
+                report("PASS", "Model workflow", str(model_path))
+                loaders = {"UNETLoader": ("diffusion_models", "unet_name"),
+                           "VAELoader": ("vae", "vae_name"), "CLIPVisionLoader": ("clip_vision", "clip_name")}
+                for node in json.loads(model_path.read_text()).values():
+                    loader = loaders.get(node.get("class_type"))
+                    if loader:
+                        folder, field = loader
+                        model = comfy_home(config, root) / "models" / folder / node["inputs"][field]
+                        report("PASS" if model.is_file() else "FAIL", "Model weight", str(model))
             generated = root / config["asset_pipeline"]["output_root"]
             report("PASS" if generated.is_dir() else "WARN", "Generated directories",
                    str(generated) if generated.is_dir() else f"not initialized: {generated}")
@@ -82,8 +95,9 @@ def run_doctor(project_root=None):
     except FileNotFoundError as exc:
         report("WARN", "Blender", str(exc))
 
-    checkpoint_name = (config or {}).get("asset_pipeline", {}).get("tools", {}).get(
-        "hunyuan_checkpoint", "hunyuan3d-dit-v2_fp16.safetensors")
-    checkpoint = comfy_home(config, root) / "models/checkpoints" / checkpoint_name
-    report("PASS" if checkpoint.is_file() else "WARN", "Hunyuan3D checkpoint", str(checkpoint))
+    if not (config or {}).get("asset_pipeline", {}).get("workflows", {}).get("model"):
+        checkpoint_name = (config or {}).get("asset_pipeline", {}).get("tools", {}).get(
+            "hunyuan_checkpoint", "hunyuan3d-dit-v2_fp16.safetensors")
+        checkpoint = comfy_home(config, root) / "models/checkpoints" / checkpoint_name
+        report("PASS" if checkpoint.is_file() else "WARN", "Hunyuan3D checkpoint", str(checkpoint))
     return 1 if failures else 0

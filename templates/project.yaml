@@ -23,6 +23,8 @@ asset_pipeline:
 
   workflows:
     image: image_text2img_api.json
+    # Enable after installing TRELLIS.2 models; generates mesh-aware PBR regions.
+    # model: trellis2_image_to_model_api.json
 
   conditioning:
     strategy: text_only

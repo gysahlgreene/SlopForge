@@ -8,54 +8,55 @@
 
 SlopForge is a local-first tool that uses ComfyUI and Blender to generate 2D art and 3D props from descriptions and project style settings, then exports approved assets into a Unity project.
 
-```text
-agent-authored image prompt + semantic description
-→ ComfyUI concept candidates
-→ background isolation
-→ 2D approval or Hunyuan3D mesh
-→ Blender cleanup, UVs, projected materials, and mesh previews
-→ texture iteration and approval
-→ Unity-ready PNG or FBX with material maps
+SlopForge is primarily an **agent-driven asset workflow**: an agent authors prompts, reviews generated candidates and mesh views, and iterates with you. SlopForge runs the local tools and keeps candidates separate until you approve them.
+
+```mermaid
+flowchart LR
+    A[You describe the asset and style] --> B[Agent checks project style and writes a specific prompt]
+    B --> C[ComfyUI generates concept candidates]
+    C --> D{You choose a concept}
+    D -->|2D asset| E[Approve and export PNG]
+    D -->|3D asset| F{Which 3D route is configured?}
+    F -->|Distinct colors on parts| G[TRELLIS.2 generates shape and PBR regions]
+    F -->|All-over surface treatment| H[Hunyuan3D geometry plus a repeating surface swatch]
+    G --> I[Blender prepares mesh, UVs, and review renders]
+    H --> I
+    I --> J[Agent inspects front, side, rear, and validation]
+    J --> K{You approve the material candidate?}
+    K -->|Revise| B
+    K -->|Approve| L[Unity FBX and PBR material]
 ```
 
-## Alien Terminal example
+The agent handles prompt writing and candidate review; **you choose the concept and approve the final asset**. For different materials on named parts, configure the [mesh-aware TRELLIS.2 workflow](docs/AGENT-INTEGRATION.md#mesh-aware-materials). Hunyuan3D with a surface swatch is intended for an all-over treatment and does not know which named part should receive which color.
 
-These images show one prop moving through the 3D pipeline: concept, background removal, prepared model input, and Blender output.
+## Example: a multicolor prop from concept to Unity
+
+These images follow one concept through mesh-aware material generation and a Unity material import check.
 
 <table>
   <tr>
-    <th>Concept</th>
-    <th>Background removed</th>
-    <th>Blender output</th>
+    <th>Approved concept direction</th>
+    <th>Unity import, three-quarter view</th>
   </tr>
   <tr>
-    <td><img src="img/alien-terminal-concept.png" alt="Alien Terminal concept" width="100%" /></td>
-    <td><img src="img/alien-terminal-cutout.png" alt="Alien Terminal with background removed" width="100%" /></td>
-    <td><img src="img/alien-terminal-preview.png" alt="Blender render of the processed Alien Terminal model" width="100%" /></td>
+    <td><img src="img/power-relay-concept.png" alt="Concept art for a charcoal, turquoise, and copper alien power relay" width="100%" /></td>
+    <td><img src="img/power-relay-unity.png" alt="Three-quarter Unity render of the imported power relay FBX with its generated material against a light gray background" width="100%" /></td>
+  </tr>
+</table>
+
+The concept image guides the shape and material regions; it is **not** used as the mesh texture. TRELLIS.2 generates the mesh-aware material fields, which SlopForge bakes into UV maps.
+
+<table>
+  <tr><th>Front</th><th>Side</th><th>Rear</th></tr>
+  <tr>
+    <td><img src="img/power-relay-front.png" alt="Front Blender review render showing the turquoise plate, charcoal housing, and copper details" width="100%" /></td>
+    <td><img src="img/power-relay-side.png" alt="Side Blender review render used to check material placement and mesh quality" width="100%" /></td>
+    <td><img src="img/power-relay-rear.png" alt="Rear Blender review render used to check material coverage" width="100%" /></td>
   </tr>
 </table>
 
 > [!NOTE]
-> Generated 3D props use mesh-aware surface material projection and UV baking. Concept art is not baked into the material. Front, side, and rear renders expose coverage and seams. The normal map is derived from surface luminance; roughness, metallic, and emission remain heuristic, and textures are not guaranteed seamless.
-
-  <summary>Generated material maps</summary>
-  <table>
-    <tr>
-      <th>Base color</th>
-      <th>Normal</th>
-      <th>Roughness</th>
-      <th>Metallic</th>
-      <th>Emission</th>
-    </tr>
-    <tr>
-      <td><img src="img/alien-terminal-basecolor.png" alt="Base color map" width="100%" /></td>
-      <td><img src="img/alien-terminal-normal.png" alt="Normal map" width="100%" /></td>
-      <td><img src="img/alien-terminal-roughness.png" alt="Roughness map" width="100%" /></td>
-      <td><img src="img/alien-terminal-metallic.png" alt="Metallic map" width="100%" /></td>
-      <td><img src="img/alien-terminal-emission.png" alt="Emission map" width="100%" /></td>
-    </tr>
-  </table>
-  <p>Material maps are heuristic outputs; their quality varies by asset.</p>
+> This is an experimental, **unapproved** candidate. The Unity image verifies that the FBX material maps are assigned in a temporary Unity project using the built-in Standard shader; target-project lighting and URP were not tested. The side view still shows mesh reconstruction defects, so inspect all views and validation warnings before approval.
 
 ## What can SlopForge make?
 
@@ -101,18 +102,14 @@ slopforge --project ~/UnityProjects/MyGame approve health_potion 2
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate prop alien_terminal \
   "Wall-mounted terminal controlling sealed doors" \
-  --image-prompt "A broad wall-mounted alien terminal, one recessed cyan display and three tactile controls, complete front three-quarter view, isolated on a plain neutral background, stylized painted sci-fi game prop."
+  --image-prompt "Broad wall-mounted alien terminal, recessed cyan display above three tactile controls, complete front three-quarter view, isolated on plain neutral background, stylized painted sci-fi game prop."
 slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame approve alien_terminal 2 \
-  --material-prompt "Flat repeating surface swatch of aged charcoal metal, muted teal enamel, fine brushed grain, small cyan emissive accents; even lighting, no object or perspective."
+slopforge --project ~/UnityProjects/MyGame approve alien_terminal 1
 slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame retexture alien_terminal \
-  --material-prompt "Flat surface swatch of worn ceramic and dark brass, subtle scratches, small-scale texture, even lighting, no object or perspective." --count 2
-slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 3
+slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 1
 ```
 
-Agents should inspect the actual front, side, and rear mesh previews, iterate material candidates with `retexture`, and get your choice before `approve-texture`. The guided `make` flow remains available for interactive use.
+For mesh-aware TRELLIS.2 materials, put the desired part colors in `--image-prompt`; revise and regenerate the concept if the material design needs to change. For the Hunyuan3D swatch route, `retexture` can create new all-over surface candidates on the saved mesh. In both routes, the agent should inspect front, side, and rear previews and validation warnings, then ask you to choose before `approve-texture`. Unity material export requires Unity project metadata and the Unity CLI. The guided `make` flow remains available for interactive use.
 
 ## Example projects and workflows
 
@@ -139,7 +136,7 @@ Workflow precedence is project override first (`ai/workflows/<configured path>`)
 
 - Python 3.10–3.14 and the packages declared by `pyproject.toml`.
 - ComfyUI and image models for generated 2D assets.
-- Blender, Hunyuan3D nodes/model, and the CPU ONNX backend from `rembg[cpu]` for 3D assets.
+- Blender and the CPU ONNX backend from `rembg[cpu]` for 3D assets; the selected 3D route also needs its ComfyUI workflow, nodes, and model weights.
 - An existing Unity project (`Assets/` directory) as the output target.
 
 Only Python and SlopForge are needed for prompts/configuration and the Unity-native `primitive` route. See [docs/SETUP.md](docs/SETUP.md) for installation, model locations, agent setup, and route-specific dependencies.
@@ -155,7 +152,7 @@ Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `
 ## Current limitations
 
 - Reference images are organized and recorded but are not used as visual conditioning.
-- Texture-to-mesh mapping is WIP: generated textures can stretch or land on the wrong parts of a mesh. PBR maps are heuristic outputs.
-- Hunyuan3D and Blender results depend on local models, nodes, and hardware; the 3D pipeline remains experimental.
+- 3D generation remains experimental: mesh shape and material regions vary, and reconstruction defects can remain. Review all mesh views before approval. The TRELLIS.2 route places distinct colors on the mesh but can take many minutes on Apple MPS; its current normal map is flat, emission is zero, and glass transmission is not generated.
+- The Hunyuan3D swatch route creates an all-over material treatment rather than assigning colors to named parts; roughness, metallic, and emission are heuristic, and seamless tiling is not guaranteed.
 - Model weights are not included. Known source links and expected ComfyUI destinations are documented, but availability and model terms should be checked upstream.
 - SlopForge is MIT licensed. Separately installed model weights and ComfyUI custom nodes have their own terms; see `THIRD_PARTY_NOTICES.md`.

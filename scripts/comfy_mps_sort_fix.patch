@@ -1,0 +1,40 @@
+diff --git a/comfy/ldm/trellis2/flexgemm.py b/comfy/ldm/trellis2/flexgemm.py
+index 485c272c..ce4b7703 100644
+--- a/comfy/ldm/trellis2/flexgemm.py
++++ b/comfy/ldm/trellis2/flexgemm.py
+@@ -18,7 +18,10 @@ class TorchHashMap:
+     """Sorted-array hashmap backed by torch.searchsorted."""
+ 
+     def __init__(self, keys: torch.Tensor, values: torch.Tensor):
+-        self.sorted_keys, order = torch.sort(keys.to(torch.long))
++        keys = keys.to(torch.long)
++        order = torch.argsort(keys)
++        # MPS sort values lose integer precision; gather the original keys instead.
++        self.sorted_keys = keys[order]
+         self.sorted_vals = values[order]
+         self._n = self.sorted_keys.numel()
+ 
+diff --git a/comfy_extras/nodes_mesh_postprocess.py b/comfy_extras/nodes_mesh_postprocess.py
+index d730cbff..9bdca41b 100644
+--- a/comfy_extras/nodes_mesh_postprocess.py
++++ b/comfy_extras/nodes_mesh_postprocess.py
+@@ -297,7 +297,8 @@ def _trilinear_sample_sparse_gpu(positions, voxel_coords_np, color_np, resolutio
+     base = torch.floor(gc).to(index_dtype)
+     frac = gc - base.float()
+     key = (VC[:, 0] * R + VC[:, 1]) * R + VC[:, 2]
+-    skey, order = key.sort()
++    order = key.argsort()
++    skey = key[order]  # Preserve integer keys on MPS.
+     acc = torch.zeros((K, C), device=dev)
+     wsum = torch.zeros((K, 1), device=dev)
+     for dx in (0, 1):
+@@ -341,7 +342,8 @@ def _nearest_voxel_sample_gpu(positions, voxel_coords_np, color_np, resolution):
+     col = torch.from_numpy(np.ascontiguousarray(color_np)).to(dev).float()
+     M, K = VC.shape[0], P.shape[0]
+     key = (VC[:, 0] * R + VC[:, 1]) * R + VC[:, 2]
+-    skey, order = key.sort()
++    order = key.argsort()
++    skey = key[order]  # Preserve integer keys on MPS.
+ 
+     def _search(idx, radius):
+         """Nearest occupied voxel within ±radius cells, for query subset P[idx]."""

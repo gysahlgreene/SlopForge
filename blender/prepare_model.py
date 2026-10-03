@@ -2,6 +2,8 @@ import bpy
 import sys
 from pathlib import Path
 from mathutils import Vector
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mesh_cleanup import remove_isolated_single_faces
 
 
 TARGET_FACES = 30000
@@ -31,6 +33,8 @@ def get_args():
     textures = [None] * 5
 
     for i, value in enumerate(args[3:8]):
+        if value.startswith("--"):
+            break
         textures[i] = Path(value).resolve()
 
     face_budget = TARGET_FACES
@@ -62,6 +66,8 @@ def get_args():
         float(options.get("--material-scale", 3.0)),
         Path(options["--stage-mesh-output"]).resolve() if options.get("--stage-mesh-output") else None,
         "--reuse-stage-mesh" in args,
+        "--preserve-uvs" in args,
+        "--mesh-only" in args,
     )
 
 
@@ -78,7 +84,7 @@ def load_texture(nodes, path, non_color=False):
         return None
 
     node = nodes.new("ShaderNodeTexImage")
-    node.image = bpy.data.images.load(str(path), check_existing=True)
+    node.image = bpy.data.images.load(str(path), check_existing=False)
 
     if non_color:
         node.image.colorspace_settings.name = "Non-Color"
@@ -108,7 +114,7 @@ def combined_bounds(objects):
     return minimum, maximum
 
 
-def bake_basecolor(obj, material, surface_path, destination, material_scale):
+def bake_basecolor(obj, material, surface_path, destination, material_scale, surface_maps):
     nodes, links = material.node_tree.nodes, material.node_tree.links
     bsdf = nodes.get("Principled BSDF")
     coordinates = nodes.new("ShaderNodeTexCoord")
@@ -125,7 +131,7 @@ def bake_basecolor(obj, material, surface_path, destination, material_scale):
 
     links.new(surface.outputs["Color"], bsdf.inputs["Base Color"])
 
-    width, height = surface.image.size
+    width, height = (max(2048, value) for value in surface.image.size)
     target = bpy.data.images.new("Baked Base Color", width=width, height=height, alpha=False)
     bake_node = nodes.new("ShaderNodeTexImage")
     bake_node.image = target
@@ -145,6 +151,46 @@ def bake_basecolor(obj, material, surface_path, destination, material_scale):
     target.filepath_raw = str(destination)
     target.file_format = "PNG"
     target.save()
+
+    # Every channel must follow the same projection into the mesh's UV atlas.
+    output = nodes.get("Material Output")
+    emission = nodes.new("ShaderNodeEmission")
+    for key in ("roughness", "metallic", "emission"):
+        path = surface_maps[key]
+        if path is None or not path.is_file():
+            continue
+        source = load_texture(nodes, path, non_color=key != "emission")
+        source.projection = "BOX"
+        source.projection_blend = surface.projection_blend
+        source.extension = "REPEAT"
+        links.new(mapping.outputs["Vector"], source.inputs["Vector"])
+        links.new(source.outputs["Color"], emission.inputs["Color"])
+        links.new(emission.outputs[0], output.inputs["Surface"])
+        target = bpy.data.images.new(f"Baked {key}", width=width, height=height, alpha=False)
+        if key != "emission":
+            target.colorspace_settings.name = "Non-Color"
+        bake_node.image = target
+        nodes.active = bake_node
+        bpy.ops.object.bake(type="EMIT", use_clear=True, margin=8)
+        target.filepath_raw, target.file_format = str(path), "PNG"
+        target.save()
+
+    normal_path = surface_maps["normal"]
+    if normal_path is not None:
+        # ponytail: luminance bump estimates grain; native PBR uses geometry-baked normals.
+        bump = nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = 0.1
+        bump.inputs["Distance"].default_value = 0.01
+        links.new(surface.outputs["Color"], bump.inputs["Height"])
+        links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+        links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+        target = bpy.data.images.new("Baked Normal", width=width, height=height, alpha=False)
+        target.colorspace_settings.name = "Non-Color"
+        bake_node.image = target
+        nodes.active = bake_node
+        bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_clear=True, margin=8)
+        target.filepath_raw, target.file_format = str(normal_path), "PNG"
+        target.save()
 
     nodes.clear()
     bsdf = nodes.new("ShaderNodeBsdfPrincipled")
@@ -211,6 +257,8 @@ def render_previews(obj, output_dir, prefix):
     material_scale,
     stage_mesh_output,
     reuse_stage_mesh,
+    preserve_uvs,
+    mesh_only,
 ) = get_args()
 
 
@@ -272,7 +320,7 @@ if not reuse_stage_mesh:
 # CENTER + NORMALIZE SCALE
 # -------------------------------------------------
 
-if not reuse_stage_mesh:
+if not reuse_stage_mesh and not mesh_only:
     minimum, maximum = combined_bounds([obj])
     size = maximum - minimum
     max_dimension = max(size.x, size.y, size.z, 1e-6)
@@ -286,17 +334,35 @@ if not reuse_stage_mesh:
 # GAME-READY DECIMATION
 # -------------------------------------------------
 
-if not reuse_stage_mesh:
-    face_count = len(obj.data.polygons)
-    print(f"Input faces: {face_count}")
-    if face_count > target_faces:
-        modifier = obj.modifiers.new(name="GameReadyDecimate", type="DECIMATE")
-        modifier.decimate_type = "COLLAPSE"
-        modifier.ratio = target_faces / face_count
-        modifier.use_collapse_triangulate = True
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.modifier_apply(modifier=modifier.name)
-    print(f"Output faces: {len(obj.data.polygons)}")
+if mesh_only:
+    minimum, maximum = combined_bounds([obj])
+    modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
+    modifier.mode = "VOXEL"
+    # ponytail: a 256-cell cleanup keeps prop silhouettes; raise for finer geometry.
+    modifier.voxel_size = max(maximum - minimum) / 256.0
+    modifier.use_smooth_shade = True
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+face_count = len(obj.data.polygons)
+print(f"Input faces: {face_count}")
+while face_count > target_faces:
+    modifier = obj.modifiers.new(name="GameReadyDecimate", type="DECIMATE")
+    modifier.decimate_type = "COLLAPSE"
+    # Collapse ratios are approximate on reconstructed meshes; check the result.
+    modifier.ratio = 0.95 * target_faces / face_count
+    modifier.use_collapse_triangulate = True
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    reduced_count = len(obj.data.polygons)
+    if reduced_count >= face_count:
+        raise SystemExit(f"Cannot reduce this mesh to its {target_faces}-face budget")
+    face_count = reduced_count
+print(f"Output faces: {face_count}")
+
+removed_faces = remove_isolated_single_faces(obj.data)
+if removed_faces:
+    print(f"Removed isolated single-face fragments: {removed_faces}")
 
 
 # -------------------------------------------------
@@ -312,14 +378,20 @@ if not reuse_stage_mesh:
 # UV UNWRAP
 # -------------------------------------------------
 
-if not reuse_stage_mesh:
+if not reuse_stage_mesh and not preserve_uvs:
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.025)
+    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.003)
     bpy.ops.object.mode_set(mode="OBJECT")
-    if stage_mesh_output:
+if mesh_only:
+    # Keep the generator's coordinate frame so its voxel material field still aligns.
+    bpy.ops.export_scene.gltf(filepath=str(output_fbx), export_format="GLB")
+    bpy.ops.wm.save_as_mainfile(filepath=str(output_blend))
+    raise SystemExit(0)
+
+if stage_mesh_output:
         stage_mesh_output.parent.mkdir(parents=True, exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=str(stage_mesh_output))
 
@@ -346,7 +418,9 @@ if bsdf is None:
 if surface_source_path:
     if not surface_source_path.is_file():
         raise SystemExit(f"Surface material image missing: {surface_source_path}")
-    bsdf = bake_basecolor(obj, material, surface_source_path, basecolor_path, material_scale)
+    bsdf = bake_basecolor(obj, material, surface_source_path, basecolor_path, material_scale,
+                         {"normal": normal_path, "roughness": roughness_path,
+                          "metallic": metallic_path, "emission": emission_path})
 
 tex = load_texture(nodes, basecolor_path, non_color=False)
 

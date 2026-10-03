@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from PIL import Image
 
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable
@@ -16,6 +17,7 @@ from ..paths import resolve_workflow, tool_root
 from ..provenance import generator_provenance
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
+from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
 from ..validation import summarize_validation, validate_image, validate_model_outputs
 
 
@@ -28,6 +30,8 @@ def model_paths(project_root, config, name):
             "fbx": directory / f"{name}.fbx", "blend": directory / f"{name}_preview.blend",
             "basecolor": materials / f"{name}_basecolor.png", "normal": materials / f"{name}_normal.png",
             "roughness": materials / f"{name}_roughness.png", "metallic": materials / f"{name}_metallic.png",
+            "metallic_gloss": materials / f"{name}_metallic_gloss.png",
+            "unity_material": materials / f"{name}_preview_PBR.mat",
             "emission": materials / f"{name}_emission.png", "preview_front": previews / f"{name}_front.png",
             "preview_side": previews / f"{name}_side.png", "preview_rear": previews / f"{name}_rear.png",
             "processed_mesh": source / "processed_mesh.blend",
@@ -41,6 +45,7 @@ def material_candidate_paths(project_root, config, name, number):
             "fbx": directory / f"{name}.fbx", "blend": directory / f"{name}_preview.blend",
             "basecolor": materials / f"{name}_basecolor.png", "normal": materials / f"{name}_normal.png",
             "roughness": materials / f"{name}_roughness.png", "metallic": materials / f"{name}_metallic.png",
+            "metallic_gloss": materials / f"{name}_metallic_gloss.png",
             "emission": materials / f"{name}_emission.png", "preview_front": previews / f"{name}_front.png",
             "preview_side": previews / f"{name}_side.png", "preview_rear": previews / f"{name}_rear.png",
             "validation": directory / "validation.json", "generator": directory / "generation.json"}
@@ -54,7 +59,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
     paths = material_candidate_paths(root, config, asset["name"], number)
     paths["directory"].mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
-    candidate = {"number": number, "prompt": prompt, "status": "failed",
+    candidate = {"number": number, "prompt": prompt, "status": "failed", "kind": "surface_swatch",
                  "seed": secrets.randbits(32), "path": paths["surface"].relative_to(root).as_posix(),
                  "validation": {"status": "not_run", "errors": [], "warnings": [], "measured": {}}}
     pipeline = config["asset_pipeline"]
@@ -78,6 +83,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                         "--prompt", prompt,
                         "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
                         "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
+        make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         face_budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
         textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
         mesh_path = root / asset["source"]["processed_mesh"]
@@ -88,7 +94,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       stage_mesh=mesh_path, reuse_stage_mesh=mesh_path.is_file())
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
-                       ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "emission",
+                        ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                         "preview_front", "preview_side", "preview_rear")}
         candidate["validation"] = validate_model_outputs(check_paths, inspection, face_budget, root)
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
@@ -100,6 +106,35 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         candidate["error"] = str(exc)
         candidate["validation"]["errors"].append(str(exc))
     return candidate
+
+
+def _native_material_candidate(root, config, asset_type, asset, number, mesh_info):
+    paths = material_candidate_paths(root, config, asset["name"], number)
+    paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
+    mesh_path = root / asset["source"]["glb"]
+    for key in ("basecolor", "normal", "roughness", "metallic"):
+        shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
+    make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
+    shutil.copy2(paths["basecolor"], paths["surface"])
+    with Image.open(paths["basecolor"]) as image:
+        Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
+    paths["generator"].write_text(json.dumps(mesh_info, indent=2) + "\n")
+    budget = int(config["asset_pipeline"]["model_budgets"].get(asset_type.get("face_budget"), 30000))
+    textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
+    process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
+                  preview_dir=paths["preview_front"].parent, preserve_uvs=True,
+                  stage_mesh=root / asset["source"]["processed_mesh"])
+    inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
+    keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
+            "preview_front", "preview_side", "preview_rear")
+    validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root)
+    paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+    return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
+            "status": "candidate" if validation["status"] != "failed" else "failed",
+            "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
+            "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
+            "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
+            "outputs": _relative_outputs(root, paths, keys)}
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None):
@@ -138,6 +173,9 @@ def _style_matches_selected_concept(asset, style):
 def retexture(project_root, config, asset_type, style, manifest, key, *, material_prompt=None, count=1):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
+    items = asset.get("material_candidates", {}).get("items", [])
+    if items and items[-1].get("kind") == "mesh_pbr":
+        raise ValueError("This model has mesh-generated PBR regions. Surface-swatch retexturing would replace them; generate a revised concept to change its material design.")
     if not _style_matches_selected_concept(asset, style):
         raise ValueError("Concept style has changed; restore the original style or generate a new concept")
     paths = model_paths(root, config, asset["name"])
@@ -164,10 +202,17 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
                       if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Material candidate {number} is not valid for {asset['name']}")
+    unity_cli(root)
     paths = model_paths(root, config, asset["name"])
-    final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "emission",
+    candidate_paths = material_candidate_paths(root, config, asset["name"], number)
+    candidate.setdefault("outputs", {})
+    if not candidate_paths["metallic_gloss"].is_file():
+        make_metallic_gloss(candidate_paths["metallic"], candidate_paths["roughness"],
+                            candidate_paths["metallic_gloss"])
+    candidate["outputs"]["metallic_gloss"] = candidate_paths["metallic_gloss"].relative_to(root).as_posix()
+    final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                   "preview_front", "preview_side", "preview_rear")
-    existing = [paths[name] for name in final_keys if paths[name].exists()]
+    existing = [paths[name] for name in (*final_keys, "unity_material") if paths[name].exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Approved model outputs exist; pass --force to replace: {existing[0]}")
     sources = {name: root / candidate["outputs"][name] for name in final_keys}
@@ -184,9 +229,13 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
+    build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
+                         f"{asset['name']}_preview_PBR.mat",
+                         {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
     validation = dict(candidate["validation"])
     validation["measured"] = dict(validation.get("measured", {}))
     validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
+    validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     candidate["approval"] = "approved"
     asset["material_candidates"]["selected"] = number
@@ -194,7 +243,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
     asset["generator"]["material"] = candidate.get("generator")
     asset["generator"]["workflow"]["material"] = (candidate.get("generator") or {}).get("workflow")
     asset["generator"]["seed"]["material"] = candidate.get("seed")
-    asset["outputs"] = _relative_outputs(root, paths, (*final_keys, "validation"))
+    asset["outputs"] = _relative_outputs(root, paths, (*final_keys, "unity_material", "validation"))
     asset["validation"] = validation
     asset["status"] = "ready"
     asset["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -204,6 +253,9 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
             material_prompt=None, material_count=None):
     root = Path(project_root).resolve()
+    pipeline = config["asset_pipeline"]
+    if pipeline["workflows"].get("model") and material_prompt:
+        raise ValueError("The mesh-texturing workflow uses the selected concept's material design. Put the intended materials in --image-prompt; --material-prompt is for surface swatches.")
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
@@ -243,8 +295,13 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
 
         model_metadata = paths["directory"] / "model_generation.json"
         mesh_seed = secrets.randbits(32)
-        print("3D stage: Hunyuan3D mesh generation...", flush=True)
-        generate_model(root, config, paths["input_3d"], asset["name"], paths["glb"], model_metadata, mesh_seed)
+        workflow = pipeline["workflows"].get("model")
+        print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
+        if workflow:
+            budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+            generate_model(root, config, paths["cutout"], asset["name"], paths["glb"], model_metadata, mesh_seed, budget)
+        else:
+            generate_model(root, config, paths["input_3d"], asset["name"], paths["glb"], model_metadata, mesh_seed)
         mesh_info = json.loads(model_metadata.read_text())
         asset["source"].update({"cutout": paths["cutout"].relative_to(root).as_posix(),
                                 "3d_input": paths["input_3d"].relative_to(root).as_posix(),
@@ -254,13 +311,24 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         count = material_count or int(pipeline["defaults"].get("material_candidates", 2))
         if count < 1:
             raise ValueError("Material candidate count must be at least 1")
-        print(f"3D stage: generating {count} material candidates on the saved mesh...", flush=True)
-        material_candidates = []
-        for material_number in range(1, count + 1):
-            material_candidates.append(_generate_material_candidate(root, config, asset_type, asset,
-                                                                      material_number, material_prompt,
-                                                                      paths["processed_mesh"]))
-        asset["material_candidates"] = {"items": material_candidates, "selected": None}
+        if mesh_info.get("textured"):
+            print("3D stage: preserving generated UVs and PBR maps for mesh previews...", flush=True)
+            start = max((item["number"] for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
+            material_candidates = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info)]
+        else:
+            print(f"3D stage: generating {count} material candidates on the saved mesh...", flush=True)
+            material_candidates = []
+            start = max((item["number"] for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
+            for material_number in range(start, start + count):
+                material_candidates.append(_generate_material_candidate(root, config, asset_type, asset,
+                                                                          material_number, material_prompt,
+                                                                          paths["processed_mesh"]))
+        previous = asset.get("material_candidates", {}).get("items", [])
+        for item in previous:
+            item["approval"] = "superseded"
+            if item.get("status") == "candidate":
+                item["status"] = "superseded"
+        asset["material_candidates"] = {"items": previous + material_candidates, "selected": None}
         viable = [item for item in material_candidates if item["status"] == "candidate"]
         if not viable:
             reasons = "; ".join(item.get("error", "validation failed") for item in material_candidates)
@@ -271,7 +339,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                              "material": (first.get("generator") or {}).get("workflow")},
                                "model": mesh_info.get("model"),
                                "seed": {"concept": candidate.get("seed"), "mesh": mesh_info.get("seed")}}
-        asset["material_prompt"] = material_prompt
+        asset["material_prompt"] = first["prompt"]
         asset["validation"] = {"status": "not_run", "errors": [], "warnings": [
             "Choose a material candidate and approve it before using the Unity output."], "measured": {}}
         asset["status"] = "awaiting_texture_approval"

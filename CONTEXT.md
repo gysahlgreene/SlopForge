@@ -29,7 +29,7 @@ A design feature in the selected concept, such as a screen, panel, or light. The
 _Avoid_: Surface material
 
 **Surface material**:
-The generated color and surface texture projected over the mesh and baked into its UV map.
+The mesh's color and surface treatment. The mesh-aware workflow generates material regions with the geometry and bakes their PBR properties into its UV map; the surface-swatch workflow projects one repeating treatment over the whole mesh.
 _Avoid_: Concept detail, texture map
 
 **Texture candidate**:

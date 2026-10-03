@@ -31,6 +31,15 @@ def connected_components(mesh):
             item = parent[item]
         return item
 
+    # glTF duplicates vertices along UV and normal seams; they still share geometry.
+    positions = {}
+    for vertex in mesh.vertices:
+        other = positions.setdefault(tuple(vertex.co), vertex.index)
+        root = find(other)
+        if root != vertex.index:
+            parent[vertex.index] = root
+            size[root] += 1
+
     for polygon in mesh.polygons:
         vertices = polygon.vertices
         if not vertices:

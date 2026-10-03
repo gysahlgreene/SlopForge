@@ -440,13 +440,16 @@ class SlopForgeTests(unittest.TestCase):
                               "seed": {"concept": 1, "mesh": 2}}
         manifest = {"assets": {"prop:relic": asset}}
         candidate_paths = material_candidate_paths(self.root, config, "relic", 1)
-        keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "emission",
+        keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                 "preview_front", "preview_side", "preview_rear")
         outputs = {}
         for name in keys:
             path = candidate_paths[name]
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(name.encode())
+            if name == "metallic_gloss":
+                Image.new("RGBA", (8, 8), (0, 0, 0, 255)).save(path)
+            else:
+                path.write_bytes(name.encode())
             outputs[name] = path.relative_to(self.root).as_posix()
         asset["material_candidates"] = {"items": [{"number": 1, "status": "candidate", "prompt": "Brushed steel",
                                                         "seed": 3, "outputs": outputs,
@@ -455,7 +458,10 @@ class SlopForgeTests(unittest.TestCase):
                                                                        "warnings": [], "measured": {}}}],
                                          "selected": None}
 
-        result = model.approve_texture(self.root, config, manifest, "prop:relic", 1)
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material") as build_material:
+            result = model.approve_texture(self.root, config, manifest, "prop:relic", 1)
+        build_material.assert_called_once()
 
         final_paths = model_paths(self.root, config, "relic")
         self.assertEqual(asset["status"], "ready")
@@ -463,7 +469,8 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual(asset["material_prompt"], "Brushed steel")
         self.assertEqual(result["status"], "passed")
         for name in keys:
-            self.assertEqual(final_paths[name].read_bytes(), name.encode())
+            expected = candidate_paths[name].read_bytes() if name == "metallic_gloss" else name.encode()
+            self.assertEqual(final_paths[name].read_bytes(), expected)
 
     def test_retexture_rebuilds_missing_stage_mesh_for_older_approved_models(self):
         root = self.root.resolve()

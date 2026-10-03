@@ -21,7 +21,7 @@ SMOOTH_WORDS = {
 
 ROUGH_WORDS = {
     "stone", "rock", "wood", "cloth", "fabric",
-    "leather", "concrete", "rust", "rough"
+    "leather", "concrete", "rust", "rough", "graphite", "charcoal", "matte"
 }
 
 EMISSION_WORDS = {"emissive", "emission", "glowing", "glow", "luminous", "led"}
@@ -103,9 +103,11 @@ def main():
 
     prompt = args.prompt.lower()
 
-    if contains_any(prompt, SMOOTH_WORDS):
+    smooth_position, _ = first_material_word(prompt, SMOOTH_WORDS)
+    rough_position, _ = first_material_word(prompt, ROUGH_WORDS)
+    if smooth_position is not None and (rough_position is None or smooth_position < rough_position):
         base_roughness = 0.22
-    elif contains_any(prompt, ROUGH_WORDS):
+    elif rough_position is not None:
         base_roughness = 0.70
     else:
         base_roughness = 0.42

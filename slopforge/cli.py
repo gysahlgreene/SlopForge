@@ -342,11 +342,13 @@ def _run_make(args):
                 for item in material_candidates:
                     print(f"  material {item['number']}: {item['outputs'].get('preview_front')}")
                 _open_material_candidates(root, material_candidates)
-                selection = input("Material number to approve, r to make more, or q to stop: ").strip().lower()
+                native = any(item.get("kind") == "mesh_pbr" for item in material_candidates)
+                choices = "Material number to approve, or q to stop: " if native else "Material number to approve, r to make more, or q to stop: "
+                selection = input(choices).strip().lower()
                 if selection == "q":
                     print(f"Model and material candidates are saved. Review with: slopforge --project {root} candidates {name}")
                     return 0
-                if selection == "r":
+                if selection == "r" and not native:
                     count = input("How many more material candidates? [2]: ").strip()
                     try:
                         count = int(count or "2")
@@ -362,7 +364,7 @@ def _run_make(args):
                     if not any(item["number"] == material_number for item in material_candidates):
                         raise ValueError
                 except ValueError:
-                    print("Enter a listed material number, r, or q.")
+                    print("Enter a listed material number or q." if native else "Enter a listed material number, r, or q.")
                     continue
                 confirm = input(f"Approve material {material_number} and export it to Unity? [y/N]: ").strip().lower()
                 if confirm not in {"y", "yes"}:

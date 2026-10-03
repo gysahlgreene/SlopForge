@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -14,6 +15,56 @@ BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applicat
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderMaterialBakeTests(unittest.TestCase):
+    def test_removes_only_single_face_islands(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "check_cleanup.py"
+            script.write_text(f'''import bpy, runpy
+prepare = runpy.run_path({str(ROOT / "blender/mesh_cleanup.py")!r})
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("cleanup")
+mesh.from_pydata([(0,0,0),(1,0,0),(1,1,0),(0,1,0),(3,0,0),(4,0,0),(3,1,0)], [],
+                 [(0,1,2),(0,2,3),(4,5,6)])
+removed = prepare["remove_isolated_single_faces"](mesh)
+assert removed == 1, removed
+assert len(mesh.polygons) == 2, len(mesh.polygons)
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(script)], check=True, capture_output=True)
+
+    def test_native_maps_keep_uvs_and_seams_are_connected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, fbx, blend = [root / f"cube.{extension}" for extension in ("glb", "fbx", "blend")]
+            maps = [root / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path, color in zip(maps, ((20,150,70), (128,128,255), (128,128,128), (0,0,0), (0,0,0))):
+                Image.new("RGB", (64,64), color).save(path)
+            originals = [path.read_bytes() for path in maps]
+            fixture = root / "fixture.py"
+            fixture.write_text('''import bpy,sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add()
+for index,loop in enumerate(bpy.context.object.data.uv_layers.active.data):
+    loop.uv = (0.4 + (0.1 if index%4 in (1,2) else 0), 0.2 + (0.1 if index%4 in (2,3) else 0))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1],export_format='GLB')
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(fbx), str(blend), *map(str,maps), "--preserve-uvs"], check=True, capture_output=True)
+            self.assertEqual([path.read_bytes() for path in maps], originals)
+            snapshot = root / "snapshot.py"
+            result = root / "snapshot.json"
+            snapshot.write_text(f'''import bpy,json,runpy
+bpy.ops.wm.open_mainfile(filepath={str(blend)!r})
+mesh=next(o.data for o in bpy.context.scene.objects if o.type=='MESH')
+uvs=[tuple(loop.uv) for loop in mesh.uv_layers.active.data]
+components=runpy.run_path({str(ROOT / 'blender/inspect_model.py')!r})['connected_components'](mesh)
+json.dump({{'uv_min':[min(p[i] for p in uvs) for i in (0,1)],'uv_max':[max(p[i] for p in uvs) for i in (0,1)],'components':len(components)}},open({str(result)!r},'w'))
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(snapshot)], check=True, capture_output=True)
+            data = json.loads(result.read_text())
+            self.assertEqual(data["components"], 1)
+            for actual, expected in zip(data["uv_min"] + data["uv_max"], (0.4,0.2,0.5,0.3)):
+                self.assertAlmostEqual(actual, expected, places=5)
+
     def test_bakes_generated_material_and_renders_three_mesh_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
