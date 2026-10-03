@@ -1,0 +1,27 @@
+[flake8]
+max-line-length = 120
+max-complexity = 12
+ignore =
+    # E501: line too long (handled by max-line-length)
+    # E203: whitespace before ':' (Black compatibility)
+    # W503: line break before binary operator (Black compatibility)
+    E501
+    E203
+    W503
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    build,
+    dist,
+    .eggs,
+    docs,
+    blender,
+    processing,
+    workflows,
+    templates,
+    examples,
+    img
+per-file-ignores =
+    # Tests can use assert without exception handling
+    tests/*:S101,BLK

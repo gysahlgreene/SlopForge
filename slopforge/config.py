@@ -1,3 +1,4 @@
+import copy
 import os
 import re
 from pathlib import Path
@@ -21,9 +22,12 @@ DEFAULTS = {
 
 
 def _merge(base, update):
-    result = dict(base)
+    result = copy.deepcopy(base)
     for key, value in update.items():
-        result[key] = _merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else value
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge(result[key], value)
+        else:
+            result[key] = value
     return result
 
 
@@ -45,16 +49,12 @@ def load_project(project_root):
     result["asset_pipeline"] = _merge(DEFAULTS, pipeline)
     result["_project_root"] = root
     tools = result["asset_pipeline"]["tools"]
-    env_url = os.environ.get("COMFYUI_URL")
-    if env_url:
-        tools["comfy_url"] = env_url.rstrip("/")
-    env_home = os.environ.get("COMFYUI_HOME")
-    if env_home:
-        tools["comfy_home"] = env_home
-    env_blender = os.environ.get("BLENDER_BIN")
-    if env_blender:
-        tools["blender"] = env_blender
-    env_python = os.environ.get("SLOPFORGE_PYTHON")
-    if env_python:
-        tools["asset_python"] = env_python
+    if "COMFYUI_URL" in os.environ:
+        tools["comfy_url"] = os.environ["COMFYUI_URL"].rstrip("/")
+    if "COMFYUI_HOME" in os.environ:
+        tools["comfy_home"] = os.environ["COMFYUI_HOME"]
+    if "BLENDER_BIN" in os.environ:
+        tools["blender"] = os.environ["BLENDER_BIN"]
+    if "SLOPFORGE_PYTHON" in os.environ:
+        tools["asset_python"] = os.environ["SLOPFORGE_PYTHON"]
     return result
