@@ -56,7 +56,7 @@ The concept image guides the shape and material regions; it is **not** used as t
 </table>
 
 > [!NOTE]
-> This is an experimental, **unapproved** candidate. The Unity image verifies that the FBX material maps are assigned in a temporary Unity project using the built-in Standard shader; target-project lighting and URP were not tested. The side view still shows mesh reconstruction defects, so inspect all views and validation warnings before approval.
+> This committed example shows the current work-in-progress output. The Unity render verifies that the FBX material maps are assigned in a temporary Unity project using the built-in Standard shader; target-project lighting and URP have not been checked. The side view still shows mesh reconstruction defects, which remain part of the ongoing work.
 
 ## What can SlopForge make?
 
