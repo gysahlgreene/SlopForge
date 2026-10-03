@@ -3,12 +3,21 @@ from pathlib import Path
 from PIL import Image
 
 
-def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=50_000_000, report_path=None):
+def validate_image(
+    path,
+    expected_format="PNG",
+    require_alpha=False,
+    max_bytes=50_000_000,
+    report_path=None,
+):
     path = Path(path)
     checks = ["exists", "non_empty", "decodable", "dimensions", "format", "file_size"]
     if require_alpha:
         checks.append("alpha")
-    measured = {"path": str(report_path if report_path is not None else path), "bytes": path.stat().st_size if path.is_file() else 0}
+    measured = {
+        "path": str(report_path if report_path is not None else path),
+        "bytes": path.stat().st_size if path.is_file() else 0,
+    }
     errors, warnings = [], []
     if not path.is_file() or measured["bytes"] == 0:
         errors.append("image file is missing or empty")
@@ -20,7 +29,9 @@ def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=5
                 measured["format"] = image.format
                 measured["dimensions"] = list(image.size)
                 measured["mode"] = image.mode
-                measured["has_alpha"] = "A" in image.getbands() or "transparency" in image.info
+                measured["has_alpha"] = (
+                    "A" in image.getbands() or "transparency" in image.info
+                )
             if not all(measured["dimensions"]):
                 errors.append("image dimensions must be greater than zero")
             if expected_format and measured["format"] != expected_format:
@@ -31,13 +42,28 @@ def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=5
                 warnings.append(f"image exceeds {max_bytes} byte size guideline")
         except Exception as exc:
             errors.append(f"invalid image: {exc}")
-    return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "checks": checks, "errors": errors, "warnings": warnings, "measured": measured}
+    return {
+        "status": (
+            "failed" if errors else "passed_with_warnings" if warnings else "passed"
+        ),
+        "checks": checks,
+        "errors": errors,
+        "warnings": warnings,
+        "measured": measured,
+    }
 
 
 def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None):
     errors, warnings = [], []
     root = Path(project_root).resolve() if project_root else None
-    measured = {key: (Path(path).resolve().relative_to(root).as_posix() if root and Path(path).resolve().is_relative_to(root) else str(path)) for key, path in paths.items()}
+    measured = {
+        key: (
+            Path(path).resolve().relative_to(root).as_posix()
+            if root and Path(path).resolve().is_relative_to(root)
+            else str(path)
+        )
+        for key, path in paths.items()
+    }
     for key, path in paths.items():
         path = Path(path)
         if not path.is_file() or path.stat().st_size == 0:
@@ -46,11 +72,21 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         measured.update(inspection.get("measured", {}))
         errors.extend(inspection.get("errors", []))
         warnings.extend(inspection.get("warnings", []))
-        if face_budget and inspection.get("measured", {}).get("face_count", 0) > face_budget:
+        if (
+            face_budget
+            and inspection.get("measured", {}).get("face_count", 0) > face_budget
+        ):
             errors.append(f"face count exceeds budget {face_budget}")
     else:
         warnings.append("Blender mesh inspection did not run")
-    return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "errors": errors, "warnings": warnings, "measured": measured}
+    return {
+        "status": (
+            "failed" if errors else "passed_with_warnings" if warnings else "passed"
+        ),
+        "errors": errors,
+        "warnings": warnings,
+        "measured": measured,
+    }
 
 
 def summarize_validation(result):

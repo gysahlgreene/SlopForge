@@ -31,17 +31,48 @@ def _migrate(data):
             "generator": {"workflow": old.get("workflow"), "model": None, "seed": None},
             "conditioning": {"strategy": "text_only", "references_used": []},
             "candidates": {"items": [], "selected": None},
-            "source": {k: v for k, v in (("concept", old.get("concept")), ("glb", old.get("source"))) if v},
-            "outputs": {k: v for k, v in (("asset", old.get("asset")), ("preview_blend", old.get("preview"))) if v},
-            "validation": {"status": "unknown", "warnings": ["Migrated legacy manifest entry; validation facts were not recorded."], "measured": {}},
+            "source": {
+                k: v
+                for k, v in (
+                    ("concept", old.get("concept")),
+                    ("glb", old.get("source")),
+                )
+                if v
+            },
+            "outputs": {
+                k: v
+                for k, v in (
+                    ("asset", old.get("asset")),
+                    ("preview_blend", old.get("preview")),
+                )
+                if v
+            },
+            "validation": {
+                "status": "unknown",
+                "warnings": [
+                    "Migrated legacy manifest entry; validation facts were not recorded."
+                ],
+                "measured": {},
+            },
             "legacy": copy.deepcopy(old),
         }
-    return {"schema_version": SCHEMA_VERSION, "active_style": {"name": old_style.get("name"), "version": old_style.get("version")}, "assets": assets}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "active_style": {
+            "name": old_style.get("name"),
+            "version": old_style.get("version"),
+        },
+        "assets": assets,
+    }
 
 
 def load_manifest(path):
     path = Path(path)
-    return _migrate(json.loads(path.read_text())) if path.is_file() else {"schema_version": SCHEMA_VERSION, "active_style": {}, "assets": {}}
+    return (
+        _migrate(json.loads(path.read_text()))
+        if path.is_file()
+        else {"schema_version": SCHEMA_VERSION, "active_style": {}, "assets": {}}
+    )
 
 
 def save_manifest(path, data):
@@ -64,7 +95,11 @@ def find_asset(manifest, selector):
     exact = manifest["assets"].get(selector)
     if exact:
         return exact
-    found = [asset for asset in manifest["assets"].values() if asset.get("name") == selector or asset.get("id") == selector]
+    found = [
+        asset
+        for asset in manifest["assets"].values()
+        if asset.get("name") == selector or asset.get("id") == selector
+    ]
     if len(found) != 1:
         if not found:
             raise KeyError(f"No asset named {selector!r}")
@@ -74,15 +109,26 @@ def find_asset(manifest, selector):
 
 def add_candidate(manifest, key, candidate):
     asset = manifest["assets"][key]
-    asset.setdefault("candidates", {"items": [], "selected": None})["items"].append(candidate)
+    asset.setdefault("candidates", {"items": [], "selected": None})["items"].append(
+        candidate
+    )
     asset["status"] = "candidate"
 
 
 def new_record(asset_type, name, description, style, conditioning):
-    return {"id": str(uuid.uuid4()), "name": name, "type": asset_type, "description": description,
-            "style": style["name"], "style_version": style["version"], "status": "planned",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "generator": {"workflow": None, "model": None, "seed": None},
-            "conditioning": {"strategy": conditioning["strategy"], "references_used": []},
-            "candidates": {"items": [], "selected": None}, "source": {}, "outputs": {},
-            "validation": {"status": "not_run", "warnings": [], "measured": {}}}
+    return {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "type": asset_type,
+        "description": description,
+        "style": style["name"],
+        "style_version": style["version"],
+        "status": "planned",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "generator": {"workflow": None, "model": None, "seed": None},
+        "conditioning": {"strategy": conditioning["strategy"], "references_used": []},
+        "candidates": {"items": [], "selected": None},
+        "source": {},
+        "outputs": {},
+        "validation": {"status": "not_run", "warnings": [], "measured": {}},
+    }

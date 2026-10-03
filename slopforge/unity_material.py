@@ -13,7 +13,9 @@ def unity_cli(project_root):
         raise ValueError(f"Not a Unity project: {root}")
     cli = shutil.which("unity")
     if not cli:
-        raise ValueError("Unity CLI is required to create and assign the generated PBR material")
+        raise ValueError(
+            "Unity CLI is required to create and assign the generated PBR material"
+        )
     return cli
 
 
@@ -24,7 +26,9 @@ def make_metallic_gloss(metallic_path, roughness_path, destination):
         roughness = image.convert("L")
     if metallic.size != roughness.size:
         raise ValueError("Metallic and roughness maps must have matching dimensions")
-    Image.merge("RGBA", (metallic, metallic, metallic, ImageChops.invert(roughness))).save(destination)
+    Image.merge(
+        "RGBA", (metallic, metallic, metallic, ImageChops.invert(roughness))
+    ).save(destination)
 
 
 def build_unity_material(project_root, fbx, material, maps):
@@ -36,16 +40,21 @@ def build_unity_material(project_root, fbx, material, maps):
     try:
         fbx_asset = fbx.relative_to(root).as_posix()
         material_asset = material.relative_to(root).as_posix()
-        map_assets = {name: Path(path).resolve().relative_to(root).as_posix() for name, path in maps.items()}
+        map_assets = {
+            name: Path(path).resolve().relative_to(root).as_posix()
+            for name, path in maps.items()
+        }
     except ValueError as exc:
-        raise ValueError("Unity FBX, material, and maps must be inside the Unity project") from exc
+        raise ValueError(
+            "Unity FBX, material, and maps must be inside the Unity project"
+        ) from exc
 
     editor_dir = root / "Assets/Editor"
     editor_dir.mkdir(parents=True, exist_ok=True)
     script = editor_dir / f"SlopForgeMaterialBuilder_{uuid.uuid4().hex}.cs"
     class_name = script.stem
     quote = json.dumps
-    script.write_text(f'''using System;
+    script.write_text(f"""using System;
 using System.IO;
 using System.Linq;
 using UnityEditor;
@@ -138,10 +147,21 @@ public static class {class_name}
         return null;
     }}
 }}
-''')
+""")
     try:
-        subprocess.run([cli, "run", str(root), "--timeout", "600", "--", "-executeMethod",
-                        f"{class_name}.Build"], check=True)
+        subprocess.run(
+            [
+                cli,
+                "run",
+                str(root),
+                "--timeout",
+                "600",
+                "--",
+                "-executeMethod",
+                f"{class_name}.Build",
+            ],
+            check=True,
+        )
     finally:
         script.unlink(missing_ok=True)
         script.with_suffix(".cs.meta").unlink(missing_ok=True)

@@ -7,28 +7,66 @@ from ..paths import resolve_workflow
 from ..style import build_prompt
 
 
-def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None):
+def generate(
+    project_root,
+    config,
+    asset_type,
+    style,
+    name,
+    description,
+    count,
+    manifest,
+    key,
+    *,
+    generation_prompt=None,
+):
     conditioning = resolve_conditioning(project_root, config, style)
     ensure_supported(conditioning)
-    prompt = generation_prompt or build_prompt(style, asset_type, description, asset_type.get("prompt_mode", "asset"))
+    prompt = generation_prompt or build_prompt(
+        style, asset_type, description, asset_type.get("prompt_mode", "asset")
+    )
     workflow = config["asset_pipeline"]["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
     workflow_path = resolve_workflow(project_root, workflow)
 
     def backend(prompt_text, destination, seed, metadata):
-        return generate_image(project_root, config, workflow_path, prompt_text, destination,
-                              f"slopforge/{asset_type['name']}/{name}/candidate_{seed}", seed, metadata)
+        return generate_image(
+            project_root,
+            config,
+            workflow_path,
+            prompt_text,
+            destination,
+            f"slopforge/{asset_type['name']}/{name}/candidate_{seed}",
+            seed,
+            metadata,
+        )
 
-    candidates = generate_candidates(project_root, config, asset_type, style, name, prompt, count, manifest, key, backend,
-                                     semantic_description=description)
+    candidates = generate_candidates(
+        project_root,
+        config,
+        asset_type,
+        style,
+        name,
+        prompt,
+        count,
+        manifest,
+        key,
+        backend,
+        semantic_description=description,
+    )
     record = manifest["assets"][key]
     record["description"] = description
     record["generation_prompt"] = prompt
-    record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
+    record["conditioning"] = {
+        "strategy": conditioning["strategy"],
+        "references_used": conditioning["references"],
+    }
     record["generator"]["workflow"] = workflow
     return candidates
 
 
 def approve(project_root, config, asset_type, manifest, key, number, force=False):
-    return approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+    return approve_image_candidate(
+        project_root, config, asset_type, manifest, key, number, force
+    )

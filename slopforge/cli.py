@@ -15,55 +15,109 @@ from .pipelines.primitive import register_primitive
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
-
-COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt"}
+COMMANDS = {
+    "init",
+    "make",
+    "generate",
+    "candidates",
+    "approve",
+    "retexture",
+    "approve-texture",
+    "inspect",
+    "doctor",
+    "styles",
+    "assets",
+    "prompt",
+}
 
 
 def parser():
-    root = argparse.ArgumentParser(prog="slopforge", description="Generate and approve local AI game-asset slop.")
+    root = argparse.ArgumentParser(
+        prog="slopforge", description="Generate and approve local AI game-asset slop."
+    )
     root.add_argument("--version", action="version", version=f"slopforge {__version__}")
-    root.add_argument("--project", help="Target Unity project; otherwise discovered from the current directory")
+    root.add_argument(
+        "--project",
+        help="Target Unity project; otherwise discovered from the current directory",
+    )
     sub = root.add_subparsers(dest="command", required=True)
 
-    init = sub.add_parser("init", help="Initialize SlopForge configuration in a Unity project")
+    init = sub.add_parser(
+        "init", help="Initialize SlopForge configuration in a Unity project"
+    )
     init.add_argument("target", type=Path)
-    init.add_argument("--force", action="store_true", help="Replace managed configuration files; preserve existing asset manifest")
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace managed configuration files; preserve existing asset manifest",
+    )
 
-    sub.add_parser("make", help="Guided asset creation from description to Unity",
-                   description="Walk through style, asset type, generation, visual review, and Unity approval.")
+    sub.add_parser(
+        "make",
+        help="Guided asset creation from description to Unity",
+        description="Walk through style, asset type, generation, visual review, and Unity approval.",
+    )
 
     generate = sub.add_parser("generate", help="Generate candidates for an asset")
     generate.add_argument("asset_type")
     generate.add_argument("name")
     generate.add_argument("description")
-    generate.add_argument("--image-prompt", help="Send this agent-authored prompt unchanged to the image workflow")
+    generate.add_argument(
+        "--image-prompt",
+        help="Send this agent-authored prompt unchanged to the image workflow",
+    )
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
-    generate.add_argument("--dry-run", action="store_true", help="Print the style-injected prompt without inference")
+    generate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the style-injected prompt without inference",
+    )
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
-    approve = sub.add_parser("approve", help="Approve a candidate and continue the pipeline")
+    approve = sub.add_parser(
+        "approve", help="Approve a candidate and continue the pipeline"
+    )
     approve.add_argument("name")
     approve.add_argument("candidate", type=int)
-    approve.add_argument("--material-prompt", help="Use this agent-authored surface-material prompt for 3D assets")
-    approve.add_argument("--material-count", type=int, help="Number of material candidates to bake onto the saved mesh")
+    approve.add_argument(
+        "--material-prompt",
+        help="Use this agent-authored surface-material prompt for 3D assets",
+    )
+    approve.add_argument(
+        "--material-count",
+        type=int,
+        help="Number of material candidates to bake onto the saved mesh",
+    )
     approve.add_argument("--force", action="store_true")
-    retexture = sub.add_parser("retexture", help="Generate more material candidates for an approved model")
+    retexture = sub.add_parser(
+        "retexture", help="Generate more material candidates for an approved model"
+    )
     retexture.add_argument("name")
-    retexture.add_argument("--material-prompt", help="Send this agent-authored material prompt unchanged")
+    retexture.add_argument(
+        "--material-prompt", help="Send this agent-authored material prompt unchanged"
+    )
     retexture.add_argument("--count", type=int, default=1)
-    approve_texture = sub.add_parser("approve-texture", help="Approve a material candidate for a model")
+    approve_texture = sub.add_parser(
+        "approve-texture", help="Approve a material candidate for a model"
+    )
     approve_texture.add_argument("name")
     approve_texture.add_argument("candidate", type=int)
     approve_texture.add_argument("--force", action="store_true")
-    inspect = sub.add_parser("inspect", help="Show manifest and validation details for an asset")
+    inspect = sub.add_parser(
+        "inspect", help="Show manifest and validation details for an asset"
+    )
     inspect.add_argument("name")
-    sub.add_parser("doctor", help="Diagnose local dependencies and the selected project")
+    sub.add_parser(
+        "doctor", help="Diagnose local dependencies and the selected project"
+    )
     sub.add_parser("styles", help="List project style packs")
     sub.add_parser("assets", help="List tracked project assets")
-    prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
+    prompt = sub.add_parser(
+        "prompt", help="Print a style-injected prompt without inference"
+    )
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
     return root
@@ -71,11 +125,26 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (
+        ["init"],
+        ["make"],
+        ["generate"],
+        ["candidates"],
+        ["approve"],
+        ["retexture"],
+        ["approve-texture"],
+        ["inspect"],
+        ["doctor"],
+        ["styles"],
+        ["assets"],
+        ["prompt"],
+    ):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
-    legacy = argparse.ArgumentParser(prog="slopforge", description="Automatic candidate generation.")
+    legacy = argparse.ArgumentParser(
+        prog="slopforge", description="Automatic candidate generation."
+    )
     legacy.add_argument("asset_type")
     legacy.add_argument("name")
     legacy.add_argument("description")
@@ -83,7 +152,12 @@ def parse_args(argv=None):
     legacy.add_argument("--force", action="store_true")
     legacy.add_argument("--image-prompt")
     args = legacy.parse_args(argv)
-    args.command, args.count, args.auto_approve, args.dry_run = "generate", None, True, False
+    args.command, args.count, args.auto_approve, args.dry_run = (
+        "generate",
+        None,
+        True,
+        False,
+    )
     return args
 
 
@@ -111,10 +185,18 @@ def _list_candidates(manifest, name):
     record = find_asset(manifest, name)
     print(f"{record['name']} ({record['type']}) — {record['status']}")
     for item in record.get("candidates", {}).get("items", []):
-        marker = " [selected]" if record["candidates"].get("selected") == item["number"] else ""
+        marker = (
+            " [selected]"
+            if record["candidates"].get("selected") == item["number"]
+            else ""
+        )
         print(f"{item['number']}: {item['path']} — {item['status']}{marker}")
     for item in record.get("material_candidates", {}).get("items", []):
-        marker = " [selected]" if record["material_candidates"].get("selected") == item["number"] else ""
+        marker = (
+            " [selected]"
+            if record["material_candidates"].get("selected") == item["number"]
+            else ""
+        )
         preview = item.get("outputs", {}).get("preview_front", item.get("path", ""))
         print(f"material {item['number']}: {preview} — {item['status']}{marker}")
 
@@ -123,7 +205,10 @@ def _make_style_options(root, config):
     options = []
     for path in sorted((root / "ai/styles").glob("*/style.yaml")):
         selected = dict(config)
-        selected["asset_pipeline"] = {**config["asset_pipeline"], "active_style": path.parent.name}
+        selected["asset_pipeline"] = {
+            **config["asset_pipeline"],
+            "active_style": path.parent.name,
+        }
         options.append((path.parent.name, load_style(root, selected)))
     return options
 
@@ -154,7 +239,9 @@ def _open_material_candidates(root, candidates):
             path = root / relative
             try:
                 with Image.open(path) as preview:
-                    preview.show(title=f"Material {item['number']} {view.removeprefix('preview_')}")
+                    preview.show(
+                        title=f"Material {item['number']} {view.removeprefix('preview_')}"
+                    )
             except Exception:
                 print(f"Couldn't open material preview: {path}")
 
@@ -168,27 +255,48 @@ def _make_project(args):
             root = discover_project_root()
         except FileNotFoundError:
             current = Path.cwd()
-            root = current if (current / "Assets").is_dir() else Path(input("Unity project path (folder with Assets/, e.g. ~/UnityProjects/MyGame; Ctrl-C cancels): ")).expanduser().resolve()
+            root = (
+                current
+                if (current / "Assets").is_dir()
+                else Path(
+                    input(
+                        "Unity project path (folder with Assets/, e.g. ~/UnityProjects/MyGame; Ctrl-C cancels): "
+                    )
+                )
+                .expanduser()
+                .resolve()
+            )
     if not (root / "Assets").is_dir():
-        raise ValueError(f"That folder doesn't look like a Unity project (missing Assets/): {root}")
+        raise ValueError(
+            f"That folder doesn't look like a Unity project (missing Assets/): {root}"
+        )
     if not (root / "ai/project.yaml").is_file():
         from .initializer import init_project
+
         init_project(root)
         print(f"Set up SlopForge in {root.name}.")
     return root
 
 
 def _check_comfy(config, root):
-    url = config["asset_pipeline"]["tools"].get("comfy_url", "http://127.0.0.1:8188").rstrip("/")
+    url = (
+        config["asset_pipeline"]["tools"]
+        .get("comfy_url", "http://127.0.0.1:8188")
+        .rstrip("/")
+    )
     try:
         with urlopen(url + "/system_stats", timeout=3):
             return
     except Exception as exc:
-        raise RuntimeError(f"ComfyUI isn't responding at {url}. Start it, then check with `slopforge --project {root} doctor`.") from exc
+        raise RuntimeError(
+            f"ComfyUI isn't responding at {url}. Start it, then check with `slopforge --project {root} doctor`."
+        ) from exc
 
 
 def _make_operation(command, root, style_key, **values):
-    return argparse.Namespace(command=command, project=str(root), _style_key=style_key, _guided=True, **values)
+    return argparse.Namespace(
+        command=command, project=str(root), _style_key=style_key, _guided=True, **values
+    )
 
 
 def _run_make(args):
@@ -197,36 +305,65 @@ def _run_make(args):
     types = load_taxonomy(root)
     style_options = _make_style_options(root, config)
     if not style_options:
-        raise ValueError("No style packs found. Run `slopforge init` for this Unity project first.")
+        raise ValueError(
+            "No style packs found. Run `slopforge init` for this Unity project first."
+        )
 
     active_key = config["asset_pipeline"]["active_style"]
-    active_index = next((i for i, (key, _) in enumerate(style_options) if key == active_key), None)
+    active_index = next(
+        (i for i, (key, _) in enumerate(style_options) if key == active_key), None
+    )
     if active_index is None:
-        raise ValueError(f"Active style '{active_key}' is missing. Check ai/project.yaml and ai/styles/.")
+        raise ValueError(
+            f"Active style '{active_key}' is missing. Check ai/project.yaml and ai/styles/."
+        )
     if len(style_options) == 1:
         style_key, style = style_options[0]
         print(f"\nUsing your only art style: {style['name']}.")
     else:
         current_style = style_options[active_index][1]
-        print(f"\nStep 1 of 4: choose an art style. Press Enter to keep {current_style['name']}.")
+        print(
+            f"\nStep 1 of 4: choose an art style. Press Enter to keep {current_style['name']}."
+        )
         for key, option in style_options:
             marker = " (current)" if key == active_key else ""
             identity = option["identity"]
-            description = "; ".join(value for value in (identity.get("genre"), identity.get("rendering")) if value)
+            description = "; ".join(
+                value
+                for value in (identity.get("genre"), identity.get("rendering"))
+                if value
+            )
             print(f"  • {option['name']}{marker}")
             if description:
-                print(textwrap.fill(description, width=72, initial_indent="    ", subsequent_indent="    "))
+                print(
+                    textwrap.fill(
+                        description,
+                        width=72,
+                        initial_indent="    ",
+                        subsequent_indent="    ",
+                    )
+                )
         while True:
-            choice = input(f"Which style should this asset use? Type a name, or press Enter to keep {current_style['name']}: ").strip()
+            choice = input(
+                f"Which style should this asset use? Type a name, or press Enter to keep {current_style['name']}: "
+            ).strip()
             if not choice:
                 style_key = active_key
                 break
-            selected = next(((key, option) for key, option in style_options
-                             if choice.casefold() in {key.casefold(), option["name"].casefold()}), None)
+            selected = next(
+                (
+                    (key, option)
+                    for key, option in style_options
+                    if choice.casefold() in {key.casefold(), option["name"].casefold()}
+                ),
+                None,
+            )
             if selected:
                 style_key, style = selected
                 break
-            print("Type one of the style names shown above, or press Enter to keep the current style.")
+            print(
+                "Type one of the style names shown above, or press Enter to keep the current style."
+            )
     style = next(style for key, style in style_options if key == style_key)
     if len(style_options) > 1:
         print(f"Using {style['name']} for this asset.\n")
@@ -234,7 +371,9 @@ def _run_make(args):
     sorted_types = sorted(types.values(), key=lambda item: item["name"])
     print("Step 2 of 4: what are you making?")
     for number, recipe in enumerate(sorted_types, 1):
-        route = {"image": "2D image", "model": "3D model", "native": "Unity geometry"}[recipe["pipeline"]]
+        route = {"image": "2D image", "model": "3D model", "native": "Unity geometry"}[
+            recipe["pipeline"]
+        ]
         print(f"  {number}. {recipe['name']} ({route})")
     while True:
         choice = input("Type number or name: ").strip()
@@ -260,13 +399,17 @@ def _run_make(args):
             existing_key = _asset_key(manifest, asset_type, name)
             existing = manifest["assets"].get(existing_key)
             if existing and existing.get("status") == "ready":
-                print("That name already has an approved asset. Choose another name to keep the current one safe.")
+                print(
+                    "That name already has an approved asset. Choose another name to keep the current one safe."
+                )
                 continue
             break
         except ValueError as exc:
             print(exc)
     while True:
-        description = input('Describe what it should look like (for example, "A small red healing potion"): ').strip()
+        description = input(
+            'Describe what it should look like (for example, "A small red healing potion"): '
+        ).strip()
         if description:
             break
         print("Add a short description so SlopForge knows what to create.")
@@ -275,9 +418,19 @@ def _run_make(args):
         print("\nChecking ComfyUI...")
         _check_comfy(config, root)
     print(f"\nStep 3 of 4: creating {asset_type} '{name}' in {style['name']} style.")
-    generate_args = _make_operation("generate", root, style_key, asset_type=asset_type, name=name,
-                                    description=description, image_prompt=None, count=None,
-                                    auto_approve=False, force=False, dry_run=False)
+    generate_args = _make_operation(
+        "generate",
+        root,
+        style_key,
+        asset_type=asset_type,
+        name=name,
+        description=description,
+        image_prompt=None,
+        count=None,
+        auto_approve=False,
+        force=False,
+        dry_run=False,
+    )
     try:
         _run(generate_args)
     except Exception as exc:
@@ -286,22 +439,36 @@ def _run_make(args):
         return 1
 
     if recipe["pipeline"] == "native":
-        print("\nDone. This is a Unity geometry task; create the simple shape in the Unity Editor.")
+        print(
+            "\nDone. This is a Unity geometry task; create the simple shape in the Unity Editor."
+        )
         return 0
 
     config = load_project(root)
     manifest = load_manifest(root / config["asset_pipeline"]["manifest"])
     key = _asset_key(manifest, asset_type, name)
-    print("\nStep 4 of 4: review the candidates that opened, then choose one to send to Unity.")
+    print(
+        "\nStep 4 of 4: review the candidates that opened, then choose one to send to Unity."
+    )
     while True:
         record = manifest["assets"][key]
-        candidates = [item for item in record.get("candidates", {}).get("items", []) if item.get("status") == "candidate"]
+        candidates = [
+            item
+            for item in record.get("candidates", {}).get("items", [])
+            if item.get("status") == "candidate"
+        ]
         for item in candidates:
             print(f"  {item['number']}. {item['path']}")
         _open_candidates(root, candidates)
-        selection = input("Candidate number to approve, r to make more, or q to stop: ").strip().lower()
+        selection = (
+            input("Candidate number to approve, r to make more, or q to stop: ")
+            .strip()
+            .lower()
+        )
         if selection == "q":
-            print(f"Candidates are saved. Review them later with: slopforge --project {root} candidates {name}")
+            print(
+                f"Candidates are saved. Review them later with: slopforge --project {root} candidates {name}"
+            )
             return 0
         if selection == "r":
             try:
@@ -320,11 +487,24 @@ def _run_make(args):
             print("Enter a listed candidate number, r, or q.")
             continue
         output = output_path(root, config, recipe, name)
-        confirm = input(f"Approve candidate {candidate_number} to {output.relative_to(root)}? [y/N]: ").strip().lower()
+        confirm = (
+            input(
+                f"Approve candidate {candidate_number} to {output.relative_to(root)}? [y/N]: "
+            )
+            .strip()
+            .lower()
+        )
         if confirm not in {"y", "yes"}:
             print("Nothing was copied into Unity. Your candidates are still saved.")
             return 0
-        approve_args = _make_operation("approve", root, style_key, name=name, candidate=candidate_number, force=False)
+        approve_args = _make_operation(
+            "approve",
+            root,
+            style_key,
+            name=name,
+            candidate=candidate_number,
+            force=False,
+        )
         try:
             _run(approve_args)
         except Exception as exc:
@@ -333,27 +513,53 @@ def _run_make(args):
             return 1
         manifest = load_manifest(manifest_path)
         record = find_asset(manifest, name)
-        if recipe["pipeline"] == "model" and record.get("status") == "awaiting_texture_approval":
-            print("\nReview the material candidates on the same mesh from the front, side, and rear.")
+        if (
+            recipe["pipeline"] == "model"
+            and record.get("status") == "awaiting_texture_approval"
+        ):
+            print(
+                "\nReview the material candidates on the same mesh from the front, side, and rear."
+            )
             while True:
                 record = find_asset(manifest, name)
-                material_candidates = [item for item in record.get("material_candidates", {}).get("items", [])
-                                       if item.get("status") == "candidate"]
+                material_candidates = [
+                    item
+                    for item in record.get("material_candidates", {}).get("items", [])
+                    if item.get("status") == "candidate"
+                ]
                 for item in material_candidates:
-                    print(f"  material {item['number']}: {item['outputs'].get('preview_front')}")
+                    print(
+                        f"  material {item['number']}: {item['outputs'].get('preview_front')}"
+                    )
                 _open_material_candidates(root, material_candidates)
-                native = any(item.get("kind") == "mesh_pbr" for item in material_candidates)
-                choices = "Material number to approve, or q to stop: " if native else "Material number to approve, r to make more, or q to stop: "
+                native = any(
+                    item.get("kind") == "mesh_pbr" for item in material_candidates
+                )
+                choices = (
+                    "Material number to approve, or q to stop: "
+                    if native
+                    else "Material number to approve, r to make more, or q to stop: "
+                )
                 selection = input(choices).strip().lower()
                 if selection == "q":
-                    print(f"Model and material candidates are saved. Review with: slopforge --project {root} candidates {name}")
+                    print(
+                        f"Model and material candidates are saved. Review with: slopforge --project {root} candidates {name}"
+                    )
                     return 0
                 if selection == "r" and not native:
                     count = input("How many more material candidates? [2]: ").strip()
                     try:
                         count = int(count or "2")
-                        _run(_make_operation("retexture", root, style_key, name=name,
-                                             material_prompt=None, count=count))
+                        _run(
+                            _make_operation(
+                                "retexture",
+                                root,
+                                style_key,
+                                name=name,
+                                material_prompt=None,
+                                count=count,
+                            )
+                        )
                     except Exception as exc:
                         print(f"Couldn't create material candidates: {exc}")
                         return 1
@@ -361,17 +567,38 @@ def _run_make(args):
                     continue
                 try:
                     material_number = int(selection)
-                    if not any(item["number"] == material_number for item in material_candidates):
+                    if not any(
+                        item["number"] == material_number
+                        for item in material_candidates
+                    ):
                         raise ValueError
                 except ValueError:
-                    print("Enter a listed material number or q." if native else "Enter a listed material number, r, or q.")
+                    print(
+                        "Enter a listed material number or q."
+                        if native
+                        else "Enter a listed material number, r, or q."
+                    )
                     continue
-                confirm = input(f"Approve material {material_number} and export it to Unity? [y/N]: ").strip().lower()
+                confirm = (
+                    input(
+                        f"Approve material {material_number} and export it to Unity? [y/N]: "
+                    )
+                    .strip()
+                    .lower()
+                )
                 if confirm not in {"y", "yes"}:
                     return 0
                 try:
-                    _run(_make_operation("approve-texture", root, style_key, name=name,
-                                         candidate=material_number, force=False))
+                    _run(
+                        _make_operation(
+                            "approve-texture",
+                            root,
+                            style_key,
+                            name=name,
+                            candidate=material_number,
+                            force=False,
+                        )
+                    )
                 except Exception as exc:
                     print(f"Couldn't approve that material: {exc}")
                     return 1
@@ -379,34 +606,55 @@ def _run_make(args):
                 record = find_asset(manifest, name)
                 break
         validation = record.get("validation", {})
-        if validation.get("status") in {"passed", "passed_with_warnings"} and record.get("status") == "ready":
-            relative_output = record.get("outputs", {}).get("fbx") if recipe["pipeline"] == "model" else validation.get("measured", {}).get("path")
+        if (
+            validation.get("status") in {"passed", "passed_with_warnings"}
+            and record.get("status") == "ready"
+        ):
+            relative_output = (
+                record.get("outputs", {}).get("fbx")
+                if recipe["pipeline"] == "model"
+                else validation.get("measured", {}).get("path")
+            )
             relative_output = relative_output or output.relative_to(root).as_posix()
-            print(f"\nExported to {relative_output}. Unity will import it automatically.")
+            print(
+                f"\nExported to {relative_output}. Unity will import it automatically."
+            )
             if validation["status"] == "passed_with_warnings":
                 print("Export completed with warnings; review these before using it:")
                 for warning in validation.get("warnings", []):
                     print(f"  - {warning}")
             else:
-                print("File checks passed. They check file health, so review the art itself in Unity too.")
+                print(
+                    "File checks passed. They check file health, so review the art itself in Unity too."
+                )
             if recipe["pipeline"] == "model":
-                print(f"Next: open the imported model at {relative_output} in Unity and check that the parts look attached.")
+                print(
+                    f"Next: open the imported model at {relative_output} in Unity and check that the parts look attached."
+                )
             elif asset_type in {"icon", "ui", "portrait"}:
-                print(f"Next: in Unity, select {relative_output}, set Texture Type to Sprite (2D and UI), click Apply, then assign it to an Image component.")
+                print(
+                    f"Next: in Unity, select {relative_output}, set Texture Type to Sprite (2D and UI), click Apply, then assign it to an Image component."
+                )
             else:
-                print(f"Next: review {relative_output} in Unity and assign it to the object or material that needs it.")
+                print(
+                    f"Next: review {relative_output} in Unity and assign it to the object or material that needs it."
+                )
         else:
-            print(f"\nThe asset didn't pass its file checks. Don't use it yet; run `slopforge --project {root} inspect {name}` for details.")
+            print(
+                f"\nThe asset didn't pass its file checks. Don't use it yet; run `slopforge --project {root} inspect {name}` for details."
+            )
         return 0
 
 
 def _run(args):
     if args.command == "init":
         from .initializer import init_project
+
         print(f"Initialized: {init_project(args.target, args.force)}")
         return 0
     if args.command == "doctor":
         from .doctor import run_doctor
+
         project = None
         if args.project:
             project = Path(args.project).expanduser().resolve()
@@ -431,8 +679,14 @@ def _run(args):
 
     if args.command == "prompt":
         asset_type = canonical_type(args.asset_type, types)
-        print(build_prompt(style, types[asset_type], args.description,
-                           types[asset_type].get("prompt_mode", "asset")))
+        print(
+            build_prompt(
+                style,
+                types[asset_type],
+                args.description,
+                types[asset_type].get("prompt_mode", "asset"),
+            )
+        )
         return 0
     if args.command == "styles":
         directory = root / "ai/styles"
@@ -461,16 +715,30 @@ def _run(args):
         if args.command == "retexture":
             if args.count < 1:
                 raise ValueError("--count must be at least 1")
-            generated = model.retexture(root, config, recipe, style, manifest, key,
-                                        material_prompt=args.material_prompt, count=args.count)
+            generated = model.retexture(
+                root,
+                config,
+                recipe,
+                style,
+                manifest,
+                key,
+                material_prompt=args.material_prompt,
+                count=args.count,
+            )
             save_manifest(manifest_path, manifest)
             print(f"Generated {len(generated)} material candidate(s).")
             for item in generated:
-                print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item.get('path'))} ({item['status']})")
+                print(
+                    f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item.get('path'))} ({item['status']})"
+                )
             if not any(item["status"] == "candidate" for item in generated):
-                raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
+                raise RuntimeError(
+                    f"No valid material candidates generated for {record['name']}; failures are saved in the manifest"
+                )
         else:
-            result = model.approve_texture(root, config, manifest, key, args.candidate, args.force)
+            result = model.approve_texture(
+                root, config, manifest, key, args.candidate, args.force
+            )
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0
@@ -482,13 +750,24 @@ def _run(args):
         recipe = types[canonical_type(asset_type, types)]
         key = next(key for key, item in manifest["assets"].items() if item is record)
         if recipe["pipeline"] == "image":
-            result = image.approve(root, config, recipe, manifest, key, args.candidate, args.force)
+            result = image.approve(
+                root, config, recipe, manifest, key, args.candidate, args.force
+            )
             if not getattr(args, "_guided", False):
                 print(json.dumps(result, indent=2))
         elif recipe["pipeline"] == "model":
-            model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
-                          material_prompt=getattr(args, "material_prompt", None),
-                          material_count=getattr(args, "material_count", None))
+            model.approve(
+                root,
+                config,
+                recipe,
+                style,
+                manifest,
+                key,
+                args.candidate,
+                args.force,
+                material_prompt=getattr(args, "material_prompt", None),
+                material_count=getattr(args, "material_count", None),
+            )
         else:
             raise ValueError("Unity-native geometry does not have generated candidates")
         save_manifest(manifest_path, manifest)
@@ -497,58 +776,116 @@ def _run(args):
     asset_type = canonical_type(args.asset_type, types)
     recipe = types[asset_type]
     if recipe["pipeline"] == "native":
-        record = register_primitive(manifest, config, style, args.name, args.description)
+        record = register_primitive(
+            manifest, config, style, args.name, args.description
+        )
         save_manifest(manifest_path, manifest)
-        print(f"Registered {record['name']} for Unity-native geometry; no AI inference was run.")
+        print(
+            f"Registered {record['name']} for Unity-native geometry; no AI inference was run."
+        )
         return 0
     if args.count is not None and args.count < 1:
         raise ValueError("--count must be at least 1")
-    prompt_text = args.image_prompt or build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"))
+    prompt_text = args.image_prompt or build_prompt(
+        style, recipe, args.description, recipe.get("prompt_mode", "asset")
+    )
     if args.dry_run:
         print(prompt_text)
         return 0
 
-    count_key = "image_candidates" if recipe["pipeline"] == "image" else "model_candidates"
+    count_key = (
+        "image_candidates" if recipe["pipeline"] == "image" else "model_candidates"
+    )
     count = args.count or pipeline["defaults"][count_key]
     key = _asset_key(manifest, asset_type, args.name)
     if key in manifest["assets"]:
         record = manifest["assets"][key]
-        if record.get("status") == "ready" and not (args.force or pipeline.get("overwrite_existing")):
-            raise FileExistsError(f"Asset is already ready; pass --force to regenerate: {args.name}")
-        record.update({"description": args.description, "style": style["name"],
-                       "style_version": style["version"], "status": "generating"})
+        if record.get("status") == "ready" and not (
+            args.force or pipeline.get("overwrite_existing")
+        ):
+            raise FileExistsError(
+                f"Asset is already ready; pass --force to regenerate: {args.name}"
+            )
+        record.update(
+            {
+                "description": args.description,
+                "style": style["name"],
+                "style_version": style["version"],
+                "status": "generating",
+            }
+        )
     else:
-        record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
+        record = new_record(
+            asset_type, args.name, args.description, style, pipeline["conditioning"]
+        )
         record["status"] = "generating"
         manifest["assets"][key] = record
     save_manifest(manifest_path, manifest)
 
     try:
-        generated = (image.generate(root, config, recipe, style, args.name, args.description,
-                                    count, manifest, key, generation_prompt=prompt_text) if recipe["pipeline"] == "image" else
-                     model.generate(root, config, recipe, style, args.name, args.description,
-                                    count, manifest, key, generation_prompt=prompt_text))
+        generated = (
+            image.generate(
+                root,
+                config,
+                recipe,
+                style,
+                args.name,
+                args.description,
+                count,
+                manifest,
+                key,
+                generation_prompt=prompt_text,
+            )
+            if recipe["pipeline"] == "image"
+            else model.generate(
+                root,
+                config,
+                recipe,
+                style,
+                args.name,
+                args.description,
+                count,
+                manifest,
+                key,
+                generation_prompt=prompt_text,
+            )
+        )
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"
-        record.setdefault("validation", {"status": "not_run", "warnings": [], "measured": {}})
+        record.setdefault(
+            "validation", {"status": "not_run", "warnings": [], "measured": {}}
+        )
         record["validation"].setdefault("warnings", []).append(str(exc))
         save_manifest(manifest_path, manifest)
         raise
     if not args.auto_approve:
         message = f"Generated {len(generated)} candidate(s)."
         if not getattr(args, "_guided", False):
-            message += f" Review with: slopforge --project {root} candidates {args.name}"
+            message += (
+                f" Review with: slopforge --project {root} candidates {args.name}"
+            )
         print(message)
         return 0
-    selected = next((candidate for candidate in generated if candidate.get("status") == "candidate"), None)
+    selected = next(
+        (
+            candidate
+            for candidate in generated
+            if candidate.get("status") == "candidate"
+        ),
+        None,
+    )
     if selected is None:
         raise RuntimeError(f"No valid candidate exists for {args.name}")
     if recipe["pipeline"] == "image":
-        result = image.approve(root, config, recipe, manifest, key, selected["number"], args.force)
+        result = image.approve(
+            root, config, recipe, manifest, key, selected["number"], args.force
+        )
         print(json.dumps(result, indent=2))
     else:
-        model.approve(root, config, recipe, style, manifest, key, selected["number"], args.force)
+        model.approve(
+            root, config, recipe, style, manifest, key, selected["number"], args.force
+        )
     save_manifest(manifest_path, manifest)
     return 0
 

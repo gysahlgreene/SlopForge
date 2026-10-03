@@ -25,13 +25,17 @@ def discover_project_root(start=None):
     for candidate in (current, *current.parents):
         if (candidate / "ai/project.yaml").is_file():
             return candidate
-    raise FileNotFoundError(f"No ai/project.yaml found from {current}; pass --project or run slopforge init.")
+    raise FileNotFoundError(
+        f"No ai/project.yaml found from {current}; pass --project or run slopforge init."
+    )
 
 
 def resolve_project_root(value=None, start=None):
     root = Path(value).expanduser().resolve() if value else discover_project_root(start)
     if not (root / "ai/project.yaml").is_file():
-        raise FileNotFoundError(f"Not an initialized asset project: {root} (missing ai/project.yaml)")
+        raise FileNotFoundError(
+            f"Not an initialized asset project: {root} (missing ai/project.yaml)"
+        )
     return root
 
 
@@ -49,7 +53,9 @@ def resolve_workflow(project_root, workflow):
     for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()
-    raise FileNotFoundError(f"Workflow not found in project overrides or toolkit: {workflow}")
+    raise FileNotFoundError(
+        f"Workflow not found in project overrides or toolkit: {workflow}"
+    )
 
 
 def comfy_url(config=None):
@@ -57,7 +63,11 @@ def comfy_url(config=None):
     if configured:
         return configured.rstrip("/")
     if config:
-        return config["asset_pipeline"]["tools"].get("comfy_url", "http://127.0.0.1:8188").rstrip("/")
+        return (
+            config["asset_pipeline"]["tools"]
+            .get("comfy_url", "http://127.0.0.1:8188")
+            .rstrip("/")
+        )
     return "http://127.0.0.1:8188"
 
 
@@ -83,8 +93,12 @@ def blender_executable(config=None, project_root=None):
     found = shutil.which("blender")
     if found:
         return found
-    for candidate in ("/Applications/Blender.app/Contents/MacOS/Blender",
-                      "/Applications/Blender.app/Contents/MacOS/blender"):
+    for candidate in (
+        "/Applications/Blender.app/Contents/MacOS/Blender",
+        "/Applications/Blender.app/Contents/MacOS/blender",
+    ):
         if Path(candidate).is_file():
             return candidate
-    raise FileNotFoundError("Blender not found; configure project tools.blender or set BLENDER_BIN.")
+    raise FileNotFoundError(
+        "Blender not found; configure project tools.blender or set BLENDER_BIN."
+    )

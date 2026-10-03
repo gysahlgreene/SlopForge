@@ -42,7 +42,9 @@ class TestMergeIsolation(unittest.TestCase):
         result = _merge(DEFAULTS, {"active_style": "custom"})
         # Mutating the tools dict in the result must NOT affect DEFAULTS.
         result["tools"]["comfy_url"] = "http://mutated:9999"
-        self.assertNotEqual(result["tools"]["comfy_url"], DEFAULTS["tools"]["comfy_url"])
+        self.assertNotEqual(
+            result["tools"]["comfy_url"], DEFAULTS["tools"]["comfy_url"]
+        )
 
     def test_multiple_merge_calls_are_independent(self):
         result_a = _merge(DEFAULTS, {"tools": {"comfy_url": "http://a"}})
@@ -60,12 +62,17 @@ class TestLoadProjectEnvIsolation(unittest.TestCase):
             root = _make_project(Path(tmpdir) / "project")
             with patch.dict(os.environ, {"COMFYUI_URL": "http://override.test:9000"}):
                 config = load_project(root)
-            self.assertEqual(config["asset_pipeline"]["tools"]["comfy_url"], "http://override.test:9000")
+            self.assertEqual(
+                config["asset_pipeline"]["tools"]["comfy_url"],
+                "http://override.test:9000",
+            )
             # DEFAULTS must be untouched.
             self.assertEqual(DEFAULTS["tools"]["comfy_url"], "http://127.0.0.1:8188")
             # Another call must see the original default.
             config2 = load_project(root)
-            self.assertEqual(config2["asset_pipeline"]["tools"]["comfy_url"], "http://127.0.0.1:8188")
+            self.assertEqual(
+                config2["asset_pipeline"]["tools"]["comfy_url"], "http://127.0.0.1:8188"
+            )
             os.environ.pop("COMFYUI_URL", None)
 
 

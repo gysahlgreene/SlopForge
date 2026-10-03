@@ -5,14 +5,37 @@ from pathlib import Path
 from ..paths import blender_executable, tool_root
 
 
-def process_model(project_root, config, glb, fbx, blend, textures, face_budget, *,
-                  surface_source=None, preview_dir=None, material_scale=3.0,
-                  stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False):
+def process_model(
+    project_root,
+    config,
+    glb,
+    fbx,
+    blend,
+    textures,
+    face_budget,
+    *,
+    surface_source=None,
+    preview_dir=None,
+    material_scale=3.0,
+    stage_mesh=None,
+    reuse_stage_mesh=False,
+    preserve_uvs=False,
+):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/prepare_model.py"
-    command = [blender_executable(config, root), "--background", "--python", str(script), "--",
-               str(glb), str(fbx), str(blend), *(str(path) for path in textures),
-               "--face-budget", str(face_budget)]
+    command = [
+        blender_executable(config, root),
+        "--background",
+        "--python",
+        str(script),
+        "--",
+        str(glb),
+        str(fbx),
+        str(blend),
+        *(str(path) for path in textures),
+        "--face-budget",
+        str(face_budget),
+    ]
     if preserve_uvs:
         command.append("--preserve-uvs")
     if surface_source:
@@ -32,7 +55,15 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
 def inspect_model(project_root, config, blend, output_json, face_budget):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/inspect_model.py"
-    command = [blender_executable(config, root), "--background", "--python", str(script), "--",
-               str(blend), str(output_json), str(face_budget)]
+    command = [
+        blender_executable(config, root),
+        "--background",
+        "--python",
+        str(script),
+        "--",
+        str(blend),
+        str(output_json),
+        str(face_budget),
+    ]
     subprocess.run(command, check=True)
     return json.loads(Path(output_json).read_text())
