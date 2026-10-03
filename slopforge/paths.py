@@ -1,6 +1,8 @@
 import os
+import ipaddress
 import shutil
 import sys
+from urllib.parse import urlsplit
 from pathlib import Path
 
 
@@ -61,11 +63,29 @@ def comfy_url(config=None):
     return "http://127.0.0.1:8188"
 
 
+def comfy_backend(config=None):
+    configured = os.environ.get("SLOPFORGE_COMFYUI_BACKEND")
+    if not configured and config:
+        configured = config["asset_pipeline"]["tools"].get("comfy_backend")
+    if configured and configured != "auto":
+        if configured not in {"local", "remote"}:
+            raise ValueError("ComfyUI backend must be 'local', 'remote', or 'auto'")
+        return configured
+    host = (urlsplit(comfy_url(config)).hostname or "").lower()
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    return "local" if loopback else "remote"
+
+
 def comfy_home(config=None, project_root=None):
     configured = os.environ.get("COMFYUI_HOME")
     if not configured and config:
         configured = config["asset_pipeline"]["tools"].get("comfy_home")
-    path = Path(configured).expanduser() if configured else Path.home() / "ComfyUI"
+    if not configured:
+        return None
+    path = Path(configured).expanduser()
     if not path.is_absolute() and project_root:
         path = Path(project_root) / path
     return path.resolve()

@@ -1,14 +1,14 @@
-import importlib.util
 import importlib
+import importlib.util
 import json
 import os
 import shutil
 import sys
 from pathlib import Path
-from urllib.request import urlopen
 
+from .backends.comfyui import ComfyUIClient
 from .config import load_project
-from .paths import blender_executable, comfy_home, comfy_url, resolve_workflow, tool_root
+from .paths import blender_executable, comfy_backend, comfy_home, comfy_url, resolve_workflow, tool_root
 from .style import load_style
 from .taxonomy import load_taxonomy
 
@@ -40,8 +40,9 @@ def run_doctor(project_root=None):
     else:
         report("PASS", "Background removal backend", "onnxruntime available")
 
-    config = style = types = None
     root = Path(project_root).expanduser().resolve() if project_root else None
+    config = None
+    workflow_paths = []
     if root and (root / "ai/project.yaml").is_file():
         try:
             config = load_project(root)
@@ -50,20 +51,12 @@ def run_doctor(project_root=None):
             report("PASS", "Style pack", f"{style['name']} v{style['version']}")
             types = load_taxonomy(root)
             report("PASS", "Asset taxonomy", f"{len(types)} types")
-            workflow = resolve_workflow(root, config["asset_pipeline"]["workflows"]["image"])
-            report("PASS", "Workflow", str(workflow))
-            model_workflow = config["asset_pipeline"]["workflows"].get("model")
-            if model_workflow:
-                model_path = resolve_workflow(root, model_workflow)
-                report("PASS", "Model workflow", str(model_path))
-                loaders = {"UNETLoader": ("diffusion_models", "unet_name"),
-                           "VAELoader": ("vae", "vae_name"), "CLIPVisionLoader": ("clip_vision", "clip_name")}
-                for node in json.loads(model_path.read_text()).values():
-                    loader = loaders.get(node.get("class_type"))
-                    if loader:
-                        folder, field = loader
-                        model = comfy_home(config, root) / "models" / folder / node["inputs"][field]
-                        report("PASS" if model.is_file() else "FAIL", "Model weight", str(model))
+            for role, key in (("Workflow", "image"), ("Model workflow", "model")):
+                configured = config["asset_pipeline"]["workflows"].get(key)
+                if configured:
+                    path = resolve_workflow(root, configured)
+                    workflow_paths.append((role, path))
+                    report("PASS", role, str(path))
             generated = root / config["asset_pipeline"]["output_root"]
             report("PASS" if generated.is_dir() else "WARN", "Generated directories",
                    str(generated) if generated.is_dir() else f"not initialized: {generated}")
@@ -73,31 +66,61 @@ def run_doctor(project_root=None):
         report("WARN", "Project config", "pass --project or run inside a project initialized with slopforge init")
         packaged = tool_root() / "workflows/image_text2img_api.json"
         report("PASS" if packaged.is_file() else "FAIL", "Workflow", str(packaged))
-        report("WARN", "Style pack", "no target project selected")
-        report("WARN", "Generated directories", "no target project selected")
+        if packaged.is_file():
+            workflow_paths.append(("Workflow", packaged))
 
     url = comfy_url(config)
+    backend = comfy_backend(config)
+    profile = (config or {}).get("asset_pipeline", {}).get("selected_compute_profile", "default")
+    report("PASS", "ComfyUI configuration", f"{url} ({backend}; profile: {profile})")
+    home = comfy_home(config, root) if backend == "local" else None
+    if home:
+        report("PASS" if home.is_dir() else "WARN", "ComfyUI local home", str(home))
+    elif backend == "remote":
+        report("PASS", "ComfyUI file transfer", "HTTP upload and output download; no local COMFYUI_HOME needed")
+    else:
+        report("PASS", "ComfyUI file transfer", "HTTP upload and output download")
+
+    client = ComfyUIClient(url, timeout=5)
     try:
-        with urlopen(url + "/system_stats", timeout=3):
-            report("PASS", "ComfyUI", url)
+        stats = client.health()
+        system = stats.get("system", {})
+        devices = ", ".join(device.get("name", "unknown") for device in stats.get("devices", [])) or "device not reported"
+        report("PASS", "ComfyUI reachable", f"{url}; {system.get('comfyui_version', 'version unknown')}; {devices}")
+        try:
+            node_info = client.node_types()
+            required = set()
+            for _, workflow_path in workflow_paths:
+                required.update(node.get("class_type") for node in json.loads(workflow_path.read_text()).values()
+                                if node.get("class_type"))
+            if config and not config["asset_pipeline"]["workflows"].get("model"):
+                required.update({"LoadImage", "ImageOnlyCheckpointLoader", "CLIPVisionEncode", "Hunyuan3Dv2Conditioning",
+                                 "EmptyLatentHunyuan3Dv2", "KSampler", "VAEDecodeHunyuan3D", "VoxelToMesh", "SaveGLB"})
+            missing_nodes = sorted(required - node_info.keys())
+            report("FAIL" if missing_nodes else "PASS", "Workflow node capabilities",
+                   "missing: " + ", ".join(missing_nodes) if missing_nodes else f"all {len(required)} required node classes available")
+            for role, workflow_path in workflow_paths:
+                try:
+                    client.validate_workflow(json.loads(workflow_path.read_text()), node_info)
+                except Exception as exc:
+                    report("FAIL", f"{role} model choices", str(exc))
+                else:
+                    report("PASS", f"{role} model choices", "required model names are available")
+            report("PASS", "ComfyUI HTTP API", "health, node discovery, input upload, prompt/history, and arbitrary output download")
+        except Exception as exc:
+            report("WARN", "Workflow node capabilities", str(exc))
     except Exception as exc:
-        report("WARN", "ComfyUI", f"offline or unreachable at {url} ({exc.__class__.__name__})")
+        report("WARN", "ComfyUI reachable", f"offline or unreachable at {url}: {exc}")
 
     try:
         blender = blender_executable(config, root)
         if not Path(blender).is_file():
             blender = shutil.which(blender)
-            if not blender:
-                raise FileNotFoundError("Blender executable not found")
+        if not blender:
+            raise FileNotFoundError("Blender executable not found")
         if not os.access(blender, os.X_OK):
             raise FileNotFoundError(f"Blender is not executable: {blender}")
         report("PASS", "Blender", blender)
     except FileNotFoundError as exc:
         report("WARN", "Blender", str(exc))
-
-    if not (config or {}).get("asset_pipeline", {}).get("workflows", {}).get("model"):
-        checkpoint_name = (config or {}).get("asset_pipeline", {}).get("tools", {}).get(
-            "hunyuan_checkpoint", "hunyuan3d-dit-v2_fp16.safetensors")
-        checkpoint = comfy_home(config, root) / "models/checkpoints" / checkpoint_name
-        report("PASS" if checkpoint.is_file() else "WARN", "Hunyuan3D checkpoint", str(checkpoint))
     return 1 if failures else 0
