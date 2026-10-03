@@ -6,7 +6,7 @@
   <img alt="Slop" src="https://img.shields.io/badge/slop-locally%20generated-7c3aed?style=flat" />
 </p>
 
-SlopForge is a local-first tool that uses ComfyUI and Blender to generate 2D art and 3D props from descriptions and project style settings, then exports approved assets into a Unity project.
+SlopForge coordinates agent-driven generation of 2D art and 3D props, using ComfyUI as a configurable local or remote inference service and Blender locally for mesh processing. Approved assets are exported into a Unity project. Set `COMFYUI_URL` to switch inference hosts; select model/workflow quality independently with `SLOPFORGE_COMPUTE_PROFILE`. See [ComfyUI setup](docs/COMFYUI.md).
 
 SlopForge is primarily an **agent-driven asset workflow**: an agent authors prompts, reviews generated candidates and mesh views, and iterates with you. SlopForge runs the local tools and keeps candidates separate until you approve them.
 
@@ -147,7 +147,7 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Configuration and diagnostics
 
-Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is diagnostic and does not install or modify anything. Project paths are configured with `ai/project.yaml` and environment overrides such as `COMFYUI_URL`, `COMFYUI_HOME`, `BLENDER_BIN`, and others.
+Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
 
 ## Current limitations
 

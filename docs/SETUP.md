@@ -57,7 +57,7 @@ curl -fsS http://127.0.0.1:8188/system_stats >/dev/null && echo "ComfyUI API rea
 slopforge --project "$HOME/UnityProjects/MyGame" doctor
 ```
 
-Doctor checks reachability and the configured workflow file; it does not prove that every workflow node/model is loadable. If ComfyUI uses another URL, set `COMFYUI_URL` or `asset_pipeline.tools.comfy_url`.
+`doctor` checks service health, selected workflow nodes, and model choices through ComfyUI's HTTP API. Set `COMFYUI_URL` to a reachable remote server to move inference; SlopForge and Blender remain local. See [ComfyUI backends](COMFYUI.md).
 
 Try a no-inference prompt first, then generate an image:
 
@@ -72,15 +72,15 @@ slopforge --project "$HOME/UnityProjects/MyGame" approve healing_potion 1
 
 Install Blender from [blender.org](https://www.blender.org/download/). SlopForge runs Blender in background mode; it needs GLB import and FBX export support. It searches for `blender` on PATH and common macOS app paths. Otherwise set `BLENDER_BIN` or `asset_pipeline.tools.blender` to the executable inside your Blender installation.
 
-The configured ComfyUI must expose the node classes used by the shipped Hunyuan3D API graph: `ImageOnlyCheckpointLoader`, `Hunyuan3Dv2Conditioning`, `EmptyLatentHunyuan3Dv2`, `VAEDecodeHunyuan3D`, `VoxelToMesh`, and `SaveGLB`, plus standard ComfyUI nodes. The source graph identifies these as ComfyUI core nodes; if yours lacks them, update ComfyUI using its official instructions. The 3D workflow is resource-intensive and experimental.
+The configured ComfyUI must expose the nodes and models required by the selected workflow. `doctor` checks these before generation. The 3D workflows are resource-intensive and experimental.
 
 Download `hunyuan3d-dit-v2_fp16.safetensors` to:
 
 ```text
-<COMFYUI_HOME>/models/checkpoints/hunyuan3d-dit-v2_fp16.safetensors
+<ComfyUI installation>/models/checkpoints/hunyuan3d-dit-v2_fp16.safetensors
 ```
 
-`COMFYUI_HOME` is the ComfyUI installation root (default `~/ComfyUI`); it is also where SlopForge expects the `input/` and `output/` directories for GLB transfer. The exact model URL and source notes are in [COMFYUI.md](COMFYUI.md).
+SlopForge uploads source images and locally prepared meshes through ComfyUI's HTTP API and downloads GLB/maps through `/view`; it does not need filesystem access to ComfyUI. `COMFYUI_HOME` is optional and not used for generation. Model files must exist on the machine running ComfyUI. See [COMFYUI.md](COMFYUI.md) for sources and profile configuration.
 
 Then generate and approve a prop:
 
@@ -105,11 +105,13 @@ Project settings live in `ai/project.yaml`. Environment overrides are:
 | Variable | Purpose |
 | --- | --- |
 | `COMFYUI_URL` | ComfyUI API base URL; default `http://127.0.0.1:8188` |
-| `COMFYUI_HOME` | ComfyUI root containing `input/`, `output/`, and `models/` |
+| `SLOPFORGE_COMFYUI_BACKEND` | `auto`, `local`, or `remote`; auto detects loopback URLs |
+| `SLOPFORGE_COMPUTE_PROFILE` | Compute/workflow profile from `asset_pipeline.compute_profiles` |
+| `COMFYUI_HOME` | Optional legacy install hint; not required for generation |
 | `BLENDER_BIN` | Blender executable |
 | `SLOPFORGE_PYTHON` | Python used by helper scripts |
 | `SLOPFORGE_PROJECT_ROOT` | Default project for asset commands; `doctor` discovers from the current directory or accepts `--project` |
 
-Run `slopforge --project PATH doctor` for a read-only diagnostic. PASS means a local executable/file or service check succeeded; WARN means optional or external setup is absent. Doctor does not validate workflow node compatibility, perform inference, or modify the machine.
+Run `slopforge --project PATH doctor` for a read-only diagnostic. It reports the ComfyUI URL, backend, selected profile, reachable service/version/device, workflow node classes, model choices, and local Blender setup. It does not perform inference or modify the machine.
 
 For errors, check in this order: `doctor`; ComfyUI is running at the configured URL; model files are in the listed folders; the project workflow override is compatible; Blender is executable; then inspect the failed candidate and manifest warning. See [Architecture](ARCHITECTURE.md), [Unity](UNITY.md), and [Agent integration](AGENT-INTEGRATION.md) for details.

@@ -34,6 +34,6 @@ Or `cd` into the project; root discovery walks upward until it finds `ai/project
 
 ## External tools
 
-ComfyUI and Blender are separate installations. SlopForge does not install or bundle them or download their model weights. Configure project settings in `ai/project.yaml` or use `COMFYUI_URL`, `COMFYUI_HOME`, `BLENDER_BIN`, and `SLOPFORGE_PYTHON`. The doctor reports missing local dependencies and unreachable services without installing or modifying anything.
+ComfyUI and Blender are separate installations. SlopForge does not install or bundle them or download their model weights. Configure project settings in `ai/project.yaml` or use `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, `BLENDER_BIN`, and `SLOPFORGE_PYTHON`. `COMFYUI_HOME` is optional and not required for generation. The doctor checks local or remote ComfyUI without installing or modifying anything; see [ComfyUI setup](COMFYUI.md).
 
 The default SlopForge installation declares `rembg[cpu]`, which installs the CPU ONNX Runtime backend required for background removal. The segmentation model is downloaded/cached by `rembg` only when first used, not during installation or `slopforge doctor`. On Apple Silicon, use a ComfyUI/PyTorch build compatible with the installed macOS and available MPS support. Memory and model compatibility depend on the selected workflows and checkpoints.

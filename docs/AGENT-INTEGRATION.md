@@ -1,6 +1,6 @@
 # Agent integration
 
-SlopForge is designed for an agent to operate. The agent brings creative judgment: it writes prompts, inspects candidates and mesh previews, and iterates. SlopForge runs ComfyUI and Blender, preserves provenance, and exports approved assets. No LLM service or credentials are added to SlopForge. See [SETUP.md](SETUP.md) for setup.
+SlopForge is designed for an agent to operate. The agent brings creative judgment: it writes prompts, inspects candidates and mesh previews, and iterates. SlopForge uses a configurable local or remote ComfyUI service and runs Blender locally, preserving provenance and exporting approved assets. Set the inference URL and compute profile independently as described in [COMFYUI.md](COMFYUI.md). No LLM service or credentials are added to SlopForge. See [SETUP.md](SETUP.md) for setup.
 
 For a person creating an asset, `slopforge --project /path/to/unity-project make` provides the guided terminal flow. Agents can use the explicit commands below when they need to control each step.
 
