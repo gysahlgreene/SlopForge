@@ -66,7 +66,7 @@ class TestLoadProjectEnvIsolation(unittest.TestCase):
             # Another call must see the original default.
             config2 = load_project(root)
             self.assertEqual(config2["asset_pipeline"]["tools"]["comfy_url"], "http://127.0.0.1:8188")
-            del os.environ["COMFYUI_URL"]
+            os.environ.pop("COMFYUI_URL", None)
 
 
 if __name__ == "__main__":
