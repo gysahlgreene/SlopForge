@@ -64,10 +64,16 @@ public static class {class_name}
             .SelectMany(renderer => renderer.sharedMaterials).FirstOrDefault(material => material != null);
         var sourceName = source == null ? Path.GetFileNameWithoutExtension(fbxPath) + "_PBR" : source.name;
         var sourceId = new AssetImporter.SourceAssetIdentifier(typeof(Material), sourceName);
-        Shader shader = GraphicsSettings.currentRenderPipeline == null
-            ? Shader.Find("Standard") : Shader.Find("Universal Render Pipeline/Lit");
-        if (shader == null) shader = Shader.Find("Standard");
-        if (shader == null) throw new Exception("No supported Unity Lit shader is available");
+        var pipeline = GraphicsSettings.currentRenderPipeline;
+        var pipelineType = pipeline == null ? null : pipeline.GetType();
+        var shaderName = pipeline == null ? "Standard" :
+            IsUniversalPipeline(pipelineType) ? "Universal Render Pipeline/Lit" : null;
+        if (shaderName == null)
+            throw new Exception("Unsupported render pipeline '" + pipelineType.FullName +
+                "'. SlopForge materials support the Built-in Render Pipeline and URP.");
+        var shader = Shader.Find(shaderName);
+        if (shader == null)
+            throw new Exception("Lit shader '" + shaderName + "' was not found for the active render pipeline");
 
         SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true);
         SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false);
@@ -112,6 +118,12 @@ public static class {class_name}
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
     }}
 
+    static bool IsUniversalPipeline(Type type)
+    {{
+        for (var current = type; current != null; current = current.BaseType)
+            if (current.FullName == "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset") return true;
+        return false;
+    }}
     static void SetImport(string path, TextureImporterType type, bool srgb)
     {{
         var importer = (TextureImporter)AssetImporter.GetAtPath(path);

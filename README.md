@@ -153,6 +153,7 @@ Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `
 
 - Reference images are organized and recorded but are not used as visual conditioning.
 - 3D generation remains experimental: mesh shape and material regions vary, and reconstruction defects can remain. Review all mesh views before approval. The TRELLIS.2 route places distinct colors on the mesh but can take many minutes on Apple MPS; its current normal map is flat, emission is zero, and glass transmission is not generated.
+- Unity PBR material export supports the Built-in Render Pipeline and URP. HDRP and custom render pipelines are rejected clearly until their material map layouts are supported.
 - The Hunyuan3D swatch route creates an all-over material treatment rather than assigning colors to named parts; roughness, metallic, and emission are heuristic, and seamless tiling is not guaranteed.
 - Model weights are not included. Known source links and expected ComfyUI destinations are documented, but availability and model terms should be checked upstream.
 - SlopForge is MIT licensed. Separately installed model weights and ComfyUI custom nodes have their own terms; see `THIRD_PARTY_NOTICES.md`.
