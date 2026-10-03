@@ -6,7 +6,7 @@
   <img alt="Slop" src="https://img.shields.io/badge/slop-locally%20generated-7c3aed?style=flat" />
 </p>
 
-SlopForge is a local-first tool that uses ComfyUI and Blender to generate 2D art and 3D props from descriptions and project style settings, then exports approved assets into a Unity project.
+SlopForge coordinates agent-driven generation of 2D art and 3D props, using ComfyUI as a configurable local or remote inference service and Blender locally for mesh processing. Approved assets are exported into a Unity project. Set `COMFYUI_URL` to switch inference hosts; select model/workflow quality independently with `SLOPFORGE_COMPUTE_PROFILE`. See [ComfyUI setup](docs/COMFYUI.md).
 
 SlopForge is primarily an **agent-driven asset workflow**: an agent authors prompts, reviews generated candidates and mesh views, and iterates with you. SlopForge runs the local tools and keeps candidates separate until you approve them.
 
@@ -147,12 +147,13 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Configuration and diagnostics
 
-Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is diagnostic and does not install or modify anything. Project paths are configured with `ai/project.yaml` and environment overrides such as `COMFYUI_URL`, `COMFYUI_HOME`, `BLENDER_BIN`, and others.
+Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
 
 ## Current limitations
 
 - Reference images are organized and recorded but are not used as visual conditioning.
 - 3D generation remains experimental: mesh shape and material regions vary, and reconstruction defects can remain. Review all mesh views before approval. The TRELLIS.2 route places distinct colors on the mesh but can take many minutes on Apple MPS; its current normal map is flat, emission is zero, and glass transmission is not generated.
+- Unity PBR material export supports the Built-in Render Pipeline and URP. HDRP and custom render pipelines are rejected clearly until their material map layouts are supported.
 - The Hunyuan3D swatch route creates an all-over material treatment rather than assigning colors to named parts; roughness, metallic, and emission are heuristic, and seamless tiling is not guaranteed.
 - Model weights are not included. Known source links and expected ComfyUI destinations are documented, but availability and model terms should be checked upstream.
 - SlopForge is MIT licensed. Separately installed model weights and ComfyUI custom nodes have their own terms; see `THIRD_PARTY_NOTICES.md`.

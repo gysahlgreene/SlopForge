@@ -4,35 +4,10 @@ import json
 import os
 import tempfile
 import sys
-import time
-import uuid
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-try:
-    from .comfy_status import prompt_failure
-except ImportError:
-    from comfy_status import prompt_failure
+from slopforge.backends.comfyui import ComfyUIClient
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
-
-def http_json(method, path, data=None):
-    url = COMFY_URL + path
-    body = None
-    headers = {}
-    if data is not None:
-        body = json.dumps(data).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    req = Request(url, data=body, headers=headers, method=method)
-    with urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-def http_bytes(path, query):
-    qs = urlencode(query)
-    url = f"{COMFY_URL}{path}?{qs}"
-    with urlopen(url, timeout=60) as resp:
-        return resp.read()
-
 
 def write_metadata(path, value):
     path = Path(path)
@@ -115,51 +90,22 @@ def main():
             if isinstance(value, str) and value.lower().endswith((".safetensors", ".ckpt", ".gguf", ".onnx")):
                 models.append(value)
 
-    client_id = str(uuid.uuid4())
-    res = http_json("POST", "/prompt", {
-        "prompt": workflow,
-        "client_id": client_id,
-    })
-
-    prompt_id = res["prompt_id"]
-
-    # Poll until done
-    history = None
-    for _ in range(600):
-        time.sleep(1)
-        hist = http_json("GET", f"/history/{prompt_id}")
-        if prompt_id in hist:
-            history = hist[prompt_id]
-            failure = prompt_failure(history)
-            if failure:
-                print(failure, file=sys.stderr)
-                sys.exit(1)
-            if history.get("outputs"):
-                break
-
-    if not history or not history.get("outputs"):
-        print("Timed out waiting for ComfyUI output.", file=sys.stderr)
+    client = ComfyUIClient(COMFY_URL)
+    try:
+        prompt_id = client.queue_workflow(workflow)
+        history = client.wait_for_completion(prompt_id, timeout=600)
+    except Exception as exc:
+        print(f"ComfyUI generation failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    images = []
-    for node_output in history["outputs"].values():
-        for img in node_output.get("images", []):
-            images.append(img)
+    images = [item for item in client.list_outputs(history) if item["filename"].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
 
     if not images:
         print("No images found in ComfyUI output.", file=sys.stderr)
         sys.exit(1)
 
-    img = images[0]
-    data = http_bytes("/view", {
-        "filename": img["filename"],
-        "subfolder": img.get("subfolder", ""),
-        "type": img.get("type", "output"),
-    })
-
     dest = Path(args.dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(data)
+    client.download_output(images[0], dest)
 
     if args.metadata:
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed, "prompt_id": prompt_id})

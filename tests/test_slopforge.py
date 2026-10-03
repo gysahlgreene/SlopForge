@@ -659,7 +659,7 @@ class SlopForgeTests(unittest.TestCase):
             return None if name == "onnxruntime" else Mock()
 
         output = StringIO()
-        with redirect_stdout(output), patch("slopforge.doctor.urlopen", side_effect=OSError("offline")), \
+        with redirect_stdout(output), patch("slopforge.doctor.ComfyUIClient.health", side_effect=OSError("offline")), \
                 patch("slopforge.doctor.importlib.util.find_spec", side_effect=find_spec), \
                 patch("slopforge.doctor.importlib.import_module", side_effect=ImportError("onnxruntime unavailable")):
             result = run_doctor()
@@ -671,7 +671,7 @@ class SlopForgeTests(unittest.TestCase):
         missing_blender = self.root / "missing-blender"
         output = StringIO()
         with redirect_stdout(output), patch.dict(os.environ, {"BLENDER_BIN": str(missing_blender)}), \
-                patch("slopforge.doctor.urlopen", side_effect=OSError("offline")):
+                patch("slopforge.doctor.ComfyUIClient.health", side_effect=OSError("offline")):
             result = run_doctor()
         self.assertEqual(result, 0)
         self.assertIn("WARN Blender", output.getvalue())

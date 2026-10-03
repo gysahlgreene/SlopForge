@@ -11,6 +11,8 @@ SlopForge writes ordinary PNG, GLB, Blend, and FBX files under the configured Un
 
 The Unity Editor may be closed during generation. Open the project afterward to import the new files and let Unity create `.meta` files.
 
+Texture approval creates a Unity Lit material for the Built-in Render Pipeline or URP. HDRP and custom render pipelines currently stop with an explicit unsupported-pipeline error rather than receiving a mismatched shader.
+
 3D model outputs are arranged under `Models/<name>/`: `Source/` holds the concept, cutout, white-background Hunyuan input, and source GLB; `Materials/` holds base color, normal, roughness, metallic, and emission maps; the folder root holds preview Blend and FBX. The pipeline retains source files for provenance and debugging.
 
 Use `slopforge --project /path/to/project assets` and `inspect <name>` to query the manifest without requiring Unity to be open.

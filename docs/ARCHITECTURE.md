@@ -10,7 +10,7 @@ CLI → project config + taxonomy + style pack → pipeline → backend
                                               └─ primitive → manifest route only
 ```
 
-`slopforge/` owns project discovery, config, type/style validation, prompt assembly, candidate and manifest lifecycle, and validation. Pipelines call ComfyUI functions in `slopforge/backends/comfyui.py` and Blender functions in `slopforge/backends/blender.py`. These backends invoke utilities under `processing/` and Blender scripts under `blender/`. Workflows and project templates are data. These paths resolve relative to the package/tool installation, not the Unity project.
+`slopforge/` owns project discovery, config, type/style validation, prompt assembly, candidate and manifest lifecycle, and validation. `ComfyUIClient` in `slopforge/backends/comfyui.py` is the single inference-service boundary for HTTP health/node discovery, uploads, prompt submission, history, output discovery, and downloads. The local and remote backends use identical HTTP operations; all Blender processing stays on the SlopForge machine. `COMFYUI_URL` chooses the service location, while `SLOPFORGE_COMPUTE_PROFILE` chooses the workflows/models independently. `COMFYUI_HOME` is no longer required for file transfer. Blender functions remain in `slopforge/backends/blender.py`; helper scripts live under `processing/` and Blender scripts under `blender/`. Workflows and project templates are data and project workflow overrides take precedence over bundled files.
 
 Workflow lookup checks, in order: the exact configured path under the project, `ai/workflows/<configured basename>`, then the bundled `workflows/<configured basename>`. This lets projects override a graph by name while keeping working defaults in the toolkit.
 

@@ -4,12 +4,12 @@ import os
 import sys
 import textwrap
 from pathlib import Path
-from urllib.request import urlopen
 
 from . import __version__
 from .config import load_project
+from .backends.comfyui import ComfyUIClient
 from .manifest import asset_key, find_asset, load_manifest, new_record, save_manifest
-from .paths import discover_project_root, resolve_project_root
+from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from .pipelines.primitive import register_primitive
 from .style import build_prompt, load_style
@@ -179,10 +179,9 @@ def _make_project(args):
 
 
 def _check_comfy(config, root):
-    url = config["asset_pipeline"]["tools"].get("comfy_url", "http://127.0.0.1:8188").rstrip("/")
+    url = comfy_url(config)
     try:
-        with urlopen(url + "/system_stats", timeout=3):
-            return
+        ComfyUIClient(url, timeout=3).health()
     except Exception as exc:
         raise RuntimeError(f"ComfyUI isn't responding at {url}. Start it, then check with `slopforge --project {root} doctor`.") from exc
 

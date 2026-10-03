@@ -3,53 +3,18 @@
 import argparse
 import json
 import re
-import shutil
 import subprocess
 import sys
 import os
 import struct
-import tempfile
 import time
-import uuid
 import zlib
 from pathlib import Path
-from urllib.request import Request, urlopen
-try:
-    from .comfy_status import prompt_failure
-except ImportError:
-    from comfy_status import prompt_failure
+from slopforge.backends.comfyui import ComfyUIClient
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
-COMFY_ROOT = Path(os.environ.get("COMFYUI_HOME", Path.home() / "ComfyUI")).expanduser()
-COMFY_INPUT = COMFY_ROOT / "input"
-COMFY_OUTPUT = COMFY_ROOT / "output"
-
 CHECKPOINT = "hunyuan3d-dit-v2_fp16.safetensors"
-
-
-def api(method, path, payload=None):
-    body = None
-    headers = {}
-
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    req = Request(
-        COMFY_URL + path,
-        data=body,
-        headers=headers,
-        method=method,
-    )
-
-    with urlopen(req, timeout=60) as response:
-        raw = response.read()
-
-    if not raw:
-        return {}
-
-    return json.loads(raw.decode("utf-8"))
 
 
 def safe_name(value):
@@ -181,17 +146,17 @@ def load_model_workflow(path, image_name, asset_name, seed, face_budget):
     return workflow
 
 
-def copy_generated_maps(outputs, destination):
+def copy_generated_maps(outputs, destination, client=None):
+    client = client or ComfyUIClient(COMFY_URL)
     textures = {}
     for key in ("basecolor", "roughness", "metallic"):
         images = outputs.get("save_" + key, {}).get("images", [])
         if not images:
             raise ValueError(f"Textured model workflow did not produce its {key} map")
         item = images[0]
-        source = COMFY_OUTPUT / item.get("subfolder", "") / item["filename"]
         target = destination / "native_material" / f"{key}.png"
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        client.download_output(item, target)
         textures[key] = target.relative_to(destination).as_posix()
     normal = destination / "native_material" / "normal.png"
     normal.parent.mkdir(parents=True, exist_ok=True)
@@ -204,24 +169,10 @@ def copy_generated_maps(outputs, destination):
     return textures
 
 
-def run_model_workflow(workflow):
-    result = api("POST", "/prompt", {"prompt": workflow, "client_id": str(uuid.uuid4())})
-    if result.get("node_errors") or not result.get("prompt_id"):
-        raise ValueError("ComfyUI rejected the model workflow: " + json.dumps(result))
-    prompt_id = result["prompt_id"]
+def run_model_workflow(workflow, client):
+    prompt_id = client.queue_workflow(workflow)
     print(f"Queued 3D generation: {prompt_id}", flush=True)
-    deadline = time.monotonic() + 3600
-    while time.monotonic() < deadline:
-        time.sleep(2)
-        entry = api("GET", f"/history/{prompt_id}").get(prompt_id)
-        if not entry:
-            continue
-        failure = prompt_failure(entry)
-        if failure:
-            raise RuntimeError(failure)
-        if entry.get("status", {}).get("completed"):
-            return entry, prompt_id
-    raise TimeoutError("Timed out waiting for 3D generation")
+    return client.wait_for_completion(prompt_id), prompt_id
 
 
 def main():
@@ -251,22 +202,15 @@ def main():
         print("Invalid asset name.", file=sys.stderr)
         sys.exit(1)
 
-    # Check ComfyUI first.
+    client = ComfyUIClient(COMFY_URL)
     try:
-        api("GET", "/system_stats")
+        client.health()
     except Exception as exc:
         print(f"ComfyUI is not reachable at {COMFY_URL}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    input_dir = COMFY_INPUT / "ai3d"
-    input_dir.mkdir(parents=True, exist_ok=True)
-
-    input_filename = f"{name}_concept.png"
-    input_path = input_dir / input_filename
-
-    shutil.copy2(src, input_path)
-
-    comfy_image_name = f"ai3d/{input_filename}"
+    uploaded = client.upload_input(src, "ai3d")
+    comfy_image_name = f"{uploaded.get('subfolder', 'ai3d')}/{uploaded['name']}"
 
     seed = args.seed if args.seed is not None else int(time.time_ns() % 9223372036854775807)
     workflow = (load_model_workflow(args.workflow, comfy_image_name, name, seed, args.face_budget)
@@ -280,31 +224,30 @@ def main():
         raw_workflow = {key: node for key, node in workflow.items()
                         if not key.startswith("save") or key == "save_raw"}
         print("Mesh stage: generating the detailed shape...", flush=True)
-        entry, shape_prompt_id = run_model_workflow(raw_workflow)
+        entry, shape_prompt_id = run_model_workflow(raw_workflow, client)
         raw = find_glb(entry["outputs"].get("save_raw", {}))
         if not raw:
             raise ValueError("Model workflow did not produce its raw mesh")
         raw_path = dest.with_name(dest.stem + "_untextured.glb")
-        shutil.copy2(COMFY_OUTPUT / raw.get("subfolder", "") / raw["filename"], raw_path)
-        prepared = COMFY_INPUT / "3d" / f"{name}_{seed}_prepared.glb"
-        prepared.parent.mkdir(parents=True, exist_ok=True)
+        client.download_output(raw, raw_path)
+        prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
         script = Path(__file__).resolve().parents[1] / "blender" / "prepare_model.py"
         subprocess.run([str(args.blender), "--background", "--python", str(script), "--", str(raw_path),
                         str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
                         "--mesh-only"], check=True)
-        workflow["prepared_mesh"]["inputs"]["model_file"] = prepared.relative_to(COMFY_INPUT).as_posix()
+        prepared_upload = client.upload_input(prepared, "3d")
+        workflow["prepared_mesh"]["inputs"]["model_file"] = f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
         del workflow["save_raw"]
         print("Material stage: generating and baking mesh-aware PBR textures...", flush=True)
 
-    entry, prompt_id = run_model_workflow(workflow)
+    entry, prompt_id = run_model_workflow(workflow, client)
     glb = find_glb(entry["outputs"].get("save", {})) if args.workflow else find_glb(entry["outputs"])
     if not glb:
         raise ValueError("ComfyUI finished but no final GLB was produced")
-    source = COMFY_OUTPUT / glb.get("subfolder", "") / glb["filename"]
-    shutil.copy2(source, dest)
+    client.download_output(glb, dest)
     textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
-    textures = copy_generated_maps(entry["outputs"], dest.parent) if textured else {}
+    textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
     models = sorted({value for node in workflow.values() for value in node.get("inputs", {}).values()
                      if isinstance(value, str) and value.endswith(".safetensors")})
     if args.metadata:
