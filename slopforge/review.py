@@ -52,6 +52,11 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
     for key, asset in sorted(assets.items(), key=lambda item: (item[1].get("type", ""), item[1].get("name", item[0]))):
         name = str(asset.get("name", key))
         asset_type = str(asset.get("type", "asset"))
+        mode = asset.get("generation_mode")
+        mode_label = str(mode)
+        if asset.get("quality_tier"):
+            mode_label += " · " + str(asset["quality_tier"])
+        mode_badge = f'<span class="status">{html.escape(mode_label)}</span>' if mode else ""
         anchor = anchors[key]
         relations = []
         parent = by_id.get(asset.get("parent_id"))
@@ -94,27 +99,39 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
             generator = candidate.get("generator", asset.get("generator", {}))
             validation = candidate.get("validation", {})
             code = f"slopforge --project {project_arg}"
+            exploring = asset.get("generation_mode") == "explore"
             approve = f"{code} approve {shlex.quote(name)} {shlex.quote(str(number))}"
+            promote = (f"{code} promote {shlex.quote(name)} {shlex.quote(str(number))} "
+                       f"--name {shlex.quote(name + '_asset')}")
             reject = f"{code} reject {shlex.quote(name)} {shlex.quote(str(number))} --reason 'Not selected'"
             regenerate = (f"{code} generate {shlex.quote(asset_type)} {shlex.quote(name)} "
                           f"{shlex.quote(str(asset.get('description', '')))} --count 1 --force")
             provenance = {"generator": generator, "conditioning": asset.get("conditioning"),
                           "candidate": {field: candidate[field] for field in
-                                        ("seed", "prompt", "description", "validation", "approval", "generator")
+                                        ("seed", "prompt", "description", "variation", "validation", "approval", "generator")
                                         if field in candidate}}
             actions = []
             if status == "candidate" and not selected and candidate.get("approval") != "approved":
-                actions.extend((_action(approve, "Approve / promote"), _action(reject, "Reject")))
-            actions.append(_action(regenerate, "Regenerate"))
+                if exploring:
+                    actions.append(_action(promote, "Promote to production"))
+                else:
+                    actions.append(_action(approve, "Approve"))
+                actions.append(_action(reject, "Reject"))
+            if not exploring:
+                actions.append(_action(regenerate, "Regenerate"))
             actions.append(_action(f"{code} inspect {shlex.quote(name)}", "Inspect provenance"))
             comparisons = " · ".join(
                 f'<a href="#{anchor}-candidate-{html.escape(str(other.get("number", "?")), quote=True)}">Compare {html.escape(str(other.get("number", "?")))}</a>'
                 for other in candidates if other is not candidate)
+            variation = candidate.get("variation")
+            variation_html = (f'<p class="variation">Variation: {html.escape(json.dumps(variation, ensure_ascii=False))}</p>'
+                              if variation else "")
             sections.append(
                 f'<article class="candidate" id="{candidate_anchor}"><div class="preview">{media}</div>'
                 f'<h3>Candidate {html.escape(str(number))}{" · selected" if selected else ""}</h3>'
                 f'<p><span class="status {html.escape(str(status), quote=True)}">{html.escape(str(status))}</span>'
                 f' · Seed {html.escape(str(seed))}</p><p class="prompt">{html.escape(str(prompt))}</p>'
+                f'{variation_html}'
                 f'<details><summary>Validation and provenance</summary>{_pre({"validation": validation, **provenance})}</details>'
                 f'<nav>{comparisons} · <a href="{html.escape(f"#{anchor}", quote=True)}">Asset</a></nav>'
                 f'{"".join(actions)}</article>')
@@ -147,7 +164,7 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
         asset_details = {field: asset[field] for field in ("generator", "conditioning", "validation", "approval") if field in asset}
         cards.append(f'<section class="asset" id="{anchor}"><header><h2>{html.escape(name)}</h2>'
                      f'<span class="status">{html.escape(str(asset.get("status", "unknown")))}</span>'
-                     f'<span>{html.escape(asset_type)}</span></header>{relation_html}'
+                     f'{mode_badge}<span>{html.escape(asset_type)}</span></header>{relation_html}'
                      f'<p>{html.escape(str(description))}</p>{sections_html}'
                      f'<details><summary>Asset provenance</summary>{_pre(asset_details)}</details></section>')
     page = """<!doctype html>

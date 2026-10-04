@@ -29,11 +29,13 @@ def reject_candidate(manifest, asset_selector, number, reason=None):
 
 
 def generate_candidates(project_root, config, asset_type, style, name, description, count, manifest, key, backend_generate,
-                        *, semantic_description=None):
+                        *, semantic_description=None, variations=None):
     root = Path(project_root).resolve()
     final_path = output_path(root, config, asset_type, name)
     candidate_dir = root / config["asset_pipeline"]["candidate_root"] / asset_type["name"] / name
     existing = manifest["assets"][key].setdefault("candidates", {"items": [], "selected": None})["items"]
+    if variations is not None and len(variations) != count:
+        raise ValueError("Candidate count must match the number of deliberate variations")
     start = max((int(item["number"]) for item in existing), default=0) + 1
     results = []
     for number in range(start, start + count):
@@ -41,12 +43,18 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         metadata_path = candidate_dir / f"candidate_{number:02d}.json"
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
         seed = secrets.randbits(32)
-        record = {"number": number, "path": candidate_path.relative_to(root).as_posix(), "prompt": description, "status": "failed", "seed": seed, "validation": {"status": "not_run", "errors": [], "warnings": [], "measured": {}}}
+        variation = variations[len(results)] if variations is not None else None
+        prompt = description
+        if variation:
+            prompt += "\nDESIGN VARIATION:\n" + "\n".join(f"- {key}: {value}" for key, value in variation.items())
+        record = {"number": number, "path": candidate_path.relative_to(root).as_posix(), "prompt": prompt, "status": "failed", "seed": seed, "validation": {"status": "not_run", "errors": [], "warnings": [], "measured": {}}}
+        if variation is not None:
+            record["variation"] = dict(variation)
         record["description"] = description if semantic_description is None else semantic_description
         record["style"] = style_identity(style)
         try:
             print(f"Generating {name} candidate {number} ({len(results) + 1}/{count})...", flush=True)
-            backend_generate(description, candidate_path, seed, metadata_path)
+            backend_generate(prompt, candidate_path, seed, metadata_path)
             record["validation"] = validate_image(candidate_path, expected_format=asset_type.get("format", "PNG"), require_alpha=bool(asset_type.get("alpha_required", False)), report_path=candidate_path.relative_to(root))
             record["status"] = "candidate" if record["validation"]["status"] != "failed" else "failed"
             if metadata_path.is_file():

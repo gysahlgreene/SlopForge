@@ -8,7 +8,7 @@ from ..style import build_prompt
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
-             reference_paths=None, reference_categories=None, reference_entries=None):
+             reference_paths=None, reference_categories=None, reference_entries=None, variations=None):
     conditioning = resolve_conditioning(project_root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
     ensure_supported(conditioning)
@@ -25,7 +25,7 @@ def generate(project_root, config, asset_type, style, name, description, count, 
                               **conditioning_args)
 
     candidates = generate_candidates(project_root, config, asset_type, style, name, prompt, count, manifest, key, backend,
-                                     semantic_description=description)
+                                     semantic_description=description, variations=variations)
     record = manifest["assets"][key]
     record["description"] = description
     record["generation_prompt"] = prompt

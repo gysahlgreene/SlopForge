@@ -139,7 +139,7 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
-             reference_paths=None, reference_categories=None, reference_entries=None):
+             reference_paths=None, reference_categories=None, reference_entries=None, variations=None):
     root = Path(project_root).resolve()
     conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
@@ -158,7 +158,7 @@ def generate(project_root, config, asset_type, style, name, description, count, 
                               **conditioning_args)
 
     result = generate_candidates(root, config, asset_type, style, name, prompt, count, manifest, key, backend,
-                                 semantic_description=description)
+                                 semantic_description=description, variations=variations)
     record = manifest["assets"][key]
     record["description"] = description
     record["generation_prompt"] = prompt
