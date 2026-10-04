@@ -10,6 +10,7 @@ from PIL import Image
 
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable
+from ..config import select_quality_tier
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..manifest import save_manifest
@@ -255,15 +256,18 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
 
 
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
-            material_prompt=None, material_count=None):
+            material_prompt=None, material_count=None, quality_tier=None):
     root = Path(project_root).resolve()
-    pipeline = config["asset_pipeline"]
-    if pipeline["workflows"].get("model") and material_prompt:
-        raise ValueError("The mesh-texturing workflow uses the selected concept's material design. Put the intended materials in --image-prompt; --material-prompt is for surface swatches.")
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Candidate {number} is not valid for {asset['name']}")
+    candidate_quality = (candidate.get("generator") or {}).get("quality", {}).get("tier")
+    config = select_quality_tier(config, quality_tier or candidate_quality or
+                                 config["asset_pipeline"].get("selected_quality_tier", "normal"))
+    pipeline = config["asset_pipeline"]
+    if pipeline["workflows"].get("model") and material_prompt:
+        raise ValueError("The mesh-texturing workflow uses the selected concept's material design. Put the intended materials in --image-prompt; --material-prompt is for surface swatches.")
     expected_style = candidate.get("style")
     if ((expected_style and expected_style != style_identity(style)) or
             (not expected_style and (asset.get("style"), asset.get("style_version")) != (style["name"], style["version"]))):
@@ -342,7 +346,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         asset["generator"] = {"workflow": {"concept": concept_workflow, "mesh": mesh_info.get("workflow"),
                                              "material": (first.get("generator") or {}).get("workflow")},
                                "model": mesh_info.get("model"),
-                               "seed": {"concept": candidate.get("seed"), "mesh": mesh_info.get("seed")}}
+                               "seed": {"concept": candidate.get("seed"), "mesh": mesh_info.get("seed")},
+                               "quality": mesh_info.get("quality") or (candidate.get("generator") or {}).get("quality")}
         asset["material_prompt"] = first["prompt"]
         asset["validation"] = {"status": "not_run", "errors": [], "warnings": [
             "Choose a material candidate and approve it before using the Unity output."], "measured": {}}

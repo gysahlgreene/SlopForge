@@ -1,5 +1,6 @@
 import os
 import re
+import copy
 from pathlib import Path
 
 import yaml
@@ -15,6 +16,12 @@ DEFAULTS = {
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors"},
     "compute_profile": "default",
     "compute_profiles": {},
+    "quality_tier": "normal",
+    "quality_tiers": {
+        "draft": {"defaults": {"image_candidates": 1, "model_candidates": 1, "material_candidates": 1}},
+        "normal": {},
+        "final": {"defaults": {"image_candidates": 6, "model_candidates": 3, "material_candidates": 3}},
+    },
     "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65, "workflow_inputs": []},
     "overwrite_existing": False,
     "retain_sources": True,
@@ -27,6 +34,42 @@ def _merge(base, update):
     for key, value in update.items():
         result[key] = _merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else value
     return result
+
+
+def select_quality_tier(config, tier=None):
+    result = copy.deepcopy(config)
+    base = copy.deepcopy(config.get("_quality_base_pipeline", config["asset_pipeline"]))
+    selected = tier or os.environ.get("SLOPFORGE_QUALITY_TIER") or base.get("quality_tier", "normal")
+    tiers = base.get("quality_tiers", DEFAULTS["quality_tiers"])
+    if not isinstance(selected, str) or selected not in tiers:
+        raise ValueError(f"Unknown quality tier {selected!r}; define it in asset_pipeline.quality_tiers")
+    settings = tiers[selected]
+    if not isinstance(settings, dict):
+        raise ValueError(f"Quality tier {selected!r} must be a mapping")
+    unsupported = set(settings) - {"defaults", "workflows", "model_budgets", "workflow_inputs", "estimate"}
+    if unsupported:
+        raise ValueError(f"Quality tier {selected!r} has unsupported settings: {', '.join(sorted(unsupported))}")
+    effective = _merge(base, {key: value for key, value in settings.items() if key != "estimate"})
+    profile_workflows = config.get("_compute_profile_workflows", {})
+    if profile_workflows:
+        effective = _merge(effective, {"workflows": profile_workflows})
+    effective["quality_tier"] = selected
+    effective["selected_quality_tier"] = selected
+    effective["quality_settings"] = copy.deepcopy(settings)
+    result["asset_pipeline"] = effective
+    result["_quality_base_pipeline"] = base
+    return result
+
+
+def workflow_node_inputs(config, stage, workflow):
+    settings = config["asset_pipeline"].get("quality_settings", {})
+    by_workflow = settings.get("workflow_inputs", {}).get(stage, {})
+    if not isinstance(by_workflow, dict):
+        raise ValueError(f"Quality workflow_inputs.{stage} must map workflow names to node inputs")
+    selected = by_workflow.get(Path(workflow).name, by_workflow.get("*", {}))
+    if not isinstance(selected, dict):
+        raise ValueError(f"Quality workflow inputs for {workflow!r} must be a node/input mapping")
+    return selected
 
 
 def load_project(project_root):
@@ -76,4 +119,7 @@ def load_project(project_root):
         else:
             result["asset_pipeline"][key] = value
     result["asset_pipeline"]["selected_compute_profile"] = profile
-    return result
+    result["_compute_profile_workflows"] = copy.deepcopy(overrides.get("workflows", {}))
+    result["_quality_base_pipeline"] = copy.deepcopy(result["asset_pipeline"])
+    quality_tier = os.environ.get("SLOPFORGE_QUALITY_TIER", result["asset_pipeline"].get("quality_tier", "normal"))
+    return select_quality_tier(result, quality_tier)

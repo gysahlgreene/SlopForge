@@ -11,6 +11,7 @@ import time
 import zlib
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.quality import apply_workflow_inputs
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -186,6 +187,8 @@ def main():
     parser.add_argument("--workflow", type=Path)
     parser.add_argument("--face-budget", type=int, default=30000)
     parser.add_argument("--blender", type=Path)
+    parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
+    parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     args = parser.parse_args()
     if args.face_budget <= 0:
         parser.error("--face-budget must be positive")
@@ -215,6 +218,8 @@ def main():
     seed = args.seed if args.seed is not None else int(time.time_ns() % 9223372036854775807)
     workflow = (load_model_workflow(args.workflow, comfy_image_name, name, seed, args.face_budget)
                 if args.workflow else make_workflow(comfy_image_name, name, args.checkpoint, seed))
+    if args.workflow_inputs:
+        apply_workflow_inputs(workflow, json.loads(args.workflow_inputs))
     dest = Path(args.dest).expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shape_prompt_id = None
@@ -256,7 +261,8 @@ def main():
         temporary.write_text(json.dumps({"workflow": args.workflow.name if args.workflow else "hunyuan3d_image_to_model_api",
                                         "model": models if args.workflow else args.checkpoint, "seed": seed,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
-                                        "textured": textured, "textures": textures}, indent=2) + "\n")
+                                        "textured": textured, "textures": textures,
+                                        "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")
         temporary.replace(args.metadata)
     print(f"GLB: {dest}")
 

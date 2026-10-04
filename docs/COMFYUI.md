@@ -49,6 +49,8 @@ Before the service refactor, the 2D and 3D scripts each implemented their own HT
 
 ## Choose an independent compute profile
 
+Quality tiers such as `draft`, `normal`, and `final` are selected independently of the compute profile and service URL. A tier can set candidate budgets and workflow node inputs by workflow basename. See [QUALITY-TIERS.md](QUALITY-TIERS.md) for configuration and precedence.
+
 Profiles select workflow graphs, models, and their resolution/settings. Define the profiles in `ai/project.yaml`, then select one with `SLOPFORGE_COMPUTE_PROFILE` or `asset_pipeline.compute_profile`:
 
 ```yaml

@@ -6,7 +6,7 @@ import textwrap
 from pathlib import Path
 
 from . import __version__
-from .config import load_project
+from .config import load_project, select_quality_tier
 from .backends.comfyui import ComfyUIClient
 from .manifest import asset_key, find_asset, load_manifest, new_record, save_manifest
 from .paths import comfy_url, discover_project_root, resolve_project_root
@@ -42,6 +42,7 @@ def parser():
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
     generate.add_argument("--dry-run", action="store_true", help="Print the style-injected prompt without inference")
+    generate.add_argument("--quality-tier", help="Use a configured quality tier: draft, normal, or final")
     generate.add_argument("--reference", action="append", dest="reference_paths", help="Approved style reference image (repeatable)")
     generate.add_argument("--reference-category", action="append", dest="reference_categories",
                           help="Select approved references from a category folder (repeatable)")
@@ -55,6 +56,7 @@ def parser():
     approve.add_argument("--material-prompt", help="Use this agent-authored surface-material prompt for 3D assets")
     approve.add_argument("--material-count", type=int, help="Number of material candidates to bake onto the saved mesh")
     approve.add_argument("--force", action="store_true")
+    approve.add_argument("--quality-tier", help="Override the selected candidate's tier for 3D processing")
     reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
     reject.add_argument("name")
     reject.add_argument("candidate", type=int)
@@ -64,7 +66,8 @@ def parser():
     retexture = sub.add_parser("retexture", help="Generate more material candidates for an approved model")
     retexture.add_argument("name")
     retexture.add_argument("--material-prompt", help="Send this agent-authored material prompt unchanged")
-    retexture.add_argument("--count", type=int, default=1)
+    retexture.add_argument("--count", type=int)
+    retexture.add_argument("--quality-tier", help="Use a configured tier for material generation")
     approve_texture = sub.add_parser("approve-texture", help="Approve a material candidate for a model")
     approve_texture.add_argument("name")
     approve_texture.add_argument("candidate", type=int)
@@ -89,6 +92,7 @@ def parser():
     run_recipe = recipe_commands.add_parser("run", help="Create a recipe run and generate its children")
     run_recipe.add_argument("recipe_name")
     run_recipe.add_argument("--name", help="Unique name for this pack instance")
+    run_recipe.add_argument("--quality-tier", help="Override the recipe's configured quality tier")
     resume_recipe = recipe_commands.add_parser("resume", help="Continue incomplete recipe stages")
     resume_recipe.add_argument("name", help="Recipe instance name")
     regenerate = recipe_commands.add_parser("regenerate", help="Generate new candidates for one recipe child")
@@ -451,6 +455,8 @@ def _run(args):
     config = load_project(root)
     if getattr(args, "_style_key", None):
         config["asset_pipeline"]["active_style"] = args._style_key
+    if getattr(args, "quality_tier", None):
+        config = select_quality_tier(config, args.quality_tier)
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
     manifest = load_manifest(manifest_path)
@@ -484,7 +490,7 @@ def _run(args):
         persist = lambda current: save_manifest(manifest_path, current)
         if args.recipe_action == "run":
             record = recipes.run_recipe(root, config, style, types, manifest, args.recipe_name,
-                                        instance_name=args.name, save=persist)
+                                        instance_name=args.name, quality_tier=args.quality_tier, save=persist)
         elif args.recipe_action == "resume":
             record = recipes.resume_recipe(root, config, style, types, manifest, args.name, save=persist)
         else:
@@ -533,10 +539,12 @@ def _run(args):
             raise ValueError(f"{args.name} is not a generated model")
         key = next(key for key, item in manifest["assets"].items() if item is record)
         if args.command == "retexture":
-            if args.count < 1:
+            count = args.count if args.count is not None else pipeline.get("quality_settings", {}).get(
+                "defaults", {}).get("material_candidates", 1)
+            if count < 1:
                 raise ValueError("--count must be at least 1")
             generated = model.retexture(root, config, recipe, style, manifest, key,
-                                        material_prompt=args.material_prompt, count=args.count)
+                                        material_prompt=args.material_prompt, count=count)
             save_manifest(manifest_path, manifest)
             print(f"Generated {len(generated)} material candidate(s).")
             for item in generated:
@@ -562,7 +570,8 @@ def _run(args):
         elif recipe["pipeline"] == "model":
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
-                          material_count=getattr(args, "material_count", None))
+                          material_count=getattr(args, "material_count", None),
+                          quality_tier=getattr(args, "quality_tier", None))
         else:
             raise ValueError("Unity-native geometry does not have generated candidates")
         save_manifest(manifest_path, manifest)
@@ -635,7 +644,8 @@ def _run(args):
         result = image.approve(root, config, recipe, manifest, key, selected["number"], args.force)
         print(json.dumps(result, indent=2))
     else:
-        model.approve(root, config, recipe, style, manifest, key, selected["number"], args.force)
+        model.approve(root, config, recipe, style, manifest, key, selected["number"], args.force,
+                      quality_tier=getattr(args, "quality_tier", None))
     save_manifest(manifest_path, manifest)
     return 0
 

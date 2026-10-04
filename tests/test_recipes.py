@@ -212,6 +212,21 @@ class RecipeTests(unittest.TestCase):
                                "sample_pack", instance_name="demo")
         self.assertEqual(self.manifest["assets"], {})
 
+    def test_recipe_and_child_quality_tiers_propagate_and_are_snapshotted(self):
+        self.definition["quality_tier"] = "final"
+        self.definition["children"] = [{"id": "coin", "type": "icon", "description": "Coin",
+                                         "quality_tier": "draft"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        self.config["asset_pipeline"]["defaults"]["image_candidates"] = 5
+        with patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate:
+            recipe_asset = recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                                              "sample_pack", instance_name="demo")
+        self.assertEqual(recipe_asset["recipe_instance"]["quality_tier"], "final")
+        stage = recipe_asset["recipe_instance"]["stages"]["coin"]
+        self.assertEqual(stage["quality_tier"], "draft")
+        self.assertEqual(generate.call_args.args[1]["asset_pipeline"]["selected_quality_tier"], "draft")
+        self.assertEqual(generate.call_args.args[1]["asset_pipeline"]["defaults"]["image_candidates"], 1)
+
     def test_unhandled_pipeline_is_rejected_before_creating_recipe_assets(self):
         self.definition["children"] = [{"id": "primitive", "type": "primitive", "description": "A Unity primitive"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))

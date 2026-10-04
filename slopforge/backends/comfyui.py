@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from pathlib import Path
 
 from ..paths import blender_executable, comfy_backend, comfy_url, resolve_workflow, tool_root
+from ..config import workflow_node_inputs
 
 
 class ComfyUIError(RuntimeError):
@@ -196,6 +197,13 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     command = [python_executable(root, config), str(script), "--workflow", str(resolved),
                "--prompt", prompt, "--dest", str(destination), "--prefix", prefix,
                "--seed", str(seed), "--metadata", str(metadata)]
+    quality = config["asset_pipeline"].get("quality_settings", {})
+    quality_info = {"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
+                    "settings": quality}
+    command.extend(["--quality", json.dumps(quality_info)])
+    node_inputs = workflow_node_inputs(config, "image", resolved.name)
+    if node_inputs:
+        command.extend(["--workflow-inputs", json.dumps(node_inputs)])
     if conditioning and conditioning.get("strategy") == "reference":
         references = [{**item, "path": str(root / item["path"]), "provenance_path": item["path"]}
                       for item in conditioning["references"]]
@@ -215,4 +223,11 @@ def generate_model(project_root, config, image, name, destination, metadata, see
     if workflow:
         command.extend(["--workflow", str(resolve_workflow(root, workflow)), "--face-budget", str(face_budget),
                         "--blender", blender_executable(config, root)])
+    quality = config["asset_pipeline"].get("quality_settings", {})
+    command.extend(["--quality", json.dumps({"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
+                                               "settings": quality})])
+    workflow_name = Path(workflow).name if workflow else "hunyuan3d_image_to_model_api.json"
+    node_inputs = workflow_node_inputs(config, "model", workflow_name)
+    if node_inputs:
+        command.extend(["--workflow-inputs", json.dumps(node_inputs)])
     return subprocess.run(command, check=True, env=comfy_environment(config, root))

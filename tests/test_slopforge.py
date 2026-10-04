@@ -642,6 +642,28 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual(record["candidates"]["items"][0]["review"]["reason"], "wrong shape")
         self.assertEqual(record["candidates"]["items"][1]["status"], "candidate")
 
+    def test_generate_uses_quality_candidate_budget_and_explicit_count_wins(self):
+        import yaml
+        config_path = self.root / "ai/project.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["asset_pipeline"]["quality_tier"] = "normal"
+        config["asset_pipeline"]["quality_tiers"] = {"normal": {}, "draft": {
+            "defaults": {"image_candidates": 1}}}
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+
+        def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
+            Image.new("RGB", (16, 16), (seed % 255, 10, 20)).save(destination)
+            metadata.write_text(json.dumps({"seed": seed, "model": "fixture"}))
+
+        with patch("slopforge.pipelines.image.generate_image", side_effect=backend), redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "icon", "quick", "Draft",
+                                       "--quality-tier", "draft"]), 0)
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "icon", "many", "Draft",
+                                       "--quality-tier", "draft", "--count", "2"]), 0)
+        manifest = load_manifest(self.root / "ai/assets/manifest.json")
+        self.assertEqual(len(manifest["assets"]["icon:quick"]["candidates"]["items"]), 1)
+        self.assertEqual(len(manifest["assets"]["icon:many"]["candidates"]["items"]), 2)
+
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)
         self.assertEqual(workflow["2"]["inputs"]["ckpt_name"], "checkpoint.safetensors")

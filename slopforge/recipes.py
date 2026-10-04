@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from .manifest import add_dependency, asset_key, new_record, register_artifact, set_parent
+from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
 from .taxonomy import canonical_type, validate_asset_name
@@ -52,6 +53,8 @@ def load_recipe(project_root, name, asset_types):
         raise ValueError(f"Recipe version must be a positive integer: {path}")
     if not isinstance(definition.get("description"), str) or not definition["description"].strip():
         raise ValueError(f"Recipe requires a description: {path}")
+    if definition.get("quality_tier") is not None and not isinstance(definition["quality_tier"], str):
+        raise ValueError("Recipe quality_tier must be a string")
     children = _ordered_children(definition)
     for child in children:
         if not isinstance(child.get("description"), str) or not child["description"].strip():
@@ -68,6 +71,8 @@ def load_recipe(project_root, name, asset_types):
         library = child.get("reference_library")
         if library is not None and library not in list_libraries(project_root):
             raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
+        if child.get("quality_tier") is not None and not isinstance(child["quality_tier"], str):
+            raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
     return definition, children
 
 
@@ -165,9 +170,16 @@ def _instance_key(instance_name):
     return asset_key("recipe", instance_name)
 
 
-def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, *, instance_name=None, save=None):
+def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, *, instance_name=None,
+               quality_tier=None, save=None):
     root = Path(project_root).resolve()
     definition, children = load_recipe(root, recipe_name, asset_types)
+    tier = quality_tier or definition.get("quality_tier") or config["asset_pipeline"].get("selected_quality_tier", "normal")
+    config = select_quality_tier(config, tier)
+    definition["quality_tier"] = tier
+    for child in children:
+        if child.get("quality_tier"):
+            select_quality_tier(config, child["quality_tier"])
     for child in children:
         if child.get("reference_library"):
             library = resolve_library(root, child["reference_library"], manifest)
@@ -185,6 +197,7 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
     recipe_asset["recipe_instance"] = {
         "definition": copy.deepcopy(definition),
         "definition_path": f"ai/recipes/{recipe_name}.yaml",
+        "quality_tier": tier,
         "stages": stages,
     }
     planned_children = []
@@ -228,6 +241,7 @@ def regenerate_child(project_root, config, style, asset_types, manifest, instanc
 def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id=None, regenerate=False, save=None):
     recipe_asset = manifest["assets"][recipe_key]
     instance = recipe_asset["recipe_instance"]
+    config = select_quality_tier(config, instance.get("quality_tier", "normal"))
     definition = instance["definition"]
     children = _ordered_children(definition)
     stages = instance["stages"]
@@ -268,6 +282,7 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
 
         stage["candidate_count_before"] = len(asset.get("candidates", {}).get("items", []))
         stage["status"] = "running"
+        stage["quality_tier"] = child.get("quality_tier", instance.get("quality_tier", "normal"))
         stage["attempts"] += 1
         stage["errors"] = []
         recipe_asset["status"] = "running"
@@ -278,7 +293,9 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             handler = PIPELINE_HANDLERS.get(pipeline)
             if handler is None:
                 raise ValueError(f"No recipe handler is registered for pipeline {pipeline!r}")
-            result = handler(root, config, style, asset_type, child, manifest, stage["asset_key"])
+            tier = stage["quality_tier"]
+            child_config = select_quality_tier(config, tier)
+            result = handler(root, child_config, style, asset_type, child, manifest, stage["asset_key"])
             generated = [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
             _sync_child_artifacts(root, asset, stage["asset_key"])
             successful = pipeline == "native" or any(item.get("status") == "candidate" for item in generated)
