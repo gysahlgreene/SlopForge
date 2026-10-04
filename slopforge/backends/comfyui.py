@@ -189,13 +189,18 @@ def comfy_environment(config, project_root=None):
     return env
 
 
-def generate_image(project_root, config, workflow, prompt, destination, prefix, seed, metadata):
+def generate_image(project_root, config, workflow, prompt, destination, prefix, seed, metadata, *, conditioning=None):
     root = Path(project_root).resolve()
     resolved = resolve_workflow(root, workflow)
     script = tool_root() / "processing/comfy_generate.py"
     command = [python_executable(root, config), str(script), "--workflow", str(resolved),
                "--prompt", prompt, "--dest", str(destination), "--prefix", prefix,
                "--seed", str(seed), "--metadata", str(metadata)]
+    if conditioning and conditioning.get("strategy") == "reference":
+        references = [{**item, "path": str(root / item["path"]), "provenance_path": item["path"]}
+                      for item in conditioning["references"]]
+        command.extend(["--references", json.dumps(references),
+                        "--reference-inputs", json.dumps(conditioning["workflow_inputs"])])
     return subprocess.run(command, check=True, env=comfy_environment(config, root))
 
 

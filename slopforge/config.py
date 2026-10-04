@@ -15,7 +15,7 @@ DEFAULTS = {
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors"},
     "compute_profile": "default",
     "compute_profiles": {},
-    "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65},
+    "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65, "workflow_inputs": []},
     "overwrite_existing": False,
     "retain_sources": True,
     "retain_blend_preview": True,

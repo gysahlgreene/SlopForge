@@ -590,11 +590,12 @@ class SlopForgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Asset name"):
             register_primitive(manifest, load_project(self.root), style, "../escape", "Unsafe name")
 
-    def test_reference_mode_is_never_claimed_as_active_conditioning(self):
+    def test_reference_mode_requires_explicit_workflow_mapping(self):
         config = load_project(self.root)
         config["asset_pipeline"]["conditioning"]["strategy"] = "reference"
+        (self.root / "ai/styles/plain/references/approved/reference.png").write_bytes(b"image")
         conditioning = resolve_conditioning(self.root, config, load_style(self.root, config))
-        with self.assertRaisesRegex(NotImplementedError, "does not consume reference"):
+        with self.assertRaisesRegex(NotImplementedError, "workflow_inputs"):
             ensure_supported(conditioning)
 
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):

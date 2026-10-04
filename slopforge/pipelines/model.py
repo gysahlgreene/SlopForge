@@ -137,9 +137,11 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
             "outputs": _relative_outputs(root, paths, keys)}
 
 
-def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None):
+def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
+             reference_paths=None, reference_categories=None):
     root = Path(project_root).resolve()
-    conditioning = resolve_conditioning(root, config, style)
+    conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
+                                        reference_categories=reference_categories)
     ensure_supported(conditioning)
     pipeline = config["asset_pipeline"]
     workflow = pipeline["workflows"].get("image")
@@ -147,10 +149,12 @@ def generate(project_root, config, asset_type, style, name, description, count, 
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
     workflow_path = resolve_workflow(root, workflow)
     prompt = generation_prompt or build_prompt(style, asset_type, description)
+    conditioning_args = {"conditioning": conditioning} if conditioning["strategy"] == "reference" else {}
 
     def backend(prompt_text, destination, seed, metadata):
         return generate_image(root, config, workflow_path, prompt_text, destination,
-                              f"slopforge/{asset_type['name']}/{name}/concept_{seed}", seed, metadata)
+                              f"slopforge/{asset_type['name']}/{name}/concept_{seed}", seed, metadata,
+                              **conditioning_args)
 
     result = generate_candidates(root, config, asset_type, style, name, prompt, count, manifest, key, backend,
                                  semantic_description=description)

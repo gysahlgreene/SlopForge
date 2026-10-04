@@ -22,4 +22,4 @@ Each new candidate also keeps its semantic description and style fingerprint. Ap
 
 Candidate generation and 3D processing print flushed stage messages before starting expensive work. Image approval validates a temporary file and replaces the final PNG atomically. Project initialization preserves an existing manifest even with `--force`.
 
-Conditioning is explicit. The shipped ComfyUI image workflow accepts text, so `text_only` is supported. Reference metadata can be selected for future backends, but reference mode currently fails clearly rather than claiming unsupported visual influence.
+Conditioning is explicit. `text_only` keeps the bundled text-to-image graph unchanged. Reference mode uploads only selected approved images and binds them through project-configured workflow node inputs; graphs without mappings fail before queueing. Reference storage stays independent of ComfyUI node types.
