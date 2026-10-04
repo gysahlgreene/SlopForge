@@ -3,7 +3,7 @@ from PIL import Image
 import unittest
 from pathlib import Path
 
-from slopforge.character_rigging import record_rigging_result
+from slopforge.character_rigging import record_rigging_result, resolve_rigging_source
 from slopforge.manifest import new_record, register_artifact
 
 
@@ -69,6 +69,16 @@ class CharacterRiggingTests(unittest.TestCase):
         result = dict(self.result, rigged_model="Assets/Characters/pilot/missing.fbx")
         with self.assertRaisesRegex(ValueError, "missing or empty"):
             record_rigging_result(self.root, self.manifest, "character:pilot", result)
+
+    def test_rigging_source_must_be_an_approved_contained_model_artifact(self):
+        path = resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+        self.assertEqual(path, self.root.resolve() / "Assets/Characters/pilot/model.glb")
+        self.assertTrue(path.is_file())
+
+        artifact = self.manifest["assets"]["character:pilot"]["artifacts"]["model"]
+        artifact["approval"]["status"] = "pending"
+        with self.assertRaisesRegex(ValueError, "approved"):
+            resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
 
 
 if __name__ == "__main__":
