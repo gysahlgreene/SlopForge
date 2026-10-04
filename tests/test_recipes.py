@@ -67,6 +67,23 @@ class RecipeTests(unittest.TestCase):
         self.assertIn("running", snapshots)
         self.assertIn("awaiting_approval", snapshots)
 
+    def test_child_content_overrides_are_used_and_snapshotted_for_resume(self):
+        captured = []
+
+        def inspect_child(root, config, style, asset_type, child, manifest, key):
+            captured.append((child["description"], child["generation_prompt"]))
+            return self.fake_pipeline(root, config, style, asset_type, child, manifest, key)
+
+        overrides = {"source": {"description": "A lunar rescue beacon",
+                                 "generation_prompt": "Cracked ceramic beacon with lunar rescue marks"}}
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"image": inspect_child}):
+            result = recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                                        "sample_pack", instance_name="tailored", child_overrides=overrides)
+        recipe_definition = result["recipe_instance"]["definition"]
+        source = next(child for child in recipe_definition["children"] if child["id"] == "source")
+        self.assertEqual(captured[0], ("A lunar rescue beacon", "Cracked ceramic beacon with lunar rescue marks"))
+        self.assertEqual(source["generation_prompt"], "Cracked ceramic beacon with lunar rescue marks")
+
     def test_partial_failure_blocks_dependents_and_resume_retries_only_incomplete_stages(self):
         failed_once = set()
 

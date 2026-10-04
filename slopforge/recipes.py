@@ -223,9 +223,23 @@ def _instance_key(instance_name):
 
 
 def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, *, instance_name=None,
-               quality_tier=None, reference_library=None, save=None):
+               quality_tier=None, reference_library=None, child_overrides=None, save=None):
     root = Path(project_root).resolve()
     definition, children = load_recipe(root, recipe_name, asset_types, reference_library=reference_library)
+    overrides = child_overrides or {}
+    if not isinstance(overrides, dict) or not set(overrides) <= {child["id"] for child in children}:
+        raise ValueError("Recipe child overrides must target known child ids")
+    for child in children:
+        override = overrides.get(child["id"], {})
+        if not isinstance(override, dict) or not set(override) <= {"description", "generation_prompt"}:
+            raise ValueError(f"Invalid content override for recipe child {child['id']!r}")
+        for field in ("description", "generation_prompt"):
+            if field not in override:
+                continue
+            value = override[field]
+            if not isinstance(value, str) or (field == "description" and not value.strip()):
+                raise ValueError(f"Recipe child override {field} must be a {'non-empty ' if field == 'description' else ''}string")
+            child[field] = value
     tier = quality_tier or definition.get("quality_tier") or config["asset_pipeline"].get("selected_quality_tier", "normal")
     config = select_quality_tier(config, tier)
     definition["quality_tier"] = tier
