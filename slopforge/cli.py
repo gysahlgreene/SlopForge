@@ -15,11 +15,12 @@ from .pipelines.primitive import register_primitive
 from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .spritepack import package_sprite_sheet
+from .ui import make_sprite_import_metadata
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
 
 
 def parser():
@@ -73,6 +74,13 @@ def parser():
     spritepack.add_argument("--fps", type=float, required=True)
     spritepack.add_argument("--pivot", nargs=2, type=float, metavar=("X", "Y"), default=(0.5, 0.0))
     spritepack.add_argument("--loop", action=argparse.BooleanOptionalAction, default=None)
+
+    ui_meta = sub.add_parser("ui-meta", help="Write Unity Sprite and 9-slice import settings for an approved UI asset")
+    ui_meta.add_argument("name", help="Approved ui asset name")
+    ui_meta.add_argument("--border", nargs=4, type=int, metavar=("LEFT", "BOTTOM", "RIGHT", "TOP"),
+                         default=(0, 0, 0, 0))
+    ui_meta.add_argument("--pivot", nargs=2, type=float, metavar=("X", "Y"), default=(0.5, 0.5))
+    ui_meta.add_argument("--pixels-per-unit", type=float, default=100)
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
@@ -130,7 +138,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -601,6 +609,39 @@ def _run(args):
             "metadata": result["metadata"].relative_to(root).as_posix()}
         save_manifest(manifest_path, manifest)
         print(f"Sprite pack created: {destination}")
+        return 0
+
+    if args.command == "ui-meta":
+        asset = find_asset(manifest, args.name)
+        if asset.get("type") != "ui" or asset.get("status") != "ready":
+            raise ValueError("ui-meta requires an approved ui asset")
+        selected = asset.get("candidates", {}).get("selected")
+        if not any(candidate.get("number") == selected and candidate.get("approval") == "approved"
+                   for candidate in asset.get("candidates", {}).get("items", [])):
+            raise ValueError("ui-meta requires an explicitly approved candidate")
+        image_relative = asset.get("outputs", {}).get("image")
+        if not image_relative:
+            raise ValueError("Approved UI asset has no image output")
+        image_path = (root / image_relative).resolve()
+        if not image_path.is_relative_to(root) or not image_path.is_file():
+            raise ValueError("Approved UI image is missing or outside the project")
+        from PIL import Image
+        with Image.open(image_path) as image_file:
+            dimensions = image_file.size
+        metadata = make_sprite_import_metadata(image_relative, dimensions, border=args.border, pivot=args.pivot,
+                                              pixels_per_unit=args.pixels_per_unit)
+        output = image_path.with_name(image_path.stem + "_sprite_settings.json")
+        if output.exists():
+            raise FileExistsError(f"UI import metadata already exists: {output}")
+        output.write_text(json.dumps(metadata, indent=2) + "\n")
+        register_artifact(manifest, asset["id"], "unity.sprite_settings", "data.unity_sprite_settings",
+                          output.relative_to(root).as_posix(),
+                          derived_from=[{"asset_id": asset["id"], "output_id": "image"}],
+                          provenance={"processor": "slopforge.ui", "border": metadata["border"],
+                                      "pivot": metadata["pivot"], "pixels_per_unit": args.pixels_per_unit},
+                          approval_status="approved")
+        save_manifest(manifest_path, manifest)
+        print(output)
         return 0
 
     if args.command == "recipe":

@@ -53,6 +53,21 @@ slopforge --project ~/UnityProjects/MyGame spritepack pilot_walk \
 
 See [2D character sprite packs](SPRITE-PACKS.md) for the full animation list, reference workflow setup, and Unity metadata contract.
 
+## Generate a Unity UI pack
+
+Create an ordered `ui/<theme>` reference library, then use it across the sample UI recipe so component shapes and states share the same theme:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run starter_ui_pack \
+  --name gothic_hud --reference-library ui/gothic --quality-tier draft
+slopforge --project ~/UnityProjects/MyGame candidates gothic_hud_button_normal
+slopforge --project ~/UnityProjects/MyGame approve gothic_hud_button_normal 1
+slopforge --project ~/UnityProjects/MyGame ui-meta gothic_hud_panel_landscape \
+  --border 24 24 24 24 --pixels-per-unit 100
+```
+
+The recipe prompts prohibit functional copy; render labels and values with Unity UI/TextMeshPro. `ui-meta` records Sprite type, pivot, pixels-per-unit, and 9-slice borders as a typed JSON output derived from the approved image. Unity Editor tooling must apply those settings and create prefabs; the JSON does not replace Unity `.meta` files.
+
 ## Generate a coordinated recipe pack
 
 ```sh
