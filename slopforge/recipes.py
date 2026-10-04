@@ -41,7 +41,7 @@ def _ordered_children(definition):
     return ordered
 
 
-def load_recipe(project_root, name, asset_types):
+def load_recipe(project_root, name, asset_types, *, reference_library=None):
     validate_asset_name(name)
     path = Path(project_root) / "ai/recipes" / f"{name}.yaml"
     if not path.is_file():
@@ -55,6 +55,10 @@ def load_recipe(project_root, name, asset_types):
         raise ValueError(f"Recipe requires a description: {path}")
     if definition.get("quality_tier") is not None and not isinstance(definition["quality_tier"], str):
         raise ValueError("Recipe quality_tier must be a string")
+    if reference_library is not None:
+        if not isinstance(reference_library, str) or reference_library not in list_libraries(project_root):
+            raise ValueError(f"Recipe references unknown library {reference_library!r}")
+        definition["reference_library"] = reference_library
     children = _ordered_children(definition)
     for child in children:
         if not isinstance(child.get("description"), str) or not child["description"].strip():
@@ -68,6 +72,8 @@ def load_recipe(project_root, name, asset_types):
             raise ValueError(f"Recipe child {child['id']!r} count must be positive")
         if child.get("generation_prompt") is not None and not isinstance(child["generation_prompt"], str):
             raise ValueError(f"Recipe child {child['id']!r} generation_prompt must be a string")
+        if reference_library is not None:
+            child["reference_library"] = reference_library
         library = child.get("reference_library")
         if library is not None and library not in list_libraries(project_root):
             raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
@@ -171,9 +177,9 @@ def _instance_key(instance_name):
 
 
 def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, *, instance_name=None,
-               quality_tier=None, save=None):
+               quality_tier=None, reference_library=None, save=None):
     root = Path(project_root).resolve()
-    definition, children = load_recipe(root, recipe_name, asset_types)
+    definition, children = load_recipe(root, recipe_name, asset_types, reference_library=reference_library)
     tier = quality_tier or definition.get("quality_tier") or config["asset_pipeline"].get("selected_quality_tier", "normal")
     config = select_quality_tier(config, tier)
     definition["quality_tier"] = tier

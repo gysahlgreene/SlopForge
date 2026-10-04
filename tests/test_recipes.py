@@ -227,6 +227,21 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(generate.call_args.args[1]["asset_pipeline"]["selected_quality_tier"], "draft")
         self.assertEqual(generate.call_args.args[1]["asset_pipeline"]["defaults"]["image_candidates"], 1)
 
+    def test_recipe_run_applies_character_reference_library_to_children(self):
+        reference = self.root / "References/alice.png"
+        reference.parent.mkdir(parents=True)
+        reference.write_bytes(b"reference")
+        library = self.root / "ai/libraries/character/alice.yaml"
+        library.parent.mkdir(parents=True)
+        library.write_text(yaml.safe_dump({"kind": "character", "entries": [{"id": "identity", "path": "References/alice.png"}]}))
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"image": self.fake_pipeline}):
+            result = recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                                        "sample_pack", instance_name="alice_sprites",
+                                        reference_library="character/alice")
+        snapshot = result["recipe_instance"]["definition"]
+        self.assertTrue(all(child["reference_library"] == "character/alice" for child in snapshot["children"]))
+
     def test_unhandled_pipeline_is_rejected_before_creating_recipe_assets(self):
         self.definition["children"] = [{"id": "primitive", "type": "primitive", "description": "A Unity primitive"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
