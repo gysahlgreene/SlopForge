@@ -17,6 +17,7 @@ from .exploration import parse_variations, promote_candidate
 from .spritepack import package_sprite_sheet
 from .ui import make_sprite_import_metadata
 from .unity_ui import apply_sprite_settings
+from .unity_vfx import create_particle_prefab
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -68,13 +69,15 @@ def parser():
     promote.add_argument("candidate", type=int)
     promote.add_argument("--name", required=True, help="Name for the new tracked asset")
 
-    spritepack = sub.add_parser("spritepack", help="Slice an approved character sheet into a deterministic Unity sprite pack")
-    spritepack.add_argument("name", help="Approved sprite_sheet asset name")
+    spritepack = sub.add_parser("spritepack", help="Slice an approved character or VFX sheet into deterministic frames")
+    spritepack.add_argument("name", help="Approved sprite_sheet or vfx_sheet asset name")
     spritepack.add_argument("--animation", required=True, help="Animation name such as idle or walk")
     spritepack.add_argument("--grid", nargs=2, type=int, metavar=("COLUMNS", "ROWS"), required=True)
     spritepack.add_argument("--fps", type=float, required=True)
     spritepack.add_argument("--pivot", nargs=2, type=float, metavar=("X", "Y"), default=(0.5, 0.0))
     spritepack.add_argument("--loop", action=argparse.BooleanOptionalAction, default=None)
+    spritepack.add_argument("--particle-prefab", action="store_true",
+                            help="Create a Unity texture-sheet ParticleSystem prefab (vfx_sheet only)")
 
     ui_meta = sub.add_parser("ui-meta", help="Write Unity Sprite and 9-slice import settings for an approved UI asset")
     ui_meta.add_argument("name", help="Approved ui asset name")
@@ -572,8 +575,11 @@ def _run(args):
 
     if args.command == "spritepack":
         asset = find_asset(manifest, args.name)
-        if asset.get("type") != "sprite_sheet" or asset.get("status") != "ready":
-            raise ValueError("spritepack requires an approved sprite_sheet asset")
+        asset_type = asset.get("type")
+        if asset_type not in {"sprite_sheet", "vfx_sheet"} or asset.get("status") != "ready":
+            raise ValueError("spritepack requires an approved sprite_sheet or vfx_sheet asset")
+        if args.particle_prefab and asset_type != "vfx_sheet":
+            raise ValueError("--particle-prefab requires a vfx_sheet asset")
         selected = asset.get("candidates", {}).get("selected")
         if not any(candidate.get("number") == selected and candidate.get("approval") == "approved"
                    for candidate in asset.get("candidates", {}).get("items", [])):
@@ -585,13 +591,14 @@ def _run(args):
         if not source_path.is_relative_to(root) or not source_path.is_file():
             raise ValueError("Approved sprite sheet is missing or outside the project")
         loop = args.loop if args.loop is not None else args.animation in {"idle", "walk", "run"}
-        destination = (root / pipeline["output_root"] / "Characters" / asset["name"] / args.animation).resolve()
+        asset_folder = "VisualEffects" if asset_type == "vfx_sheet" else "Characters"
+        destination = (root / pipeline["output_root"] / asset_folder / asset["name"] / args.animation).resolve()
         if not destination.is_relative_to(root):
             raise ValueError("Sprite pack output must stay within the project")
         result = package_sprite_sheet(source_path, destination, args.animation, columns=args.grid[0],
                                       rows=args.grid[1], fps=args.fps, pivot=args.pivot, loop=loop)
         derived_from = [{"asset_id": asset["id"], "output_id": "image"}]
-        prefix = f"sprites.{args.animation}"
+        prefix = f"{'vfx' if asset_type == 'vfx_sheet' else 'sprites'}.{args.animation}"
         settings = {"fps": args.fps, "pivot": result["pivot"], "loop": loop,
                     "columns": args.grid[0], "rows": args.grid[1], "frame_size": result["frame_size"]}
         for index, frame in enumerate(result["frame_paths"]):
@@ -605,6 +612,17 @@ def _run(args):
         register_artifact(manifest, asset["id"], f"{prefix}.metadata", "data.unity_animation",
                           result["metadata"].relative_to(root).as_posix(), derived_from=derived_from,
                           provenance={"processor": "slopforge.spritepack", **settings}, approval_status="approved")
+        if args.particle_prefab:
+            prefab = destination / "particle_system.prefab"
+            material = destination / "particle_system.mat"
+            create_particle_prefab(root, result["atlas"], prefab, material,
+                                   columns=args.grid[0], rows=args.grid[1], loop=loop)
+            for artifact_id, artifact_type, path in ((f"{prefix}.prefab", "unity.particle_prefab", prefab),
+                                                      (f"{prefix}.material", "unity.material", material)):
+                register_artifact(manifest, asset["id"], artifact_id, artifact_type,
+                                  path.relative_to(root).as_posix(), derived_from=derived_from,
+                                  provenance={"processor": "slopforge.unity_vfx", **settings},
+                                  approval_status="approved")
         asset.setdefault("sprite_animations", {})[args.animation] = {
             "frame_count": result["frame_count"], "frame_size": result["frame_size"],
             "fps": args.fps, "loop": loop, "pivot": result["pivot"],

@@ -19,3 +19,5 @@ slopforge --project ~/UnityProjects/MyGame spritepack pilot_walk \
 The command refuses unapproved sheets, unsafe/missing source paths, invalid grids, and existing output directories. It writes to `Assets/Art/Generated/Characters/<sheet-asset>/<animation>/`, registers each frame, atlas, and `data.unity_animation` JSON as approved typed outputs derived from the approved source sheet, and records frame timing, loop mode, and normalized Unity pivot. `idle`, `walk`, and `run` loop by default; use `--no-loop` or `--loop` to override. The default pivot is bottom-center (`0.5, 0`).
 
 This JSON is import metadata, not a Unity-generated `.meta` file or AnimatorController. Unity owns importer metadata and editor-generated animation assets. Alpha is preserved when supplied by the workflow; SlopForge does not silently remove a background from a character sheet.
+
+For animated effects and optional Unity texture-sheet ParticleSystem prefabs, see [VFX packs](VFX-PACKS.md). Both use the same deterministic frame and atlas packager.

@@ -1,0 +1,13 @@
+name: vfx_sheet
+pipeline: image
+output_folder: VisualEffects/Spritesheets
+format: PNG
+alpha_required: true
+alpha_recommended: true
+requirements:
+  - frames have equal dimensions in a fixed grid
+  - effects read clearly at game scale with transparent background
+  - sheet contains only frames in playback order, without grid lines or labels
+avoid:
+  - captions, labels, borders, or contact-sheet decoration outside the frame grid
+  - baked background or opaque canvas

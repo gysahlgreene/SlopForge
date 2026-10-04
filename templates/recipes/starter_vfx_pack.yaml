@@ -1,0 +1,75 @@
+id: starter_vfx_pack
+version: 1
+description: A coordinated set of prototype game effects and impact decals.
+children:
+  - id: projectile
+    type: vfx_sheet
+    description: A looping projectile trail effect.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a looping projectile trail moving left-to-right. Keep the effect centered
+      consistently in each cell, with transparent background, clean alpha, no grid lines,
+      no border, and no text.
+    count: 1
+  - id: impact
+    type: vfx_sheet
+    description: A fast impact burst.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a sharp impact burst expanding and fading. Keep the center and scale
+      consistent in each cell, with transparent background, clean alpha, no grid lines,
+      no border, and no text.
+    count: 1
+  - id: cast
+    type: vfx_sheet
+    description: A readable spell cast effect.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for an energy cast gathering around a focal point and releasing. Keep the
+      focal point consistent, with transparent background, clean alpha, no grid lines,
+      no border, and no text.
+    count: 1
+  - id: hit_spark
+    type: vfx_sheet
+    description: A compact hit spark.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a compact directional hit spark that appears and quickly fades. Center
+      it consistently, with transparent background, clean alpha, no grid lines, no
+      border, and no text.
+    count: 1
+  - id: smoke
+    type: vfx_sheet
+    description: A soft looping smoke puff.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a soft smoke puff that billows upward and dissipates. Keep the origin
+      consistent, with transparent background, clean alpha, no grid lines, no border,
+      and no text.
+    count: 1
+  - id: heal
+    type: vfx_sheet
+    description: A positive healing effect.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a clear healing effect rising around a small focal point. Keep the center
+      consistent, with transparent background, clean alpha, no grid lines, no border,
+      and no text.
+    count: 1
+  - id: fire
+    type: vfx_sheet
+    description: A looping flame effect.
+    generation_prompt: >-
+      Match the active game art style. Create exactly 16 evenly sized frames in a 4x4
+      grid for a looping upright flame with stable width and transparent background.
+      Keep the flame base aligned, with clean alpha, no grid lines, no border, and no
+      text.
+    count: 1
+  - id: impact_decal
+    type: decal
+    description: A matching ground impact decal.
+    generation_prompt: >-
+      Match the active game art style and the impact effect in this pack. Create one
+      top-down circular ground scorch decal, isolated on a transparent background,
+      with soft clean alpha, no shadow outside the decal, no text, and no border.
+    count: 1
