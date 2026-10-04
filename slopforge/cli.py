@@ -26,7 +26,7 @@ from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "environment-check"}
 
 
 def parser():
@@ -142,6 +142,10 @@ def parser():
     library_commands.add_parser("list", help="List reference libraries")
     show_library = library_commands.add_parser("show", help="Show resolved library membership and file status")
     show_library.add_argument("selector", help="Library kind/name, such as character/alice")
+    animation = sub.add_parser("animation", help="Validate reusable character animation libraries")
+    animation_commands = animation.add_subparsers(dest="animation_action", required=True)
+    check_animation_library = animation_commands.add_parser("validate", help="Validate clip files and retarget metadata")
+    check_animation_library.add_argument("name", help="Library name under ai/animation_libraries/")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -167,7 +171,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["environment-check"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["environment-check"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -579,6 +583,14 @@ def _run(args):
                 print(selector)
         else:
             print(json.dumps(resolve_library(root, args.selector, manifest), indent=2))
+        return 0
+
+    if args.command == "animation":
+        from .animation import validate_animation_library
+        library = validate_animation_library(root, args.name)
+        print(f"Animation library {args.name}: {len(library['clips'])} valid clip(s), {library['skeleton_type']} skeleton")
+        for clip in library["clips"]:
+            print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
         return 0
 
     if args.command == "review":
