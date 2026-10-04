@@ -179,6 +179,39 @@ class RecipeTests(unittest.TestCase):
         generate.assert_called_once()
         self.assertEqual(generate.call_args.args[6], 5)
 
+    def test_recipe_child_passes_resolved_reference_library_to_existing_pipeline(self):
+        library_dir = self.root / "ai/libraries/character"
+        library_dir.mkdir(parents=True)
+        reference = self.root / "alice.png"
+        reference.write_bytes(b"portrait")
+        (library_dir / "alice.yaml").write_text(yaml.safe_dump({
+            "name": "Alice", "kind": "character", "version": 1,
+            "entries": [{"id": "portrait", "path": "alice.png", "category": "identity", "strength": 0.9}],
+        }))
+        self.definition["children"] = [{"id": "portrait", "type": "icon", "description": "Portrait",
+                                         "reference_library": "character/alice"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        with patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate:
+            recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                               "sample_pack", instance_name="demo")
+        self.assertEqual(generate.call_args.kwargs["reference_entries"][0]["id"], "portrait")
+        self.assertEqual(generate.call_args.kwargs["reference_entries"][0]["path"], str(reference.resolve()))
+
+    def test_recipe_blocks_missing_library_entries_before_creating_a_run(self):
+        library_dir = self.root / "ai/libraries/character"
+        library_dir.mkdir(parents=True)
+        (library_dir / "alice.yaml").write_text(yaml.safe_dump({
+            "name": "Alice", "kind": "character", "version": 1,
+            "entries": [{"id": "portrait", "path": "missing.png"}],
+        }))
+        self.definition["children"] = [{"id": "portrait", "type": "icon", "description": "Portrait",
+                                         "reference_library": "character/alice"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        with self.assertRaisesRegex(ValueError, "missing or changed"):
+            recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                               "sample_pack", instance_name="demo")
+        self.assertEqual(self.manifest["assets"], {})
+
     def test_unhandled_pipeline_is_rejected_before_creating_recipe_assets(self):
         self.definition["children"] = [{"id": "primitive", "type": "primitive", "description": "A Unity primitive"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))

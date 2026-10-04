@@ -17,7 +17,7 @@ from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe"}
+COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
 
 
 def parser():
@@ -45,6 +45,7 @@ def parser():
     generate.add_argument("--reference", action="append", dest="reference_paths", help="Approved style reference image (repeatable)")
     generate.add_argument("--reference-category", action="append", dest="reference_categories",
                           help="Select approved references from a category folder (repeatable)")
+    generate.add_argument("--reference-library", help="Use ordered references from a project library such as character/alice")
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
@@ -67,6 +68,11 @@ def parser():
     sub.add_parser("doctor", help="Diagnose local dependencies and the selected project")
     sub.add_parser("styles", help="List project style packs")
     sub.add_parser("assets", help="List tracked project assets")
+    library = sub.add_parser("library", help="Inspect reusable project reference libraries")
+    library_commands = library.add_subparsers(dest="library_action", required=True)
+    library_commands.add_parser("list", help="List reference libraries")
+    show_library = library_commands.add_parser("show", help="Show resolved library membership and file status")
+    show_library.add_argument("selector", help="Library kind/name, such as character/alice")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -87,7 +93,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -268,6 +274,7 @@ def _run_make(args):
 
     manifest_path = root / config["asset_pipeline"]["manifest"]
     manifest = load_manifest(manifest_path)
+
     while True:
         name = input("Short name for this asset (letters, numbers, _ or -): ").strip()
         try:
@@ -438,11 +445,21 @@ def _run(args):
     config = load_project(root)
     if getattr(args, "_style_key", None):
         config["asset_pipeline"]["active_style"] = args._style_key
-    types = load_taxonomy(root)
-    style = load_style(root, config)
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
     manifest = load_manifest(manifest_path)
+
+    if args.command == "library":
+        from .libraries import list_libraries, resolve_library
+        if args.library_action == "list":
+            for selector in list_libraries(root):
+                print(selector)
+        else:
+            print(json.dumps(resolve_library(root, args.selector, manifest), indent=2))
+        return 0
+
+    types = load_taxonomy(root)
+    style = load_style(root, config)
 
     if args.command == "recipe":
         if args.recipe_action == "list":
@@ -563,14 +580,23 @@ def _run(args):
     save_manifest(manifest_path, manifest)
 
     try:
+        if getattr(args, "reference_library", None) and (getattr(args, "reference_paths", None) or
+                                                          getattr(args, "reference_categories", None)):
+            raise ValueError("Choose --reference-library or --reference/--reference-category, not both")
+        reference_entries = None
+        if getattr(args, "reference_library", None):
+            from .libraries import resolve_library
+            reference_entries = resolve_library(root, args.reference_library, manifest)["entries"]
         generated = (image.generate(root, config, recipe, style, args.name, args.description,
                                     count, manifest, key, generation_prompt=prompt_text,
                                     reference_paths=getattr(args, "reference_paths", None),
-                                    reference_categories=getattr(args, "reference_categories", None)) if recipe["pipeline"] == "image" else
+                                    reference_categories=getattr(args, "reference_categories", None),
+                                    reference_entries=reference_entries) if recipe["pipeline"] == "image" else
                      model.generate(root, config, recipe, style, args.name, args.description,
                                     count, manifest, key, generation_prompt=prompt_text,
                                     reference_paths=getattr(args, "reference_paths", None),
-                                    reference_categories=getattr(args, "reference_categories", None)))
+                                    reference_categories=getattr(args, "reference_categories", None),
+                                    reference_entries=reference_entries))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"

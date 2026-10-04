@@ -49,14 +49,16 @@ def bind_reference_inputs(client, workflow, references, slots):
         uploaded = client.upload_input(reference["path"], "slopforge/references")
         if not uploaded.get("name"):
             raise ValueError(f"ComfyUI did not return an uploaded filename for reference {reference['path']}")
-        image_name = "/".join(part for part in (uploaded.get("subfolder", ""), uploaded["name"]) if part)
+        image_name = "/".join(part for part in (uploaded.get("subfolder") or "", uploaded["name"]) if part)
         image_target = slot["image"]
         workflow[str(image_target["node"])]["inputs"][image_target["input"]] = image_name
         strength_target = slot.get("strength")
         if strength_target:
             workflow[str(strength_target["node"])]["inputs"][strength_target["input"]] = reference["strength"]
+        provenance = {key: reference[key] for key in
+                      ("library_entry_id", "category", "sha256", "expected_sha256", "source") if key in reference}
         used.append({"path": reference.get("provenance_path", reference["path"]),
-                     "strength": reference["strength"], "comfyui_input": image_name})
+                     "strength": reference["strength"], "comfyui_input": image_name, **provenance})
     return used
 
 def main():

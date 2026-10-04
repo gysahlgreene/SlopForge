@@ -7,6 +7,7 @@ from pathlib import Path
 
 from slopforge.backends.comfyui import ComfyUIClient
 from processing.comfy_generate import bind_reference_inputs
+from slopforge.cli import parse_args
 from slopforge.conditioning import ensure_supported, resolve_conditioning
 
 
@@ -37,6 +38,27 @@ class ConditioningTests(unittest.TestCase):
             {"path": "ai/styles/plain/references/approved/props/relay.png", "strength": 0.7},
         ])
 
+    def test_resolves_library_membership_without_changing_its_domain_metadata(self):
+        entries = [{"id": "portrait", "path": str(self.approved / "characters/alice.png"),
+                    "category": "identity", "strength": 0.82, "sha256": "abc", "status": "ready",
+                    "source": {"path": str(self.approved / "characters/alice.png")}}]
+        result = resolve_conditioning(self.root, self.config, self.style, reference_entries=entries)
+        self.assertEqual(result["references"], [{
+            "path": "ai/styles/plain/references/approved/characters/alice.png", "strength": 0.82,
+            "library_entry_id": "portrait", "category": "identity", "sha256": "abc",
+            "expected_sha256": None, "source": {"path": str(self.approved / "characters/alice.png")},
+        }])
+
+    def test_rejects_changed_library_entry_before_generation(self):
+        with self.assertRaisesRegex(ValueError, "is changed"):
+            resolve_conditioning(self.root, self.config, self.style,
+                                reference_entries=[{"id": "portrait", "path": "/tmp/portrait.png",
+                                                    "status": "changed"}])
+
+    def test_generate_cli_accepts_library_selector(self):
+        args = parse_args(["generate", "icon", "badge", "A badge", "--reference-library", "character/alice"])
+        self.assertEqual(args.reference_library, "character/alice")
+
     def test_rejects_reference_outside_approved_library(self):
         elsewhere = self.root / "private.png"
         elsewhere.write_bytes(b"private")
@@ -49,6 +71,11 @@ class ConditioningTests(unittest.TestCase):
             resolve_conditioning(self.root, self.config, self.style,
                                  reference_paths=["ai/styles/plain/references/approved/generic.png",
                                                   "ai/styles/plain/references/approved/props/relay.png"])
+
+    def test_category_selection_does_not_add_uncategorized_references(self):
+        result = resolve_conditioning(self.root, self.config, self.style, reference_categories=["props"])
+        self.assertEqual([item["path"] for item in result["references"]],
+                         ["ai/styles/plain/references/approved/props/relay.png"])
 
     def test_reference_strategy_requires_a_workflow_slot(self):
         condition = {"strategy": "reference", "references": [{"path": "ref.png", "strength": 0.5}]}

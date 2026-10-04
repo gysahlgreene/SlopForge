@@ -161,11 +161,12 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Configuration and diagnostics
 
-Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `recipe list`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
+Use `slopforge --project PATH styles`, `assets`, `library list`, `library show KIND/NAME`, `inspect NAME`, `recipe list`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
 
 ## Current limitations
 
-- Reference images are organized and recorded but are not used as visual conditioning.
+- Approved references can be selected from style folders or reusable project libraries and mapped into configured ComfyUI workflow inputs.
+- The bundled image workflow remains text-only; projects must provide a compatible reference-conditioning graph and map its node inputs.
 - 3D generation remains experimental: mesh shape and material regions vary, and reconstruction defects can remain. Review all mesh views before approval. The TRELLIS.2 route places distinct colors on the mesh but can take many minutes on Apple MPS; its current normal map is flat, emission is zero, and glass transmission is not generated.
 - Unity PBR material export supports the Built-in Render Pipeline and URP. HDRP and custom render pipelines are rejected clearly until their material map layouts are supported.
 - The Hunyuan3D swatch route creates an all-over material treatment rather than assigning colors to named parts; roughness, metallic, and emission are heuristic, and seamless tiling is not guaranteed.
