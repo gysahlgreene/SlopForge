@@ -147,6 +147,13 @@ def parser():
     animation_commands = animation.add_subparsers(dest="animation_action", required=True)
     check_animation_library = animation_commands.add_parser("validate", help="Validate clip files and retarget metadata")
     check_animation_library.add_argument("name", help="Library name under ai/animation_libraries/")
+    retarget_animation_clip = animation_commands.add_parser("retarget", help="Retarget one library clip to an approved rig")
+    retarget_animation_clip.add_argument("name", help="Animation library name")
+    retarget_animation_clip.add_argument("clip", help="Clip id in the animation library")
+    retarget_animation_clip.add_argument("--character", required=True, help="Tracked character with an approved rig")
+    unity_animation_setup = animation_commands.add_parser("unity-setup", help="Create a Unity controller and character prefab")
+    unity_animation_setup.add_argument("character", help="Tracked character name")
+    unity_animation_setup.add_argument("--rig-type", choices=("generic", "humanoid"), default="generic")
     character = sub.add_parser("character", help="Prepare reviewable 3D character rigs")
     character_commands = character.add_subparsers(dest="character_action", required=True)
     rig_character = character_commands.add_parser("rig", help="Rig an approved character model with Blender Rigify")
@@ -611,11 +618,25 @@ def _run(args):
         return 0
 
     if args.command == "animation":
-        from .animation import validate_animation_library
-        library = validate_animation_library(root, args.name)
-        print(f"Animation library {args.name}: {len(library['clips'])} valid clip(s), {library['skeleton_type']} skeleton")
-        for clip in library["clips"]:
-            print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
+        from .animation import retarget_animation, validate_animation_library
+        if args.animation_action == "validate":
+            library = validate_animation_library(root, args.name)
+            print(f"Animation library {args.name}: {len(library['clips'])} valid clip(s), {library['skeleton_type']} skeleton")
+            for clip in library["clips"]:
+                print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
+            return 0
+        if args.animation_action == "unity-setup":
+            from .unity_animation import build_character_animator
+            result = build_character_animator(root, config, manifest, args.character, rig_type=args.rig_type)
+            save_manifest(manifest_path, manifest)
+            print(f"Unity character setup: {result['status']}")
+            print(f"Controller: {result['controller']['path']}")
+            print(f"Prefab: {result['prefab']['path']}")
+            return 0
+        result = retarget_animation(root, config, manifest, args.character, args.name, args.clip)
+        save_manifest(manifest_path, manifest)
+        print(f"Animation {args.clip}: {result['status']} ({result['frames']} frames)")
+        print(f"Candidate: {result['artifact']['path']}")
         return 0
 
     if args.command == "character":
