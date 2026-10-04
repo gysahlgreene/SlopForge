@@ -3,13 +3,29 @@ import os
 import secrets
 import shutil
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .manifest import add_candidate
+from .manifest import add_candidate, find_asset
 from .provenance import generator_provenance
 from .style import style_identity
 from .taxonomy import output_path
 from .validation import validate_image
+
+
+def reject_candidate(manifest, asset_selector, number, reason=None):
+    asset = find_asset(manifest, asset_selector)
+    candidate = next((item for item in asset.get("candidates", {}).get("items", [])
+                      if item.get("number") == number), None)
+    if candidate is None or candidate.get("status") != "candidate":
+        raise ValueError(f"Candidate {number} is not available to reject for {asset.get('name')}")
+    if asset.get("candidates", {}).get("selected") == number or candidate.get("approval") == "approved":
+        raise ValueError("Cannot reject an approved candidate")
+    candidate["status"] = "rejected"
+    candidate["review"] = {"status": "rejected", "at": datetime.now(timezone.utc).isoformat()}
+    if reason:
+        candidate["review"]["reason"] = reason
+    return candidate
 
 
 def generate_candidates(project_root, config, asset_type, style, name, description, count, manifest, key, backend_generate,

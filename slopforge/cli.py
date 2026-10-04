@@ -17,7 +17,7 @@ from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
+COMMANDS = {"init", "make", "generate", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
 
 
 def parser():
@@ -55,6 +55,12 @@ def parser():
     approve.add_argument("--material-prompt", help="Use this agent-authored surface-material prompt for 3D assets")
     approve.add_argument("--material-count", type=int, help="Number of material candidates to bake onto the saved mesh")
     approve.add_argument("--force", action="store_true")
+    reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
+    reject.add_argument("name")
+    reject.add_argument("candidate", type=int)
+    reject.add_argument("--reason")
+    review = sub.add_parser("review", help="Generate a local HTML review board for candidates and packs")
+    review.add_argument("--output", default="slopforge-review.html", help="Project-relative HTML output path")
     retexture = sub.add_parser("retexture", help="Generate more material candidates for an approved model")
     retexture.add_argument("name")
     retexture.add_argument("--material-prompt", help="Send this agent-authored material prompt unchanged")
@@ -93,7 +99,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -458,6 +464,12 @@ def _run(args):
             print(json.dumps(resolve_library(root, args.selector, manifest), indent=2))
         return 0
 
+    if args.command == "review":
+        from .review import generate_review_board
+        page = generate_review_board(root, manifest, args.output)
+        print(page)
+        return 0
+
     types = load_taxonomy(root)
     style = load_style(root, config)
 
@@ -505,6 +517,12 @@ def _run(args):
         return 0
     if args.command == "candidates":
         _list_candidates(manifest, args.name)
+        return 0
+    if args.command == "reject":
+        from .candidates import reject_candidate
+        reject_candidate(manifest, args.name, args.candidate, args.reason)
+        save_manifest(manifest_path, manifest)
+        print(f"Rejected {args.name} candidate {args.candidate}.")
         return 0
 
     if args.command in {"retexture", "approve-texture"}:
