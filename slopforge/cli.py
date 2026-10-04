@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import sys
 import textwrap
@@ -19,11 +20,13 @@ from .ui import make_sprite_import_metadata
 from .unity_ui import apply_sprite_settings
 from .unity_vfx import create_particle_prefab
 from .environment import validate_environment_kit
+from .tileset import package_tileset
+from .unity_tiles import create_tile_assets
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "environment-check"}
 
 
 def parser():
@@ -79,6 +82,22 @@ def parser():
     spritepack.add_argument("--loop", action=argparse.BooleanOptionalAction, default=None)
     spritepack.add_argument("--particle-prefab", action="store_true",
                             help="Create a Unity texture-sheet ParticleSystem prefab (vfx_sheet only)")
+
+    tilepack = sub.add_parser("tilepack", help="Slice and validate an approved terrain tile sheet")
+    tilepack.add_argument("name", help="Approved tile_sheet asset name")
+    tilepack.add_argument("--grid", nargs=2, type=int, metavar=("COLUMNS", "ROWS"), required=True)
+    tilepack.add_argument("--tile-size", nargs=2, type=int, metavar=("WIDTH", "HEIGHT"), required=True)
+    tilepack.add_argument("--margin", type=int, default=0)
+    tilepack.add_argument("--padding", type=int, default=0)
+    tilepack.add_argument("--layout", choices=("orthogonal", "isometric"), default="orthogonal")
+    tilepack.add_argument("--collider", choices=("none", "grid", "sprite"), default="none")
+    tilepack.add_argument("--pixels-per-unit", type=float, default=100)
+    tilepack.add_argument("--transition-mask", type=int, action="append",
+                          help="N/E/S/W edge mask (0-15), repeat once per tile")
+    tilepack.add_argument("--unity-assets", action="store_true",
+                          help="Create native Unity Tile assets through the installed Editor")
+    tile_unity = sub.add_parser("tile-unity", help="Create Unity Tile assets for an already packaged tileset")
+    tile_unity.add_argument("name", help="Packaged tile_sheet asset name")
 
     ui_meta = sub.add_parser("ui-meta", help="Write Unity Sprite and 9-slice import settings for an approved UI asset")
     ui_meta.add_argument("name", help="Approved ui asset name")
@@ -148,7 +167,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["environment-check"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["environment-check"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -171,6 +190,51 @@ def _project(args):
 
 def _active_style(style):
     return {"key": style["_key"], "name": style["name"], "version": style["version"]}
+
+
+def _create_unity_tiles(root, manifest_path, manifest, asset, settings):
+    tile_artifacts = [(artifact_id, artifact) for artifact_id, artifact in asset.get("artifacts", {}).items()
+                      if artifact_id.startswith("tiles.") and artifact_id[6:].isdigit()]
+    tile_artifacts.sort(key=lambda item: item[0])
+    if not tile_artifacts:
+        raise ValueError("No packaged tile images were found; run tilepack first")
+    assets_exist = [artifact_id.replace("tiles.", "tiles.unity_", 1) in asset.get("artifacts", {})
+                    for artifact_id, _ in tile_artifacts]
+    if all(assets_exist):
+        paths = [root / asset["artifacts"][artifact_id.replace("tiles.", "tiles.unity_", 1)]["path"]
+                 for artifact_id, _ in tile_artifacts]
+        if all(path.is_file() for path in paths):
+            return paths
+        raise FileNotFoundError("Unity Tile artifact is registered but its file is missing")
+    if any(assets_exist):
+        raise FileExistsError("Tileset has a partial Unity Tile import; inspect UnityTiles before retrying")
+    tile_paths = [(root / artifact["path"]).resolve() for _, artifact in tile_artifacts]
+    if any(not path.is_relative_to(root) or not path.is_file() for path in tile_paths):
+        raise ValueError("Packaged tile path is missing or outside the project")
+    source = asset.get("outputs", {}).get("image")
+    if not source:
+        raise ValueError("Approved tile sheet source is missing")
+    source_path = (root / source).resolve()
+    if not source_path.is_relative_to(root) or not source_path.is_file():
+        raise ValueError("Approved tile sheet is missing or outside the project")
+    tileset_path = asset.get("tileset", {}).get("directory")
+    if not isinstance(tileset_path, str) or not tileset_path:
+        raise ValueError("Packaged tileset directory is not recorded")
+    tileset_dir = (root / tileset_path).resolve()
+    if not tileset_dir.is_relative_to(root) or not tileset_dir.is_dir():
+        raise ValueError("Packaged tileset directory is missing or outside the project")
+    unity_directory = tileset_dir.parent / "UnityTiles"
+    settings = settings or asset.get("tileset", {})
+    unity_paths = create_tile_assets(root, tile_paths, unity_directory, collider=settings.get("collider", "none"),
+                                     pixels_per_unit=settings.get("pixels_per_unit", 100))
+    for index, path in enumerate(unity_paths):
+        register_artifact(manifest, asset["id"], f"tiles.unity_{index:03d}", "unity.tile",
+                          path.relative_to(root).as_posix(),
+                          derived_from=[{"asset_id": asset["id"], "output_id": "image"}],
+                          provenance={"processor": "slopforge.unity_tiles", **settings, "index": index},
+                          approval_status="approved")
+    save_manifest(manifest_path, manifest)
+    return unity_paths
 
 
 def _asset_key(manifest, asset_type, name):
@@ -551,6 +615,61 @@ def _run(args):
         save_manifest(manifest_path, manifest)
         print(json.dumps(report, indent=2))
         return 0 if report["status"] == "passed" else 1
+
+    if args.command == "tilepack":
+        asset = find_asset(manifest, args.name)
+        if asset.get("type") != "tile_sheet" or asset.get("status") != "ready":
+            raise ValueError("tilepack requires an approved tile_sheet asset")
+        selected = asset.get("candidates", {}).get("selected")
+        if not any(candidate.get("number") == selected and candidate.get("approval") == "approved"
+                   for candidate in asset.get("candidates", {}).get("items", [])):
+            raise ValueError("tilepack requires an explicitly approved sheet candidate")
+        source = asset.get("outputs", {}).get("image")
+        if not source:
+            raise ValueError("Approved tile sheet has no image output")
+        source_path = (root / source).resolve()
+        if not source_path.is_relative_to(root) or not source_path.is_file():
+            raise ValueError("Approved tile sheet is missing or outside the project")
+        if not math.isfinite(args.pixels_per_unit) or args.pixels_per_unit <= 0:
+            raise ValueError("--pixels-per-unit must be positive and finite")
+        output_root = (root / pipeline["output_root"] / "Tilesets" / asset["name"]).resolve()
+        if not output_root.is_relative_to(root):
+            raise ValueError("Tileset output must stay within the project")
+        result = package_tileset(source_path, output_root / "Tiles", asset["name"],
+                                 columns=args.grid[0], rows=args.grid[1], tile_size=args.tile_size,
+                                 margin=args.margin, padding=args.padding, layout=args.layout,
+                                 collider=args.collider, transition_masks=args.transition_mask)
+        derived_from = [{"asset_id": asset["id"], "output_id": "image"}]
+        settings = {"columns": args.grid[0], "rows": args.grid[1], "tile_size": args.tile_size,
+                    "margin": args.margin, "padding": args.padding, "layout": args.layout,
+                    "collider": args.collider, "pixels_per_unit": args.pixels_per_unit,
+                    "transition_masks": args.transition_mask}
+        for tile in result["tiles"]:
+            register_artifact(manifest, asset["id"], f"tiles.{tile['index']:03d}", "image.tile",
+                              (result["directory"] / tile["path"]).relative_to(root).as_posix(),
+                              derived_from=derived_from,
+                              provenance={"processor": "slopforge.tileset", **settings, **tile},
+                              approval_status="approved")
+        for artifact_id, artifact_type, path in (("tiles.atlas", "image.tile_atlas", result["atlas"]),
+                                                  ("tiles.metadata", "data.tileset", result["metadata"])):
+            register_artifact(manifest, asset["id"], artifact_id, artifact_type,
+                              path.relative_to(root).as_posix(), derived_from=derived_from,
+                              provenance={"processor": "slopforge.tileset", **settings},
+                              approval_status="approved")
+        asset["tileset"] = {"directory": result["directory"].relative_to(root).as_posix(), **settings}
+        save_manifest(manifest_path, manifest)
+        if args.unity_assets:
+            _create_unity_tiles(root, manifest_path, manifest, asset, settings)
+        print(result["directory"])
+        return 0
+
+    if args.command == "tile-unity":
+        asset = find_asset(manifest, args.name)
+        if asset.get("type") != "tile_sheet" or asset.get("status") != "ready" or not asset.get("tileset"):
+            raise ValueError("tile-unity requires a tile_sheet asset already processed with tilepack")
+        paths = _create_unity_tiles(root, manifest_path, manifest, asset, asset["tileset"])
+        print("\n".join(path.relative_to(root).as_posix() for path in paths))
+        return 0
 
     types = load_taxonomy(root)
     style = load_style(root, config)

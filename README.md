@@ -121,6 +121,8 @@ For VFX sprite-sheet recipes, deterministic frame extraction, and optional Unity
 
 For modular 3D environment recipes and measured grid/pivot checks, see [environment kits](docs/ENVIRONMENT-KITS.md).
 
+For terrain, path, transition, isometric, and Unity Tile assets, see [tileset packs](docs/TILESET-PACKS.md).
+
 ## Generate a coordinated pack
 
 Project recipes compose existing atomic pipelines. Start with the installed sample and review its children using the normal commands:
