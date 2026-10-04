@@ -96,6 +96,8 @@ TRELLIS.2 profiles use the models from [Comfy-Org TRELLIS.2](https://huggingface
 
 Project workflows in `ai/workflows/` override bundled workflow files. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, workflow node availability, and configured workflow paths. It remains read-only.
 
+Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
+
 ## Integration checks
 
 Normal unit tests use mocked HTTP and need no running ComfyUI:

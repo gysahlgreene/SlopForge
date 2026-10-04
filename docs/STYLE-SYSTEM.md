@@ -16,6 +16,21 @@ Approving a 2D candidate restores that candidate's semantic description, style i
 
 Material prompts request a flat surface without standalone objects, perspective, text, cast shadows, or baked lighting. Physical prop requirements remain in concept prompts; concept art is not projected into the material. The normal map derives from the generated surface's luminance. Roughness, metallic, and emission use prompt-guided heuristics, so these maps are not physically accurate and textures are not guaranteed seamless.
 
-Put approved references under `ai/styles/<key>/references/approved/` and tentative images under `references/candidates/`. The current `text_only` conditioning records no references as used. Switching to `reference` is rejected until a workflow actually consumes reference images.
+Put approved references under `ai/styles/<key>/references/approved/`; category folders such as `characters/`, `props/`, or `materials/` are supported. Tentative images belong under `references/candidates/`. Text-only remains the default. To enable reference conditioning, configure the slots for the selected image workflow in `ai/project.yaml`:
+
+```yaml
+asset_pipeline:
+  conditioning:
+    strategy: reference
+    max_references: 2
+    strength: 0.7
+    workflow_inputs:
+      - image: {node: "12", input: image}
+        strength: {node: "18", input: strength}
+      - image: {node: "13", input: image}
+        strength: {node: "19", input: strength}
+```
+
+Each slot maps one uploaded image and optionally its strength into existing workflow inputs. Node IDs and input names must match the API-format graph. Generate with explicit files or category groups, for example `slopforge generate icon moon_badge "Lunar refinery insignia" --reference-category icons` or repeat `--reference path/to/approved.png`. Only images under the selected style's approved reference library are accepted. Candidate provenance records each used reference and strength. Reference mode with a text-only graph or missing mapping fails clearly before queueing.
 
 Taxonomy rules live in `ai/asset_types/*.yaml`. Add a type definition with `name`, `pipeline`, `output_folder`, `requirements`, and `avoid`; 3D types also select a `face_budget` key. The command discovers these files instead of maintaining a hard-coded type list.

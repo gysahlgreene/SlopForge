@@ -42,6 +42,9 @@ def parser():
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
     generate.add_argument("--dry-run", action="store_true", help="Print the style-injected prompt without inference")
+    generate.add_argument("--reference", action="append", dest="reference_paths", help="Approved style reference image (repeatable)")
+    generate.add_argument("--reference-category", action="append", dest="reference_categories",
+                          help="Select approved references from a category folder (repeatable)")
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
@@ -561,9 +564,13 @@ def _run(args):
 
     try:
         generated = (image.generate(root, config, recipe, style, args.name, args.description,
-                                    count, manifest, key, generation_prompt=prompt_text) if recipe["pipeline"] == "image" else
+                                    count, manifest, key, generation_prompt=prompt_text,
+                                    reference_paths=getattr(args, "reference_paths", None),
+                                    reference_categories=getattr(args, "reference_categories", None)) if recipe["pipeline"] == "image" else
                      model.generate(root, config, recipe, style, args.name, args.description,
-                                    count, manifest, key, generation_prompt=prompt_text))
+                                    count, manifest, key, generation_prompt=prompt_text,
+                                    reference_paths=getattr(args, "reference_paths", None),
+                                    reference_categories=getattr(args, "reference_categories", None)))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"
