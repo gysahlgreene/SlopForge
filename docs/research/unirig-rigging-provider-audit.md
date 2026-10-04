@@ -1,10 +1,12 @@
-# Automatic rigging provider audit: UniRig and SkinTokens
+# Automatic rigging provider audit: Rigify, UniRig, and SkinTokens
 
 **Checked:** 2026-10-04. Sources below are first-party repositories/model cards, the authors’ papers, or platform documentation. This is a compatibility and license inventory, not an inference test or legal opinion.
 
 ## Finding
 
-Use **SkinTokens / TokenRig** as the first candidate for issue #14’s optional automatic-rigging provider; do not start a new integration against UniRig alone. The UniRig maintainers identify SkinTokens as its successor. SkinTokens combines skeleton and skin-weight prediction, publishes inference code and checkpoints, and documents an NVIDIA GPU requirement of 14 GB. UniRig remains a useful reference/fallback because it has an MIT codebase and explicit staged skeleton/skin/merge commands, but its current README says checkpoint releases are progressive and its model card is internally inconsistent about which components/checkpoints are actually available.
+SlopForge now has an opt-in local rigging path through Blender's bundled **Rigify** add-on. It has no model weights or separate runtime and was exercised with a synthetic Blender humanoid fixture. It is a bounds-fitted humanoid heuristic, not a learned provider; the smoke test does not establish quality on generated characters. See [3D character rigging](../CHARACTER-RIGGING.md).
+
+For a learned provider, **SkinTokens / TokenRig** remains the first candidate for a separate opt-in integration; the UniRig maintainers identify it as UniRig's successor. SkinTokens combines skeleton and skin-weight prediction, publishes inference code and checkpoints, and documents an NVIDIA GPU requirement of 14 GB. UniRig remains a useful reference because it has an MIT codebase and explicit staged skeleton/skin/merge commands, but its README says checkpoint releases are progressive and its model card is internally inconsistent about which components/checkpoints are actually available.
 
 This is a candidate, not an approved production provider: neither project establishes reliable deformation for arbitrary SlopForge-generated characters, and dataset/model training-data commercial rights are not fully documented in the reviewed sources. Rig review and explicit user approval must remain in the pipeline.
 

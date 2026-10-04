@@ -20,13 +20,14 @@ from .ui import make_sprite_import_metadata
 from .unity_ui import apply_sprite_settings
 from .unity_vfx import create_particle_prefab
 from .environment import validate_environment_kit
+from .character_rigging import rigify_character
 from .tileset import package_tileset
 from .unity_tiles import create_tile_assets
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "prototype", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "prototype", "environment-check"}
 
 
 def parser():
@@ -146,6 +147,11 @@ def parser():
     animation_commands = animation.add_subparsers(dest="animation_action", required=True)
     check_animation_library = animation_commands.add_parser("validate", help="Validate clip files and retarget metadata")
     check_animation_library.add_argument("name", help="Library name under ai/animation_libraries/")
+    character = sub.add_parser("character", help="Prepare reviewable 3D character rigs")
+    character_commands = character.add_subparsers(dest="character_action", required=True)
+    rig_character = character_commands.add_parser("rig", help="Rig an approved character model with Blender Rigify")
+    rig_character.add_argument("name", help="Tracked character asset name")
+    rig_character.add_argument("--source-output", default="model", help="Approved model artifact id (default: model)")
     prototype = sub.add_parser("prototype", help="Plan and run approval-gated content recipes")
     prototype_commands = prototype.add_subparsers(dest="prototype_action", required=True)
     propose_prototype = prototype_commands.add_parser("propose", help="Write an editable, unapproved content plan")
@@ -190,7 +196,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["prototype"], ["environment-check"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["character"], ["prototype"], ["environment-check"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -610,6 +616,14 @@ def _run(args):
         print(f"Animation library {args.name}: {len(library['clips'])} valid clip(s), {library['skeleton_type']} skeleton")
         for clip in library["clips"]:
             print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
+        return 0
+
+    if args.command == "character":
+        result = rigify_character(root, config, manifest, args.name, source_output=args.source_output)
+        save_manifest(manifest_path, manifest)
+        print(f"Character {args.name}: {result['status']}")
+        print(f"Rig candidate: {result['rig_artifact']['path']}")
+        print("Review the rig and six pose images before approving it.")
         return 0
 
     if args.command == "prototype":
