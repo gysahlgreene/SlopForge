@@ -1,13 +1,17 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from PIL import Image
 
 from slopforge.config import load_project
 from slopforge.initializer import init_project
-from slopforge.pipelines.model import material_candidate_paths, model_paths
+from slopforge.pipelines.model import _native_material_candidate, material_candidate_paths, model_paths
 from slopforge.recipes import load_recipe
 from slopforge.style import build_prompt, load_style
 from slopforge.taxonomy import load_taxonomy
+from slopforge.validation import validate_model_outputs
 
 
 class CharacterRecipeTests(unittest.TestCase):
@@ -49,6 +53,64 @@ class CharacterRecipeTests(unittest.TestCase):
                          "Assets/Art/Generated/Characters/moon_scout/Source/moon_scout.glb")
         self.assertEqual(candidate["directory"].relative_to(self.root).as_posix(),
                          "ai/assets/candidates/character/moon_scout/material_01")
+        self.assertEqual(character["max_components"], 64)
+
+    def test_fragmented_character_mesh_exceeds_its_component_budget(self):
+        result = validate_model_outputs(
+            {}, {"measured": {"component_count": 1189}},
+            max_components=64,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("component count 1189 exceeds budget 64", result["errors"])
+
+    def test_nonmanifold_character_mesh_exceeds_its_topology_budget(self):
+        result = validate_model_outputs(
+            {}, {"measured": {"nonmanifold_edge_count": 4168}},
+            max_nonmanifold_edges=0,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("non-manifold edge count 4168 exceeds budget 0", result["errors"])
+
+    def test_character_topology_budgets_fail_closed_without_inspection_metrics(self):
+        result = validate_model_outputs(
+            {}, {"measured": {}}, max_components=64, max_nonmanifold_edges=0,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("component count was not measured", result["errors"])
+        self.assertIn("non-manifold edge count was not measured", result["errors"])
+
+    def test_native_character_candidate_fails_when_fragmented_mesh_exceeds_budget(self):
+        config = load_project(self.root)
+        character = load_taxonomy(self.root)["character"]
+        asset = {"name": "scout", "source": {"glb": "scout.glb", "processed_mesh": "processed.blend"},
+                 "description": "Lunar scout"}
+        (self.root / "scout.glb").write_bytes(b"glb")
+        texture_names = {key: f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
+        for filename in texture_names.values():
+            Image.new("RGB", (8, 8), "gray").save(self.root / filename)
+
+        def process_model(_root, _config, _source, fbx, blend, _textures, _budget, **options):
+            fbx.write_bytes(b"fbx")
+            blend.write_bytes(b"blend")
+            preview_dir = Path(options["preview_dir"])
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            for view in ("front", "side", "rear"):
+                Image.new("RGB", (8, 8), "gray").save(preview_dir / f"scout_{view}.png")
+
+        with patch("slopforge.pipelines.model.process_model", side_effect=process_model), \
+                patch("slopforge.pipelines.model.inspect_model", return_value={
+                    "status": "passed_with_warnings", "errors": [], "warnings": [],
+                    "measured": {"face_count": 100, "component_count": 1189,
+                                 "nonmanifold_edge_count": 4168}}):
+            result = _native_material_candidate(
+                self.root, config, character, asset, 1, {"textures": texture_names})
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("component count 1189 exceeds budget 64", result["validation"]["errors"])
+        self.assertIn("non-manifold edge count 4168 exceeds budget 0", result["validation"]["errors"])
 
 
 if __name__ == "__main__":

@@ -34,7 +34,8 @@ def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=5
     return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "checks": checks, "errors": errors, "warnings": warnings, "measured": measured}
 
 
-def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None):
+def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None, max_components=None,
+                           max_nonmanifold_edges=None):
     errors, warnings = [], []
     root = Path(project_root).resolve() if project_root else None
     measured = {key: (Path(path).resolve().relative_to(root).as_posix() if root and Path(path).resolve().is_relative_to(root) else str(path)) for key, path in paths.items()}
@@ -48,8 +49,24 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         warnings.extend(inspection.get("warnings", []))
         if face_budget and inspection.get("measured", {}).get("face_count", 0) > face_budget:
             errors.append(f"face count exceeds budget {face_budget}")
+        component_count = inspection.get("measured", {}).get("component_count")
+        if max_components is not None:
+            if component_count is None:
+                errors.append("component count was not measured")
+            elif component_count > max_components:
+                errors.append(f"component count {component_count} exceeds budget {max_components}")
+        nonmanifold_edge_count = inspection.get("measured", {}).get("nonmanifold_edge_count")
+        if max_nonmanifold_edges is not None:
+            if nonmanifold_edge_count is None:
+                errors.append("non-manifold edge count was not measured")
+            elif nonmanifold_edge_count > max_nonmanifold_edges:
+                errors.append(f"non-manifold edge count {nonmanifold_edge_count} exceeds budget {max_nonmanifold_edges}")
     else:
         warnings.append("Blender mesh inspection did not run")
+        if max_components is not None:
+            errors.append("component count was not measured")
+        if max_nonmanifold_edges is not None:
+            errors.append("non-manifold edge count was not measured")
     return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "errors": errors, "warnings": warnings, "measured": measured}
 
 

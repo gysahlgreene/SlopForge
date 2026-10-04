@@ -98,7 +98,9 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                         "preview_front", "preview_side", "preview_rear")}
-        candidate["validation"] = validate_model_outputs(check_paths, inspection, face_budget, root)
+        candidate["validation"] = validate_model_outputs(check_paths, inspection, face_budget, root,
+            max_components=asset_type.get("max_components"),
+            max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"))
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
         candidate["outputs"] = _relative_outputs(root, paths, check_paths)
@@ -129,7 +131,9 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
             "preview_front", "preview_side", "preview_rear")
-    validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root)
+    validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root,
+        max_components=asset_type.get("max_components"),
+        max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
             "status": "candidate" if validation["status"] != "failed" else "failed",
