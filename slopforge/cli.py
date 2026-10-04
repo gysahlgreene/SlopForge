@@ -12,11 +12,12 @@ from .manifest import asset_key, find_asset, load_manifest, new_record, save_man
 from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from .pipelines.primitive import register_primitive
+from . import recipes
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt"}
+COMMANDS = {"init", "make", "generate", "candidates", "approve", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe"}
 
 
 def parser():
@@ -66,12 +67,24 @@ def parser():
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
+
+    recipe = sub.add_parser("recipe", help="Run or resume a project asset recipe")
+    recipe_commands = recipe.add_subparsers(dest="recipe_action", required=True)
+    recipe_commands.add_parser("list", help="List recipe definitions and tracked runs")
+    run_recipe = recipe_commands.add_parser("run", help="Create a recipe run and generate its children")
+    run_recipe.add_argument("recipe_name")
+    run_recipe.add_argument("--name", help="Unique name for this pack instance")
+    resume_recipe = recipe_commands.add_parser("resume", help="Continue incomplete recipe stages")
+    resume_recipe.add_argument("name", help="Recipe instance name")
+    regenerate = recipe_commands.add_parser("regenerate", help="Generate new candidates for one recipe child")
+    regenerate.add_argument("name", help="Recipe instance name")
+    regenerate.add_argument("child_id", help="Child id from the recipe definition")
     return root
 
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -427,6 +440,30 @@ def _run(args):
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
     manifest = load_manifest(manifest_path)
+
+    if args.command == "recipe":
+        if args.recipe_action == "list":
+            for name in recipes.list_recipes(root):
+                print(f"definition\t{name}")
+            for record in manifest["assets"].values():
+                if record.get("type") == "recipe" and "recipe_instance" in record:
+                    print(f"run\t{record['name']}\t{record.get('status')}")
+            return 0
+        persist = lambda current: save_manifest(manifest_path, current)
+        if args.recipe_action == "run":
+            record = recipes.run_recipe(root, config, style, types, manifest, args.recipe_name,
+                                        instance_name=args.name, save=persist)
+        elif args.recipe_action == "resume":
+            record = recipes.resume_recipe(root, config, style, types, manifest, args.name, save=persist)
+        else:
+            record = recipes.regenerate_child(root, config, style, types, manifest,
+                                              args.name, args.child_id, save=persist)
+        stages = record["recipe_instance"]["stages"]
+        print(f"Recipe {record['name']}: {record['status']}")
+        for child_id, stage in stages.items():
+            detail = f" ({'; '.join(stage['errors'])})" if stage.get("errors") else ""
+            print(f"  {child_id}: {stage['status']}{detail}")
+        return 2 if record["status"] == "partial" else 0
 
     if args.command == "prompt":
         asset_type = canonical_type(args.asset_type, types)

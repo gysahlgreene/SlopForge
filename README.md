@@ -111,11 +111,25 @@ slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 1
 
 For mesh-aware TRELLIS.2 materials, put the desired part colors in `--image-prompt`; revise and regenerate the concept if the material design needs to change. For the Hunyuan3D swatch route, `retexture` can create new all-over surface candidates on the saved mesh. In both routes, the agent should inspect front, side, and rear previews and validation warnings, then ask you to choose before `approve-texture`. Unity material export requires Unity project metadata and the Unity CLI. The guided `make` flow remains available for interactive use.
 
+## Generate a coordinated pack
+
+Project recipes compose existing atomic pipelines. Start with the installed sample and review its children using the normal commands:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe list
+slopforge --project ~/UnityProjects/MyGame recipe run starter_icons --name first_hud
+slopforge --project ~/UnityProjects/MyGame candidates first_hud_health
+slopforge --project ~/UnityProjects/MyGame recipe resume first_hud
+```
+
+Recipe stages can resume after interruption; `recipe regenerate <instance> <child-id>` targets one child. See [docs/RECIPES.md](docs/RECIPES.md).
+
 ## Example projects and workflows
 
 See [docs/EXAMPLES.md](docs/EXAMPLES.md) for practical examples of:
 
 - inventory icon generation
+- recipe-based packs
 - environmental props
 - style-pack switching
 - candidate review and approval loops
@@ -123,7 +137,7 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for practical examples of:
 
 ## Architecture
 
-- `slopforge/`: the Python package for the project-aware CLI, config, taxonomy, style prompts, manifest, candidate handling, validation, and pipelines.
+- `slopforge/`: the Python package for the project-aware CLI, config, taxonomy, style prompts, manifest, recipe runner, candidate handling, validation, and pipelines.
 - `processing/`: ComfyUI API calls, 3D input preparation, and PBR maps.
 - `blender/`: GLB-to-Blend/FBX processing and Blender-based model inspection.
 - `workflows/`: bundled ComfyUI API graph defaults.
@@ -147,7 +161,7 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Configuration and diagnostics
 
-Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
+Use `slopforge --project PATH styles`, `assets`, `inspect NAME`, `recipe list`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
 
 ## Current limitations
 
