@@ -13,7 +13,7 @@ from .manifest import asset_key, find_asset, load_manifest, new_record, register
 from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from .pipelines.primitive import register_primitive
-from . import recipes
+from . import recipes, prototypes
 from .exploration import parse_variations, promote_candidate
 from .spritepack import package_sprite_sheet
 from .ui import make_sprite_import_metadata
@@ -26,7 +26,7 @@ from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "tilepack", "tile-unity", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "prototype", "environment-check"}
 
 
 def parser():
@@ -146,6 +146,25 @@ def parser():
     animation_commands = animation.add_subparsers(dest="animation_action", required=True)
     check_animation_library = animation_commands.add_parser("validate", help="Validate clip files and retarget metadata")
     check_animation_library.add_argument("name", help="Library name under ai/animation_libraries/")
+    prototype = sub.add_parser("prototype", help="Plan and run approval-gated content recipes")
+    prototype_commands = prototype.add_subparsers(dest="prototype_action", required=True)
+    propose_prototype = prototype_commands.add_parser("propose", help="Write an editable, unapproved content plan")
+    propose_prototype.add_argument("name")
+    propose_prototype.add_argument("description")
+    propose_prototype.add_argument("--recipe", action="append", dest="recipe_names",
+                                   help="Recipe to include (repeatable; defaults to all project recipes)")
+    propose_prototype.add_argument("--quality-tier", choices=("draft", "normal", "final"), default="draft")
+    propose_prototype.add_argument("--candidate-budget", type=int, default=100)
+    approve_prototype = prototype_commands.add_parser("approve", help="Approve the current on-disk plan")
+    approve_prototype.add_argument("name")
+    for action, help_text in (("run", "Run approved stages until a review gate"),
+                              ("resume", "Resume after approving recipe outputs")):
+        command = prototype_commands.add_parser(action, help=help_text)
+        command.add_argument("name")
+    regenerate_prototype = prototype_commands.add_parser("regenerate", help="Regenerate one recipe child")
+    regenerate_prototype.add_argument("name")
+    regenerate_prototype.add_argument("stage")
+    regenerate_prototype.add_argument("child_id")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -171,7 +190,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["environment-check"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["tilepack"], ["tile-unity"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["prototype"], ["environment-check"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -592,6 +611,48 @@ def _run(args):
         for clip in library["clips"]:
             print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
         return 0
+
+    if args.command == "prototype":
+        types = load_taxonomy(root)
+        style = load_style(root, config)
+        if args.prototype_action == "propose":
+            plan = prototypes.propose(root, args.name, args.description, style, types, config,
+                                      recipe_names=args.recipe_names, quality_tier=args.quality_tier,
+                                      candidate_budget=args.candidate_budget)
+            path = prototypes.plan_path(root, args.name)
+            print(f"Proposed {len(plan['stages'])} stage(s), {len(plan['content_plan'])} content item(s), "
+                  f"about {plan['estimated_candidates']} estimated candidate(s) against budget {plan['candidate_budget']}: "
+                  f"{path.relative_to(root)}")
+            print("Review/edit the plan, then run `slopforge prototype approve", args.name + "`.")
+            return 0
+        if args.prototype_action == "approve":
+            plan = prototypes.approve(root, args.name)
+            print(f"Approved prototype plan {args.name} ({len(plan['stages'])} stages)")
+            return 0
+        if args.prototype_action == "regenerate":
+            plan = prototypes.load_plan(root, args.name)
+            if plan.get("approval", {}).get("status") != "approved":
+                raise ValueError("Prototype plan must be explicitly approved before regeneration")
+            key = asset_key("prototype", args.name)
+            prototype = manifest["assets"].get(key)
+            if not prototype:
+                raise KeyError(f"No prototype run named {args.name!r}")
+            stage = prototype["prototype"]["stages"].get(args.stage)
+            if not stage:
+                raise KeyError(f"Prototype has no stage {args.stage!r}")
+            if any(prototype["prototype"]["stages"][dependency]["status"] != "approved"
+                   for dependency in stage["depends_on"]):
+                raise ValueError("Prototype stage dependencies require approved outputs before regeneration")
+            recipes.regenerate_child(root, config, style, types, manifest, stage["instance"], args.child_id,
+                                     save=lambda current: save_manifest(manifest_path, current))
+            stage["status"] = "awaiting_approval"
+        result = prototypes.run(root, config, style, types, manifest, args.name,
+                                save=lambda current: save_manifest(manifest_path, current))
+        print(f"Prototype {args.name}: {result['status']}")
+        for stage_id, stage in result["prototype"]["stages"].items():
+            detail = f" ({'; '.join(stage['errors'])})" if stage.get("errors") else ""
+            print(f"  {stage_id}: {stage['status']}{detail}")
+        return 2 if result["status"] == "partial" else 0
 
     if args.command == "review":
         from .review import generate_review_board

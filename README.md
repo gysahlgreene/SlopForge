@@ -138,6 +138,7 @@ slopforge --project ~/UnityProjects/MyGame recipe resume first_hud
 ```
 
 Recipe stages can resume after interruption; `recipe regenerate <instance> <child-id>` targets one child. See [docs/RECIPES.md](docs/RECIPES.md).
+For an editable, approval-gated plan that composes multiple recipes, see [prototype plans](docs/PROTOTYPES.md).
 
 ## Example projects and workflows
 
