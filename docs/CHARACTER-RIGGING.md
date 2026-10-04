@@ -1,6 +1,16 @@
 # 3D character rigging
 
-Rigging is a separate character stage; prop cleanup does not create a deformable skeleton. Provider outputs can be recorded with `slopforge.character_rigging.record_rigging_result()` as typed artifacts on a `character` manifest asset. The result names an already approved source output, a project-relative FBX or GLB, optional PNG pose evidence, skeleton-name mapping, and provider provenance (`name`, `version`, `source`, and `license`). Registered rig and evidence artifacts remain candidates pending human review.
+Rigging is a separate character stage; prop cleanup does not create a deformable skeleton. New projects include a first-class `character` model type and the `character_3d_pack` recipe. It generates one full-body neutral A-pose concept, runs the selected 3D model workflow, and records a reviewable model on a character asset. Configure the rigging provider with `asset_pipeline.character_rigging_provider` (`blender_rigify` is the current provider).
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run character_3d_pack --name moon_scout
+slopforge --project ~/UnityProjects/MyGame candidates moon_scout_character
+slopforge --project ~/UnityProjects/MyGame approve moon_scout_character 1
+slopforge --project ~/UnityProjects/MyGame approve-texture moon_scout_character 1
+slopforge --project ~/UnityProjects/MyGame character rig moon_scout_character
+```
+
+Provider outputs can be recorded with `slopforge.character_rigging.record_rigging_result()` as typed artifacts on a `character` manifest asset. The result names an already approved source output, a project-relative FBX or GLB, optional PNG pose evidence, skeleton-name mapping, and provider provenance (`name`, `version`, `source`, and `license`). Registered rig and evidence artifacts remain candidates pending human review.
 
 The recorder rejects paths outside the project, missing/empty exports, unapproved source artifacts, unsupported mesh formats, invalid evidence images, and incomplete provider license metadata. It records missing recommended pose evidence without pretending the rig passed deformation checks. Suggested evidence poses are T-pose, raised arms, crouch, leg lift, elbow bend, and shoulder rotation.
 
@@ -12,4 +22,6 @@ The provider uses the installed Blender executable and its bundled code; no extr
 
 This is a fitting heuristic, not general-purpose automatic rigging. It expects an upright, mostly watertight humanoid whose proportions fit Blender's human metarig; bounds-based fitting cannot place joints reliably for arbitrary anatomy. Vertex welding can alter the mesh slightly. The synthetic Blender integration smoke verifies execution, weighting, export, and pose motion, but does not establish quality on generated SlopForge characters. Inspect the source, rig, and all six pose renders before approval; pose images and nonzero displacement do not establish acceptable deformations or Unity Humanoid compatibility.
 
-Issue #14 remains partial: SlopForge still lacks a dedicated 3D identity/model-generation recipe and representative generated-character validation. Rigify does not generate the character model.
+The recipe reuses SlopForge's configurable image-to-3D model provider; it does not guarantee anatomical correctness, an animation-ready pose, or a closed manifold. Rigify remains a bounds-fitted humanoid heuristic and rejects open/non-manifold input instead of silently filling holes. Until a representative generated character completes the rigging path and passes deformation review, treat the result as experimental and do not approve it automatically. UniRig/SkinTokens remain optional-provider research because the upstream checkpoint license does not settle commercial training-data rights; see [the provider audit](research/unirig-rigging-provider-audit.md).
+
+The H100 character smoke on 2026-10-04 produced a TRELLIS.2 BF16 scout mesh with 1,189 disconnected components and visible missing surfaces in the three-view review. It was kept unapproved and was not rigged. A Hunyuan3D comparison produced a more complete single-component mesh, but Rigify rejected both its GLB and prepared FBX with 4,168 open/non-manifold edges after welding. Its neutral-gray review renders do not verify texture coverage; no rig or deformation evidence was produced. The user-provided ComfyUI-UniRig wrapper was audited but not installed: its isolated CUDA dependency set is unpinned and has not been verified on the live H100's PyTorch 2.14/CUDA 13 environment. The audit explains the compatibility and model-data-rights limits. Issue #14 remains open pending a representative character that can be skinned and passes deformation and material review.

@@ -1,0 +1,15 @@
+name: character
+pipeline: model
+output_folder: Characters
+face_budget: character_faces
+prompt_mode: character
+requirements:
+  - one full-body humanoid character on a plain background
+  - a distinctive identity, silhouette, outfit, and material palette suited to the asset description
+  - neutral A-pose with separated arms and legs for deformation and skinning
+  - clear head, torso, pelvis, limb, hand, and foot silhouettes
+  - one coherent character mesh with plausible anatomy and game-ready detail
+  - consistent identity, outfit, materials, and proportions
+avoid:
+  - action pose, crossed limbs, cropped extremities, multiple characters
+  - props fused to the body, capes, loose straps, detached pieces, text, pedestal, floor

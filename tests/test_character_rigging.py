@@ -3,7 +3,7 @@ from PIL import Image
 import unittest
 from pathlib import Path
 
-from slopforge.character_rigging import record_rigging_result, resolve_rigging_source
+from slopforge.character_rigging import record_rigging_result, resolve_rigging_source, run_character_rigging
 from slopforge.manifest import new_record, register_artifact
 
 
@@ -79,6 +79,11 @@ class CharacterRiggingTests(unittest.TestCase):
         artifact["approval"]["status"] = "pending"
         with self.assertRaisesRegex(ValueError, "approved"):
             resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+
+    def test_unknown_configured_provider_fails_with_available_provider(self):
+        config = {"asset_pipeline": {"character_rigging_provider": "unknown_provider"}}
+        with self.assertRaisesRegex(ValueError, "available provider: blender_rigify"):
+            run_character_rigging(self.root, config, self.manifest, "character:pilot")
 
 
 if __name__ == "__main__":

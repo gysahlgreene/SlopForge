@@ -20,6 +20,9 @@ asset_pipeline:
     hero_prop_faces: 60000
     architecture_faces: 60000
     collectible_faces: 20000
+    character_faces: 60000
+
+  character_rigging_provider: blender_rigify
 
   workflows:
     image: image_text2img_api.json

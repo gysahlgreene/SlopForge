@@ -1,0 +1,9 @@
+id: character_3d_pack
+version: 1
+description: Generate one rig-ready, reviewable 3D humanoid character.
+quality_tier: normal
+children:
+  - id: character
+    type: character
+    description: A full-body humanoid character prepared for rigging and prototype use.
+    count: 1
