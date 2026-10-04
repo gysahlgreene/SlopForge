@@ -56,12 +56,16 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1],export_format='GLB')
 bpy.ops.wm.open_mainfile(filepath={str(blend)!r})
 mesh=next(o.data for o in bpy.context.scene.objects if o.type=='MESH')
 uvs=[tuple(loop.uv) for loop in mesh.uv_layers.active.data]
-components=runpy.run_path({str(ROOT / 'blender/inspect_model.py')!r})['connected_components'](mesh)
-json.dump({{'uv_min':[min(p[i] for p in uvs) for i in (0,1)],'uv_max':[max(p[i] for p in uvs) for i in (0,1)],'components':len(components)}},open({str(result)!r},'w'))
+inspector=runpy.run_path({str(ROOT / 'blender/inspect_model.py')!r})
+components=inspector['connected_components'](mesh)
+boundary, nonmanifold=inspector['topology_edge_counts'](mesh, 1e-5)
+json.dump({{'uv_min':[min(p[i] for p in uvs) for i in (0,1)],'uv_max':[max(p[i] for p in uvs) for i in (0,1)],'components':len(components),'boundary_edges':boundary,'nonmanifold_edges':nonmanifold}},open({str(result)!r},'w'))
 ''')
             subprocess.run([BLENDER, "--background", "--python", str(snapshot)], check=True, capture_output=True)
             data = json.loads(result.read_text())
             self.assertEqual(data["components"], 1)
+            self.assertEqual(data["boundary_edges"], 0)
+            self.assertEqual(data["nonmanifold_edges"], 0)
             for actual, expected in zip(data["uv_min"] + data["uv_max"], (0.4,0.2,0.5,0.3)):
                 self.assertAlmostEqual(actual, expected, places=5)
 

@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 import bpy
+import bmesh
 from mathutils import Vector
 
 
@@ -53,6 +54,16 @@ def connected_components(mesh):
     return sorted((size[i] for i in range(len(parent)) if find(i) == i), reverse=True)
 
 
+def topology_edge_counts(mesh, weld_distance):
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=weld_distance)
+    boundary_edges = sum(edge.is_boundary for edge in bm.edges)
+    nonmanifold_edges = sum(not edge.is_manifold for edge in bm.edges)
+    bm.free()
+    return boundary_edges, nonmanifold_edges
+
+
 def inspect(blend, face_budget):
     errors, warnings = [], []
     bpy.ops.wm.open_mainfile(filepath=str(blend))
@@ -78,6 +89,10 @@ def inspect(blend, face_budget):
     scales_applied = all(all(abs(value - 1.0) < 1e-4 for value in obj.scale) and all(abs(value) < 1e-4 for value in obj.rotation_euler) for obj in objects)
     component_sizes = [connected_components(obj.data) for obj in objects]
     components = sum(len(sizes) for sizes in component_sizes)
+    weld_distance = max(dimensions) * 1e-5
+    topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
+    boundary_edges = sum(item[0] for item in topology_edges)
+    nonmanifold_edges = sum(item[1] for item in topology_edges)
     object_bounds = []
     for obj in objects:
         points = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
@@ -92,7 +107,8 @@ def inspect(blend, face_budget):
                 "objects": object_bounds,
                 "uv_layers": uv_layers, "material_count": len(materials), "image_texture_count": len(image_nodes),
                 "missing_textures": missing_textures, "transforms_applied": scales_applied,
-                "component_count": components, "face_budget": face_budget}
+                "component_count": components, "boundary_edge_count": boundary_edges,
+                "nonmanifold_edge_count": nonmanifold_edges, "face_budget": face_budget}
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:
