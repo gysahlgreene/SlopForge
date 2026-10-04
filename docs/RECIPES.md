@@ -2,6 +2,8 @@
 
 Project recipes live in `ai/recipes/<id>.yaml`. `slopforge init` installs a small `starter_icons` example. A recipe describes atomic children, their asset types, optional prompt/count overrides, and dependency ordering; omitted counts use the project's existing image/model candidate defaults. The runner calls the existing image or model pipeline registered for each child type. Unsupported pipeline types fail validation before creating a recipe run.
 
+An image or model child can optionally set `reference_library: character/alice`. The library is resolved from `ai/libraries/` and its entries are used through the normal conditioning pipeline; the selected project workflow still determines how those references affect generation.
+
 ```yaml
 id: starter_icons
 version: 1

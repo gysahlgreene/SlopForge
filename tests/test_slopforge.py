@@ -61,6 +61,7 @@ class SlopForgeTests(unittest.TestCase):
         init_project(target)
         self.assertTrue((target / "ai/project.yaml").is_file())
         self.assertTrue((target / "ai/recipes/starter_icons.yaml").is_file())
+        self.assertTrue((target / "ai/libraries").is_dir())
         self.assertTrue((target / "ai/styles/default/references/approved").is_dir())
         self.assertTrue((target / "ai/workflows").is_dir())
         self.assertTrue((target / "Assets/Art/Generated/Models").is_dir())
@@ -597,6 +598,23 @@ class SlopForgeTests(unittest.TestCase):
         conditioning = resolve_conditioning(self.root, config, load_style(self.root, config))
         with self.assertRaisesRegex(NotImplementedError, "workflow_inputs"):
             ensure_supported(conditioning)
+
+    def test_library_cli_lists_and_shows_resolved_membership(self):
+        import yaml
+        from io import StringIO
+        (self.root / "ai/libraries/character").mkdir(parents=True)
+        (self.root / "ai/libraries/character/alice.yaml").write_text(yaml.safe_dump({
+            "kind": "character", "name": "Alice", "entries": [{"id": "portrait", "path": "missing.png"}],
+        }))
+        (self.root / "ai/styles/plain/style.yaml").unlink()
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cli_main(["--project", str(self.root), "library", "list"]), 0)
+        self.assertEqual(output.getvalue().strip(), "character/alice")
+        output = StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cli_main(["--project", str(self.root), "library", "show", "character/alice"]), 0)
+        self.assertEqual(json.loads(output.getvalue())["entries"][0]["status"], "missing")
 
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)

@@ -44,6 +44,7 @@ asset_pipeline:
     strategy: text_only
     max_references: 3
     strength: 0.65
+    workflow_inputs: []
 
   tools:
     comfy_url: http://127.0.0.1:8188

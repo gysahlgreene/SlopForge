@@ -33,4 +33,6 @@ asset_pipeline:
 
 Each slot maps one uploaded image and optionally its strength into existing workflow inputs. Node IDs and input names must match the API-format graph. Generate with explicit files or category groups, for example `slopforge generate icon moon_badge "Lunar refinery insignia" --reference-category icons` or repeat `--reference path/to/approved.png`. Only images under the selected style's approved reference library are accepted. Candidate provenance records each used reference and strength. Reference mode with a text-only graph or missing mapping fails clearly before queueing.
 
+For reusable, manifest-backed or external membership, use project reference libraries such as `character/alice`; see [REFERENCE-LIBRARIES.md](REFERENCE-LIBRARIES.md).
+
 Taxonomy rules live in `ai/asset_types/*.yaml`. Add a type definition with `name`, `pipeline`, `output_folder`, `requirements`, and `avoid`; 3D types also select a `face_budget` key. The command discovers these files instead of maintaining a hard-coded type list.

@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from .manifest import add_dependency, asset_key, new_record, register_artifact, set_parent
+from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
 from .taxonomy import canonical_type, validate_asset_name
 
@@ -64,6 +65,9 @@ def load_recipe(project_root, name, asset_types):
             raise ValueError(f"Recipe child {child['id']!r} count must be positive")
         if child.get("generation_prompt") is not None and not isinstance(child["generation_prompt"], str):
             raise ValueError(f"Recipe child {child['id']!r} generation_prompt must be a string")
+        library = child.get("reference_library")
+        if library is not None and library not in list_libraries(project_root):
+            raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
     return definition, children
 
 
@@ -74,16 +78,18 @@ def list_recipes(project_root):
 
 def _image(root, config, style, asset_type, child, manifest, key):
     count = child.get("count", config["asset_pipeline"]["defaults"]["image_candidates"])
+    references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return image.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
-                          generation_prompt=child.get("generation_prompt"))
+                          generation_prompt=child.get("generation_prompt"), reference_entries=references)
 
 
 def _model(root, config, style, asset_type, child, manifest, key):
     count = child.get("count", config["asset_pipeline"]["defaults"]["model_candidates"])
+    references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
-                          generation_prompt=child.get("generation_prompt"))
+                          generation_prompt=child.get("generation_prompt"), reference_entries=references)
 
 
 PIPELINE_HANDLERS = {"image": _image, "model": _model}
@@ -162,6 +168,13 @@ def _instance_key(instance_name):
 def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, *, instance_name=None, save=None):
     root = Path(project_root).resolve()
     definition, children = load_recipe(root, recipe_name, asset_types)
+    for child in children:
+        if child.get("reference_library"):
+            library = resolve_library(root, child["reference_library"], manifest)
+            invalid = [entry for entry in library["entries"] if entry["status"] != "ready"]
+            if invalid:
+                raise ValueError(f"Recipe reference library {library['id']!r} has missing or changed entries: " +
+                                 ", ".join(entry["id"] for entry in invalid))
     instance_name = instance_name or recipe_name
     recipe_key = _instance_key(instance_name)
     if recipe_key in manifest["assets"]:

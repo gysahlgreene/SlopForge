@@ -21,6 +21,7 @@ def init_project(target, force=False):
 
     project_dirs = [
         "ai/assets", "ai/assets/candidates", "ai/workflows", "ai/asset_types", "ai/recipes",
+        "ai/libraries",
         "ai/styles/default/references/approved", "ai/styles/default/references/candidates",
         ".continue/rules",
         "Assets/Art/Generated/Icons", "Assets/Art/Generated/UI", "Assets/Art/Generated/Props",

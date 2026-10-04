@@ -8,9 +8,9 @@ from ..style import build_prompt
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
-             reference_paths=None, reference_categories=None):
+             reference_paths=None, reference_categories=None, reference_entries=None):
     conditioning = resolve_conditioning(project_root, config, style, reference_paths=reference_paths,
-                                        reference_categories=reference_categories)
+                                        reference_categories=reference_categories, reference_entries=reference_entries)
     ensure_supported(conditioning)
     prompt = generation_prompt or build_prompt(style, asset_type, description, asset_type.get("prompt_mode", "asset"))
     workflow = config["asset_pipeline"]["workflows"].get("image")
