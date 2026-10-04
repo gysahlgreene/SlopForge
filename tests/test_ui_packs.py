@@ -71,6 +71,23 @@ class UIPackTests(unittest.TestCase):
         output_path = self.project / artifact["path"]
         self.assertEqual(json.loads(output_path.read_text())["border"]["left"], 8)
 
+        image_two = self.project / "Assets/Art/Generated/UI/button.png"
+        Image.new("RGBA", (32, 32), "blue").save(image_two)
+        asset_two = dict(asset)
+        asset_two.update({"id": "button-id", "name": "button", "outputs": {"image": "Assets/Art/Generated/UI/button.png"},
+                          "artifacts": {}, "sprite_animations": {}})
+        manifest = load_manifest(manifest_path)
+        manifest["assets"]["ui:button"] = asset_two
+        save_manifest(manifest_path, manifest)
+        args = ["--project", str(self.project), "ui-meta", "button", "--apply", "--prefab"]
+        with patch("slopforge.cli.apply_sprite_settings") as apply, patch("sys.stdout", new=io.StringIO()):
+            self.assertEqual(main(args), 0)
+        self.assertTrue(apply.called)
+        self.assertTrue(apply.call_args.kwargs["prefab"])
+        prefab = load_manifest(manifest_path)["assets"]["ui:button"]["artifacts"]["unity.prefab"]
+        self.assertEqual(prefab["type"], "unity.prefab")
+        self.assertEqual(prefab["approval"]["status"], "approved")
+
 
 if __name__ == "__main__":
     unittest.main()

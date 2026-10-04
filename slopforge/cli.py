@@ -16,6 +16,7 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .spritepack import package_sprite_sheet
 from .ui import make_sprite_import_metadata
+from .unity_ui import apply_sprite_settings
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -81,6 +82,8 @@ def parser():
                          default=(0, 0, 0, 0))
     ui_meta.add_argument("--pivot", nargs=2, type=float, metavar=("X", "Y"), default=(0.5, 0.5))
     ui_meta.add_argument("--pixels-per-unit", type=float, default=100)
+    ui_meta.add_argument("--apply", action="store_true", help="Apply settings through the installed Unity Editor")
+    ui_meta.add_argument("--prefab", action="store_true", help="Create a simple UGUI Image prefab (requires --apply)")
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
@@ -612,6 +615,8 @@ def _run(args):
         return 0
 
     if args.command == "ui-meta":
+        if args.prefab and not args.apply:
+            raise ValueError("--prefab requires --apply")
         asset = find_asset(manifest, args.name)
         if asset.get("type") != "ui" or asset.get("status") != "ready":
             raise ValueError("ui-meta requires an approved ui asset")
@@ -634,12 +639,25 @@ def _run(args):
         if output.exists():
             raise FileExistsError(f"UI import metadata already exists: {output}")
         output.write_text(json.dumps(metadata, indent=2) + "\n")
+        if args.apply:
+            try:
+                apply_sprite_settings(root, image_path, output, border=args.border, pivot=args.pivot,
+                                      pixels_per_unit=args.pixels_per_unit, prefab=args.prefab)
+            except Exception:
+                output.unlink(missing_ok=True)
+                raise
         register_artifact(manifest, asset["id"], "unity.sprite_settings", "data.unity_sprite_settings",
                           output.relative_to(root).as_posix(),
                           derived_from=[{"asset_id": asset["id"], "output_id": "image"}],
                           provenance={"processor": "slopforge.ui", "border": metadata["border"],
                                       "pivot": metadata["pivot"], "pixels_per_unit": args.pixels_per_unit},
                           approval_status="approved")
+        if args.prefab:
+            register_artifact(manifest, asset["id"], "unity.prefab", "unity.prefab",
+                              image_path.with_suffix(".prefab").relative_to(root).as_posix(),
+                              derived_from=[{"asset_id": asset["id"], "output_id": "image"}],
+                              provenance={"processor": "slopforge.unity_ui", "sprite_settings": "unity.sprite_settings"},
+                              approval_status="approved")
         save_manifest(manifest_path, manifest)
         print(output)
         return 0
