@@ -14,9 +14,9 @@ CLI → project config + taxonomy + style pack → pipeline → backend
 
 Workflow lookup checks, in order: the exact configured path under the project, `ai/workflows/<configured basename>`, then the bundled `workflows/<configured basename>`. This lets projects override a graph by name while keeping working defaults in the toolkit.
 
-The manifest is JSON schema version 2 and is written atomically. It records semantic descriptions, style version, candidate history/selection, workflow and model metadata when exposed, inputs/outputs, validation measures, warnings, and status. Missing seed or model values remain null. Existing legacy manifests are upgraded while retaining unrecognized source fields under `legacy`.
+The manifest is JSON schema version 3 and is written atomically. It records semantic descriptions, style version, candidate history/selection, workflow and model metadata when exposed, inputs/outputs, validation measures, warnings, and status. Missing seed or model values remain null. Existing legacy manifests are upgraded while retaining unrecognized source fields under `legacy`. Optional typed output records, parent links, and dependencies are described in [Typed asset outputs](ASSET-OUTPUTS.md); current atomic records and their path-only `outputs` map remain supported.
 
-Each new candidate also keeps its semantic description and style fingerprint. Approved image provenance comes from the selected candidate. Model approval rejects a changed active style before processing. These additive fields remain compatible with schema version 2; older candidates retain the metadata available when they were generated.
+Each new candidate also keeps its semantic description and style fingerprint. Approved image provenance comes from the selected candidate. Model approval rejects a changed active style before processing. Additive fields preserve existing candidate and output metadata during schema migration; older candidates retain the metadata available when they were generated.
 
 Candidate generation and 3D processing print flushed stage messages before starting expensive work. Image approval validates a temporary file and replaces the final PNG atomically. Project initialization preserves an existing manifest even with `--force`.
 
