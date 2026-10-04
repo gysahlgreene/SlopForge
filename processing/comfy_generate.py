@@ -6,6 +6,7 @@ import tempfile
 import sys
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -158,6 +159,7 @@ def main():
     if args.metadata:
         quality = json.loads(args.quality) if args.quality else None
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed,
+                                       "workflow_sha256": workflow_sha256(workflow_path),
                                        "prompt_id": prompt_id, "references_used": references_used,
                                        "quality": quality})
 

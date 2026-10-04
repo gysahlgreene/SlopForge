@@ -84,6 +84,8 @@ The bundled TRELLIS profiles use `trellis_2_int8_convrot.safetensors` at 1024-cl
 
 ## Models and workflows
 
+The exact bundled API graphs, input/output capabilities, profile selection, H100 evidence, and remaining provenance limits are listed in the [workflow inventory](WORKFLOWS.md). New inference metadata includes the selected graph's content SHA-256; model weight and custom-node revisions are not currently pinned.
+
 The bundled Z-Image Turbo API workflow references these model names and destinations:
 
 | ComfyUI destination | File | Source |
@@ -92,11 +94,11 @@ The bundled Z-Image Turbo API workflow references these model names and destinat
 | `models/diffusion_models/` | `z_image_turbo_bf16.safetensors` | [Comfy-Org Z-Image Turbo](https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/diffusion_models) |
 | `models/vae/` | `ae.safetensors` | [Comfy-Org Z-Image Turbo](https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/vae) |
 
-The bundled Hunyuan3D workflow requests `hunyuan3d-dit-v2_fp16.safetensors` in `models/checkpoints/`; its source is [Comfy-Org Hunyuan3D](https://huggingface.co/Comfy-Org/hunyuan3D_2.0_repackaged/tree/main/split_files).
+The legacy Hunyuan3D v2 graph is assembled by `processing/comfy_generate_3d.py` when no model workflow is selected. It requests `hunyuan3d-dit-v2_fp16.safetensors` in `models/checkpoints/`; its source is [Comfy-Org Hunyuan3D](https://huggingface.co/Comfy-Org/hunyuan3D_2.0_repackaged/tree/main/split_files). It is not one of the checked-in API JSON workflows.
 
 TRELLIS.2 profiles use the models from [Comfy-Org TRELLIS.2](https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main): `diffusion_models/trellis_2_int8_convrot.safetensors` or `diffusion_models/trellis_2_bf16.safetensors`, `clip_vision/dino_v3_vit_l.safetensors`, and both `vae/trellis_2_{shape,texture}_vae_bf16.safetensors`. Check upstream terms and model availability before downloading.
 
-Project workflows in `ai/workflows/` override bundled workflow files. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, workflow node availability, and configured workflow paths. It remains read-only.
+Project workflows in `ai/workflows/` override bundled workflow files. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, workflow node availability, and configured workflow paths. The doctor preflight does not submit a prompt or test file transfer; use the opt-in integration tests for those checks. It remains read-only.
 
 Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
 

@@ -106,7 +106,7 @@ def run_doctor(project_root=None):
                     report("FAIL", f"{role} model choices", str(exc))
                 else:
                     report("PASS", f"{role} model choices", "required model names are available")
-            report("PASS", "ComfyUI HTTP API", "health, node discovery, input upload, prompt/history, and arbitrary output download")
+            report("PASS", "ComfyUI HTTP API", "health and workflow node discovery available; file transfer and generation are not exercised by doctor")
         except Exception as exc:
             report("WARN", "Workflow node capabilities", str(exc))
     except Exception as exc:

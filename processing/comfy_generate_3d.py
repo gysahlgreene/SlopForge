@@ -11,6 +11,7 @@ import time
 import zlib
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
 
 
@@ -258,8 +259,10 @@ def main():
     if args.metadata:
         args.metadata.parent.mkdir(parents=True, exist_ok=True)
         temporary = args.metadata.with_name(f".{args.metadata.name}.tmp")
+        workflow_digest = workflow_sha256(args.workflow) if args.workflow else None
         temporary.write_text(json.dumps({"workflow": args.workflow.name if args.workflow else "hunyuan3d_image_to_model_api",
                                         "model": models if args.workflow else args.checkpoint, "seed": seed,
+                                        "workflow_sha256": workflow_digest,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")
