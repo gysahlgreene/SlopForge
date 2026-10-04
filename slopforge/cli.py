@@ -13,11 +13,12 @@ from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from .pipelines.primitive import register_primitive
 from . import recipes
+from .exploration import parse_variations, promote_candidate
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
 
 
 def parser():
@@ -47,6 +48,22 @@ def parser():
     generate.add_argument("--reference-category", action="append", dest="reference_categories",
                           help="Select approved references from a category folder (repeatable)")
     generate.add_argument("--reference-library", help="Use ordered references from a project library such as character/alice")
+
+    explore = sub.add_parser("explore", help="Generate deliberate, disposable concept variations")
+    explore.add_argument("asset_type")
+    explore.add_argument("name", help="Unique exploration name, such as relay_ideas")
+    explore.add_argument("description")
+    explore.add_argument("--variation", action="append", required=True,
+                         help="Design variation as dimension=value; repeat dimensions across candidates")
+    explore.add_argument("--quality-tier", help="Quality tier (defaults to draft)")
+    explore.add_argument("--reference", action="append", dest="reference_paths")
+    explore.add_argument("--reference-category", action="append", dest="reference_categories")
+    explore.add_argument("--reference-library")
+
+    promote = sub.add_parser("promote", help="Move an exploration candidate into a tracked production asset")
+    promote.add_argument("exploration")
+    promote.add_argument("candidate", type=int)
+    promote.add_argument("--name", required=True, help="Name for the new tracked asset")
 
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
@@ -103,7 +120,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -457,6 +474,8 @@ def _run(args):
         config["asset_pipeline"]["active_style"] = args._style_key
     if getattr(args, "quality_tier", None):
         config = select_quality_tier(config, args.quality_tier)
+    elif args.command == "explore" and not os.environ.get("SLOPFORGE_QUALITY_TIER"):
+        config = select_quality_tier(config, "draft")
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
     manifest = load_manifest(manifest_path)
@@ -478,6 +497,57 @@ def _run(args):
 
     types = load_taxonomy(root)
     style = load_style(root, config)
+
+    if args.command == "explore":
+        variations = parse_variations(args.variation)
+        asset_type = canonical_type(args.asset_type, types)
+        recipe = types[asset_type]
+        if recipe["pipeline"] == "native":
+            raise ValueError("Unity-native assets do not have image concept candidates to explore")
+        validate_asset_name(args.name)
+        key = asset_key(asset_type, args.name)
+        if key in manifest["assets"]:
+            raise FileExistsError(f"Exploration {args.name!r} already exists")
+        if getattr(args, "reference_library", None) and (args.reference_paths or args.reference_categories):
+            raise ValueError("Choose --reference-library or --reference/--reference-category, not both")
+        reference_entries = None
+        if args.reference_library:
+            from .libraries import resolve_library
+            reference_entries = resolve_library(root, args.reference_library, manifest)["entries"]
+        record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
+        record.update({"generation_mode": "explore", "quality_tier": pipeline["selected_quality_tier"]})
+        manifest["active_style"] = _active_style(style)
+        manifest["assets"][key] = record
+        save_manifest(manifest_path, manifest)
+        prompt_text = build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"))
+        generator = image.generate if recipe["pipeline"] == "image" else model.generate
+        try:
+            generated = generator(root, config, recipe, style, args.name, args.description, len(variations),
+                                  manifest, key, generation_prompt=prompt_text, variations=variations,
+                                  reference_paths=args.reference_paths,
+                                  reference_categories=args.reference_categories,
+                                  reference_entries=reference_entries)
+            save_manifest(manifest_path, manifest)
+        except Exception as exc:
+            record["status"] = "failed"
+            record.setdefault("validation", {"status": "not_run", "warnings": [], "measured": {}})
+            record["validation"].setdefault("warnings", []).append(str(exc))
+            save_manifest(manifest_path, manifest)
+            raise
+        print(f"Explored {len(generated)} deliberate variation(s). Review with: slopforge --project {root} review")
+        return 0
+
+    if args.command == "promote":
+        source = find_asset(manifest, args.exploration)
+        asset_type = canonical_type(source.get("type"), types)
+        recipe = types[asset_type]
+        if recipe["pipeline"] == "native":
+            raise ValueError("Unity-native assets cannot receive generated candidates")
+        record = promote_candidate(root, pipeline["candidate_root"], manifest, args.exploration,
+                                   args.candidate, args.name, recipe, style)
+        save_manifest(manifest_path, manifest)
+        print(f"Promoted to {record['name']}. Review, then approve with: slopforge --project {root} approve {record['name']} 1")
+        return 0
 
     if args.command == "recipe":
         if args.recipe_action == "list":

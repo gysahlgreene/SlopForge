@@ -20,6 +20,7 @@ class ReviewBoardTests(unittest.TestCase):
                            "candidates": {"selected": None, "items": [{"number": 1,
                                "path": "ai/assets/candidates/icon/badge/candidate.png", "status": "candidate",
                                "prompt": "<script>alert('x')</script>", "seed": 123,
+                               "variation": {"silhouette": "wide <unsafe>"},
                                "generator": {"workflow": "z-image.json", "model": "turbo"}},
                                {"number": 2, "path": "missing.png", "status": "failed", "seed": 124}]}}}}
 
@@ -34,6 +35,8 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertIn("pack", html)
         self.assertIn("z-image.json", html)
         self.assertIn("123", html)
+        self.assertIn("silhouette", html)
+        self.assertIn("wide &lt;unsafe&gt;", html)
         self.assertIn("&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;", html)
         self.assertNotIn("<script>alert('x')</script>", html)
         self.assertIn("approve badge 1", html)

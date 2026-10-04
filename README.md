@@ -97,6 +97,8 @@ slopforge --project ~/UnityProjects/MyGame candidates health_potion
 slopforge --project ~/UnityProjects/MyGame approve health_potion 2
 ```
 
+For deliberate draft-tier concept alternatives, use `explore` with labeled `--variation` values, review the board, then `promote` one candidate into a separately named production asset before approving it. See [examples](docs/EXAMPLES.md#explore-alternatives-then-promote-one).
+
 ## Create a 3D asset
 
 ```sh

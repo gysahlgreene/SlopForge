@@ -21,6 +21,23 @@ slopforge --project ~/UnityProjects/MyGame candidates health_potion
 slopforge --project ~/UnityProjects/MyGame approve health_potion 1
 ```
 
+## Explore alternatives, then promote one
+
+Exploration creates a separate candidate set. Each candidate has an explicit design variation; the default tier is `draft`. Workflow resolution is controlled by that tier's project configuration. Review the variations, promote one to a new production name, then use the normal approval path:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame explore prop relay_ideas \
+  "Compact lunar-refinery power relay" \
+  --variation "silhouette=wide, low housing; motif=three concentric rings" \
+  --variation "silhouette=tall, narrow housing; motif=vertical status lights" \
+  --variation "shape_language=angular industrial shell; materials=painted steel and ceramic"
+slopforge --project ~/UnityProjects/MyGame review
+slopforge --project ~/UnityProjects/MyGame promote relay_ideas 2 --name power_relay
+slopforge --project ~/UnityProjects/MyGame approve power_relay 1
+```
+
+Exploration never exports directly to Unity. The review board records the variation and gives exploration candidates a promote action. Promotion creates a regular tracked asset candidate with its prompt, seed, workflow/model and variation provenance intact; approval remains an explicit production step. Pass `--quality-tier` to override the `draft` default. Configure the tier's workflow node inputs if exploration should use lower resolutions or fewer processing steps.
+
 ## Generate a coordinated recipe pack
 
 ```sh
