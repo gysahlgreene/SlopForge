@@ -66,7 +66,7 @@ The concept image guides the shape and material regions; it is **not** used as t
 | **Experimental** | Image-to-3D shape/material generation and Blender/Unity delivery. Inspect geometry and material coverage; current models can leave holes, disconnected surfaces, or incomplete textures. |
 | **Partial** | Character sprite packs have deterministic slicing/atlas metadata but no visually qualified animation workflow. Rigging and animation tooling exists, but generated character meshes fail quality gates and the current Rigify Humanoid import is unresolved. Prototype plans are approval-gated but recipe-driven, not concept-aware. |
 
-See the detailed [capability and issue audit](docs/AUDIT-2026-10.md), [ComfyUI workflow inventory](docs/WORKFLOWS.md), and [current demo steps](docs/DEMO.md).
+See the detailed [capability and issue audit](docs/AUDIT-2026-10.md), [lifecycle/platform roadmap](docs/CAPABILITY-ROADMAP-2026.md), [ComfyUI workflow inventory](docs/WORKFLOWS.md), and [current demo steps](docs/DEMO.md).
 
 ## A real H100 recipe run
 
