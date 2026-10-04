@@ -616,6 +616,32 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(cli_main(["--project", str(self.root), "library", "show", "character/alice"]), 0)
         self.assertEqual(json.loads(output.getvalue())["entries"][0]["status"], "missing")
 
+    def test_review_command_writes_local_board_from_manifest(self):
+        from slopforge.manifest import save_manifest
+        candidate = self.root / "ai/assets/candidates/icon/token.png"
+        candidate.parent.mkdir(parents=True)
+        Image.new("RGB", (8, 8), "gold").save(candidate)
+        save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 3, "assets": {
+            "icon:token": {"id": "token-id", "name": "token", "type": "icon", "status": "candidate",
+                           "candidates": {"items": [{"number": 1, "path": "ai/assets/candidates/icon/token.png",
+                                                         "status": "candidate"}], "selected": None}}}})
+        with redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "review"]), 0)
+        self.assertIn("token", (self.root / "slopforge-review.html").read_text())
+
+    def test_reject_cli_records_reason_without_touching_other_candidates(self):
+        from slopforge.manifest import save_manifest
+        save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 3, "assets": {
+            "icon:token": {"id": "token-id", "name": "token", "type": "icon", "status": "candidate",
+                           "candidates": {"items": [{"number": 1, "status": "candidate"},
+                                                         {"number": 2, "status": "candidate"}], "selected": None}}}})
+        with redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "reject", "token", "1",
+                                       "--reason", "wrong shape"]), 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:token"]
+        self.assertEqual(record["candidates"]["items"][0]["review"]["reason"], "wrong shape")
+        self.assertEqual(record["candidates"]["items"][1]["status"], "candidate")
+
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)
         self.assertEqual(workflow["2"]["inputs"]["ckpt_name"], "checkpoint.safetensors")

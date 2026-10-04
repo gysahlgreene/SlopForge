@@ -161,7 +161,7 @@ Only Python and SlopForge are needed for prompts/configuration and the Unity-nat
 
 ## Configuration and diagnostics
 
-Use `slopforge --project PATH styles`, `assets`, `library list`, `library show KIND/NAME`, `inspect NAME`, `recipe list`, `doctor`, and `prompt TYPE DESCRIPTION`. `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
+Use `slopforge --project PATH styles`, `assets`, `library list`, `library show KIND/NAME`, `review`, `inspect NAME`, `recipe list`, `doctor`, and `prompt TYPE DESCRIPTION`. The review command writes a static local board; see [docs/REVIEW-BOARD.md](docs/REVIEW-BOARD.md). `slopforge doctor` is read-only and checks either local or remote ComfyUI, including workflow node/model choices. Project paths are configured with `ai/project.yaml`; environment overrides include `COMFYUI_URL`, `SLOPFORGE_COMFYUI_BACKEND`, `SLOPFORGE_COMPUTE_PROFILE`, and `BLENDER_BIN`. `COMFYUI_HOME` is optional and not needed for generation.
 
 ## Current limitations
 
