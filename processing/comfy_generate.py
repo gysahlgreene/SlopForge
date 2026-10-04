@@ -6,6 +6,7 @@ import tempfile
 import sys
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.quality import apply_workflow_inputs
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 
@@ -72,6 +73,8 @@ def main():
     p.add_argument("--metadata", type=Path)
     p.add_argument("--references", help="JSON array of approved reference paths and strengths")
     p.add_argument("--reference-inputs", help="JSON array mapping reference slots to workflow node inputs")
+    p.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
+    p.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     args = p.parse_args()
 
     workflow_path = Path(args.workflow)
@@ -80,6 +83,9 @@ def main():
         sys.exit(1)
 
     workflow = json.loads(workflow_path.read_text())
+    if args.workflow_inputs:
+        overrides = json.loads(args.workflow_inputs)
+        apply_workflow_inputs(workflow, overrides)
 
     # Try to find positive/negative CLIPTextEncode nodes.
     # This assumes your saved workflow contains one positive prompt node and one negative prompt node.
@@ -150,8 +156,10 @@ def main():
     client.download_output(images[0], dest)
 
     if args.metadata:
+        quality = json.loads(args.quality) if args.quality else None
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed,
-                                       "prompt_id": prompt_id, "references_used": references_used})
+                                       "prompt_id": prompt_id, "references_used": references_used,
+                                       "quality": quality})
 
     print(dest)
 

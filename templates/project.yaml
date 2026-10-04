@@ -40,6 +40,20 @@ asset_pipeline:
       workflows:
         model: trellis2_image_to_model_h100_final_api.json
 
+  # Quality is independent of compute_profile and COMFYUI_URL.
+  quality_tier: normal
+  quality_tiers:
+    draft:
+      defaults: {image_candidates: 1, model_candidates: 1, material_candidates: 1}
+    normal: {}
+    final:
+      defaults: {image_candidates: 6, model_candidates: 3, material_candidates: 3}
+      # Optionally map workflow basenames to API node/input overrides.
+      # workflow_inputs:
+      #   image:
+      #     image_text2img_api.json:
+      #       "5": {width: 1024, height: 1024}
+
   conditioning:
     strategy: text_only
     max_references: 3
