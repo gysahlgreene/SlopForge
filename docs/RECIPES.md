@@ -38,3 +38,7 @@ The instance name namespaces child asset names (`<instance>_<child-id>`). Each c
 The current dependency contract orders generation and records relationships. It does not automatically pass dependency images or models as visual references; reference conditioning is configured separately by issue #6. Recipe definitions use the project's existing workflow and compute-profile settings, so local and remote ComfyUI remain selectable through the normal configuration.
 
 The normal test suite is offline. To opt into the remote ComfyUI smoke test, set both `SLOPFORGE_RUN_H100=1` and `COMFYUI_URL` when running `tests/test_recipe_h100.py`; the test creates and removes a temporary Unity fixture.
+
+## 3D characters
+
+`character_3d_pack` creates one first-class `character` model asset with a neutral A-pose concept. Approve the concept to run the configured 3D model workflow, inspect and approve its material output, then run the configured rigging provider as documented in [3D character rigging](CHARACTER-RIGGING.md). The model workflow and rigging provider remain separate choices; the recipe does not assume a particular ComfyUI host.

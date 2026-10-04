@@ -20,7 +20,7 @@ from .ui import make_sprite_import_metadata
 from .unity_ui import apply_sprite_settings
 from .unity_vfx import create_particle_prefab
 from .environment import validate_environment_kit
-from .character_rigging import rigify_character
+from .character_rigging import run_character_rigging
 from .tileset import package_tileset
 from .unity_tiles import create_tile_assets
 from .style import build_prompt, load_style
@@ -640,7 +640,7 @@ def _run(args):
         return 0
 
     if args.command == "character":
-        result = rigify_character(root, config, manifest, args.name, source_output=args.source_output)
+        result = run_character_rigging(root, config, manifest, args.name, source_output=args.source_output)
         save_manifest(manifest_path, manifest)
         print(f"Character {args.name}: {result['status']}")
         print(f"Rig candidate: {result['rig_artifact']['path']}")
@@ -1014,7 +1014,8 @@ def _run(args):
             if not any(item["status"] == "candidate" for item in generated):
                 raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
         else:
-            result = model.approve_texture(root, config, manifest, key, args.candidate, args.force)
+            result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
+                                           asset_type=recipe)
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0

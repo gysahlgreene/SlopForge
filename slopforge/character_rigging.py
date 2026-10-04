@@ -113,6 +113,14 @@ def rigify_character(project_root, config, manifest, character_selector, *, sour
         raise
 
 
+def run_character_rigging(project_root, config, manifest, character_selector, *, source_output="model"):
+    """Select the configured character-rigging provider without changing the result contract."""
+    provider = config["asset_pipeline"].get("character_rigging_provider", "blender_rigify")
+    if provider == "blender_rigify":
+        return rigify_character(project_root, config, manifest, character_selector, source_output=source_output)
+    raise ValueError(f"Unsupported character_rigging_provider {provider!r}; available provider: blender_rigify")
+
+
 def record_rigging_result(project_root, manifest, character_selector, result):
     """Record provider exports as pending typed artifacts; never auto-approve a rig."""
     if not isinstance(result, dict):

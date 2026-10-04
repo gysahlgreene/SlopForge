@@ -22,8 +22,8 @@ from ..unity_material import build_unity_material, make_metallic_gloss, unity_cl
 from ..validation import summarize_validation, validate_image, validate_model_outputs
 
 
-def model_paths(project_root, config, name):
-    directory = output_path(project_root, config, "prop", name)
+def model_paths(project_root, config, name, asset_type="prop"):
+    directory = output_path(project_root, config, asset_type, name)
     source, materials, previews = directory / "Source", directory / "Materials", directory / "Previews"
     return {"directory": directory, "concept": source / "concept.png", "cutout": source / "concept_cutout.png",
             "input_3d": source / "concept_3d_input.png", "glb": source / f"{name}.glb",
@@ -39,8 +39,9 @@ def model_paths(project_root, config, name):
             "validation": directory / "validation.json"}
 
 
-def material_candidate_paths(project_root, config, name, number):
-    directory = Path(project_root) / config["asset_pipeline"]["candidate_root"] / "prop" / name / f"material_{number:02d}"
+def material_candidate_paths(project_root, config, name, number, asset_type="prop"):
+    asset_type_name = asset_type if isinstance(asset_type, str) else asset_type.get("name", "prop")
+    directory = Path(project_root) / config["asset_pipeline"]["candidate_root"] / asset_type_name / name / f"material_{number:02d}"
     materials, previews = directory / "Materials", directory / "Previews"
     return {"directory": directory, "surface": directory / "surface_source.png",
             "fbx": directory / f"{name}.fbx", "blend": directory / f"{name}_preview.blend",
@@ -57,7 +58,7 @@ def _relative_outputs(root, paths, keys):
 
 
 def _generate_material_candidate(root, config, asset_type, asset, number, prompt, stage_mesh):
-    paths = material_candidate_paths(root, config, asset["name"], number)
+    paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["directory"].mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     candidate = {"number": number, "prompt": prompt, "status": "failed", "kind": "surface_swatch",
@@ -110,7 +111,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
 
 
 def _native_material_candidate(root, config, asset_type, asset, number, mesh_info):
-    paths = material_candidate_paths(root, config, asset["name"], number)
+    paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     mesh_path = root / asset["source"]["glb"]
     for key in ("basecolor", "normal", "roughness", "metallic"):
@@ -183,7 +184,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
         raise ValueError("This model has mesh-generated PBR regions. Surface-swatch retexturing would replace them; generate a revised concept to change its material design.")
     if not _style_matches_selected_concept(asset, style):
         raise ValueError("Concept style has changed; restore the original style or generate a new concept")
-    paths = model_paths(root, config, asset["name"])
+    paths = model_paths(root, config, asset["name"], asset_type)
     if not paths["glb"].is_file():
         raise ValueError("No generated mesh exists; approve a concept candidate first")
     asset.setdefault("source", {})["processed_mesh"] = paths["processed_mesh"].relative_to(root).as_posix()
@@ -200,7 +201,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     return results
 
 
-def approve_texture(project_root, config, manifest, key, number, force=False):
+def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop"):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
@@ -208,8 +209,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False):
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Material candidate {number} is not valid for {asset['name']}")
     unity_cli(root)
-    paths = model_paths(root, config, asset["name"])
-    candidate_paths = material_candidate_paths(root, config, asset["name"], number)
+    paths = model_paths(root, config, asset["name"], asset_type)
+    candidate_paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     candidate.setdefault("outputs", {})
     if not candidate_paths["metallic_gloss"].is_file():
         make_metallic_gloss(candidate_paths["metallic"], candidate_paths["roughness"],
@@ -274,7 +275,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         raise ValueError("Candidate style has changed; activate the original unchanged style pack or generate new candidates before 3D approval")
     conditioning = resolve_conditioning(root, config, style)
     ensure_supported(conditioning)
-    paths = model_paths(root, config, asset["name"])
+    paths = model_paths(root, config, asset["name"], asset_type)
     existing = [path for name, path in paths.items() if name != "directory" and path.exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Model outputs exist; pass --force to replace: {existing[0]}")
