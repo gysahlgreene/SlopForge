@@ -42,6 +42,34 @@ class PrototypePlanTests(unittest.TestCase):
             prototypes.run(self.root, self.config, self.style, self.types, self.manifest, "demo")
         self.assertEqual(self.manifest["assets"], {})
 
+    def test_approved_content_briefs_are_passed_to_recipe_execution(self):
+        definition = yaml.safe_load((self.root / "ai/recipes/sample.yaml").read_text())
+        definition["children"][0]["generation_prompt"] = "Original prompt"
+        (self.root / "ai/recipes/sample.yaml").write_text(yaml.safe_dump(definition))
+        plan = prototypes.propose(self.root, "tailored", "A lunar refinery game", self.style, self.types,
+                                  self.config, recipe_names=["sample"])
+        child = plan["content_plan"][0]
+        self.assertEqual(child["generation_prompt"], "Original prompt")
+        child["description"] = "A cracked ceramic emergency beacon for the refinery crew"
+        child["generation_prompt"] = "Single cracked ceramic beacon, lunar rescue markings, no text"
+        prototypes.plan_path(self.root, "tailored").write_text(yaml.safe_dump(plan, sort_keys=False))
+        prototypes.approve(self.root, "tailored")
+        received = []
+
+        def fake_run(root, config, style, types, manifest, recipe_name, *, instance_name, quality_tier,
+                     child_overrides, save):
+            received.append(child_overrides)
+            record = new_record("recipe", instance_name, "sample", style, {"strategy": "text_only"})
+            record["status"] = "awaiting_approval"
+            record["recipe_instance"] = {"quality_tier": quality_tier, "stages": {}}
+            manifest["assets"][f"recipe:{instance_name}"] = record
+            return record
+
+        with patch("slopforge.prototypes.recipes.run_recipe", side_effect=fake_run):
+            prototypes.run(self.root, self.config, self.style, self.types, self.manifest, "tailored")
+        self.assertEqual(received, [{"badge": {"description": child["description"],
+                                                "generation_prompt": child["generation_prompt"]}}])
+
     def test_cli_propose_and_approve_are_local_and_do_not_generate(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -64,7 +92,8 @@ class PrototypePlanTests(unittest.TestCase):
             prototypes.run(self.root, self.config, self.style, self.types, self.manifest, "demo")
         prototypes.approve(self.root, "demo")
 
-        def fake_run(root, config, style, types, manifest, recipe_name, *, instance_name, quality_tier, save):
+        def fake_run(root, config, style, types, manifest, recipe_name, *, instance_name, quality_tier,
+                     child_overrides=None, save):
             record = new_record("recipe", instance_name, "sample", style, {"strategy": "text_only"})
             record["status"] = "awaiting_approval"
             record["recipe_instance"] = {"quality_tier": quality_tier, "stages": {}}
@@ -116,7 +145,8 @@ class PrototypePlanTests(unittest.TestCase):
         prototypes.approve(self.root, "demo")
         calls = []
 
-        def fake_run(root, config, style, types, manifest, recipe_name, *, instance_name, quality_tier, save):
+        def fake_run(root, config, style, types, manifest, recipe_name, *, instance_name, quality_tier,
+                     child_overrides=None, save):
             calls.append(recipe_name)
             record = new_record("recipe", instance_name, recipe_name, style, {"strategy": "text_only"})
             record["status"] = "awaiting_approval"

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,7 +57,9 @@ def propose(project_root, name, description, style, asset_types, config, *, reci
                        "depends_on": [stages[-1]["id"]] if stages else [],
                        "quality_tier": quality_tier})
         contents.extend({"stage": stage_id, "id": child["id"], "type": child["type"],
-                         "description": child["description"]} for child in children)
+                         "description": child["description"],
+                         **({"generation_prompt": child["generation_prompt"]}
+                            if child.get("generation_prompt") is not None else {})} for child in children)
         estimated_candidates += _candidate_estimate(config, children, asset_types, quality_tier)
     plan = {"version": 1, "id": name, "description": description,
             "art_direction": {"brief": description, "style": style["name"], "style_version": style["version"]},
@@ -101,6 +104,22 @@ def load_plan(project_root, name, *, check_approval=True):
             raise ValueError("Prototype stages must list dependencies before their dependents")
         if stage.get("quality_tier") is not None and not isinstance(stage["quality_tier"], str):
             raise ValueError(f"Prototype stage {stage['id']!r} quality_tier must be a string")
+    content_plan = plan.get("content_plan", [])
+    if not isinstance(content_plan, list):
+        raise ValueError("Prototype content_plan must be a list")
+    content_ids = set()
+    for child in content_plan:
+        if (not isinstance(child, dict) or child.get("stage") not in known
+                or not isinstance(child.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", child["id"])
+                or not isinstance(child.get("type"), str) or not isinstance(child.get("description"), str)
+                or not child["description"].strip()):
+            raise ValueError("Prototype content items require a known stage, id, type, and description")
+        key = (child["stage"], child["id"])
+        if key in content_ids:
+            raise ValueError(f"Duplicate prototype content item {key[0]}:{key[1]}")
+        content_ids.add(key)
+        if child.get("generation_prompt") is not None and not isinstance(child["generation_prompt"], str):
+            raise ValueError(f"Prototype content item {key[0]}:{key[1]} generation_prompt must be a string")
     pending = list(stages)
     while pending:
         ready = next((stage for stage in pending if set(stage.get("depends_on", [])) <= done), None)
@@ -133,6 +152,20 @@ def _candidate_count(manifest, recipe_asset):
     recipe_id = recipe_asset["id"]
     return sum(len(child.get("candidates", {}).get("items", []))
                for child in manifest["assets"].values() if child.get("parent_id") == recipe_id)
+
+
+def _child_overrides(plan, stage_id, children):
+    by_id = {child["id"]: child for child in children}
+    overrides = {}
+    for item in plan.get("content_plan", []):
+        if item.get("stage") != stage_id:
+            continue
+        child = by_id.get(item["id"])
+        if child is None or item.get("type") != child["type"]:
+            raise ValueError(f"Prototype content item {stage_id}:{item['id']} does not match its recipe child")
+        overrides[item["id"]] = {field: item[field] for field in ("description", "generation_prompt")
+                                  if field in item}
+    return overrides
 
 
 def run(project_root, config, style, asset_types, manifest, name, *, save=None):
@@ -189,7 +222,8 @@ def run(project_root, config, style, asset_types, manifest, name, *, save=None):
             existing = recipe_key in manifest["assets"]
             recipe_asset = (recipes.resume_recipe(root, config, style, asset_types, manifest, instance_name, save=save)
                             if existing else recipes.run_recipe(root, effective, style, asset_types, manifest,
-                                recipe_name, instance_name=instance_name, quality_tier=stage_tier, save=save))
+                                recipe_name, instance_name=instance_name, quality_tier=stage_tier,
+                                child_overrides=_child_overrides(plan, stage_id, children), save=save))
             if recipe_asset.get("parent_id") is None:
                 set_parent(manifest, recipe_asset["id"], prototype["id"])
             for dependency_id in stage_state["depends_on"]:
