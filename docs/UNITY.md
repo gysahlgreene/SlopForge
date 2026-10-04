@@ -9,6 +9,8 @@ Unity is an output target, not a generation dependency. Initialize an existing U
 
 SlopForge writes ordinary PNG, GLB, Blend, and FBX files under the configured Unity `output_root`. Unity owns `.meta` files. This tool does not modify scenes or prefabs.
 
+UI recipes produce reviewable PNG components and states without functional text. `ui-meta` records Sprite import and 9-slice settings next to an approved image as a typed JSON output; a Unity Editor importer/prefab tool must apply those settings. No Unity `.meta`, prefab, HUD, or menu is synthesized by the core CLI yet.
+
 The Unity Editor may be closed during generation. Open the project afterward to import the new files and let Unity create `.meta` files.
 
 Texture approval creates a Unity Lit material for the Built-in Render Pipeline or URP. HDRP and custom render pipelines currently stop with an explicit unsupported-pipeline error rather than receiving a mismatched shader.

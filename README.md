@@ -115,6 +115,8 @@ For mesh-aware TRELLIS.2 materials, put the desired part colors in `--image-prom
 
 For identity-conditioned 2D character animation sheets and deterministic frame/atlas packaging, see [sprite packs](docs/SPRITE-PACKS.md).
 
+For coherent Unity UI components, visual states, and 9-slice import metadata, see the [UI pack example](docs/EXAMPLES.md#generate-a-unity-ui-pack).
+
 ## Generate a coordinated pack
 
 Project recipes compose existing atomic pipelines. Start with the installed sample and review its children using the normal commands:
