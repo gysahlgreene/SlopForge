@@ -78,8 +78,18 @@ def inspect(blend, face_budget):
     scales_applied = all(all(abs(value - 1.0) < 1e-4 for value in obj.scale) and all(abs(value) < 1e-4 for value in obj.rotation_euler) for obj in objects)
     component_sizes = [connected_components(obj.data) for obj in objects]
     components = sum(len(sizes) for sizes in component_sizes)
+    object_bounds = []
+    for obj in objects:
+        points = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        obj_min = [min(point[axis] for point in points) for axis in range(3)]
+        obj_max = [max(point[axis] for point in points) for axis in range(3)]
+        object_bounds.append({"name": obj.name, "bounds_min": obj_min, "bounds_max": obj_max,
+                              "dimensions": [obj_max[i] - obj_min[i] for i in range(3)],
+                              "origin": [float(value) for value in obj.matrix_world.translation],
+                              "rotation_degrees": [math.degrees(value) for value in obj.rotation_euler]})
     measured = {"mesh_objects": len(objects), "vertex_count": vertices, "face_count": faces,
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
+                "objects": object_bounds,
                 "uv_layers": uv_layers, "material_count": len(materials), "image_texture_count": len(image_nodes),
                 "missing_textures": missing_textures, "transforms_applied": scales_applied,
                 "component_count": components, "face_budget": face_budget}

@@ -1,5 +1,6 @@
 """Data-driven orchestration of existing atomic asset pipelines."""
 import copy
+import math
 import re
 from pathlib import Path
 
@@ -41,6 +42,50 @@ def _ordered_children(definition):
     return ordered
 
 
+def _validate_kit_constraints(definition, child_ids):
+    constraints = definition.get("kit_constraints")
+    if constraints is None:
+        return
+    if not isinstance(constraints, dict):
+        raise ValueError("kit_constraints must be a mapping")
+    for name, default in (("grid_size", 1.0), ("snap_tolerance", 0.05), ("pivot_tolerance", 0.05)):
+        value = constraints.get(name, default)
+        if (not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+                or (value <= 0 if name == "grid_size" else value < 0)):
+            raise ValueError(f"kit_constraints.{name} has an invalid value")
+    maximum = constraints.get("max_dimension")
+    if maximum is not None and (not isinstance(maximum, (int, float)) or isinstance(maximum, bool)
+                                or not math.isfinite(maximum) or maximum <= 0):
+        raise ValueError("kit_constraints.max_dimension must be positive")
+    pivot = constraints.get("pivot")
+    if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+        raise ValueError("kit_constraints.pivot is unsupported")
+    modules = constraints.get("modules", {})
+    if not isinstance(modules, dict) or not set(modules) <= child_ids:
+        raise ValueError("kit_constraints.modules must map known child ids to rules")
+    for child_id, rule in modules.items():
+        if not isinstance(rule, dict):
+            raise ValueError(f"kit_constraints.modules.{child_id} must be a mapping")
+        maximum = rule.get("max_dimension")
+        if maximum is not None and (not isinstance(maximum, (int, float)) or isinstance(maximum, bool)
+                                    or not math.isfinite(maximum) or maximum <= 0):
+            raise ValueError(f"kit_constraints.modules.{child_id}.max_dimension must be positive")
+        tolerance = rule.get("snap_tolerance")
+        if tolerance is not None and (not isinstance(tolerance, (int, float)) or isinstance(tolerance, bool)
+                                      or not math.isfinite(tolerance) or tolerance < 0):
+            raise ValueError(f"kit_constraints.modules.{child_id}.snap_tolerance cannot be negative")
+        axes = rule.get("snap_axes", [])
+        if not isinstance(axes, list) or any(type(axis) is not int or axis not in (0, 1, 2) for axis in axes):
+            raise ValueError(f"kit_constraints.modules.{child_id}.snap_axes must contain axes 0, 1, or 2")
+        for axis_name in ("vertical_axis", "flat_axis"):
+            axis = rule.get(axis_name)
+            if axis is not None and (type(axis) is not int or axis not in (0, 1, 2)):
+                raise ValueError(f"kit_constraints.modules.{child_id}.{axis_name} must be axis 0, 1, or 2")
+        pivot = rule.get("pivot")
+        if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+            raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
+
+
 def load_recipe(project_root, name, asset_types, *, reference_library=None):
     validate_asset_name(name)
     path = Path(project_root) / "ai/recipes" / f"{name}.yaml"
@@ -60,6 +105,7 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe references unknown library {reference_library!r}")
         definition["reference_library"] = reference_library
     children = _ordered_children(definition)
+    _validate_kit_constraints(definition, {child["id"] for child in children})
     for child in children:
         if not isinstance(child.get("description"), str) or not child["description"].strip():
             raise ValueError(f"Recipe child {child['id']!r} requires a description")

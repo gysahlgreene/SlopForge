@@ -119,6 +119,8 @@ For coherent Unity UI components, visual states, and 9-slice import metadata, se
 
 For VFX sprite-sheet recipes, deterministic frame extraction, and optional Unity ParticleSystem prefabs, see [VFX packs](docs/VFX-PACKS.md).
 
+For modular 3D environment recipes and measured grid/pivot checks, see [environment kits](docs/ENVIRONMENT-KITS.md).
+
 ## Generate a coordinated pack
 
 Project recipes compose existing atomic pipelines. Start with the installed sample and review its children using the normal commands:

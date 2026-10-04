@@ -18,11 +18,12 @@ from .spritepack import package_sprite_sheet
 from .ui import make_sprite_import_metadata
 from .unity_ui import apply_sprite_settings
 from .unity_vfx import create_particle_prefab
+from .environment import validate_environment_kit
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "ui-meta", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "environment-check"}
 
 
 def parser():
@@ -126,6 +127,9 @@ def parser():
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
 
+    environment_check = sub.add_parser("environment-check", help="Validate approved environment kit modules against their grid constraints")
+    environment_check.add_argument("name", help="Completed environment recipe instance")
+
     recipe = sub.add_parser("recipe", help="Run or resume a project asset recipe")
     recipe_commands = recipe.add_subparsers(dest="recipe_action", required=True)
     recipe_commands.add_parser("list", help="List recipe definitions and tracked runs")
@@ -144,7 +148,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["ui-meta"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["environment-check"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -518,6 +522,35 @@ def _run(args):
         page = generate_review_board(root, manifest, args.output)
         print(page)
         return 0
+
+    if args.command == "environment-check":
+        selector = asset_key("recipe", args.name)
+        recipe_asset = manifest["assets"].get(selector)
+        if not recipe_asset or "recipe_instance" not in recipe_asset:
+            raise KeyError(f"No recipe run named {args.name!r}")
+        if "kit_constraints" not in recipe_asset["recipe_instance"].get("definition", {}):
+            raise ValueError(f"Recipe {args.name!r} has no environment kit constraints")
+        report = validate_environment_kit(recipe_asset, manifest)
+        output = root / "ai/assets/environment_checks" / f"{args.name}.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2) + "\n")
+        derived_from = []
+        for stage in recipe_asset["recipe_instance"]["stages"].values():
+            child = manifest["assets"].get(stage.get("asset_key"), {})
+            for output_id in ("blend", "fbx"):
+                if output_id in child.get("outputs", {}):
+                    derived_from.append({"asset_id": child["id"], "output_id": output_id})
+                    break
+        register_artifact(manifest, selector, "kit.validation", "data.environment_validation",
+                          output.relative_to(root).as_posix(), status="ready" if report["status"] == "passed" else "failed",
+                          derived_from=derived_from,
+                          provenance={"processor": "slopforge.environment", "constraints": report["constraints"]},
+                          approval_status="not_required", validation=report)
+        recipe_asset["environment_validation"] = {"status": report["status"],
+                                                  "path": output.relative_to(root).as_posix()}
+        save_manifest(manifest_path, manifest)
+        print(json.dumps(report, indent=2))
+        return 0 if report["status"] == "passed" else 1
 
     types = load_taxonomy(root)
     style = load_style(root, config)
