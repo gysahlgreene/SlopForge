@@ -21,6 +21,18 @@ slopforge --project ~/UnityProjects/MyGame candidates health_potion
 slopforge --project ~/UnityProjects/MyGame approve health_potion 1
 ```
 
+## Generate a coordinated recipe pack
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe list
+slopforge --project ~/UnityProjects/MyGame recipe run starter_icons --name first_hud
+slopforge --project ~/UnityProjects/MyGame candidates first_hud_health
+slopforge --project ~/UnityProjects/MyGame approve first_hud_health 1
+slopforge --project ~/UnityProjects/MyGame recipe resume first_hud
+```
+
+`recipe resume` continues incomplete children and refreshes the aggregate pack after approvals. `recipe regenerate first_hud mana` adds candidates for only the mana child. See [Recipe and pack orchestration](RECIPES.md) for the recipe format and statuses.
+
 ## Generate and approve a 3D prop
 
 ```sh

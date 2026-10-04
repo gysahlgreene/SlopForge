@@ -46,4 +46,4 @@ The following abbreviated shape shows how different products can live under one 
 }
 ```
 
-This schema represents outputs and their relationships; recipe scheduling, aggregate review, and bulk migrations are separate features.
+Recipe scheduling and aggregate output records build on this schema. Aggregate visual review and bulk migrations remain separate work.

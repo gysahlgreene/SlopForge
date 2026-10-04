@@ -60,6 +60,7 @@ class SlopForgeTests(unittest.TestCase):
         (target / "Assets").mkdir(parents=True)
         init_project(target)
         self.assertTrue((target / "ai/project.yaml").is_file())
+        self.assertTrue((target / "ai/recipes/starter_icons.yaml").is_file())
         self.assertTrue((target / "ai/styles/default/references/approved").is_dir())
         self.assertTrue((target / "ai/workflows").is_dir())
         self.assertTrue((target / "Assets/Art/Generated/Models").is_dir())

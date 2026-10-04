@@ -14,12 +14,13 @@ def init_project(target, force=False):
     source = tool_root() / "templates"
     managed = [Path("ai/project.yaml"), Path("ai/assets/manifest.json"), Path("ai/styles/default/style.yaml")]
     managed.extend(Path("ai/asset_types") / path.name for path in (source / "asset_types").glob("*.yaml"))
+    managed.extend(Path("ai/recipes") / path.name for path in (source / "recipes").glob("*.yaml"))
     conflicts = [target / path for path in managed if (target / path).exists()]
     if conflicts and not force:
         raise FileExistsError("Refusing to overwrite existing project files; pass --force: " + str(conflicts[0]))
 
     project_dirs = [
-        "ai/assets", "ai/assets/candidates", "ai/workflows", "ai/asset_types",
+        "ai/assets", "ai/assets/candidates", "ai/workflows", "ai/asset_types", "ai/recipes",
         "ai/styles/default/references/approved", "ai/styles/default/references/candidates",
         ".continue/rules",
         "Assets/Art/Generated/Icons", "Assets/Art/Generated/UI", "Assets/Art/Generated/Props",
@@ -42,6 +43,10 @@ def init_project(target, force=False):
         shutil.copy2(style_source, style_target)
     for path in (source / "asset_types").glob("*.yaml"):
         destination = target / "ai/asset_types" / path.name
+        if force or not destination.exists():
+            shutil.copy2(path, destination)
+    for path in (source / "recipes").glob("*.yaml"):
+        destination = target / "ai/recipes" / path.name
         if force or not destination.exists():
             shutil.copy2(path, destination)
     agent_files = [(source / name, target / name) for name in ("AGENTS.md", "CLAUDE.md")]
