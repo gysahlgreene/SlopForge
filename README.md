@@ -124,6 +124,7 @@ For modular 3D environment recipes and measured grid/pivot checks, see [environm
 For terrain, path, transition, isometric, and Unity Tile assets, see [tileset packs](docs/TILESET-PACKS.md).
 
 For the current 3D character rig-result contract and provider/license status, see [character rigging](docs/CHARACTER-RIGGING.md).
+Reusable imported animation metadata and its current retargeting limits are described in [character animation libraries](docs/CHARACTER-ANIMATIONS.md).
 
 ## Generate a coordinated pack
 
