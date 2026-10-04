@@ -113,6 +113,8 @@ slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 1
 
 For mesh-aware TRELLIS.2 materials, put the desired part colors in `--image-prompt`; revise and regenerate the concept if the material design needs to change. For the Hunyuan3D swatch route, `retexture` can create new all-over surface candidates on the saved mesh. In both routes, the agent should inspect front, side, and rear previews and validation warnings, then ask you to choose before `approve-texture`. Unity material export requires Unity project metadata and the Unity CLI. The guided `make` flow remains available for interactive use.
 
+For identity-conditioned 2D character animation sheets and deterministic frame/atlas packaging, see [sprite packs](docs/SPRITE-PACKS.md).
+
 ## Generate a coordinated pack
 
 Project recipes compose existing atomic pipelines. Start with the installed sample and review its children using the normal commands:

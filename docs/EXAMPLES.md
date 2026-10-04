@@ -38,6 +38,21 @@ slopforge --project ~/UnityProjects/MyGame approve power_relay 1
 
 Exploration never exports directly to Unity. The review board records the variation and gives exploration candidates a promote action. Promotion creates a regular tracked asset candidate with its prompt, seed, workflow/model and variation provenance intact; approval remains an explicit production step. Pass `--quality-tier` to override the `draft` default. Configure the tier's workflow node inputs if exploration should use lower resolutions or fewer processing steps.
 
+## Generate and package 2D character animations
+
+After creating an approved identity reference library, run the sample character recipe and package each approved eight-frame sheet. The selected ComfyUI workflow must support reference conditioning and sheet generation; the bundled text-to-image graph is not an animation workflow.
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run character_sprite_pack \
+  --name pilot --reference-library character/pilot --quality-tier draft
+slopforge --project ~/UnityProjects/MyGame candidates pilot_walk
+slopforge --project ~/UnityProjects/MyGame approve pilot_walk 1
+slopforge --project ~/UnityProjects/MyGame spritepack pilot_walk \
+  --animation walk --grid 8 1 --fps 8
+```
+
+See [2D character sprite packs](SPRITE-PACKS.md) for the full animation list, reference workflow setup, and Unity metadata contract.
+
 ## Generate a coordinated recipe pack
 
 ```sh

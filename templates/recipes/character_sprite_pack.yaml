@@ -1,0 +1,103 @@
+id: character_sprite_pack
+version: 1
+description: Generate a reference-conditioned set of character animation sprite sheets.
+children:
+  - id: idle
+    type: sprite_sheet
+    description: Idle animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Idle:
+      subtle breathing and weight shift, full body, fixed camera and scale, consistent
+      outfit, clean silhouette, transparent background if supported, no text.
+    count: 1
+  - id: walk
+    type: sprite_sheet
+    description: Walk animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Walk
+      cycle, full body, fixed camera and scale, consistent outfit and proportions,
+      clean silhouette, transparent background if supported, no text.
+    count: 1
+  - id: run
+    type: sprite_sheet
+    description: Run animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Run
+      cycle, full body, fixed camera and scale, consistent outfit and proportions,
+      clean silhouette, transparent background if supported, no text.
+    count: 1
+  - id: attack
+    type: sprite_sheet
+    description: Attack animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Clear
+      readable attack action, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1
+  - id: hurt
+    type: sprite_sheet
+    description: Hurt animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Brief
+      hurt reaction, full body, fixed camera and scale, consistent outfit, transparent
+      background if supported, no text.
+    count: 1
+  - id: death
+    type: sprite_sheet
+    description: Death animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Readable
+      non-gory death/fall action, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1
+  - id: jump
+    type: sprite_sheet
+    description: Jump animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Jump
+      takeoff, airborne pose and landing, full body, fixed camera and scale, consistent
+      outfit, transparent background if supported, no text.
+    count: 1
+  - id: cast
+    type: sprite_sheet
+    description: Cast animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Readable
+      spell-casting gesture, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1
+  - id: block
+    type: sprite_sheet
+    description: Block animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Defensive
+      block pose and recovery, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1
+  - id: interact
+    type: sprite_sheet
+    description: Interact animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Reach
+      and interact gesture, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1
+  - id: dodge
+    type: sprite_sheet
+    description: Dodge animation sheet, preserving the approved character identity.
+    generation_prompt: >-
+      Use the approved character identity reference. Create exactly eight evenly sized
+      animation frames in one horizontal row, in left-to-right playback order. Quick
+      dodge and recovery, full body, fixed camera and scale, consistent outfit,
+      transparent background if supported, no text.
+    count: 1

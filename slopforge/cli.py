@@ -8,17 +8,18 @@ from pathlib import Path
 from . import __version__
 from .config import load_project, select_quality_tier
 from .backends.comfyui import ComfyUIClient
-from .manifest import asset_key, find_asset, load_manifest, new_record, save_manifest
+from .manifest import asset_key, find_asset, load_manifest, new_record, register_artifact, save_manifest
 from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from .pipelines.primitive import register_primitive
 from . import recipes
 from .exploration import parse_variations, promote_candidate
+from .spritepack import package_sprite_sheet
 from .style import build_prompt, load_style
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "spritepack", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library"}
 
 
 def parser():
@@ -65,6 +66,14 @@ def parser():
     promote.add_argument("candidate", type=int)
     promote.add_argument("--name", required=True, help="Name for the new tracked asset")
 
+    spritepack = sub.add_parser("spritepack", help="Slice an approved character sheet into a deterministic Unity sprite pack")
+    spritepack.add_argument("name", help="Approved sprite_sheet asset name")
+    spritepack.add_argument("--animation", required=True, help="Animation name such as idle or walk")
+    spritepack.add_argument("--grid", nargs=2, type=int, metavar=("COLUMNS", "ROWS"), required=True)
+    spritepack.add_argument("--fps", type=float, required=True)
+    spritepack.add_argument("--pivot", nargs=2, type=float, metavar=("X", "Y"), default=(0.5, 0.0))
+    spritepack.add_argument("--loop", action=argparse.BooleanOptionalAction, default=None)
+
     candidates = sub.add_parser("candidates", help="List candidates for an asset")
     candidates.add_argument("name")
     approve = sub.add_parser("approve", help="Approve a candidate and continue the pipeline")
@@ -110,6 +119,7 @@ def parser():
     run_recipe.add_argument("recipe_name")
     run_recipe.add_argument("--name", help="Unique name for this pack instance")
     run_recipe.add_argument("--quality-tier", help="Override the recipe's configured quality tier")
+    run_recipe.add_argument("--reference-library", help="Use this approved reference library for every recipe child")
     resume_recipe = recipe_commands.add_parser("resume", help="Continue incomplete recipe stages")
     resume_recipe.add_argument("name", help="Recipe instance name")
     regenerate = recipe_commands.add_parser("regenerate", help="Generate new candidates for one recipe child")
@@ -120,7 +130,7 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
+    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["spritepack"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"]):
         return parser().parse_args(argv)
     if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
         return parser().parse_args(argv)
@@ -549,6 +559,50 @@ def _run(args):
         print(f"Promoted to {record['name']}. Review, then approve with: slopforge --project {root} approve {record['name']} 1")
         return 0
 
+    if args.command == "spritepack":
+        asset = find_asset(manifest, args.name)
+        if asset.get("type") != "sprite_sheet" or asset.get("status") != "ready":
+            raise ValueError("spritepack requires an approved sprite_sheet asset")
+        selected = asset.get("candidates", {}).get("selected")
+        if not any(candidate.get("number") == selected and candidate.get("approval") == "approved"
+                   for candidate in asset.get("candidates", {}).get("items", [])):
+            raise ValueError("spritepack requires an explicitly approved sheet candidate")
+        source = asset.get("outputs", {}).get("image")
+        if not source:
+            raise ValueError("Approved sprite sheet has no image output")
+        source_path = (root / source).resolve()
+        if not source_path.is_relative_to(root) or not source_path.is_file():
+            raise ValueError("Approved sprite sheet is missing or outside the project")
+        loop = args.loop if args.loop is not None else args.animation in {"idle", "walk", "run"}
+        destination = (root / pipeline["output_root"] / "Characters" / asset["name"] / args.animation).resolve()
+        if not destination.is_relative_to(root):
+            raise ValueError("Sprite pack output must stay within the project")
+        result = package_sprite_sheet(source_path, destination, args.animation, columns=args.grid[0],
+                                      rows=args.grid[1], fps=args.fps, pivot=args.pivot, loop=loop)
+        derived_from = [{"asset_id": asset["id"], "output_id": "image"}]
+        prefix = f"sprites.{args.animation}"
+        settings = {"fps": args.fps, "pivot": result["pivot"], "loop": loop,
+                    "columns": args.grid[0], "rows": args.grid[1], "frame_size": result["frame_size"]}
+        for index, frame in enumerate(result["frame_paths"]):
+            register_artifact(manifest, asset["id"], f"{prefix}.frame_{index:03d}", "image.sprite_frame",
+                              frame.relative_to(root).as_posix(), derived_from=derived_from,
+                              provenance={"processor": "slopforge.spritepack", **settings, "frame": index},
+                              approval_status="approved")
+        register_artifact(manifest, asset["id"], f"{prefix}.atlas", "image.sprite_atlas",
+                          result["atlas"].relative_to(root).as_posix(), derived_from=derived_from,
+                          provenance={"processor": "slopforge.spritepack", **settings}, approval_status="approved")
+        register_artifact(manifest, asset["id"], f"{prefix}.metadata", "data.unity_animation",
+                          result["metadata"].relative_to(root).as_posix(), derived_from=derived_from,
+                          provenance={"processor": "slopforge.spritepack", **settings}, approval_status="approved")
+        asset.setdefault("sprite_animations", {})[args.animation] = {
+            "frame_count": result["frame_count"], "frame_size": result["frame_size"],
+            "fps": args.fps, "loop": loop, "pivot": result["pivot"],
+            "atlas": result["atlas"].relative_to(root).as_posix(),
+            "metadata": result["metadata"].relative_to(root).as_posix()}
+        save_manifest(manifest_path, manifest)
+        print(f"Sprite pack created: {destination}")
+        return 0
+
     if args.command == "recipe":
         if args.recipe_action == "list":
             for name in recipes.list_recipes(root):
@@ -560,7 +614,8 @@ def _run(args):
         persist = lambda current: save_manifest(manifest_path, current)
         if args.recipe_action == "run":
             record = recipes.run_recipe(root, config, style, types, manifest, args.recipe_name,
-                                        instance_name=args.name, quality_tier=args.quality_tier, save=persist)
+                                        instance_name=args.name, quality_tier=args.quality_tier,
+                                        reference_library=args.reference_library, save=persist)
         elif args.recipe_action == "resume":
             record = recipes.resume_recipe(root, config, style, types, manifest, args.name, save=persist)
         else:

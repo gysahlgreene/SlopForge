@@ -27,6 +27,7 @@ def init_project(target, force=False):
         "Assets/Art/Generated/Icons", "Assets/Art/Generated/UI", "Assets/Art/Generated/Props",
         "Assets/Art/Generated/Portraits", "Assets/Art/Generated/Models", "Assets/Art/Generated/Decals",
         "Assets/Art/Generated/Concepts", "Assets/Art/Generated/Textures",
+        "Assets/Art/Generated/Characters", "Assets/Art/Generated/Characters/Spritesheets",
     ]
     for directory in project_dirs:
         (target / directory).mkdir(parents=True, exist_ok=True)
