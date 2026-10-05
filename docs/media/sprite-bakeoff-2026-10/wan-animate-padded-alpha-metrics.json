@@ -1,0 +1,359 @@
+[
+  {
+    "frame": "frame_0000.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      100,
+      203,
+      355,
+      682
+    ],
+    "alpha_bbox_gt128": [
+      101,
+      204,
+      354,
+      681
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0001.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      88,
+      203,
+      355,
+      683
+    ],
+    "alpha_bbox_gt128": [
+      89,
+      204,
+      354,
+      682
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0002.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      84,
+      200,
+      342,
+      686
+    ],
+    "alpha_bbox_gt128": [
+      86,
+      201,
+      340,
+      685
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0003.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      133,
+      189,
+      326,
+      692
+    ],
+    "alpha_bbox_gt128": [
+      134,
+      190,
+      326,
+      691
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0004.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      133,
+      189,
+      326,
+      692
+    ],
+    "alpha_bbox_gt128": [
+      135,
+      190,
+      326,
+      691
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0005.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      96,
+      181,
+      336,
+      695
+    ],
+    "alpha_bbox_gt128": [
+      98,
+      182,
+      335,
+      694
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0006.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      66,
+      167,
+      339,
+      703
+    ],
+    "alpha_bbox_gt128": [
+      67,
+      168,
+      339,
+      702
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0007.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      77,
+      161,
+      340,
+      713
+    ],
+    "alpha_bbox_gt128": [
+      78,
+      162,
+      339,
+      712
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0008.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      77,
+      161,
+      340,
+      713
+    ],
+    "alpha_bbox_gt128": [
+      78,
+      162,
+      339,
+      712
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0009.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      125,
+      158,
+      327,
+      722
+    ],
+    "alpha_bbox_gt128": [
+      126,
+      159,
+      327,
+      721
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0010.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      125,
+      156,
+      313,
+      717
+    ],
+    "alpha_bbox_gt128": [
+      126,
+      157,
+      312,
+      716
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0011.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      109,
+      153,
+      430,
+      695
+    ],
+    "alpha_bbox_gt128": [
+      110,
+      155,
+      428,
+      694
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0012.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      108,
+      153,
+      431,
+      695
+    ],
+    "alpha_bbox_gt128": [
+      109,
+      154,
+      430,
+      694
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0013.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      117,
+      150,
+      361,
+      695
+    ],
+    "alpha_bbox_gt128": [
+      117,
+      151,
+      359,
+      694
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0014.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      0,
+      140,
+      371,
+      698
+    ],
+    "alpha_bbox_gt128": [
+      0,
+      142,
+      369,
+      698
+    ],
+    "foreground_touches_edge": true
+  },
+  {
+    "frame": "frame_0015.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      23,
+      128,
+      401,
+      700
+    ],
+    "alpha_bbox_gt128": [
+      24,
+      130,
+      400,
+      699
+    ],
+    "foreground_touches_edge": false
+  },
+  {
+    "frame": "frame_0016.png",
+    "size": [
+      480,
+      832
+    ],
+    "mode": "RGBA",
+    "alpha_bbox_gt8": [
+      23,
+      128,
+      401,
+      700
+    ],
+    "alpha_bbox_gt128": [
+      24,
+      130,
+      400,
+      699
+    ],
+    "foreground_touches_edge": false
+  }
+]

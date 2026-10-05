@@ -1,0 +1,155 @@
+{
+  "workflow": "wan_animate_sprite_api.json",
+  "model": [
+    "wan_animate_2_distill_int8_convrot.safetensors",
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "clip_vision_h.safetensors",
+    "wan_2.1_vae.safetensors",
+    "birefnet.safetensors"
+  ],
+  "seed": 314159265,
+  "workflow_sha256": "574c9f7add1c30f6a06e70f763b7b24eb59644c23dfe725e7d0b22f7a5928d75",
+  "workflow_requirements": {
+    "id": "character_sprite.wan_animate_reference",
+    "version": 1,
+    "schema_version": 1
+  },
+  "prompt_id": "4516c1bb-4b84-4b36-823d-f07063ad4177",
+  "output_kind": "image",
+  "references_used": [],
+  "workflow_files_used": [
+    {
+      "path": "slopforge/issue-9-qualification/slopforge-goblin-reference.png",
+      "sha256": "08270b05b15e10fff9bd9189c96d413613e2f73dad227908754b7323aaec2e8f",
+      "comfyui_input": "slopforge/workflow-inputs/slopforge-goblin-reference.png"
+    },
+    {
+      "path": "slopforge/issue-9-qualification/slopforge-wan-drive-1s.mp4",
+      "sha256": "77f96de1fb9004c19ddd9a92935717c156a6994258192e4b8a6aaea271b76946",
+      "comfyui_input": "slopforge/workflow-inputs/slopforge-wan-drive-1s.mp4"
+    }
+  ],
+  "outputs": [
+    {
+      "index": 0,
+      "source_filename": "sprite_candidate_small_subject_00001_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0000.png",
+      "sha256": "a4c57a80313467010704996b2f91da58fa97dea46af0327d0a05ad94f449a69c"
+    },
+    {
+      "index": 1,
+      "source_filename": "sprite_candidate_small_subject_00002_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0001.png",
+      "sha256": "69e8803a885b3c11e9e16526780330faa0cc07b664100c16810459495b68bbb7"
+    },
+    {
+      "index": 2,
+      "source_filename": "sprite_candidate_small_subject_00003_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0002.png",
+      "sha256": "8ae4de07e5e6354d72b92a7607090c5277b899a5a1a9edec7d77ebddbf31959b"
+    },
+    {
+      "index": 3,
+      "source_filename": "sprite_candidate_small_subject_00004_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0003.png",
+      "sha256": "c1bd4904dbc9623af9ebdbc38e71198b167f68585b4e512323e944a50defdef0"
+    },
+    {
+      "index": 4,
+      "source_filename": "sprite_candidate_small_subject_00005_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0004.png",
+      "sha256": "c013f5fc70bd61aaa3164159f9622f437f0912f85bbb787dd94c0c64b7f2e9ed"
+    },
+    {
+      "index": 5,
+      "source_filename": "sprite_candidate_small_subject_00006_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0005.png",
+      "sha256": "a7555c8c1a465bafc02ba5f35df28476bdca9f12ad9188c4fd511205d0b0e3ff"
+    },
+    {
+      "index": 6,
+      "source_filename": "sprite_candidate_small_subject_00007_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0006.png",
+      "sha256": "e9c5cf0f312c0831261a7db01066755457a24cf260397d998d6d99ed24fd7901"
+    },
+    {
+      "index": 7,
+      "source_filename": "sprite_candidate_small_subject_00008_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0007.png",
+      "sha256": "c4ae1540a2622bb9a4323df41840269dd27df760d33e3185cdb8a63fc05b7554"
+    },
+    {
+      "index": 8,
+      "source_filename": "sprite_candidate_small_subject_00009_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0008.png",
+      "sha256": "fede142d932c7c2fc0874603b9f73d7c5272a46530f28b04250468424a65b241"
+    },
+    {
+      "index": 9,
+      "source_filename": "sprite_candidate_small_subject_00010_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0009.png",
+      "sha256": "60727d13863c3a0dfe78f0c901fee68d897034a0ff3de22a7b769f0d1b471f75"
+    },
+    {
+      "index": 10,
+      "source_filename": "sprite_candidate_small_subject_00011_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0010.png",
+      "sha256": "874b5bb9ead2a0c0358741b95626740876484704367666488aeb26bf3f72082b"
+    },
+    {
+      "index": 11,
+      "source_filename": "sprite_candidate_small_subject_00012_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0011.png",
+      "sha256": "749bb44996256917a0614147ee3257998846ef374bcdb58f54b9634911107a80"
+    },
+    {
+      "index": 12,
+      "source_filename": "sprite_candidate_small_subject_00013_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0012.png",
+      "sha256": "99b88567fc87d4962146e3d9ccb4d8fe1a7ef2bad01c5708651f9946ea610a9b"
+    },
+    {
+      "index": 13,
+      "source_filename": "sprite_candidate_small_subject_00014_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0013.png",
+      "sha256": "43e8c0018ddf1bdce4deb98ce532e6a649820ea14b81e022f20db39f94784f0e"
+    },
+    {
+      "index": 14,
+      "source_filename": "sprite_candidate_small_subject_00015_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0014.png",
+      "sha256": "c28f3261f01a2308df7c31e826a3ac4ed9f8bc590f55548da26ee23b498ba72d"
+    },
+    {
+      "index": 15,
+      "source_filename": "sprite_candidate_small_subject_00016_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0015.png",
+      "sha256": "ef5d473efd5d3823b3b8450c20cac9a75f2e550035199c18d5db8f4b56a62573"
+    },
+    {
+      "index": 16,
+      "source_filename": "sprite_candidate_small_subject_00017_.png",
+      "path": "docs/media/sprite-bakeoff-2026-10/wan-animate-dance-frames/frame_0016.png",
+      "sha256": "68cba750b7f831b954369cf7d6eaaf10cb5e7f9a25569127b3382664019f7d78"
+    }
+  ],
+  "quality": null,
+  "comfyui_version": "0.37.0",
+  "device": "NVIDIA H100 80 GB",
+  "motion_action": "dance",
+  "positive_prompt": "The same full-body green goblin miner from the reference, with large copper goggles, teal backpack straps, dark brown overalls and a glowing amber lantern at his belt. Preserve identity, proportions, silhouette and costume. Follow the provided dance movement clearly, keep the entire character centered and fully visible with margin around hands, ears and feet, fixed camera, plain neutral background.",
+  "negative_prompt": "different character, changed costume, extra limbs, missing limbs, duplicated body, camera movement, zoom, cropped head, cropped feet, cropped hands, cut off ears, text, watermark, blur, flicker, background objects",
+  "execution_seconds": null,
+  "peak_vram_bytes": null,
+  "approval_status": "exploratory_unapproved",
+  "visual_review": {
+    "identity_and_costume": "pass",
+    "motion_readability": "pass for supplied dance clip",
+    "transparent_alpha": "pass in all 17 frames",
+    "foreground_touches_canvas_edge": 0,
+    "nearest_edge_margin_px": 92,
+    "alignment": "needs review; width 148-285 px, height 354-448 px, foot baseline spread 31 px"
+  },
+  "engine_validation": "not_run",
+  "outputs_archived": true
+}

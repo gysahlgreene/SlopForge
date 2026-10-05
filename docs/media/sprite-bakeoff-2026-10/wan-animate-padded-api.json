@@ -1,0 +1,163 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {"image": "character_reference.png"},
+    "_meta": {"title": "Character identity reference"}
+  },
+  "2": {
+    "class_type": "LoadVideo",
+    "inputs": {"file": "motion_reference.mp4"},
+    "_meta": {"title": "Motion reference"}
+  },
+  "3": {
+    "class_type": "GetVideoComponents",
+    "inputs": {"video": ["2", 0]},
+    "_meta": {"title": "Read motion frames"}
+  },
+  "4": {
+    "class_type": "UNETLoader",
+    "inputs": {"unet_name": "wan_animate_2_distill_int8_convrot.safetensors", "weight_dtype": "default"},
+    "_meta": {"title": "Wan Animate model"}
+  },
+  "5": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {"model": ["4", 0], "shift": 8.0},
+    "_meta": {"title": "Wan sampling settings"}
+  },
+  "6": {
+    "class_type": "WanAnimate2Cache",
+    "inputs": {"model": ["5", 0], "device": "cpu", "dtype": "int8"},
+    "_meta": {"title": "Cache motion features"}
+  },
+  "7": {
+    "class_type": "CLIPLoader",
+    "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"},
+    "_meta": {"title": "Wan text encoder"}
+  },
+  "8": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {"clip_name": "clip_vision_h.safetensors"},
+    "_meta": {"title": "Reference image encoder"}
+  },
+  "14": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "A stylized green goblin miner with large copper goggles, teal backpack straps, dark brown overalls, and an amber lantern. Preserve the same full-body character, face, proportions, costume, and colors from the reference image. Keep the character centered, fully visible, and on a simple plain background.", "clip": ["7", 0]},
+    "_meta": {"title": "Appearance and style"}
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {"text": "different character, changed costume, extra or missing limbs, duplicated body, camera movement, zoom, cropped head, cropped feet, text, watermark, blur, flicker, background objects", "clip": ["7", 0]},
+    "_meta": {"title": "Negative prompt"}
+  },
+  "10": {
+    "class_type": "WanAnimate2ToVideo",
+    "inputs": {
+      "positive": ["14", 0],
+      "negative": ["9", 0],
+      "vae": ["11", 0],
+      "width": 480,
+      "height": 832,
+      "length": 17,
+      "batch_size": 1,
+      "video_frame_offset": 0,
+      "pose_strength": 1.0,
+      "pose_start_percent": 0.0,
+      "pose_end_percent": 1.0,
+      "reference_image_strength": 1.0,
+      "reference_image": ["26", 0],
+      "pose_video": ["28", 0],
+      "clip_vision_output": ["12", 0]
+    },
+    "_meta": {"title": "Transfer motion to character"}
+  },
+  "11": {
+    "class_type": "VAELoader",
+    "inputs": {"vae_name": "wan_2.1_vae.safetensors"},
+    "_meta": {"title": "Wan video decoder"}
+  },
+  "12": {
+    "class_type": "CLIPVisionEncode",
+    "inputs": {"clip_vision": ["8", 0], "image": ["1", 0], "crop": "center"},
+    "_meta": {"title": "Encode character identity"}
+  },
+  "15": {
+    "class_type": "KSamplerSelect",
+    "inputs": {"sampler_name": "lcm"},
+    "_meta": {"title": "Sampler"}
+  },
+  "16": {
+    "class_type": "BasicScheduler",
+    "inputs": {"model": ["6", 0], "scheduler": "simple", "steps": 8, "denoise": 1.0},
+    "_meta": {"title": "Sampling schedule"}
+  },
+  "17": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "model": ["6", 0],
+      "add_noise": true,
+      "noise_seed": 314159265,
+      "cfg": 1.0,
+      "positive": ["10", 0],
+      "negative": ["10", 1],
+      "sampler": ["15", 0],
+      "sigmas": ["16", 0],
+      "latent_image": ["10", 2]
+    },
+    "_meta": {"title": "Generate animated frames"}
+  },
+  "18": {
+    "class_type": "TrimVideoLatent",
+    "inputs": {"samples": ["17", 0], "trim_amount": ["10", 3]},
+    "_meta": {"title": "Trim conditioning frame"}
+  },
+  "19": {
+    "class_type": "VAEDecode",
+    "inputs": {"samples": ["18", 0], "vae": ["11", 0]},
+    "_meta": {"title": "Decode generated frames"}
+  },
+  "20": {
+    "class_type": "LoadBackgroundRemovalModel",
+    "inputs": {"bg_removal_name": "birefnet.safetensors"},
+    "_meta": {"title": "Load licensed foreground matting model"}
+  },
+  "21": {
+    "class_type": "RemoveBackground",
+    "inputs": {"image": ["19", 0], "bg_removal_model": ["20", 0]},
+    "_meta": {"title": "Matte every generated frame"}
+  },
+  "22": {
+    "class_type": "InvertMask",
+    "inputs": {"mask": ["21", 0]},
+    "_meta": {"title": "Invert foreground mask"}
+  },
+  "23": {
+    "class_type": "JoinImageWithAlpha",
+    "inputs": {"image": ["19", 0], "alpha": ["22", 0]},
+    "_meta": {"title": "Apply transparency"}
+  },
+  "24": {
+    "class_type": "SaveImage",
+    "inputs": {"filename_prefix": "slopforge/sprite_candidate", "images": ["23", 0]},
+    "_meta": {"title": "Save RGBA frames"}
+  },
+  "25": {
+    "class_type": "ImageScale",
+    "inputs": {"image": ["1", 0], "upscale_method": "lanczos", "width": 352, "height": 608, "crop": "disabled"},
+    "_meta": {"title": "Scale reference for safe margins"}
+  },
+  "26": {
+    "class_type": "ImagePadForOutpaint",
+    "inputs": {"image": ["25", 0], "left": 64, "top": 112, "right": 64, "bottom": 112, "feathering": 0},
+    "_meta": {"title": "Pad character reference to output canvas"}
+  },
+  "27": {
+    "class_type": "ImageScale",
+    "inputs": {"image": ["3", 0], "upscale_method": "lanczos", "width": 352, "height": 608, "crop": "disabled"},
+    "_meta": {"title": "Scale motion frames for safe margins"}
+  },
+  "28": {
+    "class_type": "ImagePadForOutpaint",
+    "inputs": {"image": ["27", 0], "left": 64, "top": 112, "right": 64, "bottom": 112, "feathering": 0},
+    "_meta": {"title": "Pad motion frames to output canvas"}
+  }
+}
