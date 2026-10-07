@@ -2,7 +2,9 @@
 
 [Watch the eight-second motion test](motion-test.mp4) · [Validation report](Validation-Summary.json) · [Unity mapping and motion results](Unity-Humanoid-Validation.txt)
 
-![Raised-arm diagnostic pose](raised-arms.png)
+![Animated body-deformation diagnostic](motion-test.gif)
+
+[Full-resolution raised-arm pose](raised-arms.png)
 
 On 2026-10-07 Eoin reviewed the delivered rig and animation in Blender and confirmed “all good.” This records approval of body deformation for this candidate. It does not automatically approve future generated humanoids.
 
