@@ -92,11 +92,28 @@ def inspect(source, face_budget):
     dimensions = [maximum[i] - minimum[i] for i in range(3)]
     origins = [[float(value) for value in obj.matrix_world.translation] for obj in objects]
     uv_layers = sum(len(obj.data.uv_layers) for obj in objects)
+    mesh_without_uv_count = sum(not obj.data.uv_layers for obj in objects)
     polygons = [polygon for obj in objects for polygon in obj.data.polygons]
     zero_area_faces = sum(polygon.area <= 1e-12 for polygon in polygons)
     zero_normals = sum(polygon.normal.length <= 1e-8 for polygon in polygons)
-    materials = [material for obj in objects for material in obj.data.materials if material]
-    image_nodes = [node.image for material in materials if material.use_nodes for node in material.node_tree.nodes if node.type == "TEX_IMAGE" and node.image]
+    assigned_materials = []
+    for obj in objects:
+        indices = {polygon.material_index for polygon in obj.data.polygons}
+        assigned_materials.append([obj.data.materials[index] if 0 <= index < len(obj.data.materials) else None
+                                   for index in indices])
+    materials = [material for assignments in assigned_materials for material in assignments if material]
+    mesh_without_material_count = sum(not assignments or any(material is None for material in assignments)
+                                      for assignments in assigned_materials)
+    def linked_images(material):
+        if not material or not material.use_nodes or not material.node_tree:
+            return []
+        # ponytail: node-link presence only; traverse active shader outputs if graph qualification is added.
+        return [node.image for node in material.node_tree.nodes
+                if node.type == "TEX_IMAGE" and node.image
+                and any(output.is_linked for output in node.outputs)]
+    image_nodes = [image for material in materials for image in linked_images(material)]
+    mesh_without_texture_count = sum(
+        not any(linked_images(material) for material in assignments) for assignments in assigned_materials)
     missing_textures = []
     for image in image_nodes:
         filepath = Path(bpy.path.abspath(image.filepath))
@@ -118,11 +135,22 @@ def inspect(source, face_budget):
                               "dimensions": [obj_max[i] - obj_min[i] for i in range(3)],
                               "origin": [float(value) for value in obj.matrix_world.translation],
                               "rotation_degrees": [math.degrees(value) for value in obj.rotation_euler]})
+    auxiliary_objects = [{"name": obj.name, "type": obj.type} for obj in bpy.context.scene.objects
+                         if obj.type not in {"MESH", "CAMERA", "LIGHT"}]
+    coordinate_system = {"unit_system": bpy.context.scene.unit_settings.system or "NONE",
+                         "scale_length": float(bpy.context.scene.unit_settings.scale_length),
+                         "up_axis": "Z", "forward_axis": "-Y", "basis": "Blender world",
+                         "measured_unit": "Blender units"}
     measured = {"mesh_objects": len(objects), "vertex_count": vertices, "face_count": faces,
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,
-                "uv_layers": uv_layers, "material_count": len(materials), "image_texture_count": len(image_nodes),
-                "missing_textures": missing_textures, "transforms_applied": scales_applied,
+                "uv_layers": uv_layers, "mesh_without_uv_count": mesh_without_uv_count,
+                "material_count": len(materials), "mesh_without_material_count": mesh_without_material_count,
+                "image_texture_count": len(image_nodes), "mesh_without_texture_count": mesh_without_texture_count,
+                "missing_textures": missing_textures,
+                "coordinate_system": coordinate_system, "rest_pose_status": "visual_review_required",
+                "auxiliary_objects": auxiliary_objects,
+                "transforms_applied": scales_applied,
                 "normal_count": len(polygons), "zero_normal_count": zero_normals,
                 "degenerate_face_count": zero_area_faces,
                 "component_count": components, "boundary_edge_count": boundary_edges,

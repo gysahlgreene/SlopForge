@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from slopforge.character_normalization import approve_character_normalization, normalize_character
+from readiness_fixture import complete_measurements
 
 
 def complete_report():
@@ -36,6 +37,7 @@ class CharacterNormalizationTests(unittest.TestCase):
                                                    "path": "Assets/Characters/pilot/model.glb", "status": "ready",
                                                    "approval": {"status": "approved"}}},
                           "animation_readiness": {"status": "pass", "approval": {"status": "approved"},
+                                                  "measured": complete_measurements(),
                                                   "source_output": "model", "source": {
                                                       "artifact_id": "model", "path": "Assets/Characters/pilot/model.glb",
                                                       "sha256": hashlib.sha256(self.source.read_bytes()).hexdigest()}}}

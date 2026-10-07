@@ -14,6 +14,7 @@ SkinTokens arm classification previously mistook rising shoulder stubs for upper
 
 ## Evidence
 
+- [Canonical source input-contract check](Input-Contract-Validation.json): the source SHA-256 matches the source recorded by the reviewed rig. Blender 5.1 measured one mesh, 43,480 faces, four connected components, zero boundary/non-manifold/degenerate geometry, UVs/materials/linked textures, and no missing texture files or auxiliary objects. Readiness remains `needs_review`, with pending approval of component layout, material fidelity, orientation and rest pose. The earlier failing raw-rig probe is a different file and does not describe this source.
 - Original source and raw-rig hashes, checkpoint hash, provider revision, compatibility patch hash and seed: [report](Validation-Summary.json).
 - Blender 5.1 fresh FBX import: one mesh, one 28-bone armature, all vertices weighted, at most four influences, normalized weight sums.
 - Unity 6000.6.3f1: valid Humanoid Avatar with all required body joints; eight-second diagnostic clip evaluated through an initialized Animator PlayableGraph, with maximum skinned vertex displacement 0.4485983 in mesh coordinates. Reproduction script: [Unity-RigCheck.cs](Unity-RigCheck.cs).

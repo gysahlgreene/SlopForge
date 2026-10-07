@@ -49,7 +49,16 @@ bm=bmesh.new(); bm.from_mesh(mesh.data)
 bmesh.ops.dissolve_degenerate(bm, edges=list(bm.edges), dist=0.00001)
 bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
 material=bpy.data.materials.new("FixtureMaterial"); material.diffuse_color=(0.4,0.5,0.7,1)
+material.use_nodes=True
+image=bpy.data.images.new("FixtureColor", width=4, height=4)
+image.pixels=[0.4,0.5,0.7,1.0]*16; image.pack()
+texture=material.node_tree.nodes.new("ShaderNodeTexImage"); texture.image=image
+material.node_tree.links.new(texture.outputs["Color"], material.node_tree.nodes.get("Principled BSDF").inputs["Base Color"])
 mesh.data.materials.append(material)
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.uv.smart_project()
+bpy.ops.object.mode_set(mode="OBJECT")
 bpy.ops.export_scene.gltf(filepath=str(Path(__file__).parent / "Assets/Characters/pilot/model.glb"),
                            export_format="GLB", use_selection=True)
 ''')

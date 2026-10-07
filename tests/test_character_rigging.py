@@ -8,6 +8,7 @@ from unittest.mock import patch
 from slopforge.character_rigging import (record_rigging_result, resolve_rigging_source,
     run_character_rigging, classify_skintokens_structure, approve_deformation, skintokens_character)
 from slopforge.manifest import new_record, register_artifact
+from readiness_fixture import complete_measurements
 
 
 class CharacterRiggingTests(unittest.TestCase):
@@ -24,6 +25,7 @@ class CharacterRiggingTests(unittest.TestCase):
         register_artifact(self.manifest, "character:pilot", "model", "model.glb",
                           "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
         character["animation_readiness"] = {
+            "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
             "source": {"artifact_id": "model", "path": "Assets/Characters/pilot/model.glb",
                        "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}}
@@ -157,6 +159,7 @@ class CharacterRiggingTests(unittest.TestCase):
                           "Assets/Characters/pilot/normalized.glb", status="ready", approval_status="approved")
         character = self.manifest["assets"]["character:pilot"]
         character["animation_readiness"] = {
+            "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "normalized_model",
             "source": {"artifact_id": "normalized_model", "path": "Assets/Characters/pilot/normalized.glb",
                        "sha256": hashlib.sha256(normalized.read_bytes()).hexdigest()}}

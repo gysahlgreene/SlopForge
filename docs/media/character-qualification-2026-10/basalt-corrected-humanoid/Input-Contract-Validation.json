@@ -1,0 +1,146 @@
+{
+  "checked_on": "2026-10-07",
+  "source": {
+    "filename": "Basalt-Warden-H100.glb",
+    "sha256": "06d2f086359960eddb2b048338809fe0f1982ef9a3947b1de319ee619fe279ec",
+    "matches_reviewed_rig_source": true
+  },
+  "inspector": {
+    "blender_version": "5.1.0",
+    "script_sha256": "76851eadd2d767cfb24391ea5b3914bdc7f6fcc5c1f6d0e01f1990ad9b54984a",
+    "classifier_sha256": "7b32d64dd9140981e9b00e5c6dfdb2fd8741329f44494b66f2ea800b6e17dfe0"
+  },
+  "readiness": {
+    "status": "needs_review",
+    "approval": {
+      "status": "pending"
+    },
+    "measured": {
+      "mesh_objects": 1,
+      "vertex_count": 29183,
+      "face_count": 43480,
+      "bounds_min": [
+        -0.31839415431022644,
+        -0.1141679659485817,
+        -0.49996963143348694
+      ],
+      "bounds_max": [
+        0.3182446360588074,
+        0.11338752508163452,
+        0.49553704261779785
+      ],
+      "dimensions": [
+        0.6366387903690338,
+        0.22755549103021622,
+        0.9955066740512848
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Mesh_0",
+          "bounds_min": [
+            -0.31839415431022644,
+            -0.1141679659485817,
+            -0.49996963143348694
+          ],
+          "bounds_max": [
+            0.3182446360588074,
+            0.11338752508163452,
+            0.49553704261779785
+          ],
+          "dimensions": [
+            0.6366387903690338,
+            0.22755549103021622,
+            0.9955066740512848
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 1,
+      "mesh_without_uv_count": 0,
+      "material_count": 1,
+      "mesh_without_material_count": 0,
+      "image_texture_count": 2,
+      "mesh_without_texture_count": 0,
+      "missing_textures": [],
+      "coordinate_system": {
+        "unit_system": "METRIC",
+        "scale_length": 1.0,
+        "up_axis": "Z",
+        "forward_axis": "-Y",
+        "basis": "Blender world",
+        "measured_unit": "Blender units"
+      },
+      "rest_pose_status": "visual_review_required",
+      "auxiliary_objects": [],
+      "transforms_applied": true,
+      "normal_count": 43480,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 0,
+      "component_count": 4,
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "face_budget": 60000
+    },
+    "reasons": [
+      "rest pose and model orientation require human review",
+      "4 disconnected mesh components"
+    ],
+    "checks": {
+      "face_budget": 60000,
+      "prototype_scale_meters": [
+        0.05,
+        5.0
+      ],
+      "dimensions_meters": [
+        0.6366387903690338,
+        0.22755549103021622,
+        0.9955066740512848
+      ],
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "component_count": 4,
+      "transforms_applied": true,
+      "uv_layers": 1,
+      "mesh_without_uv_count": 0,
+      "material_count": 1,
+      "mesh_without_material_count": 0,
+      "image_texture_count": 2,
+      "mesh_without_texture_count": 0,
+      "missing_textures": [],
+      "coordinate_system": {
+        "unit_system": "METRIC",
+        "scale_length": 1.0,
+        "up_axis": "Z",
+        "forward_axis": "-Y",
+        "basis": "Blender world",
+        "measured_unit": "Blender units"
+      },
+      "rest_pose_status": "visual_review_required",
+      "auxiliary_objects": []
+    },
+    "limitations": [
+      "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+      "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+    ]
+  },
+  "limits": [
+    "This is source structure/material-presence evidence. Material fidelity, intended component layout, orientation and rest pose require human review.",
+    "Existing body-deformation approval and Humanoid diagnostic evaluation remain separate evidence; no known-good third-party Unity playback is established here."
+  ]
+}

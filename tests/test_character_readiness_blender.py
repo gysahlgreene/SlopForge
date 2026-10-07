@@ -14,6 +14,38 @@ BLENDER = (os.environ.get("BLENDER_BIN") or shutil.which("blender")
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class CharacterReadinessBlenderTests(unittest.TestCase):
+    def test_unused_textured_slot_does_not_cover_unassigned_faces(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "unassigned.py"
+            fixture.write_text('''import bpy, sys
+from pathlib import Path
+root=Path(sys.argv[sys.argv.index("--")+1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add()
+obj=bpy.context.object
+obj.data.materials.append(None)
+material=bpy.data.materials.new("UnusedPaint"); material.use_nodes=True
+image=bpy.data.images.new("PackedColor", width=4, height=4)
+image.pixels=[0.4,0.5,0.7,1.0]*16; image.pack()
+texture=material.node_tree.nodes.new("ShaderNodeTexImage"); texture.image=image
+material.node_tree.links.new(texture.outputs["Color"], material.node_tree.nodes.get("Principled BSDF").inputs["Base Color"])
+obj.data.materials.append(material)
+for polygon in obj.data.polygons: polygon.material_index=0
+bpy.ops.wm.save_as_mainfile(filepath=str(root/"source.blend"))
+''')
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(root)], check=True, capture_output=True, text=True)
+            report = root / "report.json"
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(root / "source.blend"),
+                            str(report), "60000"], check=True, capture_output=True, text=True)
+            result = json.loads(report.read_text())
+            self.assertEqual(result["animation_readiness"]["status"], "fail")
+            self.assertEqual(result["measured"]["mesh_without_material_count"], 1)
+            self.assertEqual(result["measured"]["mesh_without_texture_count"], 1)
+            self.assertEqual(result["measured"]["image_texture_count"], 0)
+
     def test_normalization_preserves_components_and_bakes_packed_color(self):
         import hashlib
         with tempfile.TemporaryDirectory() as temporary:
@@ -107,6 +139,20 @@ def export(name, vertices, faces):
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
+    uv = mesh.uv_layers.new(name="QualificationUV")
+    for loop in mesh.loops:
+        point = mesh.vertices[loop.vertex_index].co
+        uv.data[loop.index].uv = (point.x, point.z)
+    image = bpy.data.images.new(name + "Color", width=4, height=4)
+    image.pixels = [0.7, 0.4, 0.2, 1.0] * 16
+    image.pack()
+    material = bpy.data.materials.new(name + "Material")
+    material.use_nodes = True
+    texture = material.node_tree.nodes.new("ShaderNodeTexImage")
+    texture.image = image
+    material.node_tree.links.new(texture.outputs["Color"],
+                                  material.node_tree.nodes.get("Principled BSDF").inputs["Base Color"])
+    obj.data.materials.append(material)
     bpy.context.view_layer.objects.active = obj
     obj.select_set(True)
     bpy.ops.export_scene.gltf(filepath=str(root / (name + ".glb")), export_format="GLB", use_selection=True)
@@ -159,7 +205,11 @@ export("unsuitable_generated", [(0,0,0),(1,0,0),(0,1,0)], [(0,1,2)])
                 self.assertTrue(report.is_file(), inspected.stdout[-500:] + inspected.stderr[-500:])
                 reports[name] = json.loads(report.read_text())
 
-            self.assertEqual(reports["valid_humanoid"]["animation_readiness"]["status"], "pass")
+            self.assertEqual(reports["valid_humanoid"]["animation_readiness"]["status"], "needs_review")
+            self.assertEqual(reports["valid_humanoid"]["measured"]["mesh_without_uv_count"], 0)
+            self.assertEqual(reports["valid_humanoid"]["measured"]["mesh_without_material_count"], 0)
+            self.assertEqual(reports["valid_humanoid"]["measured"]["image_texture_count"], 1)
+            self.assertEqual(reports["valid_humanoid"]["measured"]["mesh_without_texture_count"], 0)
             self.assertEqual(reports["disconnected_open"]["animation_readiness"]["status"], "needs_review")
             self.assertEqual(reports["unsuitable_generated"]["animation_readiness"]["status"], "fail")
             self.assertIn("normal_count", reports["valid_humanoid"]["measured"])

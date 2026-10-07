@@ -9,6 +9,7 @@ from PIL import Image
 
 from slopforge.character_rigging import rigify_character, welding_tolerance
 from slopforge.cli import parse_args
+from readiness_fixture import complete_measurements
 from slopforge.manifest import new_record, register_artifact
 
 
@@ -17,6 +18,7 @@ class RigifyProviderTests(unittest.TestCase):
         artifact = self.manifest["assets"]["character:pilot"]["artifacts"]["model"]
         source = self.root / artifact["path"]
         self.manifest["assets"]["character:pilot"]["animation_readiness"] = {
+            "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
             "source": {"artifact_id": artifact["id"], "path": artifact["path"],
                        "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}}
