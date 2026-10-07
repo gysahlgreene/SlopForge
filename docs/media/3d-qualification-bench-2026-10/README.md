@@ -1,6 +1,6 @@
 # 3D qualification benchmark — October 2026
 
-**2026-10-07 follow-up:** the retained 120-cell Basalt source now has a valid Unity Humanoid rig, evaluated diagnostic animation and user-approved body deformation. See [reviewed rig evidence](../character-qualification-2026-10/basalt-corrected-humanoid/README.md). Earlier failed generation attempts below remain historical failures; they were not promoted. Ashen remains unqualified at the configured mesh budget.
+**2026-10-07 follow-up:** the retained 120-cell Basalt source has a valid Unity Humanoid rig, evaluated diagnostic animation, and user-approved body deformation, but its visual quality was rejected by the owner. A separate final-tier H100 run used all three candidates: attempts 1 and 2 failed structural checks; attempt 3 passed structural checks after 120-cell remeshing and was scaled to 1.8 m. Its human visual review is pending, so it remains unapproved and unrigged. See the [new attempt report](basalt_h100_final_review.json) and [earlier reviewed rig evidence](../character-qualification-2026-10/basalt-corrected-humanoid/README.md). Earlier failed generation attempts below remain historical failures; they were not promoted. Ashen remains unqualified at the configured mesh budget.
 
 Offline re-inspection of the supplied review folders using Blender 5.1.0 and the current `blender/inspect_model.py`, with a 100,000-face budget. `summary.json` records input SHA-256, Blender runtime, mesh counts, topology, texture nodes, and report paths. The input files remain in `~/Downloads`; they were not modified.
 
@@ -20,7 +20,7 @@ The concept-to-character benchmark ran through the remote ComfyUI endpoint at `h
 
 The real SlopForge path then used the normal tier's full two-attempt budget from the same reference. Attempt 1 generated and textured a mesh, but the reduced candidate had 1,470 components and 36,481 boundary edges. Attempt 2 generated a raw shape that Blender could not reduce to 60,000 faces; the retained raw mesh has 4,563,774 faces, no UV map, and 139,704 non-manifold edges. The asset manifest records both attempts and ends in `failed`, with no selected candidate or approval. Detailed prompt IDs, seeds, inference times, model names, source hashes, reports, and 4-view renders are retained in `h100_slopforge_run/` and `basalt_warden_h100.json`.
 
-The standalone candidate's basecolor, roughness, and metallic maps are 2048²; its normal map is a 1×1 flat map. The live SlopForge candidate's four views show severe fragmented geometry. Visual approval, deformation review, and Unity import/playback remain pending. No Basalt result is game-ready.
+The standalone candidate's basecolor, roughness, and metallic maps are 2048²; its normal map is a 1×1 flat map. The live SlopForge candidate's four views show severe fragmented geometry. These remain failed historical candidates. The new final-tier candidate's basecolor, roughness, and metallic maps are 4096², but its normal map is still 1×1 and flat. Visual review of that new candidate, deformation review, and Unity import/playback remain pending. No Basalt result is game-ready.
 
 ### Voxel-remesh diagnostic
 
