@@ -15,6 +15,21 @@
     "approval": {
       "status": "pending"
     },
+    "human_review": {
+      "reviewed_on": "2026-10-07",
+      "decision": "revision_required",
+      "reviewer": "repository owner",
+      "accepted": [
+        "upright orientation",
+        "starting pose suitable for rigging",
+        "overall appearance of four connected geometry islands as one intended character"
+      ],
+      "findings": [
+        "tiny stray geometry at the back of an elbow",
+        "visual quality rejected as lumpy, low-resolution, and flat"
+      ],
+      "scale_preference": "Use Unity convention 1 unit = 1 metre and target approximately 1.8 metres for an adult humanoid; current source is approximately 1 metre tall."
+    },
     "measured": {
       "mesh_objects": 1,
       "vertex_count": 29183,
