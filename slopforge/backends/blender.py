@@ -1,8 +1,15 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
-from ..paths import blender_executable, tool_root
+from ..paths import blender_executable, package_root, tool_root
+
+
+def blender_environment():
+    env = os.environ.copy()
+    env["SLOPFORGE_PACKAGE_ROOT"] = str(package_root())
+    return env
 
 
 def process_model(project_root, config, glb, fbx, blend, textures, face_budget, *,
@@ -32,7 +39,7 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
 def inspect_model(project_root, config, blend, output_json, face_budget):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/inspect_model.py"
-    command = [blender_executable(config, root), "--background", "--python", str(script), "--",
+    command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python", str(script), "--",
                str(blend), str(output_json), str(face_budget)]
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, env=blender_environment())
     return json.loads(Path(output_json).read_text())

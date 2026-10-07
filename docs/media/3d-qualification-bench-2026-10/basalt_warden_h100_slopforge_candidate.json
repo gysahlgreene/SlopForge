@@ -121,7 +121,7 @@
   "mesh_source": "basalt_warden_h100.glb",
   "provider": {
     "service": "ComfyUI HTTP API",
-    "endpoint": "http://100.108.220.4:8188",
+    "endpoint": "http://<comfyui-host>:8188",
     "backend": "remote",
     "gpu": "NVIDIA H100 80GB HBM3",
     "gpu_memory_mib": 81559,

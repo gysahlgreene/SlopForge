@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Labeled public SkinTokens Git revision and model-integrity SHA-256 values"
+regexTarget = "match"
+regexes = ['''(?i)skintokens_(?:revision|(?:demo|tokenrig|patch)_sha256)["']?\s*[:=]\s*["'][a-f0-9]{40,64}["']''']

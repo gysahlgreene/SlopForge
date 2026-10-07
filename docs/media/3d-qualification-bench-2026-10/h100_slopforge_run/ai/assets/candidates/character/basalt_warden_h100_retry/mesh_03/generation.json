@@ -122,7 +122,7 @@
   },
   "shape_prompt_id": "4fa1fd2f-261f-412d-ada7-6625eeb57b00",
   "texture_prompt_id": "7155a34a-30d5-4ba6-ab44-1bf442948a31",
-  "provider_endpoint": "http://100.108.220.4:8188",
+  "provider_endpoint": "http://<comfyui-host>:8188",
   "mesh_preparation": {
     "operation": "Blender voxel remesh, then isolated single-face cleanup",
     "resolution_cells": 120,

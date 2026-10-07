@@ -71,5 +71,3 @@ asset_pipeline:
     hunyuan_checkpoint: hunyuan3d-dit-v2_fp16.safetensors
 
   overwrite_existing: false
-  retain_sources: true
-  retain_blend_preview: true

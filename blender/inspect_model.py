@@ -11,7 +11,7 @@ import bpy
 import bmesh
 from mathutils import Vector
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.character_readiness import classify_character_readiness
 
 

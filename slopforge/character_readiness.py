@@ -128,9 +128,10 @@ def run_character_readiness(project_root, config, manifest, character_selector, 
         raise ValueError("Readiness output directory must stay inside the project")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     script = tool_root() / "blender/inspect_model.py"
-    command = [blender_executable(config, root), "--background", "--factory-startup",
+    command = [blender_executable(config, root), "--background", "--factory-startup", "--python-exit-code", "1",
                "--python", str(script), "--", str(source), str(report_path), str(face_budget)]
-    subprocess.run(command, check=True)
+    from .backends.blender import blender_environment
+    subprocess.run(command, check=True, env=blender_environment())
     if not report_path.is_file():
         raise RuntimeError("Blender completed without creating a character-readiness report")
     inspection = json.loads(report_path.read_text())

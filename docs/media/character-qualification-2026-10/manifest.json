@@ -2,7 +2,7 @@
   "date": "2026-10-06",
   "status": "experimental; not approved",
   "source_model": {
-    "path": "/Users/eoin/Downloads/SlopForge-H100-character-rig-20261004/results/hunyuan_comparison/moon_scout_hunyuan.glb",
+    "path": "<review-assets>/SlopForge-H100-character-rig-20261004/results/hunyuan_comparison/moon_scout_hunyuan.glb",
     "sha256": "39b98f0c9ad3502e6c61446d4d0959abc03b19dc238ff58c1348bd8e44de4c05"
   },
   "normalized_model": {

@@ -23,7 +23,7 @@ slopforge --project ~/UnityProjects/MyGame make
 The first tested remote example is the H100 host:
 
 ```sh
-export COMFYUI_URL=http://100.108.220.4:8188
+export COMFYUI_URL=http://<comfyui-host>:8188
 export SLOPFORGE_COMPUTE_PROFILE=h100
 slopforge --project ~/UnityProjects/MyGame doctor
 slopforge --project ~/UnityProjects/MyGame make
@@ -104,7 +104,7 @@ Project workflows in `ai/workflows/` override bundled workflow files. Put an opt
 
 Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
 
-The bundled text-to-image graph remains text-only. A paired Wan 2.2 TI2V reference-conditioning experiment is retained as historical evidence in [the qualification report](REFERENCE-CONDITIONING-QUALIFICATION.md); it does not qualify the 3D generation route.
+The bundled text-to-image graph remains text-only. A paired Wan 2.2 TI2V reference-conditioning experiment is retained as historical evidence in [the qualification report](archive/reference-conditioning-2026-10.md); it does not qualify the 3D generation route.
 
 ## Integration checks
 

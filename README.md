@@ -1,91 +1,90 @@
 # SlopForge
 
-SlopForge is a local-first workflow for creating and preparing 3D game assets. It coordinates ComfyUI for concept and mesh generation, Blender for mesh processing and review, and Unity for asset import. ComfyUI is an HTTP service: set `COMFYUI_URL` to use a local or remote host, and choose compatible workflows separately with `SLOPFORGE_COMPUTE_PROFILE`.
+**Turn an asset brief into a reviewed 3D game asset.**
 
-SlopForge keeps generated candidates separate until a person reviews and approves them. Its job is to make the generation and processing stages repeatable, traceable, and easier to inspect—not to claim every generated model is game-ready.
+SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU; keep your assets, approval decisions, and provenance in your own project.
+
+[Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md) · [Roadmap](docs/CAPABILITY-ROADMAP-2026.md)
+
+## See it working
+
+| Reviewed humanoid | Prop delivery |
+| :---: | :---: |
+| ![Basalt Warden performing the body-deformation test](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/motion-test.gif) | ![Generated power relay imported into Unity](img/power-relay-unity.png) |
+| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Pipeline notes →](docs/archive/mesh-texturing-2026-10-02.md) |
+
+These are measured examples. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
+
+## The workflow
 
 ```mermaid
 flowchart LR
-  A[Asset brief and style] --> B[Concept or material reference]
-  B --> C[3D generation]
-  C --> D[Mesh cleanup and readiness checks]
-  D --> E[Human review]
-  E -->|Revise| B
-  E -->|Approve| F[Unity model and materials]
-  D --> G[Character rigging]
-  G --> H[Deformation review]
-  H --> I[Animation and Unity playback]
+    Brief[Brief + style] --> Concept[Concept candidates]
+    Concept --> Review[Human selection]
+    Review --> Mesh[3D generation + checks]
+    Mesh --> Materials[Material review]
+    Materials --> Unity[Unity delivery]
+    Mesh --> Rig[Character rigging]
+    Rig --> Motion[Deformation review]
+    Motion --> Playback[Animation + Unity validation]
 ```
 
-## Current state
-
-The 3D generation, Blender processing, material export, candidate review, recipe, provenance, and Unity paths are implemented to different levels. Generated geometry can still have holes, disconnected parts, incomplete textures, and other defects. Character readiness checks are structural; they do not prove anatomy or deformation. Rigging providers are experimental, and a generated character is not qualified until its deformation has been visually reviewed and its animation has been played in Unity.
-
-The committed [power relay example](img/power-relay-unity.png) documents a real mesh/material/import route and its visible reconstruction defects. It is evidence of the pipeline, not a quality guarantee.
-
-See the [capability roadmap](docs/CAPABILITY-ROADMAP-2026.md), [audit](docs/AUDIT-2026-10.md), [workflow inventory](docs/WORKFLOWS.md), [character rigging notes](docs/CHARACTER-RIGGING.md), and [demo](docs/DEMO.md).
+- **Generate:** props, collectibles, architecture, and humanoid character candidates using configurable ComfyUI workflows.
+- **Prepare:** inspect geometry, preserve sources, process meshes and PBR maps, and render review views in Blender.
+- **Review:** compare candidates, approve explicitly, and retain failed attempts and processing evidence.
+- **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
+- **Deliver:** export models/materials and prepare character animation tooling for Unity.
 
 ## Quick start
 
+Requires **Python 3.10–3.14**, Blender, a compatible ComfyUI service, and an existing Unity project. Model weights and custom nodes are installed separately.
+
 ```sh
+git clone https://github.com/gysahlgreene/SlopForge.git
+cd SlopForge
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-slopforge --help
 slopforge init ~/UnityProjects/MyGame
+slopforge --project ~/UnityProjects/MyGame doctor
 ```
 
-For macOS setup and route-specific dependencies, see [installation](docs/INSTALL.md) and [setup](docs/SETUP.md). The target must be an existing Unity project. Blender is used locally; ComfyUI can run locally or on a remote GPU host over HTTP.
+[Installation](docs/INSTALL.md) covers dependencies. [ComfyUI configuration](docs/COMFYUI.md) covers local/remote inference and model/workflow compatibility.
 
-## Generate a 3D prop
+### Generate a prop
 
 ```sh
-slopforge --project ~/UnityProjects/MyGame generate prop alien_terminal \
-  "Wall-mounted alien terminal controlling sealed doors" \
-  --image-prompt "Broad wall-mounted sci-fi terminal, recessed cyan display above three tactile controls, complete front three-quarter view, isolated on a plain neutral background."
-slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame approve alien_terminal 1
-slopforge --project ~/UnityProjects/MyGame candidates alien_terminal
-slopforge --project ~/UnityProjects/MyGame approve-texture alien_terminal 1
+slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern \
+  "Weathered stone lantern for a fantasy ruin" \
+  --image-prompt "Squat carved stone lantern, broad square cap, open sides, warm glass core; complete three-quarter view, isolated on a plain neutral background."
+slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
+slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1
+slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
+slopforge --project ~/UnityProjects/MyGame approve-texture stone_lantern 1
 ```
 
-Review front, side, and rear previews and validation warnings before approving. TRELLIS.2 can generate mesh-aware material regions; the Hunyuan3D route uses an all-over surface swatch. Neither route guarantees clean topology or complete material coverage.
+Inspect the concept, mesh views, materials, and validation report before each approval. For characters, continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
 
-## Characters and coordinated 3D sets
+## What is qualified today?
 
-Use `character_3d_pack` to generate a character model candidate. After approving the model, inspect readiness, normalize and review a clean candidate when needed, then rig it, review deformation poses, and validate animation in Unity. See [character rigging](docs/CHARACTER-RIGGING.md) and [character animation](docs/CHARACTER-ANIMATIONS.md) for the current stages and limitations.
+| Area | Current evidence |
+| --- | --- |
+| Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
+| Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
+| Humanoid rigging | One generated Basalt candidate has approved body deformation and valid Unity Humanoid evaluation. Providers remain experimental. |
+| Third-party motion retargeting | Plumbing and fixture evidence exist; production idle/walk/attack qualification remains open. |
+| Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 
-Recipes coordinate related 3D assets, including modular environment kits. They resume after interruptions and stop for candidate approval; they do not infer a game plan from a natural-language pitch. See [recipe orchestration](docs/RECIPES.md) and [environment kits](docs/ENVIRONMENT-KITS.md).
+Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprite/UI/VFX generators.
 
-## What SlopForge ships
+## Find your way around
 
-- 3D asset types for props, collectibles, architecture, and characters.
-- Concept and material images as supporting inputs to 3D generation.
-- Candidate review, provenance, reference libraries, quality tiers, and resumable 3D recipes.
-- Blender mesh inspection/processing, character readiness and rigging stages, and Unity model/material/animation tooling.
-- Local or remote ComfyUI over HTTP, isolated from local Blender processing.
+| Directory | Purpose |
+| --- | --- |
+| `slopforge/` | CLI, asset lifecycle, recipes, providers, and Unity integration |
+| `blender/` · `processing/` | Background mesh, rigging, and image helpers |
+| `workflows/` · `templates/` | ComfyUI graphs, requirement declarations, and project defaults |
+| `tests/` | Offline checks and opt-in Blender, Unity, and GPU integrations |
+| `docs/` | Guides, current audit, research, and compact benchmark evidence |
 
-## Requirements and limitations
-
-- Python 3.10–3.14 and dependencies in `pyproject.toml`.
-- An existing Unity project with `Assets/`.
-- ComfyUI with a compatible image-to-3D workflow and its separately installed model weights/nodes.
-- Blender for mesh processing and character tooling.
-- Model weights are not included. Their licenses and commercial terms are separate from SlopForge's MIT license; see `THIRD_PARTY_NOTICES.md`.
-- The bundled concept graph is text-only. Reference-conditioned 3D generation depends on a workflow that accepts mapped reference inputs.
-- Unity import success does not prove a model is visually good, properly rigged, or animation-ready. Human review and visible engine validation remain required.
-
-## Documentation
-
-- [Examples](docs/EXAMPLES.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [ComfyUI setup](docs/COMFYUI.md)
-- [Workflow inventory](docs/WORKFLOWS.md)
-- [Review board](docs/REVIEW-BOARD.md)
-- [Quality tiers](docs/QUALITY-TIERS.md)
-- [Unity delivery](docs/UNITY.md)
-- [Environment kits](docs/ENVIRONMENT-KITS.md)
-
-## Reviewed humanoid benchmark
-
-Basalt Warden now has a valid Unity Humanoid rig, an eight-second diagnostic animation, and user-approved body deformation. [Watch the animation and inspect the evidence](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md). This validates the benchmark candidate; future assets still require individual qualification. Full finger animation and third-party motion validation remain outstanding.
+[Contributing](CONTRIBUTING.md) · [Security and publishing](SECURITY.md) · [MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)

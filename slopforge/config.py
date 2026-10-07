@@ -26,8 +26,6 @@ DEFAULTS = {
     },
     "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65, "workflow_inputs": []},
     "overwrite_existing": False,
-    "retain_sources": True,
-    "retain_blend_preview": True,
 }
 
 

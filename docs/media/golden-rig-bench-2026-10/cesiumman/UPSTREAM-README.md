@@ -4,7 +4,7 @@
 
 ## Tags
 
-[core](../Models-core.md), [issues](../Models-issues.md), [testing](../Models-testing.md)
+[core](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/Models-core.md), [issues](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/Models-issues.md), [testing](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Models/Models-testing.md)
 
 ## Summary
 
@@ -18,7 +18,7 @@ Textured. Animations. Skins. [Issues: non-Khronos mark]
 
 ## Screenshot
 
-![screenshot](screenshot/screenshot.gif)
+![screenshot](https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/CesiumMan/screenshot/screenshot.gif)
 
 ## Description
 
@@ -31,7 +31,7 @@ Animated and skinned character with the Cesium logo.
 
  - Cesium for Everything
 
-&copy; 2015, Cesium. [Cesium Trademark or Logo](../../LICENSES/LicenseRef-LegalMark-Cesium.txt)
+&copy; 2015, Cesium. [Cesium Trademark or Logo](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/LICENSES/LicenseRef-LegalMark-Cesium.txt)
 
  - Non-copyrightable logo for Cesium logo
 

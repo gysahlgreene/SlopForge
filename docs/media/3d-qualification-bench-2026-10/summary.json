@@ -4,7 +4,7 @@
   "runs": [
     {
       "name": "ashen-prepared",
-      "source": "/Users/eoin/Downloads/Ashen-Cartographer-3D-Review/ashen_cartographer_prepared.glb",
+      "source": "<review-assets>/Ashen-Cartographer-3D-Review/ashen_cartographer_prepared.glb",
       "sha256": "f75d4efec35c2dbf9223025669f87a0f3e97e145b9072680a6ed576ccfd215db",
       "runtime_seconds": 1.459,
       "exit_code": 0,
@@ -24,7 +24,7 @@
     },
     {
       "name": "ashen-fixednormals",
-      "source": "/Users/eoin/Downloads/Ashen-Cartographer-3D-Review/ashen_cartographer_fixednormals.glb",
+      "source": "<review-assets>/Ashen-Cartographer-3D-Review/ashen_cartographer_fixednormals.glb",
       "sha256": "fb6fc42b2d9042119e6a6bbcc90edc8611e12de1eaafbdfc7e9bc78698150dd1",
       "runtime_seconds": 1.944,
       "exit_code": 0,
@@ -44,7 +44,7 @@
     },
     {
       "name": "ashen-fine",
-      "source": "/Users/eoin/Downloads/Ashen-Cartographer-3D-Review/ashen_cartographer_prepared_fine.glb",
+      "source": "<review-assets>/Ashen-Cartographer-3D-Review/ashen_cartographer_prepared_fine.glb",
       "sha256": "f41cc331b7f53806955169a7bea66561684d64f158c396e908a2bd62cb6cae76",
       "runtime_seconds": 3.233,
       "exit_code": 0,
@@ -64,7 +64,7 @@
     },
     {
       "name": "basalt-triposr",
-      "source": "/Users/eoin/Downloads/Basalt-Warden-3D-Review/basalt_warden.glb",
+      "source": "<review-assets>/Basalt-Warden-3D-Review/basalt_warden.glb",
       "sha256": "be1cbc541651c7328485e1c7c117021c0fa2e843bdd2dc3a3005240374aa2074",
       "runtime_seconds": 0.629,
       "exit_code": 0,
@@ -82,7 +82,7 @@
     },
     {
       "name": "basalt-review-candidate",
-      "source": "/Users/eoin/Downloads/Basalt-Warden-3D-Review/Final-Review-Candidate/basalt_warden.glb",
+      "source": "<review-assets>/Basalt-Warden-3D-Review/Final-Review-Candidate/basalt_warden.glb",
       "sha256": "4e3fd956c3d0a7ae408e07b5dfdc645075eef0934c2cde38843da2ac27d8fdbe",
       "runtime_seconds": 0.606,
       "exit_code": 0,
@@ -100,7 +100,7 @@
     },
     {
       "name": "ashen-cartographer-decimated",
-      "source": "/Users/eoin/Downloads/Ashen-Cartographer-3D-Review/ashen_cartographer_decimated.glb",
+      "source": "<review-assets>/Ashen-Cartographer-3D-Review/ashen_cartographer_decimated.glb",
       "sha256": "d5e5b35f690ac00968099398d5af4f10c36662e8d0308c7ddd483a5f84b94b42",
       "runtime_seconds": 11.101,
       "exit_code": 0,
@@ -120,7 +120,7 @@
     },
     {
       "name": "ashen-cartographer-textured",
-      "source": "/Users/eoin/Downloads/Ashen-Cartographer-3D-Review/ashen_cartographer_textured.glb",
+      "source": "<review-assets>/Ashen-Cartographer-3D-Review/ashen_cartographer_textured.glb",
       "sha256": "62f6e7a187f0c0c22ac383261f3b800163a4db355eb916c757dda7bf73a2937b",
       "runtime_seconds": 11.093,
       "exit_code": 0,

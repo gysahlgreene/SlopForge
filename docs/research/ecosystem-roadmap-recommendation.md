@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-05
 **Branch:** `codex/prototype-content-factory`
-**Related evidence:** [capability matrix and licensing audit](ecosystem-capability-audit.md), [current implementation audit](../AUDIT-2026-10.md), [SkinTokens/UniRig provider audit](unirig-rigging-provider-audit.md), [ComfyUI workflow inventory](../WORKFLOWS.md).
+**Related evidence:** [capability matrix and licensing audit](ecosystem-capability-audit.md), [current implementation audit](../archive/release-audit-2026-10-04.md), [SkinTokens/UniRig provider audit](unirig-rigging-provider-audit.md), [ComfyUI workflow inventory](../WORKFLOWS.md).
 
 ## Subsequent product decision (2026-10-06)
 
@@ -177,4 +177,4 @@ Order is **#16 and #9 in parallel**, then #24 before broad engine handoff, then 
 
 ## Benchmark record for this pass
 
-No new external inference or engine benchmark was run during this audit. That avoids treating search claims as test results and does not alter the already documented SlopForge experiments. Existing H100, Blender and Unity evidence is summarized in [the repository audit](../AUDIT-2026-10.md) and [rigging evidence](./unirig-rigging-provider-audit.md). The items above are the next controlled tests.
+No new external inference or engine benchmark was run during this audit. That avoids treating search claims as test results and does not alter the already documented SlopForge experiments. Existing H100, Blender and Unity evidence is summarized in [the repository audit](../archive/release-audit-2026-10-04.md) and [rigging evidence](./unirig-rigging-provider-audit.md). The items above are the next controlled tests.

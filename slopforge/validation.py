@@ -62,12 +62,13 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         for key in required:
             if key not in report:
                 errors.append(f"inspection did not measure {key}")
-        metrics = report
+        metrics = dict(report)
         for key in ("mesh_objects", "vertex_count", "face_count", "uv_layers", "material_count", "image_texture_count",
                     "component_count", "nonmanifold_edge_count"):
             value = metrics.get(key)
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
                 errors.append(f"inspection reported invalid {key}")
+                metrics[key] = 0
         if metrics.get("mesh_objects", 0) < 1 or metrics.get("vertex_count", 0) < 3 or metrics.get("face_count", 0) < 1:
             errors.append("mesh has no usable surface geometry")
         if not isinstance(metrics.get("dimensions"), (list, tuple)) or len(metrics["dimensions"]) != 3:
@@ -86,7 +87,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         face_count = metrics.get("face_count")
         if face_budget and isinstance(face_count, (int, float)) and face_count > face_budget:
             errors.append(f"face count exceeds budget {face_budget}")
-        component_count = metrics.get("component_count")
+        component_count = report.get("component_count")
         if max_components is not None:
             if component_count is None:
                 errors.append("component count was not measured")
@@ -94,7 +95,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
                 errors.append("inspection reported invalid component count")
             elif component_count > max_components:
                 errors.append(f"component count {component_count} exceeds budget {max_components}")
-        nonmanifold_edge_count = metrics.get("nonmanifold_edge_count")
+        nonmanifold_edge_count = report.get("nonmanifold_edge_count")
         if max_nonmanifold_edges is not None:
             if nonmanifold_edge_count is None:
                 errors.append("non-manifold edge count was not measured")
@@ -102,7 +103,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
                 errors.append("inspection reported invalid non-manifold edge count")
             elif nonmanifold_edge_count > max_nonmanifold_edges:
                 errors.append(f"non-manifold edge count {nonmanifold_edge_count} exceeds budget {max_nonmanifold_edges}")
-        boundary_edge_count = metrics.get("boundary_edge_count")
+        boundary_edge_count = report.get("boundary_edge_count")
         if max_boundary_edges is not None:
             if boundary_edge_count is None:
                 errors.append("boundary edge count was not measured")

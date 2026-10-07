@@ -245,27 +245,44 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
-    for name in final_keys:
-        destination = paths[name]
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=f".{destination.name}.", delete=False) as handle:
-            temporary = Path(handle.name)
+    publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "validation")]
+    publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
+    with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
+        backups = {}
+        for index, destination in enumerate(publication_paths):
+            if destination.is_file():
+                backup = Path(backup_dir) / str(index)
+                shutil.copy2(destination, backup)
+                backups[destination] = backup
         try:
-            shutil.copy2(sources[name], temporary)
-            os.replace(temporary, destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-    if (root / mesh_source).resolve() != paths["glb"].resolve():
-        paths["glb"].parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(root / mesh_source, paths["glb"])
-    build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
-                         f"{asset['name']}_preview_PBR.mat",
-                         {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
-    validation = dict(candidate["validation"])
-    validation["measured"] = dict(validation.get("measured", {}))
-    validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
-    validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
-    paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+            for name in final_keys:
+                destination = paths[name]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=f".{destination.name}.", delete=False) as handle:
+                    temporary = Path(handle.name)
+                try:
+                    shutil.copy2(sources[name], temporary)
+                    os.replace(temporary, destination)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            if (root / mesh_source).resolve() != paths["glb"].resolve():
+                paths["glb"].parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(root / mesh_source, paths["glb"])
+            build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
+                                 f"{asset['name']}_preview_PBR.mat",
+                                 {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
+            validation = dict(candidate["validation"])
+            validation["measured"] = dict(validation.get("measured", {}))
+            validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
+            validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+        except Exception:
+            for destination in publication_paths:
+                if destination in backups:
+                    shutil.copy2(backups[destination], destination)
+                else:
+                    destination.unlink(missing_ok=True)
+            raise
     candidate["approval"] = "approved"
     asset["material_candidates"]["selected"] = number
     asset["material_prompt"] = candidate["prompt"]

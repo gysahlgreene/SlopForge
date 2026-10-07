@@ -20,13 +20,12 @@ from slopforge.cli import parse_args
 from slopforge.cli import main as cli_main
 from slopforge.initializer import init_project
 from slopforge.conditioning import ensure_supported, resolve_conditioning
-from slopforge.backends.blender import process_model
-from slopforge.backends.comfyui import generate_image
+from slopforge.backends.blender import inspect_model, process_model
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError, generate_image
 from slopforge.paths import tool_root
 from slopforge.pipelines import model
 from slopforge.validation import validate_model_outputs
 from processing.comfy_generate_3d import make_workflow
-from processing.comfy_status import prompt_failure
 from processing.make_pbr_maps import main as make_pbr_maps
 from slopforge.doctor import run_doctor
 from slopforge.pipelines.model import material_candidate_paths, model_paths
@@ -471,6 +470,18 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("mesh has no UV map", result["errors"])
         self.assertIn("mesh has no material", result["errors"])
 
+    def test_malformed_model_metrics_fail_without_raising_or_changing_evidence(self):
+        metrics = {"mesh_objects": "one", "vertex_count": None, "face_count": [],
+                   "uv_layers": {}, "material_count": "one", "image_texture_count": 0,
+                   "component_count": 1, "nonmanifold_edge_count": 0,
+                   "dimensions": [1, 1, 1], "transforms_applied": True, "missing_textures": []}
+        result = validate_model_outputs({}, {"status": "passed", "measured": metrics})
+        self.assertEqual(result["status"], "failed")
+        for key in ("mesh_objects", "vertex_count", "face_count", "uv_layers", "material_count"):
+            self.assertIn(f"inspection reported invalid {key}", result["errors"])
+            self.assertEqual(result["measured"][key], metrics[key])
+        self.assertEqual(metrics["mesh_objects"], "one")
+
     def test_approved_material_candidate_replaces_outputs_and_marks_asset_ready(self):
         config, style = load_project(self.root), load_style(self.root)
         asset = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
@@ -697,8 +708,26 @@ class SlopForgeTests(unittest.TestCase):
 
     def test_comfy_failed_prompt_reports_backend_error_immediately(self):
         entry = {"status": {"status_str": "error", "messages": [["execution_error", {"exception_message": "missing model"}]]}}
-        self.assertIn("missing model", prompt_failure(entry))
-        self.assertIsNone(prompt_failure({"status": {"status_str": "success"}}))
+        client = ComfyUIClient("http://127.0.0.1:8188")
+        with patch.object(client, "history", return_value=entry), patch("slopforge.backends.comfyui.time.sleep") as sleep:
+            with self.assertRaisesRegex(ComfyUIError, "missing model"):
+                client.wait_for_completion("failed")
+        sleep.assert_not_called()
+
+    def test_blender_inspection_imports_installed_package_outside_resource_directory(self):
+        report = self.root / "inspection.json"
+        report.write_text('{"status": "passed"}')
+        with patch("slopforge.backends.blender.package_root", return_value=Path("/installed/site-packages")), \
+                patch("slopforge.backends.blender.tool_root", return_value=Path("/installed/share/slopforge")), \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"), \
+                patch.dict(os.environ, {"PYTHONPATH": "/existing/imports"}), \
+                patch("slopforge.backends.blender.subprocess.run") as run:
+            self.assertEqual(inspect_model(self.root, {}, "model.blend", report, 100)["status"], "passed")
+        self.assertEqual(run.call_args.kwargs["env"]["SLOPFORGE_PACKAGE_ROOT"], "/installed/site-packages")
+        self.assertEqual(run.call_args.kwargs["env"]["PYTHONPATH"], "/existing/imports")
+        self.assertIn("/installed/share/slopforge/blender/inspect_model.py", run.call_args.args[0])
+        self.assertNotIn("--python-use-system-env", run.call_args.args[0])
+        self.assertEqual(run.call_args.args[0][run.call_args.args[0].index("--python-exit-code") + 1], "1")
 
     def test_comfy_backend_uses_configured_workflow_url_and_seed(self):
         config = load_project(self.root)

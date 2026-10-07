@@ -1,6 +1,6 @@
 # 3D game-asset roadmap (2026-10)
 
-SlopForge now focuses on one outcome: coherent 3D game assets that can be reviewed, processed, and imported into Unity. Concept/material images remain supporting inputs. Sprite, UI, VFX, tileset, and generic prototype-planner work is outside the product scope. Historical experiments remain in `docs/research/` and `docs/media/`; they are not active lanes.
+SlopForge now focuses on one outcome: coherent 3D game assets that can be reviewed, processed, and imported into Unity. Concept/material images remain supporting inputs. Sprite, UI, VFX, tileset, and generic prototype-planner work is outside the product scope. Historical experiments are separated under `docs/archive/`, with compact evidence under `docs/media/`; they are not active lanes.
 
 The current pipeline has substantial orchestration and processing infrastructure, but generated visual quality is still the blocker. “Implemented” below describes a software stage, not production-quality AI output.
 
@@ -12,14 +12,14 @@ The current pipeline has substantial orchestration and processing infrastructure
 | 3D generation | **LIVE VERIFIED, visually mixed** | Hunyuan3D and TRELLIS.2 routes produce model/material outputs. Mesh holes, disconnected parts, UV or texture defects remain possible. |
 | Mesh processing | **STRUCTURALLY VERIFIED** | Blender cleanup, normalization, measurements, multi-view previews, and material export exist. Structural checks do not establish a good-looking model. |
 | Character readiness | **STRUCTURALLY VERIFIED** | Reports inspect topology, components, transforms, scale, normals, and required conditions before rigging. They do not prove anatomy or deformation. |
-| Automatic rigging | **EXPERIMENTAL** | Rigify and an opt-in isolated SkinTokens provider are available. SkinTokens looked materially better on the tested candidate, but the input/output still failed approval and no generated character has passed deformation review plus Unity animation playback. |
-| Skeletal animation and retargeting | **STRUCTURALLY VERIFIED / ENGINE PARTIAL** | Animation library, explicit bone mapping, Blender retargeting, and Unity setup exist. Generated-character animation playback is not qualified. |
-| Unity delivery | **ENGINE VERIFIED for selected stages only** | Model/material and synthetic-rig imports have prior checks. The tested SkinTokens candidate imported as Generic, but it has not passed real animation playback. |
+| Automatic rigging | **EXPERIMENTAL** | Rigify and an opt-in isolated SkinTokens provider are available. Basalt now has user-approved body deformation and valid Unity Humanoid diagnostic-animation evaluation. Full input/material qualification, visible Unity footage, and repeatability across future candidates remain open. |
+| Skeletal animation and retargeting | **STRUCTURALLY VERIFIED / ENGINE PARTIAL** | Animation library, explicit bone mapping, Blender retargeting, and Unity setup exist. A generated Basalt rig evaluates a procedural diagnostic clip. Known-good third-party motion retargeting remains unqualified. |
+| Unity delivery | **ENGINE VERIFIED for selected stages only** | Model/material and synthetic-rig imports have prior checks. Basalt has a valid Humanoid Avatar and Animator-evaluated diagnostic animation; visible Unity playback capture and production motion remain outstanding. |
 | Review, provenance, resumability | **STRUCTURALLY VERIFIED** | Typed outputs, candidate approval, reference libraries, quality tiers, recipe dependencies, stage state, and workflow provenance are part of the core product. Human visual approval remains mandatory. |
 
 ## Product priorities
 
-1. **#14 — qualify the character input contract and end-to-end rigging.** Split the work into mesh cleanup/readiness, material preservation, rigging/skinning, deformation evidence, and export. Compare providers only on a normalized, readiness-passing textured character. Approval requires reviewed diagnostic poses and Unity playback.
+1. **#14 — qualify the character input contract and end-to-end rigging.** Split the work into mesh cleanup/readiness, material preservation, rigging/skinning, deformation evidence, and export. Compare providers only on a normalized, readiness-passing textured character. Basalt provides the first reviewed body-deformation and Humanoid-evaluation benchmark. Complete remaining input/material and visible playback evidence before closing the issue.
 2. **#15 — qualify skeletal animation and retargeting.** Use known-good source clips, explicit bone maps/rest-pose checks, and Unity playback. Do not report an animation as valid from export or import status alone.
 3. **3D visual consistency — make connected assets share a visual language.** Improve reference-conditioned concepts and generation prompts against a small authored asset/style set. Review the resulting models together in a neutral scene before expanding pack breadth.
 4. **3D delivery — make regeneration/reimport safe and repeatable.** Record stable asset identity, processing evidence, material assignments, scale/orientation, and Unity import settings. Prioritize this only after the current model contract is stable.
@@ -36,7 +36,7 @@ The product no longer pursues #9 sprite generation or #16 generic natural-langua
 | Provider isolation | **KEEP** | Keep experimental rigging/model dependencies out of the core environment. |
 | Mesh/material/deformation evidence | **HARDEN** | Current failures are quality and readiness failures; show them clearly and prevent bad assets from appearing approved. |
 | Stable identity and deterministic Unity reimport | **ADD AFTER MESH CONTRACT** | Avoid duplicate imports and overwriting unrelated Unity assets during regeneration. |
-| Contact sheets and turntable review | **SOON** | Small Blender/Pillow helpers can make model comparison and human review faster without another media framework. |
+| Contact sheets and turntable review | **SOON** | Contact sheets, multi-view stills and an eight-second diagnostic animation exist; extend those helpers as needed. |
 | Generic provider SDK, distributed scheduler, audio, sprite/UI/VFX/tileset lanes | **OUT OF SCOPE** | They do not address the current 3D quality and delivery bottlenecks. |
 
 ## Validation standard
@@ -47,4 +47,4 @@ The product no longer pursues #9 sprite generation or #16 generic natural-langua
 - **Engine:** verify Unity import settings, materials, scale/orientation, skeleton/bind poses, replacement behavior, and visible animation playback.
 - **Human approval:** required after visual/deformation review. Unit tests do not qualify AI output.
 
-See the [implementation audit](AUDIT-2026-10.md), [3D workflow inventory](WORKFLOWS.md), [character rigging evidence](CHARACTER-RIGGING.md), and [named-source ecosystem research](research/ecosystem-capability-audit.md).
+See the [implementation audit](archive/release-audit-2026-10-04.md), [3D workflow inventory](WORKFLOWS.md), [character rigging evidence](CHARACTER-RIGGING.md), and [named-source ecosystem research](research/ecosystem-capability-audit.md).

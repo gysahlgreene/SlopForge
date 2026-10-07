@@ -3,7 +3,7 @@
 This is a live ComfyUI and Blender workflow, not an offline showcase. Start with a fresh Unity project so the sample recipe and asset names do not collide with existing data.
 
 ```sh
-mkdir -p ~/SlopForgeDemo/Assets
+# First create a real 3D Unity project at ~/SlopForgeDemo using Unity Hub.
 slopforge init ~/SlopForgeDemo
 
 # Local or remote ComfyUI; host and compute profile are independent.
