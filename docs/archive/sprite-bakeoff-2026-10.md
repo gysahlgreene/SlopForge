@@ -70,7 +70,7 @@ The prompt-only TI2V result was not usable, so the next run used the reference-a
 - **Run:** seed `314159265`; prompt ID `4516c1bb-4b84-4b36-823d-f07063ad4177`; appearance prompt and runner output are in [wan-animate-dance-run.json](../media/sprite-bakeoff-2026-10/wan-animate-dance-run.json).
 - **Motion source:** the supplied 17-frame clip is a dance, not an idle, walk, or attack driver. The prompt was corrected to describe the actual clip.
 - **Processing:** character reference and driver frames are each scaled to 256×448 and padded to the 480×832 generation canvas. Wan Animate 2 transfers motion, then BiRefNet output is inverted and joined as alpha.
-- **Output:** [17 raw RGBA frames](../media/sprite-bakeoff-2026-10/wan-animate-dance-frames), [contact sheet](../media/sprite-bakeoff-2026-10/wan-animate-dance-contact.png), and [alpha bounds](../media/sprite-bakeoff-2026-10/wan-animate-dance-alpha-metrics.json).
+- **Output:** 17 raw RGBA frames (preserved in the local audit archive), [contact sheet](../media/sprite-bakeoff-2026-10/wan-animate-dance-contact.png), and [alpha bounds](../media/sprite-bakeoff-2026-10/wan-animate-dance-alpha-metrics.json).
 - **Visual review:** identity, goggles, teal straps, overalls, lantern, and silhouette remained recognizable; the dance movement was readable. All 17 frames have alpha, and no foreground touches a frame edge. The nearest foreground edge is 92 px away. Character bounds vary from 148–285 px wide and 354–448 px tall; feet baselines vary by 31 px.
 - **Decision:** the user rejected this result. It is not a selected provider or an approved sprite pack. No packer approval, Unity import, or Unity playback was run.
 
