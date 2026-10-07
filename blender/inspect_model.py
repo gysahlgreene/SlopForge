@@ -11,6 +11,9 @@ import bpy
 import bmesh
 from mathutils import Vector
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from slopforge.character_readiness import classify_character_readiness
+
 
 def write_result(path, result):
     path = Path(path)
@@ -59,14 +62,24 @@ def topology_edge_counts(mesh, weld_distance):
     bm.from_mesh(mesh)
     bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=weld_distance)
     boundary_edges = sum(edge.is_boundary for edge in bm.edges)
-    nonmanifold_edges = sum(not edge.is_manifold for edge in bm.edges)
+    nonmanifold_edges = sum(not edge.is_manifold and not edge.is_boundary for edge in bm.edges)
     bm.free()
     return boundary_edges, nonmanifold_edges
 
 
-def inspect(blend, face_budget):
+def inspect(source, face_budget):
     errors, warnings = [], []
-    bpy.ops.wm.open_mainfile(filepath=str(blend))
+    extension = source.suffix.lower()
+    if extension == ".blend":
+        bpy.ops.wm.open_mainfile(filepath=str(source))
+    elif extension == ".glb":
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.import_scene.gltf(filepath=str(source))
+    elif extension == ".fbx":
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        bpy.ops.import_scene.fbx(filepath=str(source))
+    else:
+        raise ValueError(f"Unsupported model format for inspection: {extension or 'no extension'}")
     objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH"]
     if not objects:
         errors.append("no mesh object exists in the Blend")
@@ -79,6 +92,9 @@ def inspect(blend, face_budget):
     dimensions = [maximum[i] - minimum[i] for i in range(3)]
     origins = [[float(value) for value in obj.matrix_world.translation] for obj in objects]
     uv_layers = sum(len(obj.data.uv_layers) for obj in objects)
+    polygons = [polygon for obj in objects for polygon in obj.data.polygons]
+    zero_area_faces = sum(polygon.area <= 1e-12 for polygon in polygons)
+    zero_normals = sum(polygon.normal.length <= 1e-8 for polygon in polygons)
     materials = [material for obj in objects for material in obj.data.materials if material]
     image_nodes = [node.image for material in materials if material.use_nodes for node in material.node_tree.nodes if node.type == "TEX_IMAGE" and node.image]
     missing_textures = []
@@ -107,6 +123,8 @@ def inspect(blend, face_budget):
                 "objects": object_bounds,
                 "uv_layers": uv_layers, "material_count": len(materials), "image_texture_count": len(image_nodes),
                 "missing_textures": missing_textures, "transforms_applied": scales_applied,
+                "normal_count": len(polygons), "zero_normal_count": zero_normals,
+                "degenerate_face_count": zero_area_faces,
                 "component_count": components, "boundary_edge_count": boundary_edges,
                 "nonmanifold_edge_count": nonmanifold_edges, "face_budget": face_budget}
     if faces > face_budget:
@@ -139,11 +157,13 @@ def inspect(blend, face_budget):
 def main():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     if len(args) != 3:
-        raise SystemExit("Usage: blender --background --python blender/inspect_model.py -- model.blend validation.json face_budget")
-    blend, output, budget = Path(args[0]).resolve(), Path(args[1]).resolve(), int(args[2])
-    if not blend.is_file():
-        raise SystemExit(f"Blend file not found: {blend}")
-    write_result(output, inspect(blend, budget))
+        raise SystemExit("Usage: blender --background --python blender/inspect_model.py -- model.{blend,glb,fbx} validation.json face_budget")
+    source, output, budget = Path(args[0]).resolve(), Path(args[1]).resolve(), int(args[2])
+    if not source.is_file():
+        raise SystemExit(f"Model file not found: {source}")
+    result = inspect(source, budget)
+    result["animation_readiness"] = classify_character_readiness(result)
+    write_result(output, result)
 
 
 if __name__ == "__main__":

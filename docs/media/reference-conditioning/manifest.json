@@ -1,0 +1,63 @@
+{
+  "qualification": "visually_reviewed_experimental",
+  "generated_at": "2026-10-04",
+  "source_command": "python processing/comfy_generate.py --workflow workflows/wan22_ti2v_reference_api.json --prompt <prompt below> --seed 21021",
+  "workflow": {
+    "id": "image.reference_conditioning.wan22_ti2v",
+    "version": 1,
+    "file": "workflows/wan22_ti2v_reference_api.json",
+    "sha256": "309137ac3a4b94fae08158e51071c962bbeff3e9dd7da3a782ceefc013d29914"
+  },
+  "provider": "ComfyUI",
+  "backend": "remote",
+  "profile": "h100",
+  "models": [
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "wan2.2_vae.safetensors",
+    "wan2.2_ti2v_5B_fp16.safetensors"
+  ],
+  "prompt": "A stylized charcoal-gray alien power relay with a turquoise front plate, copper side couplings and an amber lens, standing alone on a light neutral studio background. It gently pulses with turquoise light and makes a small mechanical turn; preserve its silhouette and materials.",
+  "negative_prompt": "different object, text, extra parts, camera cut, blur, flicker",
+  "seed": 21021,
+  "control": {
+    "file": "neutral-control.png",
+    "sha256": "f16f403f9dc365e9aba867f32a5d77152ee4072ed728ffed6fb52396f40fc99a",
+    "description": "384x384 neutral gray control frame; no approved asset reference selected"
+  },
+  "approved_reference": {
+    "id": "power-relay-concept",
+    "category": "props",
+    "sha256": "7c4628620a468ab3d48c3eacbe18b3574c5b7bf9de1a7039f556eabb687dd8ee",
+    "source_file": "img/power-relay-concept.png"
+  },
+  "workflow_input_mapping": {
+    "approved_reference": {"node": "7", "input": "image"},
+    "consumer": {"node": "8", "input": "start_image"},
+    "control": "the neutral image is loaded through the same node and mapping"
+  },
+  "outputs": {
+    "without_approved_reference": {
+      "image": "no-approved-reference-final.png",
+      "metadata": "no-approved-reference.json",
+      "sha256": "b67b56e8dde9fab80faef5ee28ef85f9c5940a8c2550bccf51c0b759a11be846",
+      "dimensions": "768x768 PNG",
+      "comfyui_prompt_id": "bfe8e37c-7713-4f51-b10f-194d3f9db060"
+    },
+    "with_approved_reference": {
+      "image": "approved-reference-final.png",
+      "metadata": "approved-reference.json",
+      "sha256": "c2d84db8d781b585d726bae927ba675cb745282a65c2cfe3d1f99d444a63ab93",
+      "dimensions": "768x768 PNG",
+      "comfyui_prompt_id": "66f1846b-4ca4-4449-a618-27c3cf996f8b"
+    }
+  },
+  "review": {
+    "observed": "The approved-reference output retains the reference's chunky charcoal housing, turquoise front plate, copper side couplings, and amber lens. With the same prompt and seed but a neutral control frame, the result has a different narrow cylindrical silhouette. This is visible evidence that the image input affects the result.",
+    "limitations": [
+      "This is one image-to-video comparison, not a character identity or multi-pose qualification.",
+      "The selected final frame is close to the source reference; the run does not establish useful motion or sprite readiness.",
+      "The neutral control is still an image input, so this comparison measures approved-reference influence against a neutral image condition rather than a graph with the image input disconnected.",
+      "This workflow is experimental and is not the default for image generation or character production."
+    ]
+  }
+}

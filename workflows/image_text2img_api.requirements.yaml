@@ -1,0 +1,77 @@
+schema_version: 1
+id: image.text_to_image
+version: 1
+capabilities:
+- text_to_image
+workflow_sha256: 0d07442a082d56aca96c08709aa2d8b72563be01f97c5184b011fa1a004b2bd7
+nodes:
+- class: CLIPLoader
+  source: ComfyUI core
+  revision: unknown
+- class: CLIPTextEncode
+  source: ComfyUI core
+  revision: unknown
+- class: ConditioningZeroOut
+  source: ComfyUI core
+  revision: unknown
+- class: EmptySD3LatentImage
+  source: ComfyUI core
+  revision: unknown
+- class: KSampler
+  source: ComfyUI core
+  revision: unknown
+- class: ModelSamplingAuraFlow
+  source: ComfyUI core
+  revision: unknown
+- class: SaveImage
+  source: ComfyUI core
+  revision: unknown
+- class: UNETLoader
+  source: ComfyUI core
+  revision: unknown
+- class: VAEDecode
+  source: ComfyUI core
+  revision: unknown
+- class: VAELoader
+  source: ComfyUI core
+  revision: unknown
+models:
+- name: ae.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/vae
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+- name: qwen_3_4b.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/text_encoders
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+- name: z_image_turbo_bf16.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/diffusion_models
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+inputs:
+- name: prompt
+  type: text
+- name: seed
+  type: integer
+outputs:
+- name: image
+  type: image/png
+profiles:
+- default
+- mac
+- h100
+- h100_final
+estimated_resource_class: standard_gpu
+tested_on:
+- profile: default
+  backend: comfyui
+  date: '2026-10-04'
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms
+  for the exact installed weights.
+limitations:
+- Node revisions and model file hashes are not exposed by the ComfyUI API and remain
+  unverified.

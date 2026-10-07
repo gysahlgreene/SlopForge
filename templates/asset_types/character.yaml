@@ -2,8 +2,10 @@ name: character
 pipeline: model
 output_folder: Characters
 face_budget: character_faces
+voxel_resolution: 120
 max_components: 64
 max_nonmanifold_edges: 0
+max_boundary_edges: 0
 prompt_mode: character
 requirements:
   - one full-body humanoid character on a plain background

@@ -23,16 +23,16 @@ class ExplorationTests(unittest.TestCase):
         (self.root / "ai/asset_types").mkdir(parents=True)
         (self.root / "ai/styles/plain").mkdir(parents=True)
         (self.root / "ai/project.yaml").write_text("project: {name: Test}\nasset_pipeline: {active_style: plain}\n")
-        (self.root / "ai/asset_types/icon.yaml").write_text(
-            "name: icon\npipeline: image\noutput_folder: Icons\nformat: PNG\nrequirements: []\navoid: []\n")
+        (self.root / "ai/asset_types/concept.yaml").write_text(
+            "name: concept\npipeline: image\noutput_folder: Icons\nformat: PNG\nrequirements: []\navoid: []\n")
         (self.root / "ai/styles/plain/style.yaml").write_text(
             "name: Plain\nversion: 1\nidentity: {}\nshape_language: {preferred: [], avoid: []}\n"
             "palette: {}\nmaterials: {}\nsurface_language: {preferred: [], avoid: []}\n"
             "lighting: {}\nasset_rules: {}\nmaterial_generation: {rules: []}\n")
         self.config = {"asset_pipeline": {"candidate_root": "ai/assets/candidates", "output_root": "Assets/Art"}}
         self.style = {"name": "Test", "version": 1}
-        self.asset_type = {"name": "icon", "pipeline": "image", "format": "PNG", "alpha_required": False,
-                           "output_folder": "Icons"}
+        self.asset_type = {"name": "concept", "pipeline": "image", "format": "PNG", "alpha_required": False,
+                           "output_folder": "Concepts"}
         self.manifest = {"assets": {}}
 
     def tearDown(self):
@@ -53,8 +53,8 @@ class ExplorationTests(unittest.TestCase):
 
     def test_generation_uses_and_records_each_deliberate_variation(self):
         variations = parse_variations(["shape=round", "shape=angular"])
-        key = asset_key("icon", "relic_explore")
-        self.manifest["assets"][key] = new_record("icon", "relic_explore", "A relic", self.style,
+        key = asset_key("concept", "relic_explore")
+        self.manifest["assets"][key] = new_record("concept", "relic_explore", "A relic", self.style,
                                                    {"strategy": "text_only"})
         prompts = []
 
@@ -72,10 +72,10 @@ class ExplorationTests(unittest.TestCase):
         self.assertNotEqual(results[0]["seed"], results[1]["seed"])
 
     def test_promote_preserves_candidate_provenance_and_requires_fresh_target(self):
-        key = asset_key("icon", "relic_explore")
-        source = new_record("icon", "relic_explore", "A relic", self.style, {"strategy": "text_only"})
+        key = asset_key("concept", "relic_explore")
+        source = new_record("concept", "relic_explore", "A relic", self.style, {"strategy": "text_only"})
         source["generation_mode"] = "explore"
-        image_path = self.root / "ai/assets/candidates/icon/relic_explore/candidate_01.png"
+        image_path = self.root / "ai/assets/candidates/concept/relic_explore/candidate_01.png"
         image_path.parent.mkdir(parents=True)
         Image.new("RGB", (8, 8), "blue").save(image_path)
         source["candidates"] = {"selected": None, "items": [{
@@ -88,13 +88,13 @@ class ExplorationTests(unittest.TestCase):
         promoted = promote_candidate(self.root, "ai/assets/candidates", self.manifest,
                                      "relic_explore", 1, "relic", self.asset_type, self.style)
 
-        target = self.manifest["assets"]["icon:relic"]
+        target = self.manifest["assets"]["concept:relic"]
         self.assertEqual(promoted, target)
         self.assertEqual(target["status"], "candidate")
         self.assertEqual(target["candidates"]["items"][0]["variation"], {"shape": "round"})
         self.assertEqual(target["candidates"]["items"][0]["generator"]["model"], "model-a")
         self.assertEqual(target["candidates"]["items"][0]["path"],
-                         "ai/assets/candidates/icon/relic/candidate_01.png")
+                         "ai/assets/candidates/concept/relic/candidate_01.png")
         self.assertTrue((self.root / target["candidates"]["items"][0]["path"]).is_file())
         self.assertNotEqual(target["candidates"]["items"][0]["path"], image_path.relative_to(self.root).as_posix())
         self.assertEqual(target["promoted_from"]["asset_id"], source["id"])
@@ -109,22 +109,22 @@ class ExplorationTests(unittest.TestCase):
             metadata.write_text(json.dumps({"workflow": "fixture.json", "seed": seed, "model": "fixture"}))
 
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend):
-            result = cli_main(["--project", str(self.root), "explore", "icon", "relic_ideas", "A relic",
+            result = cli_main(["--project", str(self.root), "explore", "concept", "relic_ideas", "A relic",
                                "--variation", "silhouette=round", "--variation", "silhouette=angular"])
         self.assertEqual(result, 0)
         manifest_path = self.root / "ai/assets/manifest.json"
         manifest = load_manifest(manifest_path)
-        exploration = manifest["assets"]["icon:relic_ideas"]
+        exploration = manifest["assets"]["concept:relic_ideas"]
         self.assertEqual(exploration["generation_mode"], "explore")
         self.assertEqual(exploration["candidates"]["items"][1]["variation"], {"silhouette": "angular"})
         self.assertIn("explore · draft", generate_review_board(self.root, manifest).read_text())
         board = generate_review_board(self.root, manifest).read_text()
         self.assertIn("promote relic_ideas 1 --name relic_ideas_asset", board)
         self.assertNotIn("approve relic_ideas 1", board)
-        self.assertNotIn("generate icon relic_ideas", board)
+        self.assertNotIn("generate concept relic_ideas", board)
         self.assertEqual(cli_main(["--project", str(self.root), "promote", "relic_ideas", "1", "--name", "relic"]), 0)
         manifest = load_manifest(manifest_path)
-        tracked = manifest["assets"]["icon:relic"]
+        tracked = manifest["assets"]["concept:relic"]
         self.assertEqual(tracked["status"], "candidate")
         self.assertEqual(tracked["promoted_from"]["variation"], {"silhouette": "round"})
         self.assertEqual(cli_main(["--project", str(self.root), "approve", "relic", "1"]), 0)

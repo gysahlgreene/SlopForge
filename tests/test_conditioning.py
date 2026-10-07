@@ -56,7 +56,7 @@ class ConditioningTests(unittest.TestCase):
                                                     "status": "changed"}])
 
     def test_generate_cli_accepts_library_selector(self):
-        args = parse_args(["generate", "icon", "badge", "A badge", "--reference-library", "character/alice"])
+        args = parse_args(["generate", "concept", "badge", "A badge", "--reference-library", "character/alice"])
         self.assertEqual(args.reference_library, "character/alice")
 
     def test_rejects_reference_outside_approved_library(self):

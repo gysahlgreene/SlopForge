@@ -1,0 +1,180 @@
+{
+  "status": "complete",
+  "armature_count": 1,
+  "skinned_component_count": 4,
+  "helper_objects": [
+    "Icosphere"
+  ],
+  "unclassified_objects": [],
+  "bind_pose_count": 28,
+  "material_coverage": {
+    "base_color": 1.0,
+    "roughness": 1.0,
+    "metallic": 1.0
+  },
+  "semantic_mapping": {
+    "hips": "Hips",
+    "spine": "Spine",
+    "right_upper_arm": "RightUpperArm",
+    "right_forearm": "RightLowerArm",
+    "right_thigh": "RightUpperLeg",
+    "right_shin": "RightLowerLeg",
+    "left_upper_arm": "LeftUpperArm",
+    "left_forearm": "LeftLowerArm",
+    "left_thigh": "LeftUpperLeg",
+    "left_shin": "LeftLowerLeg"
+  },
+  "bone_names": [
+    "Chest",
+    "Head",
+    "Hips",
+    "LeftFinger1",
+    "LeftFinger1_2",
+    "LeftFinger1_3",
+    "LeftFoot",
+    "LeftHand",
+    "LeftLowerArm",
+    "LeftLowerLeg",
+    "LeftShoulder",
+    "LeftToes",
+    "LeftUpperArm",
+    "LeftUpperLeg",
+    "Neck",
+    "RightFinger1",
+    "RightFinger1_2",
+    "RightFinger1_3",
+    "RightFoot",
+    "RightHand",
+    "RightLowerArm",
+    "RightLowerLeg",
+    "RightShoulder",
+    "RightToes",
+    "RightUpperArm",
+    "RightUpperLeg",
+    "Spine",
+    "UpperChest"
+  ],
+  "deformation_evidence": {
+    "neutral": {
+      "max_vertex_displacement": 0.0,
+      "view": "front",
+      "upper_arm_tip_height_delta": {
+        "left": 0.0,
+        "right": 0.0
+      },
+      "left_thigh_tip_depth_delta": 0.0
+    },
+    "t_pose": {
+      "max_vertex_displacement": 0.18519260063752596,
+      "view": "front",
+      "upper_arm_tip_height_delta": {
+        "left": 0.06374573707580566,
+        "right": 0.06374573707580566
+      },
+      "left_thigh_tip_depth_delta": 0.0
+    },
+    "raised_arms": {
+      "max_vertex_displacement": 0.45973071433305956,
+      "view": "front",
+      "upper_arm_tip_height_delta": {
+        "left": 0.15967661142349243,
+        "right": 0.15967661142349243
+      },
+      "left_thigh_tip_depth_delta": 0.0
+    },
+    "shoulder_rotation": {
+      "max_vertex_displacement": 0.17895776348519182,
+      "view": "front",
+      "upper_arm_tip_height_delta": {
+        "left": 0.0,
+        "right": 0.0
+      },
+      "left_thigh_tip_depth_delta": 0.0
+    },
+    "elbow_bend": {
+      "max_vertex_displacement": 0.29993089619484137,
+      "view": "front",
+      "upper_arm_tip_height_delta": {
+        "left": 0.0,
+        "right": 0.0
+      },
+      "left_thigh_tip_depth_delta": 0.0
+    },
+    "crouch": {
+      "max_vertex_displacement": 0.1995891267300917,
+      "view": "side",
+      "upper_arm_tip_height_delta": {
+        "left": 0.0,
+        "right": 0.0
+      },
+      "left_thigh_tip_depth_delta": -0.06794406473636627
+    },
+    "leg_lift": {
+      "max_vertex_displacement": 0.5919301068745861,
+      "view": "side",
+      "upper_arm_tip_height_delta": {
+        "left": 0.0,
+        "right": 0.0
+      },
+      "left_thigh_tip_depth_delta": -0.08504511415958405
+    }
+  },
+  "contact_sheet_dimensions": [
+    1792,
+    256
+  ],
+  "pose_parameters": "world_axis_hinge_v2",
+  "source_sha256": "06d2f086359960eddb2b048338809fe0f1982ef9a3947b1de319ee619fe279ec",
+  "raw_sha256": "fc78e78d72274a850556a914d941cc5ff4ee11ed1ebecfe980bf56f197304870",
+  "rigged_model_sha256": "1db7f3f3019006b499c814063d3787e38762ea8224e073acd52109a021e44d03",
+  "checkpoint_sha256": "f4e4706a11cfb520cdde65156a0358545e4fbf8f36237aca01ea5e79d5cb5692",
+  "skintokens_revision": "273b691d35989d71cd17ff2895fdc735097b92d1",
+  "blender_version": "5.1.0",
+  "object_inventory": [
+    {
+      "name": "Armature",
+      "type": "ARMATURE"
+    },
+    {
+      "name": "Mesh_0",
+      "type": "MESH",
+      "welded_vertices": 7679,
+      "components": 4,
+      "classification": "skinned_character"
+    },
+    {
+      "name": "Icosphere",
+      "type": "MESH",
+      "classification": "known_unskinned_helper"
+    }
+  ],
+  "unweighted_vertices": 0,
+  "weight_sum_min": 0.9999998562270775,
+  "weight_sum_max": 1.0000001196749508,
+  "max_influences": 4,
+  "qualification": {
+    "approved": false,
+    "human_deformation_review": "approved",
+    "unity_humanoid": "valid",
+    "unity_animation": "8-second clip evaluated through Animator PlayableGraph",
+    "production_animation_review": "pending",
+    "finger_animation": "one chain per hand only",
+    "unity_animation_max_skinned_vertex_delta": 0.4485983,
+    "unity_animation_frames": 193,
+    "human_review_evidence": {
+      "reviewer": "Eoin",
+      "date": "2026-10-07",
+      "response": "all good",
+      "scope": "body deformation in delivered diagnostic animation"
+    },
+    "approval_scope": "Body deformation approved; full production qualification not established"
+  },
+  "seed": 0,
+  "provider": "SkinTokens H100 + Blender postprocess",
+  "compatibility_patch_sha256": "e9bb33fd067461aa3f12621bfa32d66a8fc6489e6bfafbd4a2866bef9c29f796",
+  "package_hashes": {
+    "Basalt-Warden-H100-Rigged-Test.fbx": "1db7f3f3019006b499c814063d3787e38762ea8224e073acd52109a021e44d03",
+    "Basalt-Warden-Motion-Test.blend": "26155f50b43c1032d938450863e39abadfe7f97d5f883301ae0291f14cf137b1",
+    "Basalt-Warden-Motion-Test.fbx": "193ca79ce2b2a779dd2bdf3c570241c467a26ceb281c6d9cc71bec863846507a"
+  }
+}

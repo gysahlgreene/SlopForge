@@ -1,6 +1,6 @@
 # Modular environment kits
 
-`slopforge init` installs `starter_environment_kit`, a recipe that composes modular floor, wall, corner, ceiling, doorway, door, column, pipe, terminal, crate, surface, and decal assets. It uses the existing atomic image/model pipelines, so configured workflows, references, and local or remote ComfyUI remain unchanged.
+`slopforge init` installs `starter_environment_kit`, a recipe that composes modular floor, wall, corner, ceiling, doorway, door, column, pipe, terminal, crate, and surface assets. It uses the existing atomic 3D/model pipelines and supporting material-image workflow, so configured providers, references, and local or remote ComfyUI remain unchanged.
 
 Start with one candidate per child to keep the first pass inexpensive:
 

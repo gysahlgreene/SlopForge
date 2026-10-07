@@ -10,11 +10,30 @@ from .manifest import register_artifact
 from .unity_material import unity_cli
 
 
+_REQUIRED_HUMAN_BONES = {
+    "Hips", "Spine", "Head",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot",
+}
+
+
 def build_character_animator(project_root, config, manifest, character_selector, *, rig_type="generic"):
     if rig_type not in {"generic", "humanoid"}:
         raise ValueError("Unity rig type must be generic or humanoid")
     root = Path(project_root).resolve()
     character = _character_asset(manifest, character_selector)
+    humanoid_mapping = None
+    if rig_type == "humanoid":
+        humanoid_mapping = character.get("rigging", {}).get("unity_humanoid_mapping")
+        if not isinstance(humanoid_mapping, dict):
+            raise ValueError("Unity Humanoid bone mapping is required from the selected rigging provider")
+        missing = sorted(_REQUIRED_HUMAN_BONES - humanoid_mapping.keys())
+        if missing:
+            raise ValueError("Unity Humanoid bone mapping is missing: " + ", ".join(missing))
+        if (any(not isinstance(name, str) or not name.strip() or not isinstance(bone, str) or not bone.strip()
+                for name, bone in humanoid_mapping.items())
+                or len(set(humanoid_mapping.values())) != len(humanoid_mapping)):
+            raise ValueError("Unity Humanoid bone mapping must use unique, non-empty rig bones")
     artifacts = character.get("artifacts", {})
     rig = artifacts.get("rig")
     if not rig or rig.get("status") != "ready" or rig.get("approval", {}).get("status") != "approved":
@@ -51,6 +70,25 @@ def build_character_animator(project_root, config, manifest, character_selector,
     animation_paths = ", ".join(json.dumps(clip["path"]) for clip in clips)
     loop_flags = ", ".join(str(clip["loop"]).lower() for clip in clips)
     root_motion = any(clip["root_motion"] for clip in clips)
+    humanoid_description = ""
+    humanoid_clip_hierarchy = ""
+    if humanoid_mapping is not None:
+        human_bones = ",\n            ".join(
+            "new HumanBone {{ humanName = {human}, boneName = {bone}, limit = new HumanLimit {{ useDefaultValues = true }} }}".format(
+                human=json.dumps(human_name), bone=json.dumps(bone_name))
+            for human_name, bone_name in sorted(humanoid_mapping.items()))
+        humanoid_description = f"""rigImporter.animationType = ModelImporterAnimationType.Human;
+        rigImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+        rigImporter.SaveAndReimport();
+        rigImporter = AssetImporter.GetAtPath(rigPath) as ModelImporter;
+        if (rigImporter == null) throw new Exception("Character FBX importer not found after skeleton import: " + rigPath);
+        var humanDescription = rigImporter.humanDescription;
+        humanDescription.human = new HumanBone[] {{
+            {human_bones}
+        }};
+        rigImporter.humanDescription = humanDescription;
+        """
+        humanoid_clip_hierarchy = "importer.preserveHierarchy = true;"
     script.write_text(f'''using System;
 using System.Linq;
 using UnityEditor;
@@ -69,6 +107,7 @@ public static class {class_name}
         AssetDatabase.Refresh();
         var rigImporter = AssetImporter.GetAtPath(rigPath) as ModelImporter;
         if (rigImporter == null) throw new Exception("Character FBX importer not found: " + rigPath);
+        {humanoid_description}
         rigImporter.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
         rigImporter.avatarSetup = {"ModelImporterAvatarSetup.CreateFromThisModel" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
         rigImporter.SaveAndReimport();
@@ -86,6 +125,7 @@ public static class {class_name}
             importer.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
             importer.avatarSetup = {"ModelImporterAvatarSetup.CopyFromOther" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
             if ({str(rig_type == "humanoid").lower()}) importer.sourceAvatar = avatar;
+            {humanoid_clip_hierarchy}
             var clipSettings = importer.clipAnimations;
             if (clipSettings.Length == 0) clipSettings = importer.defaultClipAnimations;
             for (int j = 0; j < clipSettings.Length; j++) clipSettings[j].loopTime = loopFlags[i];
@@ -111,7 +151,13 @@ public static class {class_name}
         animator.avatar = avatar;
         animator.runtimeAnimatorController = controller;
         animator.applyRootMotion = {str(root_motion).lower()};
-        PrefabUtility.SaveAsPrefabAsset(instance, prefabPath);
+        var savedPrefab = PrefabUtility.SaveAsPrefabAsset(instance, prefabPath);
+        var savedAnimator = savedPrefab == null ? null : savedPrefab.GetComponent<Animator>();
+        if (savedAnimator == null || savedAnimator.runtimeAnimatorController != controller)
+            throw new Exception("Unity character prefab is missing its Animator or controller");
+        if ({str(rig_type == "humanoid").lower()} &&
+            (savedAnimator.avatar == null || !savedAnimator.avatar.isValid || !savedAnimator.avatar.isHuman))
+            throw new Exception("Unity character prefab did not retain a valid Humanoid Avatar");
         UnityEngine.Object.DestroyImmediate(instance);
         AssetDatabase.SaveAssets();
         Debug.Log("SLOPFORGE_CHARACTER_ANIMATOR_CREATED " + controllerPath + " " + prefabPath);
@@ -147,4 +193,6 @@ public static class {class_name}
     prefab_artifact = register_artifact(manifest, character["id"], "unity.character_prefab", "unity.prefab",
         prefab.relative_to(root).as_posix(), status="candidate", derived_from=derived_from,
         provenance=provenance, approval_status="pending")
+    if rig_type == "humanoid":
+        character.setdefault("pipeline_status", {})["unity_avatar_status"] = "valid"
     return {"status": "review_required", "controller": controller_artifact, "prefab": prefab_artifact}

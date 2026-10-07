@@ -25,6 +25,15 @@ class WorkflowProvenanceTests(unittest.TestCase):
         provenance = generator_provenance("hunyuan3d_image_to_model_api", {"workflow_sha256": None})
         self.assertNotIn("workflow_sha256", provenance)
 
+    def test_generator_provenance_records_workflow_requirements_identity(self):
+        identity = {"id": "image.text_to_image", "version": 1, "schema_version": 1}
+        provenance = generator_provenance("image_text2img_api.json", {"workflow_requirements": identity})
+        self.assertEqual(provenance["workflow_requirements"], identity)
+
+    def test_legacy_workflow_provenance_marks_requirements_unknown(self):
+        provenance = generator_provenance("legacy.json", {"workflow_requirements": {"status": "unknown"}})
+        self.assertEqual(provenance["workflow_requirements"], {"status": "unknown"})
+
 
 if __name__ == "__main__":
     unittest.main()

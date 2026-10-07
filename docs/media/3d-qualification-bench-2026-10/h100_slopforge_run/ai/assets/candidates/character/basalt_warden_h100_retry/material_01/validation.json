@@ -1,0 +1,93 @@
+{
+  "status": "failed",
+  "errors": [
+    "component count 1470 exceeds budget 64",
+    "boundary edge count 36481 exceeds budget 0"
+  ],
+  "warnings": [
+    "mesh contains 1470 disconnected components; inspect for detached geometry",
+    "mesh has a very small disconnected component; inspect for debris"
+  ],
+  "measured": {
+    "surface": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/surface_source.png",
+    "fbx": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/basalt_warden_h100_retry.fbx",
+    "blend": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/basalt_warden_h100_retry_preview.blend",
+    "basecolor": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_basecolor.png",
+    "normal": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_normal.png",
+    "roughness": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_roughness.png",
+    "metallic": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_metallic.png",
+    "metallic_gloss": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_metallic_gloss.png",
+    "emission": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Materials/basalt_warden_h100_retry_emission.png",
+    "preview_front": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Previews/basalt_warden_h100_retry_front.png",
+    "preview_side": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Previews/basalt_warden_h100_retry_side.png",
+    "preview_rear": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Previews/basalt_warden_h100_retry_rear.png",
+    "preview_three_quarter": "ai/assets/candidates/character/basalt_warden_h100_retry/material_01/Previews/basalt_warden_h100_retry_three_quarter.png",
+    "mesh_objects": 1,
+    "vertex_count": 80681,
+    "face_count": 56731,
+    "bounds_min": [
+      -0.3131386637687683,
+      -0.11802732944488525,
+      -0.002350330352783203
+    ],
+    "bounds_max": [
+      0.31299716234207153,
+      0.11437800526618958,
+      0.9976862668991089
+    ],
+    "dimensions": [
+      0.6261358261108398,
+      0.23240533471107483,
+      1.000036597251892
+    ],
+    "origins": [
+      [
+        -7.075071334838867e-05,
+        -0.0018246658146381378,
+        0.49766796827316284
+      ]
+    ],
+    "objects": [
+      {
+        "name": "Mesh_0",
+        "bounds_min": [
+          -0.3131386637687683,
+          -0.11802732944488525,
+          -0.002350330352783203
+        ],
+        "bounds_max": [
+          0.31299716234207153,
+          0.11437800526618958,
+          0.9976862668991089
+        ],
+        "dimensions": [
+          0.6261358261108398,
+          0.23240533471107483,
+          1.000036597251892
+        ],
+        "origin": [
+          -7.075071334838867e-05,
+          -0.0018246658146381378,
+          0.49766796827316284
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "uv_layers": 1,
+    "material_count": 1,
+    "image_texture_count": 5,
+    "missing_textures": [],
+    "transforms_applied": true,
+    "normal_count": 56731,
+    "zero_normal_count": 0,
+    "degenerate_face_count": 12,
+    "component_count": 1470,
+    "boundary_edge_count": 36481,
+    "nonmanifold_edge_count": 0,
+    "face_budget": 60000
+  }
+}

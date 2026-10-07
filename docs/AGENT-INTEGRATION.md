@@ -4,12 +4,12 @@ SlopForge is designed for an agent to operate. The agent brings creative judgmen
 
 For a person creating an asset, `slopforge --project /path/to/unity-project make` provides the guided terminal flow. Agents can use the explicit commands below when they need to control each step.
 
-For a 2D image, keep the semantic brief and model prompt separate. The prompt is sent unchanged to the configured positive conditioning node:
+For a physical asset, keep the semantic brief and detailed model prompt separate. The prompt is sent unchanged to the configured positive conditioning node:
 
 ```sh
-slopforge --project /path/to/unity-project generate icon inventory_key \
-  "Key icon for the inventory" \
-  --image-prompt "Single small brass key, broad readable silhouette, three-quarter angle, hand-painted fantasy game icon, warm highlights, dark teal background, centered with clear margins."
+slopforge --project /path/to/unity-project generate prop inventory_key \
+  "A brass key used by the lunar refinery crew" \
+  --image-prompt "One detailed brass access key with a broad readable silhouette, engraved mechanical grooves, warm aged-metal highlights; complete object in three-quarter view against a plain neutral background."
 slopforge --project /path/to/unity-project candidates inventory_key
 slopforge --project /path/to/unity-project approve inventory_key 1
 ```

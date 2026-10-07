@@ -46,11 +46,15 @@ class MeshPBRTests(unittest.TestCase):
                 fbx.write_bytes(b"fbx")
                 blend.write_bytes(b"blend")
                 options["preview_dir"].mkdir()
-                for view in ("front", "side", "rear"):
+                for view in ("front", "side", "rear", "three_quarter"):
                     Image.new("RGB", (64, 64), "gray").save(options["preview_dir"] / f"relay_{view}.png")
 
             inspection = {"status": "passed", "errors": [], "warnings": [],
-                          "measured": {"face_count": 500, "uv_layers": 1}}
+                          "measured": {"mesh_objects": 1, "vertex_count": 1000, "face_count": 500,
+                                       "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
+                                       "image_texture_count": 4,
+                                       "component_count": 1, "nonmanifold_edge_count": 0,
+                                       "transforms_applied": True, "missing_textures": []}}
             with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                     patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
                 candidate = _native_material_candidate(root, config, {"face_budget": "prop_faces"}, asset, 1, metadata)

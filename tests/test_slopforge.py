@@ -23,7 +23,6 @@ from slopforge.conditioning import ensure_supported, resolve_conditioning
 from slopforge.backends.blender import process_model
 from slopforge.backends.comfyui import generate_image
 from slopforge.paths import tool_root
-from slopforge.pipelines.primitive import register_primitive
 from slopforge.pipelines import model
 from slopforge.validation import validate_model_outputs
 from processing.comfy_generate_3d import make_workflow
@@ -41,9 +40,8 @@ def make_project(root):
     (root / "ai/asset_types").mkdir(parents=True)
     (root / "ai/project.yaml").write_text("""project:\n  name: Test\nasset_pipeline:\n  active_style: plain\n  workflows:\n    image: image_text2img_api.json\n""")
     (root / "ai/styles/plain/style.yaml").write_text("""name: Plain\nversion: 1\nidentity: {genre: fantasy, rendering: painted, mood: [warm]}\nshape_language: {preferred: [rounded], avoid: [photorealistic]}\npalette: {}\nmaterials: {}\nsurface_language: {preferred: [matte], avoid: []}\nlighting: {description: soft, avoid: []}\nasset_rules: {}\nmaterial_generation: {rules: [surface only]}\n""")
-    (root / "ai/asset_types/icon.yaml").write_text("""name: icon\npipeline: image\noutput_folder: Icons\nformat: PNG\nrequirements: [one subject]\navoid: [text]\n""")
+    (root / "ai/asset_types/concept.yaml").write_text("""name: concept\npipeline: image\noutput_folder: Concepts\nformat: PNG\nrequirements: [one subject]\navoid: [text]\n""")
     (root / "ai/asset_types/prop.yaml").write_text("""name: prop\npipeline: model\noutput_folder: Models\nface_budget: prop_faces\nrequirements: [isolated object]\navoid: [environment]\n""")
-    (root / "ai/asset_types/primitive.yaml").write_text("""name: primitive\npipeline: native\noutput_folder: null\nrequirements: [Unity-native route]\navoid: []\n""")
     return root
 
 
@@ -60,7 +58,7 @@ class SlopForgeTests(unittest.TestCase):
         (target / "Assets").mkdir(parents=True)
         init_project(target)
         self.assertTrue((target / "ai/project.yaml").is_file())
-        self.assertTrue((target / "ai/recipes/starter_icons.yaml").is_file())
+        self.assertTrue((target / "ai/recipes/character_3d_pack.yaml").is_file())
         self.assertTrue((target / "ai/libraries").is_dir())
         self.assertTrue((target / "ai/styles/default/references/approved").is_dir())
         self.assertTrue((target / "ai/workflows").is_dir())
@@ -98,7 +96,7 @@ class SlopForgeTests(unittest.TestCase):
             if "Style number:" in prompt:
                 return ""
             if "Type number or name:" in prompt:
-                return "icon"
+                return "concept"
             if "Short name" in prompt:
                 return "guided_potion"
             if "Describe what" in prompt:
@@ -119,7 +117,7 @@ class SlopForgeTests(unittest.TestCase):
         def approve_with_warning(*args):
             result = approve_image(*args)
             result["status"] = "passed_with_warnings"
-            result["warnings"] = ["background is opaque; inspect the icon in Unity"]
+            result["warnings"] = ["background is opaque; inspect the concept in Unity"]
             manifest, key = args[3], args[4]
             manifest["assets"][key]["validation"] = result
             return result
@@ -132,15 +130,15 @@ class SlopForgeTests(unittest.TestCase):
                 redirect_stdout(output):
             result = cli_main(["--project", str(project), "make"])
 
-        record = load_manifest(project / "ai/assets/manifest.json")["assets"]["icon:guided_potion"]
+        record = load_manifest(project / "ai/assets/manifest.json")["assets"]["concept:guided_potion"]
         self.assertEqual(result, 0)
         self.assertEqual(record["candidates"]["selected"], 2)
         self.assertEqual(record["status"], "ready")
-        self.assertTrue((project / "Assets/Art/Generated/Icons/guided_potion.png").is_file())
+        self.assertTrue((project / "Assets/Art/Generated/Concepts/guided_potion.png").is_file())
         self.assertTrue((project / "AGENTS.md").is_file())
         self.assertNotIn('"checks"', output.getvalue())
         self.assertIn("Export completed with warnings", output.getvalue())
-        self.assertIn("background is opaque; inspect the icon in Unity", output.getvalue())
+        self.assertIn("background is opaque; inspect the concept in Unity", output.getvalue())
         self.assertNotIn("Style number:", prompts)
         self.assertIn("Using your only art style: Default", output.getvalue())
         self.assertIn("Next", output.getvalue())
@@ -178,7 +176,7 @@ class SlopForgeTests(unittest.TestCase):
     def test_project_style_and_type_rules_build_prompt(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
-        prompt = build_prompt(style, load_taxonomy(self.root)["icon"], "Health potion")
+        prompt = build_prompt(style, load_taxonomy(self.root)["concept"], "Health potion")
         self.assertIn("fantasy", prompt)
         self.assertIn("one subject", prompt)
         self.assertIn("Health potion", prompt)
@@ -196,10 +194,10 @@ class SlopForgeTests(unittest.TestCase):
     def test_candidate_creation_and_approval_only_copies_selected_image(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
-        recipe = load_taxonomy(self.root)["icon"]
+        recipe = load_taxonomy(self.root)["concept"]
         manifest = load_manifest(self.root / "ai/assets/manifest.json")
-        key = asset_key("icon", "potion")
-        manifest["assets"][key] = new_record("icon", "potion", "Health potion", style, {"strategy": "text_only"})
+        key = asset_key("concept", "potion")
+        manifest["assets"][key] = new_record("concept", "potion", "Health potion", style, {"strategy": "text_only"})
 
         def backend(_prompt, destination, seed, metadata):
             Image.new("RGBA", (16, 16), (seed % 255, 10, 20, 255)).save(destination)
@@ -211,30 +209,30 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual(len(candidates), 2)
         self.assertEqual(manifest["assets"][key]["candidates"]["selected"], 2)
         self.assertEqual(result["status"], "passed")
-        self.assertTrue((self.root / "Assets/Art/Generated/Icons/potion.png").is_file())
+        self.assertTrue((self.root / "Assets/Art/Generated/Concepts/potion.png").is_file())
 
     def test_manifest_atomic_round_trip_keeps_candidate_history(self):
         path = self.root / "ai/assets/manifest.json"
         manifest = load_manifest(path)
-        manifest["assets"]["icon:potion"] = {"name": "potion", "type": "icon", "status": "candidate",
+        manifest["assets"]["concept:potion"] = {"name": "potion", "type": "concept", "status": "candidate",
                                                 "candidates": {"items": [{"number": 1}], "selected": None}}
         save_manifest(path, manifest)
-        self.assertEqual(load_manifest(path)["assets"]["icon:potion"]["candidates"]["items"], [{"number": 1}])
+        self.assertEqual(load_manifest(path)["assets"]["concept:potion"]["candidates"]["items"], [{"number": 1}])
 
     def test_approval_records_selected_candidate_provenance(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
-        recipe = load_taxonomy(self.root)["icon"]
-        manifest = {"assets": {"icon:potion": new_record("icon", "potion", "Potion", style, {"strategy": "text_only"})}}
+        recipe = load_taxonomy(self.root)["concept"]
+        manifest = {"assets": {"concept:potion": new_record("concept", "potion", "Potion", style, {"strategy": "text_only"})}}
 
         def backend(_prompt, destination, seed, metadata):
             Image.new("RGB", (16, 16), "red").save(destination)
             metadata.write_text(json.dumps({"seed": seed, "model": "fixture", "prompt_id": str(seed)}))
 
         generated = generate_candidates(self.root, config, recipe, style, "potion", "Potion", 2,
-                                        manifest, "icon:potion", backend)
-        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
-        self.assertEqual(manifest["assets"]["icon:potion"]["generator"], generated[0]["generator"])
+                                        manifest, "concept:potion", backend)
+        approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 1)
+        self.assertEqual(manifest["assets"]["concept:potion"]["generator"], generated[0]["generator"])
 
     def test_cli_auto_approval_keeps_first_candidate_provenance(self):
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
@@ -243,10 +241,10 @@ class SlopForgeTests(unittest.TestCase):
                                             "model": "fixture", "prompt_id": str(seed)}))
 
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend), redirect_stdout(StringIO()):
-            result = cli_main(["--project", str(self.root), "generate", "icon", "potion", "Health potion",
+            result = cli_main(["--project", str(self.root), "generate", "concept", "potion", "Health potion",
                                "--count", "2", "--auto-approve"])
         self.assertEqual(result, 0)
-        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:potion"]
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["concept:potion"]
         self.assertEqual(record["status"], "ready")
         self.assertEqual(record["generator"], record["candidates"]["items"][0]["generator"])
         self.assertEqual(record["description"], "Health potion")
@@ -255,21 +253,21 @@ class SlopForgeTests(unittest.TestCase):
     def test_corrupt_candidate_cannot_replace_approved_image(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
-        recipe = load_taxonomy(self.root)["icon"]
-        record = new_record("icon", "potion", "Potion", style, {"strategy": "text_only"})
-        manifest = {"assets": {"icon:potion": record}}
+        recipe = load_taxonomy(self.root)["concept"]
+        record = new_record("concept", "potion", "Potion", style, {"strategy": "text_only"})
+        manifest = {"assets": {"concept:potion": record}}
 
         def backend(_prompt, destination, seed, metadata):
             Image.new("RGB", (16, 16), "red").save(destination)
 
         generated = generate_candidates(self.root, config, recipe, style, "potion", "Potion", 2,
-                                        manifest, "icon:potion", backend)
-        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
+                                        manifest, "concept:potion", backend)
+        approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 1)
         final = output_path(self.root, config, recipe, "potion")
         original = final.read_bytes()
         (self.root / generated[1]["path"]).write_bytes(b"corrupted after generation")
         with self.assertRaisesRegex(ValueError, "invalid image"):
-            approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 2, force=True)
+            approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 2, force=True)
         self.assertEqual(final.read_bytes(), original)
         self.assertEqual(record["candidates"]["selected"], 1)
         self.assertEqual(record["status"], "ready")
@@ -278,20 +276,20 @@ class SlopForgeTests(unittest.TestCase):
     def test_older_image_approval_restores_original_description_and_style(self):
         config = load_project(self.root)
         style = load_style(self.root, config)
-        recipe = load_taxonomy(self.root)["icon"]
-        record = new_record("icon", "potion", "Health potion", style, {"strategy": "text_only"})
-        manifest = {"assets": {"icon:potion": record}}
+        recipe = load_taxonomy(self.root)["concept"]
+        record = new_record("concept", "potion", "Health potion", style, {"strategy": "text_only"})
+        manifest = {"assets": {"concept:potion": record}}
 
         def backend(_prompt, destination, seed, metadata):
             Image.new("RGB", (16, 16), "red").save(destination)
 
         generate_candidates(self.root, config, recipe, style, "potion", "First styled prompt", 1,
-                            manifest, "icon:potion", backend, semantic_description="Health potion")
+                            manifest, "concept:potion", backend, semantic_description="Health potion")
         style["name"], style["version"] = "Different", 2
         record.update(description="Mana potion", style="Different", style_version=2)
         generate_candidates(self.root, config, recipe, style, "potion", "Second styled prompt", 1,
-                            manifest, "icon:potion", backend, semantic_description="Mana potion")
-        approve_image_candidate(self.root, config, recipe, manifest, "icon:potion", 1)
+                            manifest, "concept:potion", backend, semantic_description="Mana potion")
+        approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 1)
         self.assertEqual((record["description"], record["style"], record["style_version"]),
                          ("Health potion", "Plain", 1))
 
@@ -409,20 +407,29 @@ class SlopForgeTests(unittest.TestCase):
             if not options["reuse_stage_mesh"]:
                 Path(options["stage_mesh"]).write_bytes(b"processed mesh")
             Path(options["preview_dir"]).mkdir(parents=True, exist_ok=True)
-            for name in ("front", "side", "rear"):
+            for name in ("front", "side", "rear", "three_quarter"):
                 Image.new("RGB", (16, 16), "gray").save(Path(options["preview_dir"]) / f"relic_{name}.png")
 
         with patch("slopforge.pipelines.model.generate_image", side_effect=write_generated_image), \
                 patch("slopforge.pipelines.model.generate_model", side_effect=generate_mesh), \
                 patch("slopforge.pipelines.model.process_model", side_effect=process_mesh) as process, \
-                patch("slopforge.pipelines.model.inspect_model", return_value={
-                    "status": "passed", "errors": [], "warnings": [], "measured": {"face_count": 8, "uv_layers": 1}}), \
+                patch("slopforge.pipelines.model.inspect_model", side_effect=[
+                    {"status": "passed", "errors": [], "warnings": [], "measured": {"mesh_objects": 1}},
+                    {"status": "passed", "errors": [], "warnings": [], "measured": {"mesh_objects": 1}},
+                    {"status": "passed", "errors": [], "warnings": [], "measured": {
+                        "mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1],
+                        "uv_layers": 1, "material_count": 1, "image_texture_count": 4, "component_count": 1,
+                        "nonmanifold_edge_count": 0, "transforms_applied": True, "missing_textures": []}}]), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=run_script) as run_scripts:
             result = approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1,
                                   material_prompt=authored_material_prompt)
 
         self.assertEqual(result["status"], "awaiting_texture_approval")
-        self.assertEqual(len(record["material_candidates"]["items"]), 2)
+        self.assertEqual(len(record["material_candidates"]["items"]), 4)
+        self.assertEqual([item["status"] for item in record["model_attempts"]], ["rejected", "qualified"])
+        self.assertTrue((self.root / record["material_candidates"]["items"][-1]["mesh_source"]).is_file())
+        self.assertEqual(len(record["model_attempts"][-1]["source_sha256"]), 64)
+        self.assertEqual(len(record["model_attempts"][-1]["input_sha256"]), 64)
         self.assertEqual(record["material_prompt"], authored_material_prompt)
         self.assertEqual(record["generator"]["workflow"]["material"], "material.json")
         self.assertEqual(Path(record["material_candidates"]["items"][0]["outputs"]["preview_front"]).name,
@@ -435,15 +442,48 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual(Path(pbr_command[pbr_command.index("--basecolor") + 1]).name, "surface_source.png")
         self.assertNotIn("--source", pbr_command)
 
+        config["asset_pipeline"]["defaults"]["model_candidates"] = 1
+        rejected = {"number": 5, "status": "failed", "path": "missing.png",
+                    "validation": {"status": "failed", "errors": ["no usable geometry"], "warnings": [], "measured": {}}}
+        with patch("slopforge.pipelines.model.generate_model", side_effect=generate_mesh), \
+                patch("slopforge.pipelines.model._generate_material_candidate", return_value=rejected), \
+                patch("slopforge.pipelines.model.subprocess.run", side_effect=run_script):
+            with self.assertRaisesRegex(ValueError, "No qualified model after 1 attempts"):
+                approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1,
+                              force=True, material_prompt=authored_material_prompt, material_count=1)
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["validation"]["status"], "failed")
+        self.assertTrue(any("Pipeline stopped: No qualified model after 1 attempts" in error
+                            for error in record["validation"]["errors"]))
+        self.assertEqual(record["model_attempts"][-1]["status"], "rejected")
+        self.assertNotIn("approval", record)
+        self.assertNotEqual(record["status"], "ready")
+
+    def test_incomplete_geometry_and_material_report_fails_closed(self):
+        result = validate_model_outputs({}, {"status": "passed", "errors": [], "warnings": [],
+            "measured": {"mesh_objects": 1, "vertex_count": 12, "face_count": 0,
+                         "dimensions": [1, 1, 1], "uv_layers": 0, "material_count": 0,
+                         "image_texture_count": 0,
+                         "component_count": 1, "nonmanifold_edge_count": 0,
+                         "transforms_applied": True, "missing_textures": []}})
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("mesh has no usable surface geometry", result["errors"])
+        self.assertIn("mesh has no UV map", result["errors"])
+        self.assertIn("mesh has no material", result["errors"])
+
     def test_approved_material_candidate_replaces_outputs_and_marks_asset_ready(self):
         config, style = load_project(self.root), load_style(self.root)
         asset = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
         asset["generator"] = {"workflow": {"concept": "concept.json", "mesh": "mesh.json", "material": None},
                               "seed": {"concept": 1, "mesh": 2}}
+        source_mesh = self.root / "source/relic.glb"
+        source_mesh.parent.mkdir(parents=True, exist_ok=True)
+        source_mesh.write_bytes(b"glb")
+        asset["source"] = {"glb": source_mesh.relative_to(self.root).as_posix()}
         manifest = {"assets": {"prop:relic": asset}}
         candidate_paths = material_candidate_paths(self.root, config, "relic", 1)
         keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
-                "preview_front", "preview_side", "preview_rear")
+                "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
         outputs = {}
         for name in keys:
             path = candidate_paths[name]
@@ -501,7 +541,7 @@ class SlopForgeTests(unittest.TestCase):
         init_project(target)
         manifest_path = target / "ai/assets/manifest.json"
         manifest = load_manifest(manifest_path)
-        manifest["assets"]["icon:potion"] = {"name": "potion", "status": "ready", "candidates": {"items": [{"number": 1}]}}
+        manifest["assets"]["concept:potion"] = {"name": "potion", "status": "ready", "candidates": {"items": [{"number": 1}]}}
         save_manifest(manifest_path, manifest)
         original = manifest_path.read_bytes()
         init_project(target, force=True)
@@ -509,9 +549,9 @@ class SlopForgeTests(unittest.TestCase):
 
     def test_short_cli_and_explicit_forms_parse(self):
         self.assertTrue(parse_args(["model", "terminal", "wall object"]).auto_approve)
-        explicit = parse_args(["generate", "icon", "potion", "red flask"])
+        explicit = parse_args(["generate", "concept", "potion", "red flask"])
         self.assertEqual(explicit.command, "generate")
-        authored = parse_args(["generate", "icon", "potion", "Red flask", "--image-prompt", "exact\nimage prompt"])
+        authored = parse_args(["generate", "concept", "potion", "Red flask", "--image-prompt", "exact\nimage prompt"])
         self.assertEqual(authored.image_prompt, "exact\nimage prompt")
         self.assertEqual(parse_args(["approve", "potion", "2"]).candidate, 2)
         material = parse_args(["retexture", "terminal", "--material-prompt", "blue steel", "--count", "3"])
@@ -527,11 +567,11 @@ class SlopForgeTests(unittest.TestCase):
                 Image.new("RGB", (16, 16), "gold").save(destination)
                 metadata.write_text(json.dumps({"workflow": "fixture.json", "model": "fixture"}))
             generate_image.side_effect = write_candidate
-            result = cli_main(["--project", str(self.root), "generate", "icon", "brass_key",
+            result = cli_main(["--project", str(self.root), "generate", "concept", "brass_key",
                                "An old key for the archive", "--image-prompt", authored_prompt, "--count", "1"])
 
         self.assertEqual(result, 0)
-        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:brass_key"]
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["concept:brass_key"]
         self.assertEqual(record["description"], "An old key for the archive")
         self.assertEqual(record["candidates"]["items"][0]["description"], "An old key for the archive")
         self.assertEqual(record["candidates"]["items"][0]["prompt"], authored_prompt)
@@ -559,7 +599,7 @@ class SlopForgeTests(unittest.TestCase):
     def test_cli_dry_run_injects_project_style_without_generating(self):
         output = StringIO()
         with redirect_stdout(output):
-            result = cli_main(["--project", str(self.root), "generate", "icon", "potion", "Health potion", "--dry-run"])
+            result = cli_main(["--project", str(self.root), "generate", "concept", "potion", "Health potion", "--dry-run"])
         self.assertEqual(result, 0)
         self.assertIn("fantasy", output.getvalue())
         self.assertIn("one subject", output.getvalue())
@@ -576,20 +616,6 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(tools["asset_python"], "/tmp/python")
             with redirect_stdout(StringIO()):
                 self.assertEqual(cli_main(["assets"]), 0)
-
-    def test_primitive_is_native_route(self):
-        args = parse_args(["generate", "primitive", "door_frame", "Simple doorway"])
-        style = load_style(self.root, load_project(self.root))
-        manifest = load_manifest(self.root / "ai/assets/manifest.json")
-        record = register_primitive(manifest, load_project(self.root), style, args.name, args.description)
-        self.assertEqual(record["route"], "unity_native_geometry")
-        self.assertEqual(load_taxonomy(self.root)[args.asset_type]["pipeline"], "native")
-        original_id, original_created = record["id"], record["created_at"]
-        updated = register_primitive(manifest, load_project(self.root), style, args.name, "Updated doorway")
-        self.assertEqual((updated["id"], updated["created_at"]), (original_id, original_created))
-        self.assertEqual(updated["description"], "Updated doorway")
-        with self.assertRaisesRegex(ValueError, "Asset name"):
-            register_primitive(manifest, load_project(self.root), style, "../escape", "Unsafe name")
 
     def test_reference_mode_requires_explicit_workflow_mapping(self):
         config = load_project(self.root)
@@ -618,12 +644,12 @@ class SlopForgeTests(unittest.TestCase):
 
     def test_review_command_writes_local_board_from_manifest(self):
         from slopforge.manifest import save_manifest
-        candidate = self.root / "ai/assets/candidates/icon/token.png"
+        candidate = self.root / "ai/assets/candidates/concept/token.png"
         candidate.parent.mkdir(parents=True)
         Image.new("RGB", (8, 8), "gold").save(candidate)
         save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 3, "assets": {
-            "icon:token": {"id": "token-id", "name": "token", "type": "icon", "status": "candidate",
-                           "candidates": {"items": [{"number": 1, "path": "ai/assets/candidates/icon/token.png",
+            "concept:token": {"id": "token-id", "name": "token", "type": "concept", "status": "candidate",
+                           "candidates": {"items": [{"number": 1, "path": "ai/assets/candidates/concept/token.png",
                                                          "status": "candidate"}], "selected": None}}}})
         with redirect_stdout(StringIO()):
             self.assertEqual(cli_main(["--project", str(self.root), "review"]), 0)
@@ -632,13 +658,13 @@ class SlopForgeTests(unittest.TestCase):
     def test_reject_cli_records_reason_without_touching_other_candidates(self):
         from slopforge.manifest import save_manifest
         save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 3, "assets": {
-            "icon:token": {"id": "token-id", "name": "token", "type": "icon", "status": "candidate",
+            "concept:token": {"id": "token-id", "name": "token", "type": "concept", "status": "candidate",
                            "candidates": {"items": [{"number": 1, "status": "candidate"},
                                                          {"number": 2, "status": "candidate"}], "selected": None}}}})
         with redirect_stdout(StringIO()):
             self.assertEqual(cli_main(["--project", str(self.root), "reject", "token", "1",
                                        "--reason", "wrong shape"]), 0)
-        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["icon:token"]
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["concept:token"]
         self.assertEqual(record["candidates"]["items"][0]["review"]["reason"], "wrong shape")
         self.assertEqual(record["candidates"]["items"][1]["status"], "candidate")
 
@@ -656,13 +682,13 @@ class SlopForgeTests(unittest.TestCase):
             metadata.write_text(json.dumps({"seed": seed, "model": "fixture"}))
 
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend), redirect_stdout(StringIO()):
-            self.assertEqual(cli_main(["--project", str(self.root), "generate", "icon", "quick", "Draft",
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "quick", "Draft",
                                        "--quality-tier", "draft"]), 0)
-            self.assertEqual(cli_main(["--project", str(self.root), "generate", "icon", "many", "Draft",
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "many", "Draft",
                                        "--quality-tier", "draft", "--count", "2"]), 0)
         manifest = load_manifest(self.root / "ai/assets/manifest.json")
-        self.assertEqual(len(manifest["assets"]["icon:quick"]["candidates"]["items"]), 1)
-        self.assertEqual(len(manifest["assets"]["icon:many"]["candidates"]["items"]), 2)
+        self.assertEqual(len(manifest["assets"]["concept:quick"]["candidates"]["items"]), 1)
+        self.assertEqual(len(manifest["assets"]["concept:many"]["candidates"]["items"]), 2)
 
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)
@@ -679,7 +705,7 @@ class SlopForgeTests(unittest.TestCase):
         with patch.dict(os.environ, {"COMFYUI_URL": "http://localhost:9000/"}):
             with patch("slopforge.backends.comfyui.subprocess.run") as run:
                 generate_image(self.root, config, "image_text2img_api.json", "prompt", self.root / "out.png",
-                               "test/icon", 42, self.root / "out.json")
+                               "test/concept", 42, self.root / "out.json")
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--seed") + 1], "42")
         self.assertEqual(run.call_args.kwargs["env"]["COMFYUI_URL"], "http://localhost:9000")
@@ -707,8 +733,8 @@ class SlopForgeTests(unittest.TestCase):
             path.write_bytes(b"present")
             paths[extension[1:]] = path
         result = validate_model_outputs(paths, inspection=None, face_budget=100)
-        self.assertEqual(result["status"], "passed_with_warnings")
-        self.assertIn("inspection did not run", result["warnings"][0])
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("inspection did not run", result["errors"][0])
 
     def test_model_preview_path_is_safe_posix_blend_path(self):
         preview = model_paths(self.root, load_project(self.root), "smoke_relic")["blend"]

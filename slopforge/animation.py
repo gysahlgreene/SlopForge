@@ -40,7 +40,7 @@ def validate_animation_library(project_root, name):
             raise ValueError(f"Duplicate animation clip id {clip['id']!r}")
         ids.add(clip["id"])
         if clip.get("name") not in CLIP_NAMES:
-            raise ValueError(f"Unsupported prototype animation name: {clip.get('name')!r}")
+            raise ValueError(f"Unsupported game animation name: {clip.get('name')!r}")
         relative = clip.get("path")
         if not isinstance(relative, str) or not relative or "\\" in relative:
             raise ValueError(f"Clip {clip['id']!r} path must be project-relative")

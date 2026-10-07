@@ -21,13 +21,12 @@ def init_project(target, force=False):
 
     project_dirs = [
         "ai/assets", "ai/assets/candidates", "ai/workflows", "ai/asset_types", "ai/recipes",
-        "ai/libraries", "ai/animation_libraries", "ai/prototypes",
+        "ai/libraries", "ai/animation_libraries",
         "ai/styles/default/references/approved", "ai/styles/default/references/candidates",
         ".continue/rules",
-        "Assets/Art/Generated/Icons", "Assets/Art/Generated/UI", "Assets/Art/Generated/Props",
-        "Assets/Art/Generated/Portraits", "Assets/Art/Generated/Models", "Assets/Art/Generated/Decals",
+        "Assets/Art/Generated/Props", "Assets/Art/Generated/Models",
         "Assets/Art/Generated/Concepts", "Assets/Art/Generated/Textures",
-        "Assets/Art/Generated/Characters", "Assets/Art/Generated/Characters/Spritesheets",
+        "Assets/Art/Generated/Characters",
     ]
     for directory in project_dirs:
         (target / directory).mkdir(parents=True, exist_ok=True)

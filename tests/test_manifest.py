@@ -74,31 +74,31 @@ class ManifestTests(unittest.TestCase):
     def test_typed_outputs_keep_legacy_paths_and_independent_approval(self):
         asset = self.make_asset("pilot")
         manifest = {"schema_version": 3, "assets": {"character:pilot": asset}}
-        concept = register_artifact(
-            manifest, "character:pilot", "concept", "image.concept",
-            "ai/candidates/pilot.png", status="ready", approval_status="approved",
+        model = register_artifact(
+            manifest, "character:pilot", "model", "model.glb",
+            "Assets/Art/Generated/Characters/pilot/model.glb", status="ready", approval_status="approved",
             provenance={"workflow": "image.json", "seed": 17},
             validation={"status": "passed", "errors": []},
         )
-        sprite = register_artifact(
-            manifest, "character:pilot", "sprites.idle", "image.sprite_sheet",
-            "Assets/Pilot/idle.png", status="candidate",
-            derived_from=[{"asset_id": asset["id"], "output_id": "concept"}],
-            provenance={"workflow": "sprite.json", "seed": 23},
-            validation={"status": "passed_with_warnings", "warnings": ["review pivots"]},
+        rig = register_artifact(
+            manifest, "character:pilot", "rig", "model.rigged",
+            "ai/assets/candidates/pilot/rigged.fbx", status="candidate",
+            derived_from=[{"asset_id": asset["id"], "output_id": "model"}],
+            provenance={"provider": "blender_rigify"},
+            validation={"status": "passed_with_warnings", "warnings": ["review deformations"]},
         )
 
-        self.assertEqual(asset["outputs"]["concept"], "ai/candidates/pilot.png")
-        self.assertEqual(asset["outputs"]["sprites.idle"], "Assets/Pilot/idle.png")
-        self.assertEqual(concept["type"], "image.concept")
-        self.assertEqual(sprite["derived_from"], [{"asset_id": asset["id"], "output_id": "concept"}])
-        self.assertEqual(sprite["validation"]["warnings"], ["review pivots"])
-        self.assertEqual(sprite["approval"]["status"], "pending")
+        self.assertEqual(asset["outputs"]["model"], "Assets/Art/Generated/Characters/pilot/model.glb")
+        self.assertEqual(asset["outputs"]["rig"], "ai/assets/candidates/pilot/rigged.fbx")
+        self.assertEqual(model["type"], "model.glb")
+        self.assertEqual(rig["derived_from"], [{"asset_id": asset["id"], "output_id": "model"}])
+        self.assertEqual(rig["validation"]["warnings"], ["review deformations"])
+        self.assertEqual(rig["approval"]["status"], "pending")
 
-        set_artifact_approval(manifest, "character:pilot", "sprites.idle", "approved", approved_by="user")
-        self.assertEqual(sprite["approval"]["status"], "approved")
-        self.assertEqual(sprite["approval"]["approved_by"], "user")
-        self.assertEqual(concept["approval"]["status"], "approved")
+        set_artifact_approval(manifest, "character:pilot", "rig", "approved", approved_by="user")
+        self.assertEqual(rig["approval"]["status"], "approved")
+        self.assertEqual(rig["approval"]["approved_by"], "user")
+        self.assertEqual(model["approval"]["status"], "approved")
 
     def test_parent_children_and_output_dependencies_are_explicit(self):
         pack = self.make_asset("pack")

@@ -27,7 +27,7 @@ slopforge init ~/UnityProjects/MyGame
 Existing managed files are not overwritten. Pass `--force` to replace configuration, taxonomy, and the default style explicitly. An existing asset manifest is always preserved, including candidate history and approvals. Back up customized configuration before using `--force`. The standalone toolkit can then target the project from any working directory:
 
 ```sh
-slopforge --project ~/UnityProjects/MyGame generate icon example "Simple inventory icon"
+slopforge --project ~/UnityProjects/MyGame generate prop example "A detailed game-ready handheld scanner"
 ```
 
 Or `cd` into the project; root discovery walks upward until it finds `ai/project.yaml`.

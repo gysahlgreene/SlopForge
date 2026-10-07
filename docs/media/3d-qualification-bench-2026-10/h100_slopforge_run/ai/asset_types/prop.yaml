@@ -1,0 +1,12 @@
+name: prop
+pipeline: model
+output_folder: Models
+face_budget: prop_faces
+requirements:
+  - physical object with a clean silhouette
+  - plausible from multiple viewing angles
+  - isolated concept for reconstruction
+  - game-ready polygon budget
+  - complete object visible against a clean white background
+  - no floor, pedestal, cast shadow, or unrelated props
+avoid: [environment, concept sheets, multiple variants, fragile floating details, unnecessary tiny geometry]

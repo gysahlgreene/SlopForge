@@ -22,6 +22,7 @@ class RigifyBlenderIntegrationTests(unittest.TestCase):
             fixture_script = root / "create_fixture.py"
             fixture_script.write_text('''
 import bpy
+import bmesh
 from pathlib import Path
 bpy.ops.object.select_all(action="SELECT")
 bpy.ops.object.delete(use_global=False)
@@ -44,6 +45,9 @@ mesh=bpy.context.object
 modifier=mesh.modifiers.new("VoxelUnion", "REMESH")
 modifier.mode="VOXEL"; modifier.voxel_size=0.025
 bpy.ops.object.modifier_apply(modifier=modifier.name)
+bm=bmesh.new(); bm.from_mesh(mesh.data)
+bmesh.ops.dissolve_degenerate(bm, edges=list(bm.edges), dist=0.00001)
+bm.to_mesh(mesh.data); bm.free(); mesh.data.update()
 material=bpy.data.materials.new("FixtureMaterial"); material.diffuse_color=(0.4,0.5,0.7,1)
 mesh.data.materials.append(material)
 bpy.ops.export_scene.gltf(filepath=str(Path(__file__).parent / "Assets/Characters/pilot/model.glb"),
@@ -63,6 +67,8 @@ bpy.ops.export_scene.gltf(filepath=str(Path(__file__).parent / "Assets/Character
                               "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
             save_manifest(manifest_path, manifest)
 
+            self.assertEqual(main(["--project", str(root), "character", "readiness", "pilot"]), 0)
+            self.assertEqual(main(["--project", str(root), "character", "approve-readiness", "pilot"]), 0)
             self.assertEqual(main(["--project", str(root), "character", "rig", "pilot"]), 0)
             manifest = load_manifest(manifest_path)
             character = manifest["assets"]["character:pilot"]
@@ -78,7 +84,53 @@ bpy.ops.export_scene.gltf(filepath=str(Path(__file__).parent / "Assets/Character
                 self.assertGreater(evidence[pose]["max_vertex_displacement"], 0.01)
                 artifact = character["artifacts"][f"rig_pose.{pose}"]
                 self.assertGreater((root / artifact["path"]).stat().st_size, 0)
-            self.assertEqual(sum(item["open_edges"] for item in character["rigging"]["mesh_repair"]["meshes"]), 0)
+            self.assertEqual(sum(item["boundary_edges"] for item in character["rigging"]["mesh_repair"]["meshes"]), 0)
+            self.assertEqual(sum(item["nonmanifold_edges"] for item in character["rigging"]["mesh_repair"]["meshes"]), 0)
+
+            if os.environ.get("SLOPFORGE_RUN_UNITY_HUMANOID") == "1":
+                from slopforge.unity_animation import build_character_animator
+
+                rig_path = root / result["rig_artifact"]["path"]
+                animation_path = root / "Assets/Animations/walk.fbx"
+                animation_path.parent.mkdir(parents=True, exist_ok=True)
+                animation_script = root / "create_walk.py"
+                animation_script.write_text(f'''import bpy
+from pathlib import Path
+rig_path = Path({str(rig_path)!r})
+output = Path({str(animation_path)!r})
+bpy.ops.import_scene.fbx(filepath=str(rig_path))
+rig = next(obj for obj in bpy.context.scene.objects if obj.type == "ARMATURE")
+bone = rig.pose.bones["DEF-hand.R"]
+bone.rotation_mode = "XYZ"
+scene = bpy.context.scene
+scene.frame_start, scene.frame_end = 1, 24
+for frame, rotation in ((1, 0.0), (12, 0.5), (24, 0.0)):
+    scene.frame_set(frame)
+    bone.rotation_euler[1] = rotation
+    bone.keyframe_insert(data_path="rotation_euler", frame=frame)
+bpy.ops.object.select_all(action="DESELECT")
+rig.select_set(True)
+bpy.context.view_layer.objects.active = rig
+bpy.ops.export_scene.fbx(filepath=str(output), use_selection=True, object_types={{"ARMATURE"}},
+    add_leaf_bones=False, bake_anim=True, bake_anim_use_nla_strips=False,
+bake_anim_use_all_actions=True, bake_anim_force_startend_keying=True, bake_anim_step=1.0)
+''')
+                subprocess.run([blender, "--background", "--factory-startup", "--python",
+                                str(animation_script)], check=True, capture_output=True, text=True)
+                (root / "ProjectSettings").mkdir(parents=True, exist_ok=True)
+                (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+                (root / "Packages").mkdir(exist_ok=True)
+                (root / "Packages/manifest.json").write_text('{"dependencies": {}}\n')
+                character["artifacts"]["rig"]["status"] = "ready"
+                character["artifacts"]["rig"]["approval"]["status"] = "approved"
+                register_artifact(manifest, character["id"], "animation.walk", "animation.fbx",
+                                  animation_path.relative_to(root).as_posix(), status="ready",
+                                  approval_status="approved")
+                result = build_character_animator(root, config, manifest, "pilot", rig_type="humanoid")
+                self.assertEqual(result["status"], "review_required")
+                self.assertEqual(character["pipeline_status"]["unity_avatar_status"], "valid")
+                self.assertTrue((root / result["controller"]["path"]).is_file())
+                self.assertTrue((root / result["prefab"]["path"]).is_file())
 
 
 if __name__ == "__main__":

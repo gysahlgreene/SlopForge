@@ -13,6 +13,7 @@ from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
 from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
+from slopforge.workflow_requirements import workflow_requirements_identity
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -187,12 +188,16 @@ def main():
     parser.add_argument("--metadata", type=Path)
     parser.add_argument("--workflow", type=Path)
     parser.add_argument("--face-budget", type=int, default=30000)
+    parser.add_argument("--voxel-resolution", type=int, default=256,
+                        help="Voxel remesh resolution used before reducing a generated shape")
     parser.add_argument("--blender", type=Path)
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     args = parser.parse_args()
     if args.face_budget <= 0:
         parser.error("--face-budget must be positive")
+    if args.voxel_resolution <= 0:
+        parser.error("--voxel-resolution must be positive")
 
     src = Path(args.image).expanduser().resolve()
 
@@ -205,6 +210,11 @@ def main():
     if not name:
         print("Invalid asset name.", file=sys.stderr)
         sys.exit(1)
+
+    workflow_requirements = {"status": "unknown"}
+    if args.workflow:
+        declared_workflow = json.loads(args.workflow.read_text())
+        workflow_requirements = workflow_requirements_identity(args.workflow, declared_workflow)
 
     client = ComfyUIClient(COMFY_URL)
     try:
@@ -241,7 +251,7 @@ def main():
         script = Path(__file__).resolve().parents[1] / "blender" / "prepare_model.py"
         subprocess.run([str(args.blender), "--background", "--python", str(script), "--", str(raw_path),
                         str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
-                        "--mesh-only"], check=True)
+                        "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"], check=True)
         prepared_upload = client.upload_input(prepared, "3d")
         workflow["prepared_mesh"]["inputs"]["model_file"] = f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
         del workflow["save_raw"]
@@ -263,6 +273,9 @@ def main():
         temporary.write_text(json.dumps({"workflow": args.workflow.name if args.workflow else "hunyuan3d_image_to_model_api",
                                         "model": models if args.workflow else args.checkpoint, "seed": seed,
                                         "workflow_sha256": workflow_digest,
+                                        "workflow_requirements": workflow_requirements,
+                                        "mesh_preparation": {"voxel_resolution": args.voxel_resolution,
+                                                             "face_budget": args.face_budget},
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")

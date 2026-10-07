@@ -15,16 +15,16 @@ class RecipeTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "ai/recipes").mkdir(parents=True)
         self.definition = {
-            "id": "sample_pack", "version": 1, "description": "Small icon pack",
+            "id": "sample_pack", "version": 1, "description": "Small concept pack",
             "children": [
-                {"id": "dependent", "type": "icon", "description": "Dependent icon",
+                {"id": "dependent", "type": "concept", "description": "Dependent concept",
                  "depends_on": ["source"]},
-                {"id": "source", "type": "icon", "description": "Source icon"},
-                {"id": "independent", "type": "icon", "description": "Independent icon"},
+                {"id": "source", "type": "concept", "description": "Source concept"},
+                {"id": "independent", "type": "concept", "description": "Independent concept"},
             ],
         }
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
-        self.types = {"icon": {"name": "icon", "pipeline": "image"}}
+        self.types = {"concept": {"name": "concept", "pipeline": "image"}}
         self.style = {"name": "default", "version": 1}
         self.config = {"asset_pipeline": {"defaults": {"image_candidates": 1}}}
         self.manifest = {"schema_version": 3, "assets": {}}
@@ -37,7 +37,7 @@ class RecipeTests(unittest.TestCase):
         self.events.append(child["id"])
         asset = manifest["assets"][key]
         number = len(asset["candidates"]["items"]) + 1
-        candidate = {"number": number, "path": f"ai/assets/candidates/icon/{asset['name']}/candidate_{number:02d}.png",
+        candidate = {"number": number, "path": f"ai/assets/candidates/concept/{asset['name']}/candidate_{number:02d}.png",
                      "status": "candidate", "seed": number,
                      "generator": {"workflow": "image.json", "seed": number},
                      "validation": {"status": "passed", "errors": [], "warnings": []}}
@@ -61,7 +61,7 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(dependent["dependencies"], [{"asset_id": stages["source"]["asset_id"]}])
         self.assertEqual(len(result["artifacts"]), 3)
         aggregate = result["artifacts"]["source.candidate.1"]
-        self.assertEqual(aggregate["path"], "ai/assets/candidates/icon/demo_source/candidate_01.png")
+        self.assertEqual(aggregate["path"], "ai/assets/candidates/concept/demo_source/candidate_01.png")
         self.assertEqual(aggregate["derived_from"], [{"asset_id": stages["source"]["asset_id"], "output_id": "candidate.1"}])
         self.assertEqual(aggregate["provenance"]["seed"], 1)
         self.assertIn("running", snapshots)
@@ -184,7 +184,7 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(self.manifest["assets"]["recipe:demo"]["status"], "awaiting_approval")
 
     def test_image_children_use_configured_candidate_default(self):
-        child = {"id": "coin", "type": "icon", "description": "Gold coin"}
+        child = {"id": "coin", "type": "concept", "description": "Gold coin"}
         self.definition["children"] = [child]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
         self.config["asset_pipeline"]["defaults"]["image_candidates"] = 5
@@ -205,7 +205,7 @@ class RecipeTests(unittest.TestCase):
             "name": "Alice", "kind": "character", "version": 1,
             "entries": [{"id": "portrait", "path": "alice.png", "category": "identity", "strength": 0.9}],
         }))
-        self.definition["children"] = [{"id": "portrait", "type": "icon", "description": "Portrait",
+        self.definition["children"] = [{"id": "portrait", "type": "concept", "description": "Portrait",
                                          "reference_library": "character/alice"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
         with patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate:
@@ -221,7 +221,7 @@ class RecipeTests(unittest.TestCase):
             "name": "Alice", "kind": "character", "version": 1,
             "entries": [{"id": "portrait", "path": "missing.png"}],
         }))
-        self.definition["children"] = [{"id": "portrait", "type": "icon", "description": "Portrait",
+        self.definition["children"] = [{"id": "portrait", "type": "concept", "description": "Portrait",
                                          "reference_library": "character/alice"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
         with self.assertRaisesRegex(ValueError, "missing or changed"):
@@ -231,7 +231,7 @@ class RecipeTests(unittest.TestCase):
 
     def test_recipe_and_child_quality_tiers_propagate_and_are_snapshotted(self):
         self.definition["quality_tier"] = "final"
-        self.definition["children"] = [{"id": "coin", "type": "icon", "description": "Coin",
+        self.definition["children"] = [{"id": "coin", "type": "concept", "description": "Coin",
                                          "quality_tier": "draft"}]
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
         self.config["asset_pipeline"]["defaults"]["image_candidates"] = 5
@@ -258,16 +258,6 @@ class RecipeTests(unittest.TestCase):
                                         reference_library="character/alice")
         snapshot = result["recipe_instance"]["definition"]
         self.assertTrue(all(child["reference_library"] == "character/alice" for child in snapshot["children"]))
-
-    def test_unhandled_pipeline_is_rejected_before_creating_recipe_assets(self):
-        self.definition["children"] = [{"id": "primitive", "type": "primitive", "description": "A Unity primitive"}]
-        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
-
-        with self.assertRaisesRegex(ValueError, "pipeline.*not supported"):
-            recipes.run_recipe(self.root, self.config, self.style,
-                               {"primitive": {"name": "primitive", "pipeline": "native"}},
-                               self.manifest, "sample_pack", instance_name="demo")
-        self.assertEqual(self.manifest["assets"], {})
 
     def test_invalid_dependency_shape_returns_recipe_validation_error(self):
         self.definition["children"][0]["depends_on"] = [{}]

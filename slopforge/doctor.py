@@ -11,6 +11,7 @@ from .config import load_project
 from .paths import blender_executable, comfy_backend, comfy_home, comfy_url, resolve_workflow, tool_root
 from .style import load_style
 from .taxonomy import load_taxonomy
+from .workflow_requirements import load_workflow_requirements, validate_workflow_requirements
 
 
 def run_doctor(project_root=None):
@@ -69,6 +70,45 @@ def run_doctor(project_root=None):
         if packaged.is_file():
             workflow_paths.append(("Workflow", packaged))
 
+    workflow_checks = []
+    for role, workflow_path in workflow_paths:
+        try:
+            workflow = json.loads(workflow_path.read_text())
+            if not isinstance(workflow, dict):
+                raise ValueError("workflow graph must be a mapping")
+        except Exception as exc:
+            report("FAIL", f"{role} graph", str(exc))
+            continue
+        try:
+            requirements = load_workflow_requirements(workflow_path)
+        except Exception as exc:
+            report("FAIL", f"{role} requirements", str(exc))
+            requirements = None
+        else:
+            if requirements is None:
+                report("WARN", f"{role} requirements", "unknown (no adjacent .requirements.yaml sidecar)")
+            else:
+                problems = validate_workflow_requirements(workflow_path, workflow, requirements)
+                report("FAIL" if problems else "PASS", f"{role} requirements",
+                       "; ".join(problems) if problems else
+                       f"{requirements['id']} v{requirements['version']} (schema {requirements['schema_version']})")
+                unknown_nodes = [node["class"] for node in requirements["nodes"]
+                                 if node["revision"].lower() in {"unknown", "unverified"}]
+                unknown_models = [model["name"] for model in requirements["models"]
+                                  if model["sha256"].lower() in {"unknown", "unverified"}]
+                detail = "ComfyUI API does not expose installed node revisions or model artifact hashes"
+                if unknown_nodes:
+                    detail += "; node revision unknown: " + ", ".join(unknown_nodes)
+                if unknown_models:
+                    detail += "; model hash unknown: " + ", ".join(unknown_models)
+                report("WARN", f"{role} dependency versions", detail)
+        workflow_checks.append((role, workflow_path, workflow))
+
+    legacy_hunyuan = bool(config and not config["asset_pipeline"]["workflows"].get("model"))
+    if legacy_hunyuan:
+        report("WARN", "Model workflow requirements",
+               "unknown (legacy inline Hunyuan graph has no API workflow sidecar)")
+
     url = comfy_url(config)
     backend = comfy_backend(config)
     profile = (config or {}).get("asset_pipeline", {}).get("selected_compute_profile", "default")
@@ -90,8 +130,8 @@ def run_doctor(project_root=None):
         try:
             node_info = client.node_types()
             required = set()
-            for _, workflow_path in workflow_paths:
-                required.update(node.get("class_type") for node in json.loads(workflow_path.read_text()).values()
+            for _, _, workflow in workflow_checks:
+                required.update(node.get("class_type") for node in workflow.values()
                                 if node.get("class_type"))
             if config and not config["asset_pipeline"]["workflows"].get("model"):
                 required.update({"LoadImage", "ImageOnlyCheckpointLoader", "CLIPVisionEncode", "Hunyuan3Dv2Conditioning",
@@ -99,13 +139,24 @@ def run_doctor(project_root=None):
             missing_nodes = sorted(required - node_info.keys())
             report("FAIL" if missing_nodes else "PASS", "Workflow node capabilities",
                    "missing: " + ", ".join(missing_nodes) if missing_nodes else f"all {len(required)} required node classes available")
-            for role, workflow_path in workflow_paths:
+            for role, workflow_path, workflow in workflow_checks:
                 try:
-                    client.validate_workflow(json.loads(workflow_path.read_text()), node_info)
+                    client.validate_workflow(workflow, node_info)
                 except Exception as exc:
                     report("FAIL", f"{role} model choices", str(exc))
                 else:
                     report("PASS", f"{role} model choices", "required model names are available")
+            if legacy_hunyuan:
+                checkpoint = config["asset_pipeline"]["tools"].get("hunyuan_checkpoint")
+                choices = (node_info.get("ImageOnlyCheckpointLoader", {}).get("input", {})
+                           .get("required", {}).get("ckpt_name"))
+                available = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], list) else None
+                if available is None:
+                    report("WARN", "Model workflow model choices", "ComfyUI did not expose the Hunyuan checkpoint choices")
+                elif checkpoint not in available:
+                    report("FAIL", "Model workflow model choices", f"ImageOnlyCheckpointLoader.ckpt_name: {checkpoint}")
+                else:
+                    report("PASS", "Model workflow model choices", "configured Hunyuan checkpoint is available")
             report("PASS", "ComfyUI HTTP API", "health and workflow node discovery available; file transfer and generation are not exercised by doctor")
         except Exception as exc:
             report("WARN", "Workflow node capabilities", str(exc))
@@ -123,4 +174,9 @@ def run_doctor(project_root=None):
         report("PASS", "Blender", blender)
     except FileNotFoundError as exc:
         report("WARN", "Blender", str(exc))
+    if config is not None:
+        from .character_rigging import skintokens_preflight
+        skin = skintokens_preflight(config, root)
+        report("OK" if skin["status"] == "ready" else "WARN", "SkinTokens",
+               skin["status"] + (": " + "; ".join(skin["reasons"]) if skin["reasons"] else ""))
     return 1 if failures else 0

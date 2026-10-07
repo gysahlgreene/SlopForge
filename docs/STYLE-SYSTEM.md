@@ -12,7 +12,7 @@ Copy `templates/style/style.yaml` into a new style directory and fill in project
 
 New candidates record the style-pack key, name, version, and a SHA-256 fingerprint of the style data. A 3D approval checks that the active pack still matches before starting inference: its concept and material stages must use the same art direction. If you switched or edited the pack, restore the original pack or generate new candidates. Legacy candidates without a fingerprint can only be checked by style name and version.
 
-Approving a 2D candidate restores that candidate's semantic description, style identity, and generator provenance to the asset record. Image approval validates a temporary copy before replacing the canonical output, so a corrupt candidate cannot overwrite the approved image.
+Approving a supporting concept or material candidate restores its semantic description, style identity, and generator provenance to the asset record. Image approval validates a temporary copy before replacing the canonical output, so a corrupt candidate cannot overwrite the approved input.
 
 Material prompts request a flat surface without standalone objects, perspective, text, cast shadows, or baked lighting. Physical prop requirements remain in concept prompts; concept art is not projected into the material. The normal map derives from the generated surface's luminance. Roughness, metallic, and emission use prompt-guided heuristics, so these maps are not physically accurate and textures are not guaranteed seamless.
 
@@ -31,7 +31,7 @@ asset_pipeline:
         strength: {node: "19", input: strength}
 ```
 
-Each slot maps one uploaded image and optionally its strength into existing workflow inputs. Node IDs and input names must match the API-format graph. Generate with explicit files or category groups, for example `slopforge generate icon moon_badge "Lunar refinery insignia" --reference-category icons` or repeat `--reference path/to/approved.png`. Only images under the selected style's approved reference library are accepted. Candidate provenance records each used reference and strength. Reference mode with a text-only graph or missing mapping fails clearly before queueing.
+Each slot maps one uploaded image and optionally its strength into existing workflow inputs. Node IDs and input names must match the API-format graph. Supply approved concept or material references with `--reference path/to/approved.png` or `--reference-category props`. Only images under the selected style's approved reference library are accepted. Candidate provenance records each used reference and strength. Reference mode with a text-only graph or missing mapping fails clearly before queueing.
 
 For reusable, manifest-backed or external membership, use project reference libraries such as `character/alice`; see [REFERENCE-LIBRARIES.md](REFERENCE-LIBRARIES.md).
 

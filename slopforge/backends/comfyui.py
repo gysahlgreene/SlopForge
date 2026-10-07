@@ -22,7 +22,8 @@ class ComfyUIError(RuntimeError):
 class ComfyUIClient:
     """HTTP boundary for local and remote ComfyUI instances."""
 
-    MODEL_INPUTS = {"ckpt_name", "unet_name", "vae_name", "clip_name", "clip_vision", "model_name"}
+    MODEL_INPUTS = {"ckpt_name", "unet_name", "vae_name", "clip_name", "clip_vision", "model_name",
+                    "bg_removal_name"}
 
     def __init__(self, base_url, timeout=60):
         self.base_url = base_url.rstrip("/")
@@ -190,7 +191,8 @@ def comfy_environment(config, project_root=None):
     return env
 
 
-def generate_image(project_root, config, workflow, prompt, destination, prefix, seed, metadata, *, conditioning=None):
+def generate_image(project_root, config, workflow, prompt, destination, prefix, seed, metadata, *,
+                   conditioning=None):
     root = Path(project_root).resolve()
     resolved = resolve_workflow(root, workflow)
     script = tool_root() / "processing/comfy_generate.py"
@@ -212,7 +214,8 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     return subprocess.run(command, check=True, env=comfy_environment(config, root))
 
 
-def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000):
+def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
+                  voxel_resolution=None):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     command = [python_executable(root, config), str(script), "--image", str(image),
@@ -223,6 +226,8 @@ def generate_model(project_root, config, image, name, destination, metadata, see
     if workflow:
         command.extend(["--workflow", str(resolve_workflow(root, workflow)), "--face-budget", str(face_budget),
                         "--blender", blender_executable(config, root)])
+        if voxel_resolution is not None:
+            command.extend(["--voxel-resolution", str(voxel_resolution)])
     quality = config["asset_pipeline"].get("quality_settings", {})
     command.extend(["--quality", json.dumps({"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                                                "settings": quality})])

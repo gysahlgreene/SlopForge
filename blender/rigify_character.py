@@ -93,10 +93,12 @@ def weld_mesh(mesh, distance):
     bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=distance)
     merged = before - len(bm.verts)
     bm.to_mesh(mesh.data)
-    open_edges = sum(not edge.is_manifold for edge in bm.edges)
+    boundary_edges = sum(edge.is_boundary for edge in bm.edges)
+    nonmanifold_edges = sum(not edge.is_manifold and not edge.is_boundary for edge in bm.edges)
     bm.free()
     mesh.data.update()
-    return {"merged_vertices": merged, "open_edges": open_edges}
+    return {"merged_vertices": merged, "boundary_edges": boundary_edges,
+            "nonmanifold_edges": nonmanifold_edges}
 
 
 def setup_render(low, high):
@@ -171,9 +173,9 @@ def run(request):
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
     weld_distance = max(high - low) * float(request.get("weld_relative_tolerance", 1e-5))
     mesh_reports = [weld_mesh(mesh, weld_distance) for mesh in meshes]
-    open_edges = sum(item["open_edges"] for item in mesh_reports)
-    if open_edges:
-        fail(f"Character mesh has {open_edges} open/non-manifold edges after welding; repair it before rigging")
+    nonmanifold_edges = sum(item["nonmanifold_edges"] for item in mesh_reports)
+    if nonmanifold_edges:
+        fail(f"Character mesh has {nonmanifold_edges} non-manifold edges after welding; repair it before rigging")
     low, high = bounds(meshes)
 
     bpy.ops.preferences.addon_enable(module="rigify")
@@ -236,6 +238,12 @@ def run(request):
         "license": "GPL-2.0-or-later", "model": "Blender bundled human metarig",
         "model_license": "GPL-2.0-or-later"},
         "skeleton_mapping": {name: name for name in deform_bones},
+        "unity_humanoid_mapping": {
+            "Hips": "torso", "Spine": "spine_fk.003", "Head": "ORG-face",
+            "LeftUpperArm": "DEF-upper_arm.L", "LeftLowerArm": "DEF-forearm.L", "LeftHand": "DEF-hand.L",
+            "RightUpperArm": "DEF-upper_arm.R", "RightLowerArm": "DEF-forearm.R", "RightHand": "DEF-hand.R",
+            "LeftUpperLeg": "DEF-thigh.L", "LeftLowerLeg": "DEF-shin.L", "LeftFoot": "DEF-foot.L",
+            "RightUpperLeg": "DEF-thigh.R", "RightLowerLeg": "DEF-shin.R", "RightFoot": "DEF-foot.R"},
         "deformation_evidence": evidence_metrics,
         "mesh_repair": {"weld_tolerance": weld_distance, "meshes": mesh_reports},
         "validation": {"status": "not_run", "warnings": [

@@ -41,7 +41,9 @@ SlopForge detects loopback URLs as `local` and other hosts as `remote`. Override
 
 ComfyUI's HTTP API handles health and node discovery, image and mesh uploads, prompt submission, history polling, and output downloads. `/view` serves generated GLB and other binary files as well as images. Blender and SlopForge processing remain on the machine running SlopForge. No SSH setup or local `COMFYUI_HOME` is needed.
 
-`COMFYUI_HOME` and `asset_pipeline.tools.comfy_home` are optional legacy/local-install hints shown by doctor; generation does not read ComfyUI's filesystem. Workflow model availability is checked through ComfyUI's `/object_info` API before prompts are queued.
+The image workflow runner can bind approved reference files to configured graph inputs and return image results. Reference images can guide 3D concepts and material inputs when the selected workflow supports those inputs. Conditioning is an execution capability; it does not guarantee visual consistency or a usable 3D model.
+
+`COMFYUI_HOME` and `asset_pipeline.tools.comfy_home` are optional legacy/local-install hints shown by doctor; generation does not read ComfyUI's filesystem. Workflow sidecars declare node and model requirements; doctor checks graph consistency locally and model-choice availability through ComfyUI's `/object_info` API. The API does not expose installed node revisions or model weight hashes, so those remain unverified. See the [workflow inventory](WORKFLOWS.md) for the sidecar format and current declarations.
 
 ## Previous local-install assumptions
 
@@ -98,9 +100,11 @@ The legacy Hunyuan3D v2 graph is assembled by `processing/comfy_generate_3d.py` 
 
 TRELLIS.2 profiles use the models from [Comfy-Org TRELLIS.2](https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main): `diffusion_models/trellis_2_int8_convrot.safetensors` or `diffusion_models/trellis_2_bf16.safetensors`, `clip_vision/dino_v3_vit_l.safetensors`, and both `vae/trellis_2_{shape,texture}_vae_bf16.safetensors`. Check upstream terms and model availability before downloading.
 
-Project workflows in `ai/workflows/` override bundled workflow files. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, workflow node availability, and configured workflow paths. The doctor preflight does not submit a prompt or test file transfer; use the opt-in integration tests for those checks. It remains read-only.
+Project workflows in `ai/workflows/` override bundled workflow files. Put an optional `name.requirements.yaml` next to `name.json`; legacy overrides without sidecars continue to work and doctor reports their requirements as unknown. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, sidecar consistency, workflow node availability, model-choice availability, and unverified dependency revisions/hashes. The doctor preflight does not submit a prompt or test file transfer; it remains read-only.
 
 Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
+
+The bundled text-to-image graph remains text-only. A paired Wan 2.2 TI2V reference-conditioning experiment is retained as historical evidence in [the qualification report](REFERENCE-CONDITIONING-QUALIFICATION.md); it does not qualify the 3D generation route.
 
 ## Integration checks
 
@@ -108,6 +112,14 @@ Normal unit tests use mocked HTTP and need no running ComfyUI:
 
 ```sh
 python -m pytest
+```
+
+The opt-in workflow capability check validates every bundled workflow against the server's `/object_info` without submitting inference:
+
+```sh
+SLOPFORGE_COMFYUI_PREFLIGHT=1 \
+COMFYUI_URL=http://127.0.0.1:8188 \
+python -m pytest tests/test_workflow_preflight_live.py -q
 ```
 
 Opt-in integration tests require a reachable ComfyUI and the models for the selected workflow:

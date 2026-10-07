@@ -1,0 +1,121 @@
+schema_version: 1
+id: model.trellis2.h100_final
+version: 1
+capabilities:
+- image_to_3d
+- pbr_texturing
+workflow_sha256: 569c02785852a2be895ab97762c7903918a65e0af643f0027671beeb919235ec
+nodes:
+- class: ApplyTextureToMesh
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: BakeTextureFromVoxel
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: CFGOverride
+  source: ComfyUI core
+  revision: unknown
+- class: CLIPVisionLoader
+  source: ComfyUI core
+  revision: unknown
+- class: EmptyTrellis2LatentStructure
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: Get3DComponents
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: ImageCropToMask
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: KSampler
+  source: ComfyUI core
+  revision: unknown
+- class: Load3DAdvanced
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: LoadImage
+  source: ComfyUI core
+  revision: unknown
+- class: MeshSmoothNormals
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: ModelSamplingSD3
+  source: ComfyUI core
+  revision: unknown
+- class: RescaleCFG
+  source: ComfyUI core
+  revision: unknown
+- class: SaveGLB
+  source: ComfyUI core
+  revision: unknown
+- class: SaveImage
+  source: ComfyUI core
+  revision: unknown
+- class: Trellis2Conditioning
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: Trellis2ShapeStage
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: Trellis2TextureStage
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: Trellis2UpsampleStage
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: UNETLoader
+  source: ComfyUI core
+  revision: unknown
+- class: VAELoader
+  source: ComfyUI core
+  revision: unknown
+- class: VaeDecodeShapeTrellis
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: VaeDecodeStructureTrellis2
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: VaeDecodeTextureTrellis
+  source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+models:
+- name: dino_v3_vit_l.safetensors
+  source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+  license: unverified
+  license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+  sha256: unknown
+- name: trellis_2_bf16.safetensors
+  source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+  license: 'upstream model card: MIT; repackaged artifact not independently verified'
+  license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+  sha256: unknown
+- name: trellis_2_shape_vae_bf16.safetensors
+  source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+  license: 'upstream model card: MIT; repackaged artifact not independently verified'
+  license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+  sha256: unknown
+- name: trellis_2_texture_vae_bf16.safetensors
+  source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+  license: 'upstream model card: MIT; repackaged artifact not independently verified'
+  license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+  sha256: unknown
+inputs:
+- name: image
+  type: image
+- name: seed
+  type: integer
+outputs:
+- name: model
+  type: model/glb
+- name: material_maps
+  type: image/png
+profiles:
+- h100_final
+estimated_resource_class: very_large_gpu
+tested_on: []
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms
+  for the exact installed weights.
+limitations:
+- Node revisions and model file hashes are not exposed by the ComfyUI API and remain
+  unverified.

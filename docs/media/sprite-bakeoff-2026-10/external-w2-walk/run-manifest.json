@@ -1,0 +1,42 @@
+{
+  "candidate": "adapted-staged-wan22-w2",
+  "reference": {
+    "path": "slopforge-goblin-reference.png",
+    "sha256": "08270b05b15e10fff9bd9189c96d413613e2f73dad227908754b7323aaec2e8f"
+  },
+  "inference": {
+    "server": "ComfyUI 0.37.0 on NVIDIA H100 80 GB",
+    "prompt_id": "02baf33c-4458-4114-b1ed-a09099288c88",
+    "seed": 314159265,
+    "duration_seconds": 38.71,
+    "fps": 16,
+    "frames": 33,
+    "dimensions": [
+      512,
+      512
+    ],
+    "video_sha256": "e206fda62166152b24ca5061b4f967a3b4e251923328e853c3e5e6f3a8f9fb38",
+    "workflow": "w2-api.json",
+    "workflow_sha256": "1e807bd02ee2ce588510efc9c16356c9769a27485b719743488cb15ae3aa7fc7",
+    "prompt": "A full-body green goblin miner, preserving the same character identity, face, goggles, clothes and proportions as the provided reference. Walk cycle in place, clear alternating left-right steps and counter-swinging arms, feet remain within frame, fixed camera, centered character, plain white background, coherent animation.",
+    "negative_prompt": "different character, changed costume, extra limbs, missing limbs, duplicate body, camera movement, zoom, cropped head, cropped feet, text, watermark, flicker, distortion"
+  },
+  "matting": {
+    "method": "ComfyUI core LoadVideo + GetVideoComponents + RemoveBackground + InvertMask + JoinImageWithAlpha + SaveImage",
+    "model": "birefnet.safetensors",
+    "model_license": "MIT",
+    "model_sha256": "9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154",
+    "workflow": "matting-api.json",
+    "workflow_sha256": "1ec7c4ffb8b8219611eeaaf9a983216d89ac11dead830c2ea878be1eb58689fa"
+  },
+  "loop_qa": {
+    "project": "sprite-gen",
+    "version": "2.35.0",
+    "commit": "47e985b6320eb000e587632c2cd62a98b1bc5c99",
+    "license": "Apache-2.0",
+    "command": "video-loop --state walk --fps 16 --cycle auto",
+    "result": "rejected: no periodic cycle found; periodicity -0.07 < 0.150 in window [8,16]"
+  },
+  "visual_assessment": "Identity and silhouette are recognizable. The clip has a delayed/weak step sequence and does not contain a repeating gait; upstream periodicity QA correctly refused to emit a walk loop. The transparency pass works, but bounds and foot baseline vary across frames.",
+  "reuse": "No upstream code or weights copied. The external loop analyzer was run from its pinned source tree in an isolated /tmp checkout using existing Pillow/NumPy dependencies. The W2 API graph was adapted for officially licensed Wan weights and core ComfyUI nodes."
+}

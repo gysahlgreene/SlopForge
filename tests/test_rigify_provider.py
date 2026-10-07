@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,14 @@ from slopforge.manifest import new_record, register_artifact
 
 
 class RigifyProviderTests(unittest.TestCase):
+    def _approve_readiness(self):
+        artifact = self.manifest["assets"]["character:pilot"]["artifacts"]["model"]
+        source = self.root / artifact["path"]
+        self.manifest["assets"]["character:pilot"]["animation_readiness"] = {
+            "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
+            "source": {"artifact_id": artifact["id"], "path": artifact["path"],
+                       "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}}
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
@@ -38,6 +47,7 @@ class RigifyProviderTests(unittest.TestCase):
                          ("character", "rig", "pilot", "model"))
 
     def test_real_provider_adapter_records_pending_rig_and_pose_artifacts(self):
+        self._approve_readiness()
         def fake_blender(command, check):
             request = json.loads(Path(command[-1]).read_text())
             Path(request["rigged_model"]).parent.mkdir(parents=True, exist_ok=True)
@@ -54,7 +64,7 @@ class RigifyProviderTests(unittest.TestCase):
                       "rigged_model": Path(request["rigged_model"]).relative_to(self.root).as_posix(),
                       "evidence": evidence, "skeleton_mapping": {"DEF-spine": "DEF-spine"},
                       "deformation_evidence": {"leg_lift": {"max_vertex_displacement": 0.25}},
-                      "mesh_repair": {"weld_tolerance": 0.00001, "meshes": [{"merged_vertices": 10, "open_edges": 0}]}}
+                      "mesh_repair": {"weld_tolerance": 0.00001, "meshes": [{"merged_vertices": 10, "boundary_edges": 0, "nonmanifold_edges": 0}]}}
             Path(request["report"]).write_text(json.dumps(result))
 
         with patch("slopforge.character_rigging.subprocess.run", side_effect=fake_blender) as run:
@@ -69,6 +79,7 @@ class RigifyProviderTests(unittest.TestCase):
         self.assertEqual(asset["rigging"]["mesh_repair"]["meshes"][0]["merged_vertices"], 10)
 
     def test_failed_provider_report_is_actionable_and_cleans_its_partial_files(self):
+        self._approve_readiness()
         def failed_blender(command, check):
             request = json.loads(Path(command[-1]).read_text())
             Path(request["rigged_model"]).parent.mkdir(parents=True, exist_ok=True)

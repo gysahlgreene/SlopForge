@@ -1,6 +1,0 @@
-name: primitive
-pipeline: native
-output_folder: null
-requirements:
-  - use Unity-native or basic geometry route
-avoid: [ComfyUI generation, AI-generated image substitution]

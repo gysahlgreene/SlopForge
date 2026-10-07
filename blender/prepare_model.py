@@ -38,6 +38,7 @@ def get_args():
         textures[i] = Path(value).resolve()
 
     face_budget = TARGET_FACES
+    voxel_resolution = 256
     options = {}
     if "--face-budget" in args:
         index = args.index("--face-budget")
@@ -47,6 +48,14 @@ def get_args():
             raise SystemExit("--face-budget must be followed by a positive integer")
         if face_budget <= 0:
             raise SystemExit("--face-budget must be a positive integer")
+    if "--voxel-resolution" in args:
+        index = args.index("--voxel-resolution")
+        try:
+            voxel_resolution = int(args[index + 1])
+        except (IndexError, ValueError):
+            raise SystemExit("--voxel-resolution must be a positive integer")
+        if voxel_resolution <= 0:
+            raise SystemExit("--voxel-resolution must be a positive integer")
     for option in ("--surface-source", "--preview-dir", "--material-scale", "--stage-mesh-output"):
         if option in args:
             index = args.index(option)
@@ -60,6 +69,7 @@ def get_args():
         output_fbx,
         output_blend,
         face_budget,
+        voxel_resolution,
         *textures,
         Path(options["--surface-source"]).resolve() if options.get("--surface-source") else None,
         Path(options["--preview-dir"]).resolve() if options.get("--preview-dir") else None,
@@ -234,7 +244,8 @@ def render_previews(obj, output_dir, prefix):
         light.data.size = size
         light.rotation_euler = (target - light.location).to_track_quat("-Z", "Y").to_euler()
 
-    views = {"front": Vector((0, -3, 0)), "side": Vector((3, 0, 0)), "rear": Vector((0, 3, 0))}
+    views = {"front": Vector((0, -3, 0)), "side": Vector((3, 0, 0)), "rear": Vector((0, 3, 0)),
+             "three_quarter": Vector((2, -2, 0))}
     for name, direction in views.items():
         camera.location = target + direction
         camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
@@ -247,6 +258,7 @@ def render_previews(obj, output_dir, prefix):
     output_fbx,
     output_blend,
     target_faces,
+    voxel_resolution,
     basecolor_path,
     normal_path,
     roughness_path,
@@ -338,8 +350,7 @@ if mesh_only:
     minimum, maximum = combined_bounds([obj])
     modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
     modifier.mode = "VOXEL"
-    # ponytail: a 256-cell cleanup keeps prop silhouettes; raise for finer geometry.
-    modifier.voxel_size = max(maximum - minimum) / 256.0
+    modifier.voxel_size = max(maximum - minimum) / voxel_resolution
     modifier.use_smooth_shade = True
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=modifier.name)

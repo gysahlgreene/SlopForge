@@ -29,6 +29,7 @@ class CharacterRecipeTests(unittest.TestCase):
         definition, children = load_recipe(self.root, "character_3d_pack", types)
         self.assertEqual(types["character"]["pipeline"], "model")
         self.assertEqual(types["character"]["face_budget"], "character_faces")
+        self.assertEqual(types["character"]["voxel_resolution"], 120)
         self.assertEqual([child["id"] for child in children], ["character"])
         self.assertEqual(children[0]["type"], "character")
         self.assertIsNone(children[0].get("generation_prompt"))
@@ -54,6 +55,7 @@ class CharacterRecipeTests(unittest.TestCase):
         self.assertEqual(candidate["directory"].relative_to(self.root).as_posix(),
                          "ai/assets/candidates/character/moon_scout/material_01")
         self.assertEqual(character["max_components"], 64)
+        self.assertEqual(character["max_boundary_edges"], 0)
 
     def test_fragmented_character_mesh_exceeds_its_component_budget(self):
         result = validate_model_outputs(
@@ -73,14 +75,25 @@ class CharacterRecipeTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("non-manifold edge count 4168 exceeds budget 0", result["errors"])
 
+    def test_open_character_mesh_exceeds_its_boundary_budget(self):
+        result = validate_model_outputs(
+            {}, {"measured": {"boundary_edge_count": 549}},
+            max_boundary_edges=0,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("boundary edge count 549 exceeds budget 0", result["errors"])
+
     def test_character_topology_budgets_fail_closed_without_inspection_metrics(self):
         result = validate_model_outputs(
             {}, {"measured": {}}, max_components=64, max_nonmanifold_edges=0,
+            max_boundary_edges=0,
         )
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("component count was not measured", result["errors"])
         self.assertIn("non-manifold edge count was not measured", result["errors"])
+        self.assertIn("boundary edge count was not measured", result["errors"])
 
     def test_native_character_candidate_fails_when_fragmented_mesh_exceeds_budget(self):
         config = load_project(self.root)
@@ -104,13 +117,14 @@ class CharacterRecipeTests(unittest.TestCase):
                 patch("slopforge.pipelines.model.inspect_model", return_value={
                     "status": "passed_with_warnings", "errors": [], "warnings": [],
                     "measured": {"face_count": 100, "component_count": 1189,
-                                 "nonmanifold_edge_count": 4168}}):
+                                 "nonmanifold_edge_count": 4168, "boundary_edge_count": 549}}):
             result = _native_material_candidate(
                 self.root, config, character, asset, 1, {"textures": texture_names})
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("component count 1189 exceeds budget 64", result["validation"]["errors"])
         self.assertIn("non-manifold edge count 4168 exceeds budget 0", result["validation"]["errors"])
+        self.assertIn("boundary edge count 549 exceeds budget 0", result["validation"]["errors"])
 
 
 if __name__ == "__main__":

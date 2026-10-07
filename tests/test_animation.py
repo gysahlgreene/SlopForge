@@ -132,6 +132,66 @@ class AnimationLibraryTests(unittest.TestCase):
         self.assertEqual(character["artifacts"]["unity.animator_controller"]["approval"]["status"], "pending")
         self.assertEqual(character["artifacts"]["unity.character_prefab"]["approval"]["status"], "pending")
 
+    def test_humanoid_setup_requires_and_applies_provider_bone_mapping(self):
+        from slopforge.unity_animation import build_character_animator
+
+        character, manifest = self._character_manifest()
+        character["rigging"] = {"unity_humanoid_mapping": {
+            "Hips": "torso", "Spine": "spine_fk.003", "Head": "ORG-face",
+            "LeftUpperArm": "DEF-upper_arm.L", "LeftLowerArm": "DEF-forearm.L", "LeftHand": "DEF-hand.L",
+            "RightUpperArm": "DEF-upper_arm.R", "RightLowerArm": "DEF-forearm.R", "RightHand": "DEF-hand.R",
+            "LeftUpperLeg": "DEF-thigh.L", "LeftLowerLeg": "DEF-shin.L", "LeftFoot": "DEF-foot.L",
+            "RightUpperLeg": "DEF-thigh.R", "RightLowerLeg": "DEF-shin.R", "RightFoot": "DEF-foot.R",
+        }}
+        clip = self.root / "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"retargeted clip")
+        register_artifact(manifest, "character:pilot", "animation.walk", "animation.fbx",
+                          "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx", status="ready",
+                          approval_status="approved")
+        scripts = []
+
+        def run_unity(command, check):
+            scripts.extend(path.read_text() for path in (self.root / "Assets/Editor").glob("*.cs"))
+            (self.root / "Assets/Art/Generated/Characters/pilot/Unity/pilot.controller").write_bytes(b"controller")
+            (self.root / "Assets/Art/Generated/Characters/pilot/Unity/pilot.prefab").write_bytes(b"prefab")
+
+        with patch("slopforge.unity_animation.unity_cli", return_value="unity"), \
+                patch("slopforge.unity_animation.subprocess.run", side_effect=run_unity):
+            build_character_animator(self.root, {"asset_pipeline": {"output_root": "Assets/Art/Generated"}},
+                                     manifest, "pilot", rig_type="humanoid")
+
+        self.assertEqual(len(scripts), 1)
+        self.assertIn('humanDescription.human = new HumanBone[]', scripts[0])
+        self.assertIn('humanName = "RightHand", boneName = "DEF-hand.R"', scripts[0])
+        self.assertIn('importer.preserveHierarchy = true;', scripts[0])
+        self.assertIn('savedAnimator.avatar.isHuman', scripts[0])
+        self.assertIn('savedAnimator.runtimeAnimatorController != controller', scripts[0])
+        self.assertLess(scripts[0].index('rigImporter.animationType = ModelImporterAnimationType.Human'),
+                        scripts[0].index('humanDescription.human = new HumanBone[]'))
+        self.assertLess(scripts[0].index('rigImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel'),
+                        scripts[0].index('humanDescription.human = new HumanBone[]'))
+        self.assertLess(scripts[0].index('humanDescription.human = new HumanBone[]'),
+                        scripts[0].rindex('rigImporter.animationType = ModelImporterAnimationType.Human'))
+        self.assertLess(scripts[0].index('humanDescription.human = new HumanBone[]'),
+                        scripts[0].rindex('rigImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel'))
+
+    def test_humanoid_setup_refuses_rig_without_explicit_unity_mapping(self):
+        from slopforge.unity_animation import build_character_animator
+
+        _, manifest = self._character_manifest()
+        clip = self.root / "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"retargeted clip")
+        register_artifact(manifest, "character:pilot", "animation.walk", "animation.fbx",
+                          "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx", status="ready",
+                          approval_status="approved")
+        with patch("slopforge.unity_animation.subprocess.run") as run:
+            with self.assertRaisesRegex(ValueError, "Unity Humanoid bone mapping"):
+                build_character_animator(self.root, {"asset_pipeline": {"output_root": "Assets/Art/Generated"}},
+                                          manifest, "pilot", rig_type="humanoid")
+        run.assert_not_called()
+
     @staticmethod
     def config():
         return {"asset_pipeline": {"output_root": "Assets/Art/Generated", "tools": {"blender": "/fake/blender"}}}

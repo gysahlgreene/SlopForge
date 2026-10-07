@@ -1,30 +1,22 @@
-# Repeatable SlopForge demo
+# 3D character pipeline demo
 
-This small demo generates two related inventory-icon candidates, records them in one resumable recipe, and creates the local review board. It uses real ComfyUI inference; it is not an offline showcase. The project needs the models named by `image_text2img_api.json`. The current default graph may return opaque backgrounds even when prompts request transparency.
+This is a live ComfyUI and Blender workflow, not an offline showcase. Start with a fresh Unity project so the sample recipe and asset names do not collide with existing data.
 
 ```sh
 mkdir -p ~/SlopForgeDemo/Assets
 slopforge init ~/SlopForgeDemo
 
-# Point at either a local ComfyUI server or a reachable remote one.
+# Local or remote ComfyUI; host and compute profile are independent.
 export COMFYUI_URL=http://127.0.0.1:8188
 slopforge --project ~/SlopForgeDemo doctor
 
-slopforge --project ~/SlopForgeDemo recipe run starter_icons --name first_icons
+slopforge --project ~/SlopForgeDemo recipe run character_3d_pack --name scout
 slopforge --project ~/SlopForgeDemo review
-slopforge --project ~/SlopForgeDemo candidates first_icons_health
-slopforge --project ~/SlopForgeDemo candidates first_icons_mana
+slopforge --project ~/SlopForgeDemo candidates scout_character
+slopforge --project ~/SlopForgeDemo approve scout_character 1
+slopforge --project ~/SlopForgeDemo character readiness scout_character
 ```
 
-For the H100 smoke, use its Tailscale URL and profile independently:
+A passing readiness report is a structural gate only. Follow [character rigging](CHARACTER-RIGGING.md) to prepare the provider, rig the approved mesh, inspect deformation evidence, and continue to Unity. Do not treat a successful process exit or FBX import as visual approval.
 
-```sh
-COMFYUI_URL=http://100.108.220.4:8188 SLOPFORGE_COMPUTE_PROFILE=h100 \
-  slopforge --project ~/SlopForgeDemo doctor
-COMFYUI_URL=http://100.108.220.4:8188 SLOPFORGE_COMPUTE_PROFILE=h100 \
-  slopforge --project ~/SlopForgeDemo recipe run starter_icons --name first_icons
-```
-
-The example is opt-in because inference requires a running service and may use GPU time. A fresh project avoids name collisions; otherwise choose a new recipe instance name. Candidates remain unapproved. Open the generated `slopforge-review.html` in the project root, inspect the output files, and approve only the candidates you want to keep.
-
-The checked-in images and per-candidate prompt/seed/model/workflow provenance from one actual H100 run are in [`media/`](media/manifest.json). The run did not verify transparent alpha; both PNGs were RGB with opaque white backgrounds. For automated smoke tests, use `SLOPFORGE_RUN_H100=1 COMFYUI_URL=... python -m pytest tests/test_recipe_h100.py -q -s`.
+The H100 workflow uses the same HTTP interface with `COMFYUI_URL` and a separate `SLOPFORGE_COMPUTE_PROFILE=h100`. Generation can use substantial GPU time. Candidate output remains unapproved until a person reviews it.

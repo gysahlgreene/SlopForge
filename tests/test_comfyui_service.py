@@ -145,6 +145,16 @@ class ComfyUIServiceTests(unittest.TestCase):
                 ComfyUIClient("http://remote:8188").validate_workflow({"1": {
                     "class_type": "UNETLoader", "inputs": {"unet_name": "missing.safetensors"}}})
 
+    def test_workflow_validation_checks_background_removal_model_choices(self):
+        body = json.dumps({"LoadBackgroundRemovalModel": {"input": {"required": {
+            "bg_removal_name": [["birefnet.safetensors"], {}]}}}}).encode()
+
+        with patch("slopforge.backends.comfyui.urlopen", lambda request, timeout: Response(body)):
+            with self.assertRaisesRegex(RuntimeError, "LoadBackgroundRemovalModel.bg_removal_name: missing.safetensors"):
+                ComfyUIClient("http://remote:8188").validate_workflow({"1": {
+                    "class_type": "LoadBackgroundRemovalModel",
+                    "inputs": {"bg_removal_name": "missing.safetensors"}}})
+
     def test_history_waits_until_generation_is_complete(self):
         client = ComfyUIClient("http://remote:8188")
         client.history = Mock(side_effect=[

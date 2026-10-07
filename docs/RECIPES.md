@@ -1,44 +1,40 @@
-# Recipe and pack orchestration
+# 3D recipe orchestration
 
-Project recipes live in `ai/recipes/<id>.yaml`. `slopforge init` installs a small `starter_icons` example. A recipe describes atomic children, their asset types, optional prompt/count overrides, and dependency ordering; omitted counts use the project's existing image/model candidate defaults. The runner calls the existing image or model pipeline registered for each child type. Unsupported pipeline types fail validation before creating a recipe run.
+Recipes in `ai/recipes/<id>.yaml` coordinate related 3D assets. `slopforge init` installs `character_3d_pack` and `starter_environment_kit`. A recipe describes children, asset types, prompts, dependencies, and optional generation counts. The runner calls the existing model or supporting image pipeline for each child and records progress, dependencies, and provenance in the manifest.
 
-An image or model child can optionally set `reference_library: character/alice`. The library is resolved from `ai/libraries/` and its entries are used through the normal conditioning pipeline; the selected project workflow still determines how those references affect generation.
+A small recipe can coordinate a character and an associated prop:
 
 ```yaml
-id: starter_icons
+id: scout_set
 version: 1
-description: A coordinated inventory icon set.
+description: A riggable scout character and a matching field scanner.
 children:
-  - id: health
-    type: icon
-    description: Red health potion icon.
-    generation_prompt: Single centered red potion, transparent background, no text.
-  - id: mana
-    type: icon
-    description: Blue mana potion icon.
-    generation_prompt: Single centered blue potion, transparent background, no text.
-    depends_on: [health]
+  - id: character
+    type: character
+    description: Full-body scout in a neutral A-pose, with a clean silhouette and readable materials.
+    count: 1
+  - id: scanner
+    type: hero_prop
+    description: Handheld field scanner using the same material palette and design language.
+    depends_on: [character]
 ```
 
-Run and review a pack through the same atomic commands used for standalone assets:
+Run, review, and resume a recipe with the same commands used for standalone 3D assets:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame recipe list
-slopforge --project ~/UnityProjects/MyGame recipe run starter_icons --name first_hud
-slopforge --project ~/UnityProjects/MyGame candidates first_hud_health
-slopforge --project ~/UnityProjects/MyGame approve first_hud_health 1
-slopforge --project ~/UnityProjects/MyGame recipe resume first_hud
-slopforge --project ~/UnityProjects/MyGame recipe regenerate first_hud mana
+slopforge --project ~/UnityProjects/MyGame recipe run character_3d_pack --name scout
+slopforge --project ~/UnityProjects/MyGame candidates scout_character
+slopforge --project ~/UnityProjects/MyGame approve scout_character 1
+slopforge --project ~/UnityProjects/MyGame recipe resume scout
 ```
 
-The instance name namespaces child asset names (`<instance>_<child-id>`). Each child is an ordinary manifest asset linked to its recipe parent, and each dependency is also recorded by asset ID. The recipe snapshots its definition and records stage state, attempts, errors, and pipeline provenance. Stage transitions are saved through the manifest's atomic writer before and after each pipeline call.
+The instance name namespaces child asset names (`<instance>_<child-id>`). Children are ordinary tracked assets with recipe parent/dependency links. Stage state, attempts, errors, and provenance are saved around each pipeline call. Resume retries failed or interrupted stages, skips completed stages, and waits for human approval. A failed child is reported as partial; dependent children remain blocked while independent stages may continue.
 
-`recipe run` creates candidates but does not approve them. Approve or inspect children using the existing commands. `recipe resume` retries failed/interrupted stages, skips completed stages, and recognizes children that have since been approved. Once every child is ready, resume refreshes the pack's typed aggregate outputs and marks the recipe ready. A failed child is reported as partial; dependents stay blocked while independent children can finish. `recipe regenerate` targets one child and appends candidates; when that child already has an approved output, its approval and selected output are retained.
+Dependencies order and record generation; they do not automatically turn one child's output into another child's visual reference. Configure reference libraries and workflow inputs separately. Local and remote ComfyUI use the same HTTP backend contract.
 
-The current dependency contract orders generation and records relationships. It does not automatically pass dependency images or models as visual references; reference conditioning is configured separately by issue #6. Recipe definitions use the project's existing workflow and compute-profile settings, so local and remote ComfyUI remain selectable through the normal configuration.
+Recipes do not turn an unconstrained game pitch into a concept-aware 3D asset inventory. Edit or create a 3D recipe explicitly, then review the plan before spending generation time.
 
-The normal test suite is offline. To opt into the remote ComfyUI smoke test, set both `SLOPFORGE_RUN_H100=1` and `COMFYUI_URL` when running `tests/test_recipe_h100.py`; the test creates and removes a temporary Unity fixture.
+## Character recipe
 
-## 3D characters
-
-`character_3d_pack` creates one first-class `character` model asset with a neutral A-pose concept. Approve the concept to run the configured 3D model workflow, inspect and approve its material output, then run the configured rigging provider as documented in [3D character rigging](CHARACTER-RIGGING.md). The model workflow and rigging provider remain separate choices; the recipe does not assume a particular ComfyUI host.
+`character_3d_pack` generates one full-body humanoid character in a neutral pose. Approve the model candidate, run the readiness check, choose and run a rigging provider, inspect deformation poses, then validate animation in Unity. The recipe does not claim the generated character is riggable or production-ready; see [character rigging](CHARACTER-RIGGING.md).

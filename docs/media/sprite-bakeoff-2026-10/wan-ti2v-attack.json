@@ -1,0 +1,112 @@
+{
+  "workflow": "slopforge-wan-ti2v-sprite.json",
+  "model": [
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "wan2.2_vae.safetensors",
+    "wan2.2_ti2v_5B_fp16.safetensors"
+  ],
+  "seed": 314159265,
+  "workflow_sha256": "5febefa2cce4ed84c18cd3498d44ca96cb425392525efbf56b181f40ab0944dd",
+  "workflow_requirements": {
+    "status": "unknown"
+  },
+  "prompt_id": "d2526fd8-aa72-4b38-8a9c-2f98344acafd",
+  "references_used": [],
+  "workflow_files_used": [],
+  "outputs": [
+    {
+      "index": 0,
+      "source_filename": "wan-ti2v-attack_00001_.png",
+      "path": "frame_0000.png"
+    },
+    {
+      "index": 1,
+      "source_filename": "wan-ti2v-attack_00002_.png",
+      "path": "frame_0001.png"
+    },
+    {
+      "index": 2,
+      "source_filename": "wan-ti2v-attack_00003_.png",
+      "path": "frame_0002.png"
+    },
+    {
+      "index": 3,
+      "source_filename": "wan-ti2v-attack_00004_.png",
+      "path": "frame_0003.png"
+    },
+    {
+      "index": 4,
+      "source_filename": "wan-ti2v-attack_00005_.png",
+      "path": "frame_0004.png"
+    },
+    {
+      "index": 5,
+      "source_filename": "wan-ti2v-attack_00006_.png",
+      "path": "frame_0005.png"
+    },
+    {
+      "index": 6,
+      "source_filename": "wan-ti2v-attack_00007_.png",
+      "path": "frame_0006.png"
+    },
+    {
+      "index": 7,
+      "source_filename": "wan-ti2v-attack_00008_.png",
+      "path": "frame_0007.png"
+    },
+    {
+      "index": 8,
+      "source_filename": "wan-ti2v-attack_00009_.png",
+      "path": "frame_0008.png"
+    },
+    {
+      "index": 9,
+      "source_filename": "wan-ti2v-attack_00010_.png",
+      "path": "frame_0009.png"
+    },
+    {
+      "index": 10,
+      "source_filename": "wan-ti2v-attack_00011_.png",
+      "path": "frame_0010.png"
+    },
+    {
+      "index": 11,
+      "source_filename": "wan-ti2v-attack_00012_.png",
+      "path": "frame_0011.png"
+    },
+    {
+      "index": 12,
+      "source_filename": "wan-ti2v-attack_00013_.png",
+      "path": "frame_0012.png"
+    },
+    {
+      "index": 13,
+      "source_filename": "wan-ti2v-attack_00014_.png",
+      "path": "frame_0013.png"
+    },
+    {
+      "index": 14,
+      "source_filename": "wan-ti2v-attack_00015_.png",
+      "path": "frame_0014.png"
+    },
+    {
+      "index": 15,
+      "source_filename": "wan-ti2v-attack_00016_.png",
+      "path": "frame_0015.png"
+    },
+    {
+      "index": 16,
+      "source_filename": "wan-ti2v-attack_00017_.png",
+      "path": "frame_0016.png"
+    }
+  ],
+  "quality": {
+    "tier": "draft",
+    "settings": {
+      "frames": 17,
+      "width": 384,
+      "height": 384,
+      "steps": 8
+    }
+  }
+}

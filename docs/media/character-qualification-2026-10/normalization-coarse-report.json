@@ -1,0 +1,48 @@
+{
+  "status": "pass",
+  "components": [
+    {
+      "source": "Mesh_0",
+      "output": "Normalized_Mesh_0",
+      "source_vertices": 95029,
+      "source_faces": 192966,
+      "source_materials": [
+        "Material_0"
+      ],
+      "source_material_assignments": [
+        {
+          "slot": 0,
+          "material": "Material_0",
+          "face_count": 192966
+        }
+      ],
+      "output_vertices": 6588,
+      "output_faces": 6586,
+      "textures": {
+        "base_color": "component_0_base_color.png"
+      }
+    }
+  ],
+  "uv_status": "pass",
+  "channels": {
+    "base_color": "baked",
+    "roughness": "absent",
+    "metallic": "absent",
+    "normal": "absent"
+  },
+  "warnings": [],
+  "blender_version": "5.1.0",
+  "source": {
+    "artifact_id": "model",
+    "path": "Assets/Art/Generated/Characters/moon_scout/Source/model.glb",
+    "sha256": "39b98f0c9ad3502e6c61446d4d0959abc03b19dc238ff58c1348bd8e44de4c05"
+  },
+  "normalized": {
+    "path": "Assets/Art/Generated/Characters/moon_scout/Normalization/model.glb",
+    "sha256": "db5e5ed2c0803f80056f1953a8bdc52d79df1a58e790cbe0dca4dc64d47297fc"
+  },
+  "report_path": "Assets/Art/Generated/Characters/moon_scout/Normalization/report.json",
+  "approval": {
+    "status": "pending"
+  }
+}

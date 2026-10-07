@@ -1,0 +1,10 @@
+{
+  "textures": {
+    "basecolor": "native_material/basecolor.png",
+    "normal": "native_material/normal.png",
+    "roughness": "native_material/roughness.png",
+    "metallic": "native_material/metallic.png"
+  },
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "seed": 20261007
+}

@@ -4,9 +4,9 @@ SlopForge is the command-line coordinator for local game-asset slop generation. 
 
 | Route | Needed |
 | --- | --- |
-| Prompt, config, manifest, `primitive` | SlopForge Python environment; initialized Unity project for project commands |
-| 2D images | Above + ComfyUI API + image workflow models |
-| 3D models | 2D setup + `rembg[cpu]` ONNX backend + segmentation model on first use + Hunyuan3D model/nodes + Blender |
+| Project setup, prompts, manifests | SlopForge Python environment; initialized Unity project for project commands |
+| Supporting concept/material images | Above + ComfyUI API + image workflow models |
+| 3D models | Above + `rembg[cpu]` ONNX backend + segmentation model on first use + configured 3D model workflow + Blender |
 | Use/import in game | Unity project and Editor; the Editor is not needed to generate files |
 | Agent automation | Optional Continue or another coding agent with terminal access and an LLM configured |
 
@@ -46,9 +46,9 @@ slopforge --project "$HOME/UnityProjects/MyGame" doctor
 
 Edit `ai/project.yaml` and `ai/styles/default/style.yaml` before generation. Set `asset_pipeline.active_style` to switch to another pack. Project workflow files in `ai/workflows/` override bundled files with the same configured name.
 
-## 3. Set up ComfyUI for 2D
+## 3. Set up ComfyUI for concept and material inputs
 
-Install ComfyUI using its [macOS download](https://www.comfy.org/download) or [Apple Silicon instructions](https://github.com/comfyanonymous/ComfyUI#apple-mac-silicon). Run its local API at `http://127.0.0.1:8188`; use a ComfyUI environment separate from SlopForge. SlopForge submits the bundled API workflow and downloads the resulting PNG through the API.
+Install ComfyUI using its [macOS download](https://www.comfy.org/download) or [Apple Silicon instructions](https://github.com/comfyanonymous/ComfyUI#apple-mac-silicon). Run its local API at `http://127.0.0.1:8188`; use a ComfyUI environment separate from SlopForge. SlopForge uses the bundled image workflow for concept and material inputs to 3D assets.
 
 Download the three image models into the exact ComfyUI folders in [COMFYUI.md](COMFYUI.md). The URLs there were copied from local workflow metadata; check their availability and terms. Start ComfyUI, then confirm the URL with:
 
@@ -62,10 +62,10 @@ slopforge --project "$HOME/UnityProjects/MyGame" doctor
 Try a no-inference prompt first, then generate an image:
 
 ```sh
-slopforge --project "$HOME/UnityProjects/MyGame" prompt icon "Small red healing potion"
-slopforge --project "$HOME/UnityProjects/MyGame" generate icon healing_potion "Small red healing potion"
-slopforge --project "$HOME/UnityProjects/MyGame" candidates healing_potion
-slopforge --project "$HOME/UnityProjects/MyGame" approve healing_potion 1
+slopforge --project "$HOME/UnityProjects/MyGame" prompt prop "A detailed refinery scanner"
+slopforge --project "$HOME/UnityProjects/MyGame" generate prop refinery_scanner "A detailed refinery scanner"
+slopforge --project "$HOME/UnityProjects/MyGame" candidates refinery_scanner
+slopforge --project "$HOME/UnityProjects/MyGame" approve refinery_scanner 1
 ```
 
 ## 4. Add Blender and Hunyuan3D for 3D

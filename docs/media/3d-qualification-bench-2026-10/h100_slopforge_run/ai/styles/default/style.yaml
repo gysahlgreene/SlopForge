@@ -1,0 +1,30 @@
+name: Default
+version: 1
+
+identity:
+  genre: ""
+  rendering: ""
+  mood: []
+  detail_level: medium
+
+shape_language:
+  preferred: []
+  avoid: []
+
+palette: {}
+materials: {}
+
+surface_language:
+  preferred: []
+  avoid: []
+
+lighting:
+  description: ""
+  avoid: []
+
+asset_rules: {}
+
+material_generation:
+  rules:
+    - Describe the intended surface material.
+    - Avoid standalone objects and environments unless requested.

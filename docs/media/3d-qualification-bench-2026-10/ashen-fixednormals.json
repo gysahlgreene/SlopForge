@@ -1,0 +1,179 @@
+{
+  "status": "failed",
+  "errors": [
+    "face count 397890 exceeds budget 100000"
+  ],
+  "warnings": [
+    "one or more mesh origins fall outside the combined bounds",
+    "largest mesh dimension exceeds expected normalized scale",
+    "mesh contains 2732 disconnected components; inspect for detached geometry",
+    "mesh has a very small disconnected component; inspect for debris",
+    "no image textures are connected to mesh materials"
+  ],
+  "measured": {
+    "mesh_objects": 1,
+    "vertex_count": 374804,
+    "face_count": 397890,
+    "bounds_min": [
+      -0.48274996876716614,
+      -0.20526817440986633,
+      0.00113118055742234
+    ],
+    "bounds_max": [
+      0.4826120436191559,
+      0.20217247307300568,
+      1.7990480661392212
+    ],
+    "dimensions": [
+      0.965362012386322,
+      0.407440647482872,
+      1.7979168855817989
+    ],
+    "origins": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "objects": [
+      {
+        "name": "Ashen Cartographer | prepared mesh",
+        "bounds_min": [
+          -0.48274996876716614,
+          -0.20526817440986633,
+          0.00113118055742234
+        ],
+        "bounds_max": [
+          0.4826120436191559,
+          0.20217247307300568,
+          1.7990480661392212
+        ],
+        "dimensions": [
+          0.965362012386322,
+          0.407440647482872,
+          1.7979168855817989
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "uv_layers": 1,
+    "material_count": 1,
+    "image_texture_count": 0,
+    "missing_textures": [],
+    "transforms_applied": true,
+    "normal_count": 397890,
+    "zero_normal_count": 0,
+    "degenerate_face_count": 16,
+    "component_count": 2732,
+    "boundary_edge_count": 4476,
+    "nonmanifold_edge_count": 116,
+    "face_budget": 100000
+  },
+  "animation_readiness": {
+    "status": "fail",
+    "approval": {
+      "status": "pending"
+    },
+    "measured": {
+      "mesh_objects": 1,
+      "vertex_count": 374804,
+      "face_count": 397890,
+      "bounds_min": [
+        -0.48274996876716614,
+        -0.20526817440986633,
+        0.00113118055742234
+      ],
+      "bounds_max": [
+        0.4826120436191559,
+        0.20217247307300568,
+        1.7990480661392212
+      ],
+      "dimensions": [
+        0.965362012386322,
+        0.407440647482872,
+        1.7979168855817989
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Ashen Cartographer | prepared mesh",
+          "bounds_min": [
+            -0.48274996876716614,
+            -0.20526817440986633,
+            0.00113118055742234
+          ],
+          "bounds_max": [
+            0.4826120436191559,
+            0.20217247307300568,
+            1.7990480661392212
+          ],
+          "dimensions": [
+            0.965362012386322,
+            0.407440647482872,
+            1.7979168855817989
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 1,
+      "material_count": 1,
+      "image_texture_count": 0,
+      "missing_textures": [],
+      "transforms_applied": true,
+      "normal_count": 397890,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 16,
+      "component_count": 2732,
+      "boundary_edge_count": 4476,
+      "nonmanifold_edge_count": 116,
+      "face_budget": 100000
+    },
+    "reasons": [
+      "16 zero-area faces",
+      "4476 boundary edges",
+      "116 non-manifold edges",
+      "2732 disconnected mesh components",
+      "face count exceeds configured budget 100000"
+    ],
+    "checks": {
+      "face_budget": 100000,
+      "prototype_scale_meters": [
+        0.05,
+        5.0
+      ],
+      "boundary_edge_count": 4476,
+      "nonmanifold_edge_count": 116,
+      "component_count": 2732,
+      "transforms_applied": true
+    },
+    "limitations": [
+      "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+      "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+    ]
+  }
+}

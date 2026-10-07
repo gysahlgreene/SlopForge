@@ -1,0 +1,169 @@
+{
+  "status": "passed_with_warnings",
+  "errors": [],
+  "warnings": [
+    "largest mesh dimension exceeds expected normalized scale"
+  ],
+  "measured": {
+    "mesh_objects": 1,
+    "vertex_count": 46655,
+    "face_count": 58792,
+    "bounds_min": [
+      -0.5426065921783447,
+      -0.23694007098674774,
+      0.0
+    ],
+    "bounds_max": [
+      0.5426065921783447,
+      0.23694007098674774,
+      1.7999999523162842
+    ],
+    "dimensions": [
+      1.0852131843566895,
+      0.4738801419734955,
+      1.7999999523162842
+    ],
+    "origins": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "objects": [
+      {
+        "name": "Basalt Warden",
+        "bounds_min": [
+          -0.5426065921783447,
+          -0.23694007098674774,
+          0.0
+        ],
+        "bounds_max": [
+          0.5426065921783447,
+          0.23694007098674774,
+          1.7999999523162842
+        ],
+        "dimensions": [
+          1.0852131843566895,
+          0.4738801419734955,
+          1.7999999523162842
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "uv_layers": 1,
+    "material_count": 1,
+    "image_texture_count": 1,
+    "missing_textures": [],
+    "transforms_applied": true,
+    "normal_count": 58792,
+    "zero_normal_count": 0,
+    "degenerate_face_count": 2,
+    "component_count": 1,
+    "boundary_edge_count": 0,
+    "nonmanifold_edge_count": 0,
+    "face_budget": 100000
+  },
+  "animation_readiness": {
+    "status": "fail",
+    "approval": {
+      "status": "pending"
+    },
+    "measured": {
+      "mesh_objects": 1,
+      "vertex_count": 46655,
+      "face_count": 58792,
+      "bounds_min": [
+        -0.5426065921783447,
+        -0.23694007098674774,
+        0.0
+      ],
+      "bounds_max": [
+        0.5426065921783447,
+        0.23694007098674774,
+        1.7999999523162842
+      ],
+      "dimensions": [
+        1.0852131843566895,
+        0.4738801419734955,
+        1.7999999523162842
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Basalt Warden",
+          "bounds_min": [
+            -0.5426065921783447,
+            -0.23694007098674774,
+            0.0
+          ],
+          "bounds_max": [
+            0.5426065921783447,
+            0.23694007098674774,
+            1.7999999523162842
+          ],
+          "dimensions": [
+            1.0852131843566895,
+            0.4738801419734955,
+            1.7999999523162842
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 1,
+      "material_count": 1,
+      "image_texture_count": 1,
+      "missing_textures": [],
+      "transforms_applied": true,
+      "normal_count": 58792,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 2,
+      "component_count": 1,
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "face_budget": 100000
+    },
+    "reasons": [
+      "2 zero-area faces"
+    ],
+    "checks": {
+      "face_budget": 100000,
+      "prototype_scale_meters": [
+        0.05,
+        5.0
+      ],
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "component_count": 1,
+      "transforms_applied": true
+    },
+    "limitations": [
+      "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+      "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+    ]
+  }
+}

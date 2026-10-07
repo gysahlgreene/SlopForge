@@ -8,7 +8,7 @@ Refocus SlopForge on producing coherent 3D game assets, including characters tha
 
 Keep the user-facing path for 3D props, collectibles, characters, environment kits, mesh cleanup and readiness, rigging, skeletal animation, provenance, candidate review, recipes, and Unity export. Keep concept and material image generation only as supporting inputs to 3D workflows. A 3D recipe remains the way to coordinate a related asset set.
 
-Remove shipped 2D output capabilities: sprite generation and packaging, UI packs, VFX packs, tilesets and their Unity import helpers. Remove the generic prototype planner, which composes content recipes without a qualified concept-to-plan implementation. Do not remove the general recipe runner or 3D environment validation.
+Remove shipped 2D output capabilities: sprite generation and packaging, UI packs, VFX packs, tilesets and their Unity import helpers. Remove the generic prototype planner, which composes content recipes without a qualified concept-to-plan implementation. Remove the Unity-native `primitive` route because it only registers a planned manifest record and does not generate geometry, a scene, or a prefab. Do not remove the general recipe runner or 3D environment validation.
 
 Remove those lanes from the CLI, default initialized taxonomy and recipes, product documentation, package modules, and tests that exclusively exercise removed behavior. Do not delete the historical ecosystem research, sprite benchmark evidence, generated evidence, or existing user project data. Existing custom taxonomy definitions are not migrated or deleted; the bundled product surface simply stops shipping these 2D types and commands.
 

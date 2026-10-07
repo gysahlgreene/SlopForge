@@ -364,7 +364,7 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             result = handler(root, child_config, style, asset_type, child, manifest, stage["asset_key"])
             generated = [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
             _sync_child_artifacts(root, asset, stage["asset_key"])
-            successful = pipeline == "native" or any(item.get("status") == "candidate" for item in generated)
+            successful = any(item.get("status") == "candidate" for item in generated)
             if not successful:
                 raise RuntimeError(f"No valid candidates generated for recipe child {child['id']!r}")
             if original.get("status") == "ready":

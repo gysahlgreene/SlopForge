@@ -1,96 +1,63 @@
-# Examples
+# 3D examples
 
 Run these commands against an initialized Unity project.
 
-## Guided terminal workflow
-
-Let SlopForge walk through style, asset type, description, generation, candidate review, and approval:
+## Guided workflow
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame make
 ```
 
-It opens candidates in the system image viewer. Choose a concept number, `r` to generate more, or `q` to stop and keep the candidates for later. For a model, it then shows material previews on the mesh and offers material iteration and final texture approval.
+The guided flow asks for an asset type and description, generates candidates, and opens them for review. Model candidates continue through mesh processing and material preview; approval remains explicit.
 
-## Generate and approve an icon
+## Explore prop variations
 
-```sh
-slopforge --project ~/UnityProjects/MyGame generate icon health_potion \
-  "A bright red potion bottle with a glowing cap, clean icon silhouette, game UI style"
-slopforge --project ~/UnityProjects/MyGame candidates health_potion
-slopforge --project ~/UnityProjects/MyGame approve health_potion 1
-```
-
-## Explore alternatives, then promote one
-
-Exploration creates a separate candidate set. Each candidate has an explicit design variation; the default tier is `draft`. Workflow resolution is controlled by that tier's project configuration. Review the variations, promote one to a new production name, then use the normal approval path:
+Exploration creates separate concept candidates for a model asset. Review and promote the preferred design, then continue through the normal 3D pipeline:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame explore prop relay_ideas \
   "Compact lunar-refinery power relay" \
   --variation "silhouette=wide, low housing; motif=three concentric rings" \
-  --variation "silhouette=tall, narrow housing; motif=vertical status lights" \
-  --variation "shape_language=angular industrial shell; materials=painted steel and ceramic"
+  --variation "silhouette=tall, narrow housing; motif=vertical status lights"
 slopforge --project ~/UnityProjects/MyGame review
 slopforge --project ~/UnityProjects/MyGame promote relay_ideas 2 --name power_relay
 slopforge --project ~/UnityProjects/MyGame approve power_relay 1
 ```
 
-Exploration never exports directly to Unity. The review board records the variation and gives exploration candidates a promote action. Promotion creates a regular tracked asset candidate with its prompt, seed, workflow/model and variation provenance intact; approval remains an explicit production step. Pass `--quality-tier` to override the `draft` default. Configure the tier's workflow node inputs if exploration should use lower resolutions or fewer processing steps.
+Exploration candidates do not export directly. Promotion creates a normal tracked model candidate and retains its prompt, seed, workflow, model, and variation provenance.
 
-## Generate and package 2D character animations
-
-After creating an approved identity reference library, run the sample character recipe and package each approved eight-frame sheet. The selected ComfyUI workflow must support reference conditioning and sheet generation; the bundled text-to-image graph is not an animation workflow.
-
-```sh
-slopforge --project ~/UnityProjects/MyGame recipe run character_sprite_pack \
-  --name pilot --reference-library character/pilot --quality-tier draft
-slopforge --project ~/UnityProjects/MyGame candidates pilot_walk
-slopforge --project ~/UnityProjects/MyGame approve pilot_walk 1
-slopforge --project ~/UnityProjects/MyGame spritepack pilot_walk \
-  --animation walk --grid 8 1 --fps 8
-```
-
-See [2D character sprite packs](SPRITE-PACKS.md) for the full animation list, reference workflow setup, and Unity metadata contract.
-
-## Generate a Unity UI pack
-
-Create an ordered `ui/<theme>` reference library, then use it across the sample UI recipe so component shapes and states share the same theme:
-
-```sh
-slopforge --project ~/UnityProjects/MyGame recipe run starter_ui_pack \
-  --name gothic_hud --reference-library ui/gothic --quality-tier draft
-slopforge --project ~/UnityProjects/MyGame candidates gothic_hud_button_normal
-slopforge --project ~/UnityProjects/MyGame approve gothic_hud_button_normal 1
-slopforge --project ~/UnityProjects/MyGame ui-meta gothic_hud_panel_landscape \
-  --border 24 24 24 24 --pixels-per-unit 100
-```
-
-The recipe prompts prohibit functional copy; render labels and values with Unity UI/TextMeshPro. `ui-meta` records Sprite type, pivot, pixels-per-unit, and 9-slice borders as a typed JSON output derived from the approved image. Unity Editor tooling must apply those settings and create prefabs; the JSON does not replace Unity `.meta` files.
-
-## Generate a coordinated recipe pack
-
-```sh
-slopforge --project ~/UnityProjects/MyGame recipe list
-slopforge --project ~/UnityProjects/MyGame recipe run starter_icons --name first_hud
-slopforge --project ~/UnityProjects/MyGame candidates first_hud_health
-slopforge --project ~/UnityProjects/MyGame approve first_hud_health 1
-slopforge --project ~/UnityProjects/MyGame recipe resume first_hud
-```
-
-`recipe resume` continues incomplete children and refreshes the aggregate pack after approvals. `recipe regenerate first_hud mana` adds candidates for only the mana child. See [Recipe and pack orchestration](RECIPES.md) for the recipe format and statuses.
-
-## Generate and approve a 3D prop
+## Generate a 3D prop
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern \
-  "A weathered stone lantern, medieval ruins, subtle wear" \
-  --image-prompt "A squat carved stone lantern with a broad square cap, four open sides and a warm glass core, complete front three-quarter view, isolated against a neutral background, hand-painted fantasy game prop."
+  "Weathered stone lantern for a fantasy ruin" \
+  --image-prompt "A squat carved stone lantern with a broad square cap, open sides and a warm glass core; complete front three-quarter view, isolated on neutral background."
 slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
-slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1 \
-  --material-prompt "Flat surface texture: aged gray stone with fine pores and restrained moss in creases, warm amber glass glow accents; even light, no lantern, no perspective."
+slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1
 slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
 slopforge --project ~/UnityProjects/MyGame approve-texture stone_lantern 1
 ```
 
-If the mesh previews show poor scale or coverage, run `retexture stone_lantern --material-prompt "..." --count 2`, compare front/side/rear views, then approve the selected material. Approved files are copied to the output directory configured in `ai/project.yaml`.
+Inspect front, side, and rear previews. If mesh shape, topology, or material coverage is poor, reject the candidate and try a revised brief or workflow. The 3D generators do not guarantee game-ready output.
+
+## Generate and inspect a character
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run character_3d_pack --name pilot
+slopforge --project ~/UnityProjects/MyGame candidates pilot_character
+slopforge --project ~/UnityProjects/MyGame approve pilot_character 1
+slopforge --project ~/UnityProjects/MyGame character readiness pilot_character
+```
+
+Continue with provider setup and rigging only after reviewing the readiness report. See [3D character rigging](CHARACTER-RIGGING.md) and [animation libraries](CHARACTER-ANIMATIONS.md). Structural checks do not establish deformation quality.
+
+## Coordinate an environment kit
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run starter_environment_kit --name refinery
+slopforge --project ~/UnityProjects/MyGame review
+slopforge --project ~/UnityProjects/MyGame recipe resume refinery
+slopforge --project ~/UnityProjects/MyGame environment-check refinery
+```
+
+The kit recipe generates separate modules and validates configured dimensions, grid placement, and pivots. It does not assemble a room scene or guarantee a coherent visual set; inspect and approve each module.

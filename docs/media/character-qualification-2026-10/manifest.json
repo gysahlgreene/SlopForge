@@ -1,0 +1,521 @@
+{
+  "date": "2026-10-06",
+  "status": "experimental; not approved",
+  "source_model": {
+    "path": "/Users/eoin/Downloads/SlopForge-H100-character-rig-20261004/results/hunyuan_comparison/moon_scout_hunyuan.glb",
+    "sha256": "39b98f0c9ad3502e6c61446d4d0959abc03b19dc238ff58c1348bd8e44de4c05"
+  },
+  "normalized_model": {
+    "sha256": "ad4db23c3f1adf98150c216cec7aff069b9409f432a1f9b68225a7d2a0c696e7",
+    "path": "Normalization/triangle-budget/model.glb (disposable temp project; model not copied into repo)"
+  },
+  "blender": "5.1.0",
+  "face_budget_triangles": 60000,
+  "normalization": {
+    "status": "pass",
+    "components": [
+      {
+        "source": "Mesh_0",
+        "output": "Normalized_Mesh_0",
+        "source_vertices": 95029,
+        "source_faces": 192966,
+        "source_materials": [
+          "Material_0"
+        ],
+        "source_material_assignments": [
+          {
+            "slot": 0,
+            "material": "Material_0",
+            "face_count": 192966
+          }
+        ],
+        "output_vertices": 28688,
+        "output_faces": 28688,
+        "textures": {
+          "base_color": "component_0_base_color.png"
+        }
+      }
+    ],
+    "uv_status": "pass",
+    "channels": {
+      "base_color": "baked",
+      "roughness": "absent",
+      "metallic": "absent",
+      "normal": "absent"
+    },
+    "warnings": [],
+    "blender_version": "5.1.0"
+  },
+  "readiness": {
+    "status": "passed_with_warnings",
+    "errors": [],
+    "warnings": [
+      "largest mesh dimension exceeds expected normalized scale"
+    ],
+    "measured": {
+      "mesh_objects": 1,
+      "vertex_count": 114745,
+      "face_count": 57376,
+      "bounds_min": [
+        -0.4734642803668976,
+        -0.3156171143054962,
+        -0.9796695709228516
+      ],
+      "bounds_max": [
+        0.4813099801540375,
+        0.277605801820755,
+        0.986828625202179
+      ],
+      "dimensions": [
+        0.9547742605209351,
+        0.5932229161262512,
+        1.9664981961250305
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Normalized_Mesh_0",
+          "bounds_min": [
+            -0.4734642803668976,
+            -0.3156171143054962,
+            -0.9796695709228516
+          ],
+          "bounds_max": [
+            0.4813099801540375,
+            0.277605801820755,
+            0.986828625202179
+          ],
+          "dimensions": [
+            0.9547742605209351,
+            0.5932229161262512,
+            1.9664981961250305
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 1,
+      "material_count": 1,
+      "image_texture_count": 1,
+      "missing_textures": [],
+      "transforms_applied": true,
+      "normal_count": 57376,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 0,
+      "component_count": 1,
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "face_budget": 60000
+    },
+    "animation_readiness": {
+      "status": "pass",
+      "approval": {
+        "status": "pending"
+      },
+      "measured": {
+        "mesh_objects": 1,
+        "vertex_count": 114745,
+        "face_count": 57376,
+        "bounds_min": [
+          -0.4734642803668976,
+          -0.3156171143054962,
+          -0.9796695709228516
+        ],
+        "bounds_max": [
+          0.4813099801540375,
+          0.277605801820755,
+          0.986828625202179
+        ],
+        "dimensions": [
+          0.9547742605209351,
+          0.5932229161262512,
+          1.9664981961250305
+        ],
+        "origins": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ]
+        ],
+        "objects": [
+          {
+            "name": "Normalized_Mesh_0",
+            "bounds_min": [
+              -0.4734642803668976,
+              -0.3156171143054962,
+              -0.9796695709228516
+            ],
+            "bounds_max": [
+              0.4813099801540375,
+              0.277605801820755,
+              0.986828625202179
+            ],
+            "dimensions": [
+              0.9547742605209351,
+              0.5932229161262512,
+              1.9664981961250305
+            ],
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation_degrees": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        ],
+        "uv_layers": 1,
+        "material_count": 1,
+        "image_texture_count": 1,
+        "missing_textures": [],
+        "transforms_applied": true,
+        "normal_count": 57376,
+        "zero_normal_count": 0,
+        "degenerate_face_count": 0,
+        "component_count": 1,
+        "boundary_edge_count": 0,
+        "nonmanifold_edge_count": 0,
+        "face_budget": 60000
+      },
+      "reasons": [],
+      "checks": {
+        "face_budget": 60000,
+        "prototype_scale_meters": [
+          0.05,
+          5.0
+        ],
+        "boundary_edge_count": 0,
+        "nonmanifold_edge_count": 0,
+        "component_count": 1,
+        "transforms_applied": true
+      },
+      "limitations": [
+        "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+        "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+      ]
+    }
+  },
+  "rigify": {
+    "status": "complete",
+    "provider": {
+      "name": "Blender Rigify",
+      "version": "5.1.0",
+      "source": "https://docs.blender.org/manual/en/5.1/addons/rigging/rigify/",
+      "license": "GPL-2.0-or-later",
+      "model": "Blender bundled human metarig",
+      "model_license": "GPL-2.0-or-later"
+    },
+    "skeleton_mapping": {
+      "DEF-spine": "DEF-spine",
+      "DEF-spine.001": "DEF-spine.001",
+      "DEF-spine.002": "DEF-spine.002",
+      "DEF-spine.003": "DEF-spine.003",
+      "DEF-spine.004": "DEF-spine.004",
+      "DEF-spine.005": "DEF-spine.005",
+      "DEF-spine.006": "DEF-spine.006",
+      "DEF-pelvis.L": "DEF-pelvis.L",
+      "DEF-pelvis.R": "DEF-pelvis.R",
+      "DEF-thigh.L": "DEF-thigh.L",
+      "DEF-thigh.L.001": "DEF-thigh.L.001",
+      "DEF-shin.L": "DEF-shin.L",
+      "DEF-shin.L.001": "DEF-shin.L.001",
+      "DEF-foot.L": "DEF-foot.L",
+      "DEF-toe.L": "DEF-toe.L",
+      "DEF-thigh.R": "DEF-thigh.R",
+      "DEF-thigh.R.001": "DEF-thigh.R.001",
+      "DEF-shin.R": "DEF-shin.R",
+      "DEF-shin.R.001": "DEF-shin.R.001",
+      "DEF-foot.R": "DEF-foot.R",
+      "DEF-toe.R": "DEF-toe.R",
+      "DEF-forehead.L": "DEF-forehead.L",
+      "DEF-forehead.R": "DEF-forehead.R",
+      "DEF-forehead.L.001": "DEF-forehead.L.001",
+      "DEF-forehead.R.001": "DEF-forehead.R.001",
+      "DEF-forehead.L.002": "DEF-forehead.L.002",
+      "DEF-forehead.R.002": "DEF-forehead.R.002",
+      "DEF-temple.L": "DEF-temple.L",
+      "DEF-temple.R": "DEF-temple.R",
+      "DEF-brow.B.L": "DEF-brow.B.L",
+      "DEF-brow.B.L.001": "DEF-brow.B.L.001",
+      "DEF-brow.B.L.002": "DEF-brow.B.L.002",
+      "DEF-brow.B.L.003": "DEF-brow.B.L.003",
+      "DEF-lid.B.L": "DEF-lid.B.L",
+      "DEF-lid.B.L.001": "DEF-lid.B.L.001",
+      "DEF-lid.B.L.002": "DEF-lid.B.L.002",
+      "DEF-lid.B.L.003": "DEF-lid.B.L.003",
+      "DEF-lid.T.L": "DEF-lid.T.L",
+      "DEF-lid.T.L.001": "DEF-lid.T.L.001",
+      "DEF-lid.T.L.002": "DEF-lid.T.L.002",
+      "DEF-lid.T.L.003": "DEF-lid.T.L.003",
+      "DEF-brow.B.R": "DEF-brow.B.R",
+      "DEF-brow.B.R.001": "DEF-brow.B.R.001",
+      "DEF-brow.B.R.002": "DEF-brow.B.R.002",
+      "DEF-brow.B.R.003": "DEF-brow.B.R.003",
+      "DEF-lid.B.R": "DEF-lid.B.R",
+      "DEF-lid.B.R.001": "DEF-lid.B.R.001",
+      "DEF-lid.B.R.002": "DEF-lid.B.R.002",
+      "DEF-lid.B.R.003": "DEF-lid.B.R.003",
+      "DEF-lid.T.R": "DEF-lid.T.R",
+      "DEF-lid.T.R.001": "DEF-lid.T.R.001",
+      "DEF-lid.T.R.002": "DEF-lid.T.R.002",
+      "DEF-lid.T.R.003": "DEF-lid.T.R.003",
+      "DEF-ear.L": "DEF-ear.L",
+      "DEF-ear.L.001": "DEF-ear.L.001",
+      "DEF-ear.L.002": "DEF-ear.L.002",
+      "DEF-ear.L.003": "DEF-ear.L.003",
+      "DEF-ear.L.004": "DEF-ear.L.004",
+      "DEF-ear.R": "DEF-ear.R",
+      "DEF-ear.R.001": "DEF-ear.R.001",
+      "DEF-ear.R.002": "DEF-ear.R.002",
+      "DEF-ear.R.003": "DEF-ear.R.003",
+      "DEF-ear.R.004": "DEF-ear.R.004",
+      "DEF-tongue": "DEF-tongue",
+      "DEF-chin": "DEF-chin",
+      "DEF-chin.001": "DEF-chin.001",
+      "DEF-chin.L": "DEF-chin.L",
+      "DEF-chin.R": "DEF-chin.R",
+      "DEF-jaw": "DEF-jaw",
+      "DEF-jaw.L.001": "DEF-jaw.L.001",
+      "DEF-jaw.R.001": "DEF-jaw.R.001",
+      "DEF-tongue.001": "DEF-tongue.001",
+      "DEF-tongue.002": "DEF-tongue.002",
+      "DEF-cheek.T.L": "DEF-cheek.T.L",
+      "DEF-brow.T.L": "DEF-brow.T.L",
+      "DEF-brow.T.L.001": "DEF-brow.T.L.001",
+      "DEF-brow.T.L.002": "DEF-brow.T.L.002",
+      "DEF-brow.T.L.003": "DEF-brow.T.L.003",
+      "DEF-cheek.T.R": "DEF-cheek.T.R",
+      "DEF-brow.T.R": "DEF-brow.T.R",
+      "DEF-brow.T.R.001": "DEF-brow.T.R.001",
+      "DEF-brow.T.R.002": "DEF-brow.T.R.002",
+      "DEF-brow.T.R.003": "DEF-brow.T.R.003",
+      "DEF-jaw.L": "DEF-jaw.L",
+      "DEF-jaw.R": "DEF-jaw.R",
+      "DEF-nose": "DEF-nose",
+      "DEF-nose.L": "DEF-nose.L",
+      "DEF-nose.R": "DEF-nose.R",
+      "DEF-lip.B.L": "DEF-lip.B.L",
+      "DEF-lip.B.R": "DEF-lip.B.R",
+      "DEF-lip.B.L.001": "DEF-lip.B.L.001",
+      "DEF-lip.B.R.001": "DEF-lip.B.R.001",
+      "DEF-cheek.B.L.001": "DEF-cheek.B.L.001",
+      "DEF-cheek.B.R.001": "DEF-cheek.B.R.001",
+      "DEF-cheek.B.L": "DEF-cheek.B.L",
+      "DEF-cheek.B.R": "DEF-cheek.B.R",
+      "DEF-lip.T.L.001": "DEF-lip.T.L.001",
+      "DEF-lip.T.R.001": "DEF-lip.T.R.001",
+      "DEF-lip.T.L": "DEF-lip.T.L",
+      "DEF-lip.T.R": "DEF-lip.T.R",
+      "DEF-nose.002": "DEF-nose.002",
+      "DEF-nose.001": "DEF-nose.001",
+      "DEF-nose.003": "DEF-nose.003",
+      "DEF-nose.004": "DEF-nose.004",
+      "DEF-nose.L.001": "DEF-nose.L.001",
+      "DEF-nose.R.001": "DEF-nose.R.001",
+      "DEF-cheek.T.L.001": "DEF-cheek.T.L.001",
+      "DEF-cheek.T.R.001": "DEF-cheek.T.R.001",
+      "DEF-shoulder.L": "DEF-shoulder.L",
+      "DEF-upper_arm.L": "DEF-upper_arm.L",
+      "DEF-upper_arm.L.001": "DEF-upper_arm.L.001",
+      "DEF-forearm.L": "DEF-forearm.L",
+      "DEF-forearm.L.001": "DEF-forearm.L.001",
+      "DEF-hand.L": "DEF-hand.L",
+      "DEF-f_index.01.L": "DEF-f_index.01.L",
+      "DEF-f_index.02.L": "DEF-f_index.02.L",
+      "DEF-f_index.03.L": "DEF-f_index.03.L",
+      "DEF-thumb.01.L": "DEF-thumb.01.L",
+      "DEF-thumb.02.L": "DEF-thumb.02.L",
+      "DEF-thumb.03.L": "DEF-thumb.03.L",
+      "DEF-palm.01.L": "DEF-palm.01.L",
+      "DEF-f_middle.01.L": "DEF-f_middle.01.L",
+      "DEF-f_middle.02.L": "DEF-f_middle.02.L",
+      "DEF-f_middle.03.L": "DEF-f_middle.03.L",
+      "DEF-palm.02.L": "DEF-palm.02.L",
+      "DEF-f_ring.01.L": "DEF-f_ring.01.L",
+      "DEF-f_ring.02.L": "DEF-f_ring.02.L",
+      "DEF-f_ring.03.L": "DEF-f_ring.03.L",
+      "DEF-palm.03.L": "DEF-palm.03.L",
+      "DEF-f_pinky.01.L": "DEF-f_pinky.01.L",
+      "DEF-f_pinky.02.L": "DEF-f_pinky.02.L",
+      "DEF-f_pinky.03.L": "DEF-f_pinky.03.L",
+      "DEF-palm.04.L": "DEF-palm.04.L",
+      "DEF-shoulder.R": "DEF-shoulder.R",
+      "DEF-upper_arm.R": "DEF-upper_arm.R",
+      "DEF-upper_arm.R.001": "DEF-upper_arm.R.001",
+      "DEF-forearm.R": "DEF-forearm.R",
+      "DEF-forearm.R.001": "DEF-forearm.R.001",
+      "DEF-hand.R": "DEF-hand.R",
+      "DEF-f_index.01.R": "DEF-f_index.01.R",
+      "DEF-f_index.02.R": "DEF-f_index.02.R",
+      "DEF-f_index.03.R": "DEF-f_index.03.R",
+      "DEF-thumb.01.R": "DEF-thumb.01.R",
+      "DEF-thumb.02.R": "DEF-thumb.02.R",
+      "DEF-thumb.03.R": "DEF-thumb.03.R",
+      "DEF-palm.01.R": "DEF-palm.01.R",
+      "DEF-f_middle.01.R": "DEF-f_middle.01.R",
+      "DEF-f_middle.02.R": "DEF-f_middle.02.R",
+      "DEF-f_middle.03.R": "DEF-f_middle.03.R",
+      "DEF-palm.02.R": "DEF-palm.02.R",
+      "DEF-f_ring.01.R": "DEF-f_ring.01.R",
+      "DEF-f_ring.02.R": "DEF-f_ring.02.R",
+      "DEF-f_ring.03.R": "DEF-f_ring.03.R",
+      "DEF-palm.03.R": "DEF-palm.03.R",
+      "DEF-f_pinky.01.R": "DEF-f_pinky.01.R",
+      "DEF-f_pinky.02.R": "DEF-f_pinky.02.R",
+      "DEF-f_pinky.03.R": "DEF-f_pinky.03.R",
+      "DEF-palm.04.R": "DEF-palm.04.R",
+      "DEF-breast.L": "DEF-breast.L",
+      "DEF-breast.R": "DEF-breast.R"
+    },
+    "unity_humanoid_mapping": {
+      "Hips": "torso",
+      "Spine": "spine_fk.003",
+      "Head": "ORG-face",
+      "LeftUpperArm": "DEF-upper_arm.L",
+      "LeftLowerArm": "DEF-forearm.L",
+      "LeftHand": "DEF-hand.L",
+      "RightUpperArm": "DEF-upper_arm.R",
+      "RightLowerArm": "DEF-forearm.R",
+      "RightHand": "DEF-hand.R",
+      "LeftUpperLeg": "DEF-thigh.L",
+      "LeftLowerLeg": "DEF-shin.L",
+      "LeftFoot": "DEF-foot.L",
+      "RightUpperLeg": "DEF-thigh.R",
+      "RightLowerLeg": "DEF-shin.R",
+      "RightFoot": "DEF-foot.R"
+    },
+    "deformation_evidence": {
+      "t_pose": {
+        "missing_controls": [],
+        "max_vertex_displacement": 9.588986958978277e-07
+      },
+      "raised_arms": {
+        "missing_controls": [],
+        "max_vertex_displacement": 1.15001995989576
+      },
+      "crouch": {
+        "missing_controls": [],
+        "max_vertex_displacement": 0.9342868512947711
+      },
+      "leg_lift": {
+        "missing_controls": [],
+        "max_vertex_displacement": 0.8612112139588533
+      },
+      "elbow_bend": {
+        "missing_controls": [],
+        "max_vertex_displacement": 1.1680283337883215
+      },
+      "shoulder_rotation": {
+        "missing_controls": [],
+        "max_vertex_displacement": 0.5574493317229073
+      }
+    },
+    "mesh_repair": {
+      "weld_tolerance": 1.966498136520386e-05,
+      "meshes": [
+        {
+          "merged_vertices": 86059,
+          "open_edges": 0
+        }
+      ]
+    },
+    "validation": {
+      "status": "not_run",
+      "warnings": [
+        "Rigify fitting uses source mesh bounds; inspect joint placement and all deformation poses.",
+        "Automatic weights are candidates and are not a substitute for manual skin review."
+      ]
+    }
+  },
+  "evidence_files": [
+    "normalization-budget-report.json",
+    "normalization-coarse-report.json",
+    "readiness-budget-report.json",
+    "rigify-budget-report.json",
+    "rigify-pose-contact.png",
+    "source-vs-budget-normalized-front.png",
+    "source-vs-budget-normalized-rear.png",
+    "source-vs-budget-normalized-side.png",
+    "source-vs-budget-normalized-threequarter.png",
+    "source-vs-coarse-normalized-front.png",
+    "voxel-resolution-sweep-report.json",
+    "voxel-resolution-sweep.png",
+    "same-mesh-budget-skintokens/report.json",
+    "same-mesh-budget-skintokens/contact.png",
+    "same-mesh-budget-skintokens/moon-scout-skintokens.fbx"
+  ],
+  "limits": [
+    "Only source base color was available; the other PBR channels were absent.",
+    "Rigify pose review showed unacceptable limb deformation.",
+    "No Unity animation playback was performed.",
+    "SkinTokens produced a one-component weighted mesh after exact duplicate-vertex welding, but the current automated pose controls do not prove anatomically correct deformation.",
+    "No Unity animation playback was performed for this same-mesh SkinTokens candidate."
+  ],
+  "same_mesh_skintokens": {
+    "status": "experimental; deformation review incomplete; not approved",
+    "upstream": "VAST-AI-Research/SkinTokens",
+    "revision": "273b691d35989d71cd17ff2895fdc735097b92d1",
+    "checkpoint": "experiments/articulation_xl_quantization_256_token_4/grpo_1400.ckpt",
+    "checkpoint_sha256": "f4e4706a11cfb520cdde65156a0358545e4fbf8f36237aca01ea5e79d5cb5692",
+    "input_sha256": "ad4db23c3f1adf98150c216cec7aff069b9409f432a1f9b68225a7d2a0c696e7",
+    "raw_output_sha256": "8e92c17bb94cb8795213ac69c4bc09d8b237d39a7b4fb31dca1c88aeba10f6ab",
+    "packaged_fbx_sha256": "6c67f44d0b3a4ac3028b186daa02d54ae6b57e83ae7d9aa2ac489591351a45c4",
+    "inference": {
+      "runtime": "isolated Python 3.11.17 / PyTorch 2.7.0+cu128 on H100",
+      "flags": [
+        "--use_transfer"
+      ],
+      "attention": "evaluation-only FlashAttention-to-SDPA shim via PYTHONPATH",
+      "elapsed_seconds_approx": 12
+    },
+    "mesh_cleanup": {
+      "before": {
+        "vertices": 117314,
+        "faces": 57376,
+        "components": 29969
+      },
+      "operation": "exact duplicate-vertex weld at 1e-7",
+      "vertices_removed": 88626,
+      "after": {
+        "vertices": 28688,
+        "faces": 57376,
+        "components": 1
+      }
+    },
+    "rig": {
+      "bones": 28,
+      "skinned_components": 1,
+      "unweighted_vertices": 0,
+      "maximum_influences": 4,
+      "weight_sum_min": 0.9999998509883881,
+      "weight_sum_max": 1.0000001291773515,
+      "known_unskinned_helper_removed": "Icosphere"
+    },
+    "material_coverage": {
+      "base_color": 1.0,
+      "roughness": 0,
+      "metallic": 0,
+      "normal": 0
+    },
+    "evidence": "same-mesh-budget-skintokens/",
+    "unity_animation_playback": "not run; automated poses did not yet establish anatomically correct motion"
+  }
+}

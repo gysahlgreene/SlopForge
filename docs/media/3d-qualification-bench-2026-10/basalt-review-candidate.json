@@ -1,0 +1,238 @@
+{
+  "status": "passed_with_warnings",
+  "errors": [],
+  "warnings": [
+    "largest mesh dimension exceeds expected normalized scale",
+    "mesh contains 93 disconnected components; inspect for detached geometry",
+    "no image textures are connected to mesh materials"
+  ],
+  "measured": {
+    "mesh_objects": 2,
+    "vertex_count": 35147,
+    "face_count": 40880,
+    "bounds_min": [
+      -0.9510578513145447,
+      -0.9999999403953552,
+      -1.0
+    ],
+    "bounds_max": [
+      0.9510578513145447,
+      0.9999999403953552,
+      1.834999918937683
+    ],
+    "dimensions": [
+      1.9021157026290894,
+      1.9999998807907104,
+      2.834999918937683
+    ],
+    "origins": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "objects": [
+      {
+        "name": "Basalt Warden | Armored Humanoid",
+        "bounds_min": [
+          -0.562999963760376,
+          -0.36000001430511475,
+          0.03999989479780197
+        ],
+        "bounds_max": [
+          0.562999963760376,
+          0.21899999678134918,
+          1.834999918937683
+        ],
+        "dimensions": [
+          1.125999927520752,
+          0.5790000110864639,
+          1.7950000241398811
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "Icosphere",
+        "bounds_min": [
+          -0.9510578513145447,
+          -0.9999999403953552,
+          -1.0
+        ],
+        "bounds_max": [
+          0.9510578513145447,
+          0.9999999403953552,
+          1.0
+        ],
+        "dimensions": [
+          1.9021157026290894,
+          1.9999998807907104,
+          2.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "uv_layers": 2,
+    "material_count": 7,
+    "image_texture_count": 0,
+    "missing_textures": [],
+    "transforms_applied": true,
+    "normal_count": 40880,
+    "zero_normal_count": 0,
+    "degenerate_face_count": 77,
+    "component_count": 93,
+    "boundary_edge_count": 0,
+    "nonmanifold_edge_count": 0,
+    "face_budget": 100000
+  },
+  "animation_readiness": {
+    "status": "fail",
+    "approval": {
+      "status": "pending"
+    },
+    "measured": {
+      "mesh_objects": 2,
+      "vertex_count": 35147,
+      "face_count": 40880,
+      "bounds_min": [
+        -0.9510578513145447,
+        -0.9999999403953552,
+        -1.0
+      ],
+      "bounds_max": [
+        0.9510578513145447,
+        0.9999999403953552,
+        1.834999918937683
+      ],
+      "dimensions": [
+        1.9021157026290894,
+        1.9999998807907104,
+        2.834999918937683
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Basalt Warden | Armored Humanoid",
+          "bounds_min": [
+            -0.562999963760376,
+            -0.36000001430511475,
+            0.03999989479780197
+          ],
+          "bounds_max": [
+            0.562999963760376,
+            0.21899999678134918,
+            1.834999918937683
+          ],
+          "dimensions": [
+            1.125999927520752,
+            0.5790000110864639,
+            1.7950000241398811
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        {
+          "name": "Icosphere",
+          "bounds_min": [
+            -0.9510578513145447,
+            -0.9999999403953552,
+            -1.0
+          ],
+          "bounds_max": [
+            0.9510578513145447,
+            0.9999999403953552,
+            1.0
+          ],
+          "dimensions": [
+            1.9021157026290894,
+            1.9999998807907104,
+            2.0
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 2,
+      "material_count": 7,
+      "image_texture_count": 0,
+      "missing_textures": [],
+      "transforms_applied": true,
+      "normal_count": 40880,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 77,
+      "component_count": 93,
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "face_budget": 100000
+    },
+    "reasons": [
+      "77 zero-area faces",
+      "93 disconnected mesh components"
+    ],
+    "checks": {
+      "face_budget": 100000,
+      "prototype_scale_meters": [
+        0.05,
+        5.0
+      ],
+      "boundary_edge_count": 0,
+      "nonmanifold_edge_count": 0,
+      "component_count": 93,
+      "transforms_applied": true
+    },
+    "limitations": [
+      "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+      "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+    ]
+  }
+}

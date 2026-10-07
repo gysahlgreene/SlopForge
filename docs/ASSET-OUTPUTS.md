@@ -1,49 +1,39 @@
-# Typed asset outputs
+# Typed 3D asset outputs
 
-Manifest schema version 3 adds optional typed output records to the existing asset model. Atomic assets keep using the current `outputs` path map and need no new fields. Compound assets can add an `artifacts` map, a `parent_id`, and `dependencies` when those relationships are useful.
-
-Each artifact has a stable ID, type, relative path, generation status, provenance, validation, approval state, and optional `derived_from` references:
+Manifest schema version 3 supports typed artifacts alongside each asset's path-only `outputs` map. A character or recipe can record a concept, source model, processed model, rig, material maps, animation clips, and validation reports with stable artifact IDs, provenance, approval status, and derivation links.
 
 ```json
 {
   "artifacts": {
-    "sprites.idle": {
-      "id": "sprites.idle",
-      "type": "image.sprite_sheet",
-      "status": "candidate",
-      "path": "Assets/Characters/pilot/idle.png",
+    "concept": {
+      "id": "concept",
+      "type": "image.concept",
+      "status": "ready",
+      "path": "ai/assets/candidates/pilot/concept.png",
+      "provenance": {"workflow": "image_text2img_api.json", "seed": 1234},
+      "approval": {"status": "approved"}
+    },
+    "model": {
+      "id": "model",
+      "type": "model.glb",
+      "status": "ready",
+      "path": "Assets/Art/Generated/Characters/pilot/model.glb",
       "derived_from": [{"asset_id": "pilot-id", "output_id": "concept"}],
-      "provenance": {"workflow": "sprite-sheet.json", "seed": 1234},
+      "approval": {"status": "pending"}
+    },
+    "rig": {
+      "id": "rig",
+      "type": "model.rigged",
+      "status": "candidate",
+      "path": "ai/assets/candidates/pilot/rigged.fbx",
+      "derived_from": [{"asset_id": "pilot-id", "output_id": "model"}],
       "approval": {"status": "pending"},
-      "validation": {"status": "passed", "errors": [], "warnings": []}
+      "validation": {"status": "not_run", "warnings": ["Deformation and Unity playback need review"]}
     }
-  },
-  "outputs": {"sprites.idle": "Assets/Characters/pilot/idle.png"}
-}
-```
-
-The legacy `outputs` map remains a path-only compatibility view. `register_artifact()` updates both views. Artifact records are independent, so one output can be approved while another remains pending. Validation and provenance live on the artifact they describe.
-
-`parent_id` is the stable asset ID of the owning pack or character. `children_of()` derives child assets from those one-way links, avoiding a duplicated child list. `dependencies` contains asset IDs and may name a required output ID. `derived_from` records which output(s) produced a particular artifact. Relationships use IDs rather than paths; paths remain project-relative POSIX paths.
-
-Default atomic records stay unchanged. Schema-v2 manifests are upgraded by copying all fields and changing only `schema_version`; older manifests retain their original fields under each record's `legacy` value. Unsupported future schema versions are rejected instead of being silently rewritten.
-
-Representative compound structure:
-
-The following abbreviated shape shows how different products can live under one character asset; each artifact uses the complete fields shown above.
-
-```json
-{
-  "id": "pilot-id",
-  "type": "character",
-  "artifacts": {
-    "concept": {"id": "concept", "type": "image.concept", "path": "ai/candidates/pilot.png"},
-    "portrait": {"id": "portrait", "type": "image.portrait", "path": "Assets/Characters/pilot/portrait.png"},
-    "model": {"id": "model", "type": "model.glb", "path": "Assets/Characters/pilot/model.glb"},
-    "rig": {"id": "rig", "type": "model.rigged", "path": "Assets/Characters/pilot/rigged.fbx"},
-    "animations.idle": {"id": "animations.idle", "type": "animation.fbx", "path": "Assets/Characters/pilot/idle.fbx"}
   }
 }
 ```
 
-Recipe scheduling and aggregate output records build on this schema. Aggregate visual review and bulk migrations remain separate work.
+The legacy `outputs` map remains a path-only compatibility view. `register_artifact()` updates both views. Artifacts are independent, so a model may be approved while a rig remains pending. `parent_id`, `dependencies`, and `derived_from` use IDs rather than paths.
+
+For file-backed ComfyUI generation, provenance can include the workflow SHA-256, sidecar ID/version, model identifiers, and seed. A graph hash does not identify installed custom-node revisions or model weights. Unknown values stay unknown. See the [workflow inventory](WORKFLOWS.md).

@@ -15,7 +15,7 @@ def load_taxonomy(project_root):
     for path in sorted(root.glob("*.yaml")):
         item = yaml.safe_load(path.read_text()) or {}
         name = item.get("name", path.stem)
-        if name != path.stem or item.get("pipeline") not in {"image", "model", "native"}:
+        if name != path.stem or item.get("pipeline") not in {"image", "model"}:
             raise ValueError(f"Invalid asset type definition: {path}")
         if not isinstance(item.get("requirements", []), list) or not isinstance(item.get("avoid", []), list):
             raise ValueError(f"Asset type requirements and avoid must be lists: {path}")
@@ -44,7 +44,7 @@ def output_path(project_root, config, asset_type, name, extension=None):
     root = Path(project_root).resolve() / config["asset_pipeline"]["output_root"]
     pipeline = asset_type["pipeline"]
     folder = asset_type.get("output_folder")
-    if pipeline == "native" or folder is None:
+    if folder is None:
         return None
     path = root / folder / name
     return path.with_suffix(extension or ".png") if pipeline == "image" else path

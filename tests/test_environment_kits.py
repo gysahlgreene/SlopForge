@@ -22,7 +22,6 @@ class EnvironmentKitTests(unittest.TestCase):
         self.assertIn("architecture", {child["type"] for child in children})
         self.assertIn("prop", {child["type"] for child in children})
         self.assertIn("texture", {child["type"] for child in children})
-        self.assertIn("decal", {child["type"] for child in children})
 
     def test_validation_checks_grid_bounds_pivots_and_pending_children(self):
         recipe = {

@@ -1,0 +1,152 @@
+{
+  "status": "complete",
+  "armature_count": 1,
+  "skinned_component_count": 1,
+  "helper_objects": [
+    "Icosphere"
+  ],
+  "unclassified_objects": [],
+  "bind_pose_count": 28,
+  "material_coverage": {
+    "base_color": 1.0
+  },
+  "semantic_mapping": {
+    "hips": "bone_0",
+    "spine": "bone_1",
+    "right_upper_arm": "bone_6",
+    "right_forearm": "bone_7",
+    "right_thigh": "bone_20",
+    "right_shin": "bone_21",
+    "left_upper_arm": "bone_13",
+    "left_forearm": "bone_14",
+    "left_thigh": "bone_24",
+    "left_shin": "bone_25"
+  },
+  "deformation_evidence": {
+    "neutral": {
+      "max_vertex_displacement": 0.0
+    },
+    "t_pose": {
+      "max_vertex_displacement": 0.31870195651114863
+    },
+    "raised_arms": {
+      "max_vertex_displacement": 0.7911607020581664
+    },
+    "shoulder_rotation": {
+      "max_vertex_displacement": 0.36785495997108925
+    },
+    "elbow_bend": {
+      "max_vertex_displacement": 0.6234280607039537
+    },
+    "crouch": {
+      "max_vertex_displacement": 0.8243625434081869
+    },
+    "leg_lift": {
+      "max_vertex_displacement": 1.045385318551915
+    }
+  },
+  "contact_sheet_dimensions": [
+    1792,
+    256
+  ],
+  "pose_parameters": "fixed skintokens_character.py v1",
+  "source_sha256": "ad4db23c3f1adf98150c216cec7aff069b9409f432a1f9b68225a7d2a0c696e7",
+  "raw_sha256": "8e92c17bb94cb8795213ac69c4bc09d8b237d39a7b4fb31dca1c88aeba10f6ab",
+  "rigged_model_sha256": "6c67f44d0b4a3ac3028b186daa02d54ae6b57e83ae7d9aa2ac489591351a45c4",
+  "checkpoint_sha256": "f4e4706a11cfb520cdde65156a0358545e4fbf8f36237aca01ea5e79d5cb5692",
+  "skintokens_revision": "273b691d35989d71cd17ff2895fdc735097b92d1",
+  "blender_version": "5.1.0",
+  "object_inventory": [
+    {
+      "name": "Armature",
+      "type": "ARMATURE"
+    },
+    {
+      "name": "Normalized_Mesh_0",
+      "type": "MESH",
+      "welded_vertices": 88626,
+      "components": 1,
+      "classification": "skinned_character"
+    },
+    {
+      "name": "Icosphere",
+      "type": "MESH",
+      "classification": "known_unskinned_helper"
+    }
+  ],
+  "unweighted_vertices": 0,
+  "weight_sum_min": 0.9999998509883881,
+  "weight_sum_max": 1.0000001291773515,
+  "max_influences": 4,
+  "bone_surface_probe": {
+    "method": "Blender BVH nearest-surface distance after exact duplicate-vertex weld; roles are the current heuristic semantic mapping, not ground truth",
+    "semantic_bone_surface_distances": {
+      "hips": {
+        "bone": "bone_0",
+        "parent": null,
+        "head_to_surface_m": 0.1246,
+        "tail_to_surface_m": 0.1198
+      },
+      "spine": {
+        "bone": "bone_1",
+        "parent": "bone_0",
+        "head_to_surface_m": 0.1044,
+        "tail_to_surface_m": 0.1173
+      },
+      "right_upper_arm": {
+        "bone": "bone_6",
+        "parent": "bone_3",
+        "head_to_surface_m": 0.1062,
+        "tail_to_surface_m": 0.0096
+      },
+      "right_forearm": {
+        "bone": "bone_7",
+        "parent": "bone_6",
+        "head_to_surface_m": 0.0801,
+        "tail_to_surface_m": 0.0957
+      },
+      "right_thigh": {
+        "bone": "bone_20",
+        "parent": "bone_0",
+        "head_to_surface_m": 0.0693,
+        "tail_to_surface_m": 0.1222
+      },
+      "right_shin": {
+        "bone": "bone_21",
+        "parent": "bone_20",
+        "head_to_surface_m": 0.081,
+        "tail_to_surface_m": 0.038
+      },
+      "left_upper_arm": {
+        "bone": "bone_13",
+        "parent": "bone_3",
+        "head_to_surface_m": 0.1033,
+        "tail_to_surface_m": 0.014
+      },
+      "left_forearm": {
+        "bone": "bone_14",
+        "parent": "bone_13",
+        "head_to_surface_m": 0.0803,
+        "tail_to_surface_m": 0.0993
+      },
+      "left_thigh": {
+        "bone": "bone_24",
+        "parent": "bone_0",
+        "head_to_surface_m": 0.0699,
+        "tail_to_surface_m": 0.1162
+      },
+      "left_shin": {
+        "bone": "bone_25",
+        "parent": "bone_24",
+        "head_to_surface_m": 0.0828,
+        "tail_to_surface_m": 0.0299
+      }
+    },
+    "nearest_endpoint_gap_m": {
+      "left_elbow": 0.171283,
+      "right_elbow": 0.172177,
+      "left_knee": 0.490741,
+      "right_knee": 0.494407
+    }
+  }
+}

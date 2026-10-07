@@ -7,14 +7,12 @@ Unity is an output target, not a generation dependency. Initialize an existing U
 - `ai/workflows/` for project-specific workflow overrides.
 - `Assets/Art/Generated/` folders for supported asset types.
 
-SlopForge writes ordinary PNG, GLB, Blend, and FBX files under the configured Unity `output_root`. Unity owns `.meta` files. This tool does not modify scenes or prefabs.
-
-UI recipes produce reviewable PNG components and states without functional text. `ui-meta` records Sprite import and 9-slice settings next to an approved image as a typed JSON output. Add `--apply` to run the installed Unity Editor and apply Sprite settings; add `--prefab` with `--apply` to create and register a simple UGUI Image prefab. Unity writes the `.meta` file. Prefabs require the UGUI package, and no complete HUD/menu layout is generated.
+SlopForge writes ordinary GLB, Blend, FBX, and material files under the configured Unity `output_root`. Unity owns `.meta` files. Character animation setup can create a controller and character prefab through an explicit command; SlopForge does not assemble scenes or levels.
 
 The Unity Editor may be closed during generation. Open the project afterward to import the new files and let Unity create `.meta` files.
 
 Texture approval creates a Unity Lit material for the Built-in Render Pipeline or URP. HDRP and custom render pipelines currently stop with an explicit unsupported-pipeline error rather than receiving a mismatched shader.
 
-3D model outputs are arranged under `Models/<name>/`: `Source/` holds the concept, cutout, white-background Hunyuan input, and source GLB; `Materials/` holds base color, normal, roughness, metallic, and emission maps; the folder root holds preview Blend and FBX. The pipeline retains source files for provenance and debugging.
+3D model outputs are arranged under `Models/<name>/` or `Characters/<name>/`: `Source/` holds the concept, cutout, white-background Hunyuan input, and source GLB; `Materials/` holds base color, normal, roughness, metallic, and emission maps; the folder root holds preview Blend and FBX. The pipeline retains source files for provenance and debugging.
 
 Use `slopforge --project /path/to/project assets` and `inspect <name>` to query the manifest without requiring Unity to be open.

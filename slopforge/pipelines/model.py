@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import secrets
 import shutil
@@ -22,6 +23,14 @@ from ..unity_material import build_unity_material, make_metallic_gloss, unity_cl
 from ..validation import summarize_validation, validate_image, validate_model_outputs
 
 
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def model_paths(project_root, config, name, asset_type="prop"):
     directory = output_path(project_root, config, asset_type, name)
     source, materials, previews = directory / "Source", directory / "Materials", directory / "Previews"
@@ -35,6 +44,7 @@ def model_paths(project_root, config, name, asset_type="prop"):
             "unity_material": materials / f"{name}_preview_PBR.mat",
             "emission": materials / f"{name}_emission.png", "preview_front": previews / f"{name}_front.png",
             "preview_side": previews / f"{name}_side.png", "preview_rear": previews / f"{name}_rear.png",
+            "preview_three_quarter": previews / f"{name}_three_quarter.png",
             "processed_mesh": source / "processed_mesh.blend",
             "validation": directory / "validation.json"}
 
@@ -50,6 +60,7 @@ def material_candidate_paths(project_root, config, name, number, asset_type="pro
             "metallic_gloss": materials / f"{name}_metallic_gloss.png",
             "emission": materials / f"{name}_emission.png", "preview_front": previews / f"{name}_front.png",
             "preview_side": previews / f"{name}_side.png", "preview_rear": previews / f"{name}_rear.png",
+            "preview_three_quarter": previews / f"{name}_three_quarter.png",
             "validation": directory / "validation.json", "generator": directory / "generation.json"}
 
 
@@ -97,10 +108,11 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
-                        "preview_front", "preview_side", "preview_rear")}
+                        "preview_front", "preview_side", "preview_rear", "preview_three_quarter")}
         candidate["validation"] = validate_model_outputs(check_paths, inspection, face_budget, root,
             max_components=asset_type.get("max_components"),
-            max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"))
+            max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
+            max_boundary_edges=asset_type.get("max_boundary_edges"))
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
         candidate["outputs"] = _relative_outputs(root, paths, check_paths)
@@ -130,10 +142,11 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
                   stage_mesh=root / asset["source"]["processed_mesh"])
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
-            "preview_front", "preview_side", "preview_rear")
+            "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
     validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root,
         max_components=asset_type.get("max_components"),
-        max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"))
+        max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
+        max_boundary_edges=asset_type.get("max_boundary_edges"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
             "status": "candidate" if validation["status"] != "failed" else "failed",
@@ -221,14 +234,17 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                             candidate_paths["metallic_gloss"])
     candidate["outputs"]["metallic_gloss"] = candidate_paths["metallic_gloss"].relative_to(root).as_posix()
     final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
-                  "preview_front", "preview_side", "preview_rear")
-    existing = [paths[name] for name in (*final_keys, "unity_material") if paths[name].exists()]
+                  "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
+    existing = [paths[name] for name in (*final_keys, "glb", "unity_material") if paths[name].exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Approved model outputs exist; pass --force to replace: {existing[0]}")
     sources = {name: root / candidate["outputs"][name] for name in final_keys}
     missing = [str(path) for path in sources.values() if not path.is_file() or not path.stat().st_size]
     if missing:
         raise ValueError("Material candidate output missing or empty: " + missing[0])
+    mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
+    if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
+        raise ValueError("Qualified material candidate has no retained source mesh")
     for name in final_keys:
         destination = paths[name]
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +255,9 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)
+    if (root / mesh_source).resolve() != paths["glb"].resolve():
+        paths["glb"].parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / mesh_source, paths["glb"])
     build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                          f"{asset['name']}_preview_PBR.mat",
                          {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
@@ -253,7 +272,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     asset["generator"]["material"] = candidate.get("generator")
     asset["generator"]["workflow"]["material"] = (candidate.get("generator") or {}).get("workflow")
     asset["generator"]["seed"]["material"] = candidate.get("seed")
-    asset["outputs"] = _relative_outputs(root, paths, (*final_keys, "unity_material", "validation"))
+    asset["outputs"] = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
     asset["validation"] = validation
     asset["status"] = "ready"
     asset["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -306,53 +325,86 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         if cutout_check["status"] == "failed" or input_check["status"] == "failed":
             raise ValueError(f"Prepared concept validation failed: {cutout_check['errors'] + input_check['errors']}")
 
-        model_metadata = paths["directory"] / "model_generation.json"
-        mesh_seed = secrets.randbits(32)
         workflow = pipeline["workflows"].get("model")
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
-        if workflow:
-            budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
-            generate_model(root, config, paths["cutout"], asset["name"], paths["glb"], model_metadata, mesh_seed, budget)
-        else:
-            generate_model(root, config, paths["input_3d"], asset["name"], paths["glb"], model_metadata, mesh_seed)
-        mesh_info = json.loads(model_metadata.read_text())
-        asset["source"].update({"cutout": paths["cutout"].relative_to(root).as_posix(),
-                                "3d_input": paths["input_3d"].relative_to(root).as_posix(),
-                                "glb": paths["glb"].relative_to(root).as_posix(),
-                                "processed_mesh": paths["processed_mesh"].relative_to(root).as_posix()})
         material_prompt = material_prompt or build_prompt(style, asset_type, prompt, mode="material")
-        count = material_count or int(pipeline["defaults"].get("material_candidates", 2))
-        if count < 1:
+        material_count = material_count or int(pipeline["defaults"].get("material_candidates", 2))
+        if material_count < 1:
             raise ValueError("Material candidate count must be at least 1")
-        if mesh_info.get("textured"):
-            print("3D stage: preserving generated UVs and PBR maps for mesh previews...", flush=True)
-            start = max((item["number"] for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
-            material_candidates = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info)]
-        else:
-            print(f"3D stage: generating {count} material candidates on the saved mesh...", flush=True)
-            material_candidates = []
-            start = max((item["number"] for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
-            for material_number in range(start, start + count):
-                material_candidates.append(_generate_material_candidate(root, config, asset_type, asset,
-                                                                          material_number, material_prompt,
-                                                                          paths["processed_mesh"]))
+        attempts = int(pipeline["defaults"].get("model_candidates", 1))
+        if attempts < 1:
+            raise ValueError("Model candidate budget must be at least 1")
+        material_candidates = []
+        viable = []
+        attempt_errors = []
+        attempt_reports = asset.setdefault("model_attempts", [])
+        next_attempt = max((int(item.get("number", 0)) for item in attempt_reports), default=0) + 1
+        next_material = max((int(item["number"]) for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
+        for offset in range(attempts):
+            attempt_number = next_attempt + offset
+            attempt_dir = root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"mesh_{attempt_number:02d}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
+            stage_mesh = attempt_dir / "processed_mesh.blend"
+            mesh_seed = secrets.randbits(32)
+            try:
+                if workflow:
+                    budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+                    generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
+                                   mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"))
+                else:
+                    generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                mesh_info = json.loads(model_metadata.read_text())
+            except Exception as exc:
+                reason = f"mesh generation failed: {exc}"
+                attempt_errors.append(reason)
+                attempt_reports.append({"number": attempt_number,
+                                        "seed": mesh_seed,
+                                        "source": source_mesh.relative_to(root).as_posix() if source_mesh.is_file() else None,
+                                        "generation": model_metadata.relative_to(root).as_posix(),
+                                        "status": "rejected", "error": reason})
+                continue
+            asset["source"].update({"cutout": paths["cutout"].relative_to(root).as_posix(),
+                                    "3d_input": paths["input_3d"].relative_to(root).as_posix(),
+                                    "glb": source_mesh.relative_to(root).as_posix(),
+                                    "processed_mesh": stage_mesh.relative_to(root).as_posix()})
+            if mesh_info.get("textured"):
+                start = next_material
+                generated = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info)]
+            else:
+                generated = [_generate_material_candidate(root, config, asset_type, asset, number,
+                            material_prompt, stage_mesh)
+                             for number in range(next_material, next_material + material_count)]
+            next_material += len(generated)
+            for item in generated:
+                item["mesh_source"] = source_mesh.relative_to(root).as_posix()
+                item["mesh_attempt"] = attempt_number
+            material_candidates.extend(generated)
+            viable = [item for item in generated if item["status"] == "candidate"]
+            attempt_reports.append({"number": attempt_number, "source": source_mesh.relative_to(root).as_posix(),
+                                    "seed": mesh_seed,
+                                    "generation": model_metadata.relative_to(root).as_posix(),
+                                    "source_sha256": _sha256(source_mesh),
+                                    "input_sha256": _sha256(paths["cutout"] if workflow else paths["input_3d"]),
+                                    "status": "qualified" if viable else "rejected",
+                                    "materials": [{"number": item["number"], "status": item["status"],
+                                                   "validation": item.get("validation")} for item in generated]})
+            if viable:
+                break
         previous = asset.get("material_candidates", {}).get("items", [])
-        for item in previous:
-            item["approval"] = "superseded"
-            if item.get("status") == "candidate":
-                item["status"] = "superseded"
         asset["material_candidates"] = {"items": previous + material_candidates, "selected": None}
-        viable = [item for item in material_candidates if item["status"] == "candidate"]
         if not viable:
-            reasons = "; ".join(item.get("error", "validation failed") for item in material_candidates)
-            raise ValueError(f"No valid material candidates generated for {asset['name']}: {reasons}")
+            failures = [error for item in material_candidates for error in item.get("validation", {}).get("errors", [])]
+            raise ValueError(f"No qualified model after {attempts} attempts: " +
+                             ("; ".join(attempt_errors + failures) or "candidate processing failed"))
         first = viable[0]
         asset["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
         asset["generator"] = {"workflow": {"concept": concept_workflow, "mesh": mesh_info.get("workflow"),
                                              "material": (first.get("generator") or {}).get("workflow")},
                                "model": mesh_info.get("model"),
                                "seed": {"concept": candidate.get("seed"), "mesh": mesh_info.get("seed")},
-                               "quality": mesh_info.get("quality") or (candidate.get("generator") or {}).get("quality")}
+                               "quality": mesh_info.get("quality") or (candidate.get("generator") or {}).get("quality"),
+                               "model_attempts": attempt_reports}
         asset["material_prompt"] = first["prompt"]
         asset["validation"] = {"status": "not_run", "errors": [], "warnings": [
             "Choose a material candidate and approve it before using the Unity output."], "measured": {}}
@@ -361,11 +413,14 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         save_manifest(root / pipeline["manifest"], manifest)
         print("Material candidate previews:")
         for item in material_candidates:
-            print(f"  {item['number']}: {item['outputs'].get('preview_front', item['path'])} ({item['status']})")
+            print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item['path'])} ({item['status']})")
         return {"status": asset["status"], "material_candidates": material_candidates}
     except Exception as exc:
         asset["status"] = "failed"
-        asset.setdefault("validation", {"status": "not_run", "warnings": [], "measured": {}})
-        asset["validation"].setdefault("warnings", []).append(f"Pipeline stopped: {exc}")
+        validation = asset.setdefault("validation", {})
+        validation["status"] = "failed"
+        validation.setdefault("errors", []).append(f"Pipeline stopped: {exc}")
+        validation.setdefault("warnings", [])
+        validation.setdefault("measured", {})
         save_manifest(root / pipeline["manifest"], manifest)
         raise

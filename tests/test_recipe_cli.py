@@ -17,26 +17,37 @@ class RecipeCliTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "game"
         (self.root / "Assets").mkdir(parents=True)
         init_project(self.root)
+        (self.root / "ai/recipes/test_concepts.yaml").write_text("""id: test_concepts
+version: 1
+description: Supporting concept images for a 3D asset set.
+children:
+  - id: health
+    type: concept
+    description: Red concept reference for a handheld scanner.
+  - id: mana
+    type: concept
+    description: Blue concept reference for a handheld scanner.
+""")
 
     def tearDown(self):
         self.temp.cleanup()
 
     def test_recipe_subcommands_parse_with_project_selection(self):
-        run = parse_args(["--project", str(self.root), "recipe", "run", "starter_icons", "--name", "hud"])
-        resume = parse_args(["--project", str(self.root), "recipe", "resume", "hud"])
-        regenerate = parse_args(["--project", str(self.root), "recipe", "regenerate", "hud", "health"])
+        run = parse_args(["--project", str(self.root), "recipe", "run", "test_concepts", "--name", "concept_pair"])
+        resume = parse_args(["--project", str(self.root), "recipe", "resume", "concept_pair"])
+        regenerate = parse_args(["--project", str(self.root), "recipe", "regenerate", "concept_pair", "health"])
 
         self.assertEqual((run.command, run.recipe_action, run.recipe_name, run.name),
-                         ("recipe", "run", "starter_icons", "hud"))
-        self.assertEqual((resume.recipe_action, resume.name), ("resume", "hud"))
+                         ("recipe", "run", "test_concepts", "concept_pair"))
+        self.assertEqual((resume.recipe_action, resume.name), ("resume", "concept_pair"))
         self.assertEqual((regenerate.recipe_action, regenerate.name, regenerate.child_id),
-                         ("regenerate", "hud", "health"))
+                         ("regenerate", "concept_pair", "health"))
 
     def test_recipe_list_and_run_use_project_data_and_persist_manifest(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.assertEqual(main(["--project", str(self.root), "recipe", "list"]), 0)
-        self.assertIn("starter_icons", output.getvalue())
+        self.assertIn("test_concepts", output.getvalue())
 
         def fake_pipeline(root, config, style, asset_type, child, manifest, key):
             candidate = {"number": 1, "path": f"ai/assets/candidates/{child['type']}/{manifest['assets'][key]['name']}/candidate_01.png",
@@ -48,15 +59,15 @@ class RecipeCliTests(unittest.TestCase):
             return [candidate]
 
         with patch.dict(recipes.PIPELINE_HANDLERS, {"image": fake_pipeline}), contextlib.redirect_stdout(io.StringIO()):
-            result = main(["--project", str(self.root), "recipe", "run", "starter_icons", "--name", "hud"])
+            result = main(["--project", str(self.root), "recipe", "run", "test_concepts", "--name", "concept_pair"])
 
         self.assertEqual(result, 0)
         manifest = load_manifest(self.root / "ai/assets/manifest.json")
-        recipe = manifest["assets"]["recipe:hud"]
+        recipe = manifest["assets"]["recipe:concept_pair"]
         self.assertEqual(recipe["status"], "awaiting_approval")
         self.assertEqual(len(recipe["artifacts"]), 2)
-        self.assertIn("icon:hud_mana", manifest["assets"])
-        self.assertEqual(manifest["assets"]["icon:hud_health"]["parent_id"], recipe["id"])
+        self.assertIn("concept:concept_pair_mana", manifest["assets"])
+        self.assertEqual(manifest["assets"]["concept:concept_pair_health"]["parent_id"], recipe["id"])
 
     def test_recipe_resume_refreshes_aggregate_after_atomic_child_approval(self):
         def fake_pipeline(root, config, style, asset_type, child, manifest, key):
@@ -70,27 +81,27 @@ class RecipeCliTests(unittest.TestCase):
             return [candidate]
 
         with patch.dict(recipes.PIPELINE_HANDLERS, {"image": fake_pipeline}), contextlib.redirect_stdout(io.StringIO()):
-            main(["--project", str(self.root), "recipe", "run", "starter_icons", "--name", "hud"])
+            main(["--project", str(self.root), "recipe", "run", "test_concepts", "--name", "concept_pair"])
 
         manifest_path = self.root / "ai/assets/manifest.json"
         manifest = load_manifest(manifest_path)
-        health = manifest["assets"]["icon:hud_health"]
+        health = manifest["assets"]["concept:concept_pair_health"]
         health["status"] = "ready"
         health["candidates"]["items"][0]["approval"] = "approved"
-        health["outputs"]["image"] = "Assets/Art/Generated/Icons/approved.png"
+        health["outputs"]["image"] = "Assets/Art/Generated/Concepts/approved.png"
         approved_output = self.root / health["outputs"]["image"]
         approved_output.parent.mkdir(parents=True, exist_ok=True)
         approved_output.write_bytes(b"approved")
         save_manifest(manifest_path, manifest)
 
         with contextlib.redirect_stdout(io.StringIO()):
-            result = main(["--project", str(self.root), "recipe", "resume", "hud"])
+            result = main(["--project", str(self.root), "recipe", "resume", "concept_pair"])
 
         self.assertEqual(result, 0)
-        recipe = load_manifest(manifest_path)["assets"]["recipe:hud"]
+        recipe = load_manifest(manifest_path)["assets"]["recipe:concept_pair"]
         self.assertEqual(recipe["recipe_instance"]["stages"]["health"]["status"], "approved")
         self.assertEqual(recipe["artifacts"]["health.candidate.1"]["approval"]["status"], "approved")
-        self.assertEqual(recipe["artifacts"]["health.output.image"]["type"], "image.icon")
+        self.assertEqual(recipe["artifacts"]["health.output.image"]["type"], "image.concept")
 
 
 if __name__ == "__main__":

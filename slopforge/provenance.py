@@ -17,7 +17,7 @@ def generator_provenance(workflow, metadata=None):
         "seed": metadata.get("seed"),
         "prompt_id": metadata.get("prompt_id"),
     }
-    for field in ("quality", "references_used", "workflow_sha256"):
+    for field in ("quality", "references_used", "workflow_sha256", "workflow_requirements"):
         if field in metadata and (field != "workflow_sha256" or metadata[field] is not None):
             result[field] = metadata[field]
     return result

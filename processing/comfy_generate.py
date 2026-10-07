@@ -8,6 +8,7 @@ from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
 from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
+from slopforge.workflow_requirements import workflow_requirements_identity
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 
@@ -63,6 +64,13 @@ def bind_reference_inputs(client, workflow, references, slots):
                      "strength": reference["strength"], "comfyui_input": image_name, **provenance})
     return used
 
+def apply_seed(workflow, seed):
+    for node in workflow.values():
+        inputs = node.get("inputs", {}) if isinstance(node, dict) else {}
+        for key in ("seed", "noise_seed"):
+            if key in inputs:
+                inputs[key] = seed
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--workflow", required=True)
@@ -84,6 +92,7 @@ def main():
         sys.exit(1)
 
     workflow = json.loads(workflow_path.read_text())
+    workflow_requirements = workflow_requirements_identity(workflow_path, workflow)
     if args.workflow_inputs:
         overrides = json.loads(args.workflow_inputs)
         apply_workflow_inputs(workflow, overrides)
@@ -118,13 +127,12 @@ def main():
         sys.exit(1)
 
     workflow[save_id]["inputs"]["filename_prefix"] = args.prefix
-    samplers = [node for node in workflow.values() if node.get("class_type") == "KSampler"]
     seed = args.seed
     if seed is not None:
-        for node in samplers:
-            node.setdefault("inputs", {})["seed"] = seed
-    elif samplers:
-        seed = samplers[0].get("inputs", {}).get("seed")
+        apply_seed(workflow, seed)
+    else:
+        seed = next((node.get("inputs", {}).get(key) for node in workflow.values()
+                     for key in ("seed", "noise_seed") if key in node.get("inputs", {})), None)
 
     models = []
     for node in workflow.values():
@@ -147,21 +155,26 @@ def main():
         print(f"ComfyUI generation failed: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    images = [item for item in client.list_outputs(history) if item["filename"].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))]
+    extensions = (".png", ".jpg", ".jpeg", ".webp")
+    outputs = [item for item in client.list_outputs(history)
+               if item["filename"].lower().endswith(extensions)]
 
-    if not images:
-        print("No images found in ComfyUI output.", file=sys.stderr)
+    if not outputs:
+        print("No image outputs found in ComfyUI output.", file=sys.stderr)
         sys.exit(1)
 
     dest = Path(args.dest)
-    client.download_output(images[0], dest)
+    client.download_output(outputs[0], dest)
+    outputs = [{"index": 0, "source_filename": outputs[0]["filename"], "path": dest.name}]
 
     if args.metadata:
         quality = json.loads(args.quality) if args.quality else None
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed,
                                        "workflow_sha256": workflow_sha256(workflow_path),
-                                       "prompt_id": prompt_id, "references_used": references_used,
-                                       "quality": quality})
+                                       "workflow_requirements": workflow_requirements,
+                                       "prompt_id": prompt_id, "output_kind": "image",
+                                       "references_used": references_used,
+                                       "outputs": outputs, "quality": quality})
 
     print(dest)
 

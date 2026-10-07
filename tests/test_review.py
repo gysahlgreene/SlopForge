@@ -9,16 +9,16 @@ class ReviewBoardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        (self.root / "ai/assets/candidates/icon/badge").mkdir(parents=True)
-        (self.root / "ai/assets/candidates/icon/badge/candidate.png").write_bytes(b"image")
+        (self.root / "ai/assets/candidates/concept/badge").mkdir(parents=True)
+        (self.root / "ai/assets/candidates/concept/badge/candidate.png").write_bytes(b"image")
         self.manifest = {"assets": {
             "recipe:pack": {"id": "pack-id", "name": "pack", "type": "recipe", "status": "partial",
                             "recipe_instance": {"stages": {"badge": {"asset_id": "badge-id", "status": "failed"}}}},
-            "icon:badge": {"id": "badge-id", "name": "badge", "type": "icon", "status": "candidate",
-                           "parent_id": "pack-id", "dependencies": [], "description": "Tiny icon",
+            "concept:badge": {"id": "badge-id", "name": "badge", "type": "concept", "status": "candidate",
+                           "parent_id": "pack-id", "dependencies": [], "description": "Tiny concept",
                            "generator": {"workflow": "z-image.json", "model": "z_image_turbo", "seed": 5},
                            "candidates": {"selected": None, "items": [{"number": 1,
-                               "path": "ai/assets/candidates/icon/badge/candidate.png", "status": "candidate",
+                               "path": "ai/assets/candidates/concept/badge/candidate.png", "status": "candidate",
                                "prompt": "<script>alert('x')</script>", "seed": 123,
                                "variation": {"silhouette": "wide <unsafe>"},
                                "generator": {"workflow": "z-image.json", "model": "turbo"}},
@@ -30,7 +30,7 @@ class ReviewBoardTests(unittest.TestCase):
     def test_board_renders_candidates_missing_files_pack_links_provenance_and_safe_cli_actions(self):
         page = generate_review_board(self.root, self.manifest)
         html = page.read_text()
-        self.assertIn('src="ai/assets/candidates/icon/badge/candidate.png"', html)
+        self.assertIn('src="ai/assets/candidates/concept/badge/candidate.png"', html)
         self.assertIn("Missing file: missing.png", html)
         self.assertIn("pack", html)
         self.assertIn("z-image.json", html)
@@ -41,13 +41,13 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertNotIn("<script>alert('x')</script>", html)
         self.assertIn("approve badge 1", html)
         self.assertIn("reject badge 1", html)
-        self.assertIn("generate icon badge", html)
+        self.assertIn("generate concept badge", html)
         self.assertIn("inspect badge", html)
 
     def test_board_output_and_asset_paths_stay_inside_project(self):
         with self.assertRaisesRegex(ValueError, "within the project"):
             generate_review_board(self.root, self.manifest, "../outside.html")
-        self.manifest["assets"]["icon:badge"]["candidates"]["items"][0]["path"] = "../../private.png"
+        self.manifest["assets"]["concept:badge"]["candidates"]["items"][0]["path"] = "../../private.png"
         with self.assertRaisesRegex(ValueError, "within the project"):
             generate_review_board(self.root, self.manifest)
 

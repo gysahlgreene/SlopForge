@@ -1,0 +1,174 @@
+{
+  "status": "passed_with_warnings",
+  "errors": [],
+  "warnings": [
+    "mesh contains 233 disconnected components; inspect for detached geometry",
+    "mesh has a very small disconnected component; inspect for debris",
+    "no image textures are connected to mesh materials"
+  ],
+  "measured": {
+    "mesh_objects": 1,
+    "vertex_count": 35918,
+    "face_count": 39120,
+    "bounds_min": [
+      -0.31408244371414185,
+      -0.11208051443099976,
+      -0.5001488924026489
+    ],
+    "bounds_max": [
+      0.3143099844455719,
+      0.1098509281873703,
+      0.49570244550704956
+    ],
+    "dimensions": [
+      0.6283924281597137,
+      0.22193144261837006,
+      0.9958513379096985
+    ],
+    "origins": [
+      [
+        0.0,
+        0.0,
+        0.0
+      ]
+    ],
+    "objects": [
+      {
+        "name": "Mesh_0",
+        "bounds_min": [
+          -0.31408244371414185,
+          -0.11208051443099976,
+          -0.5001488924026489
+        ],
+        "bounds_max": [
+          0.3143099844455719,
+          0.1098509281873703,
+          0.49570244550704956
+        ],
+        "dimensions": [
+          0.6283924281597137,
+          0.22193144261837006,
+          0.9958513379096985
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "uv_layers": 1,
+    "material_count": 1,
+    "image_texture_count": 0,
+    "missing_textures": [],
+    "transforms_applied": true,
+    "normal_count": 39120,
+    "zero_normal_count": 0,
+    "degenerate_face_count": 10,
+    "component_count": 233,
+    "boundary_edge_count": 4,
+    "nonmanifold_edge_count": 1,
+    "face_budget": 60000
+  },
+  "animation_readiness": {
+    "status": "fail",
+    "approval": {
+      "status": "pending"
+    },
+    "measured": {
+      "mesh_objects": 1,
+      "vertex_count": 35918,
+      "face_count": 39120,
+      "bounds_min": [
+        -0.31408244371414185,
+        -0.11208051443099976,
+        -0.5001488924026489
+      ],
+      "bounds_max": [
+        0.3143099844455719,
+        0.1098509281873703,
+        0.49570244550704956
+      ],
+      "dimensions": [
+        0.6283924281597137,
+        0.22193144261837006,
+        0.9958513379096985
+      ],
+      "origins": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "objects": [
+        {
+          "name": "Mesh_0",
+          "bounds_min": [
+            -0.31408244371414185,
+            -0.11208051443099976,
+            -0.5001488924026489
+          ],
+          "bounds_max": [
+            0.3143099844455719,
+            0.1098509281873703,
+            0.49570244550704956
+          ],
+          "dimensions": [
+            0.6283924281597137,
+            0.22193144261837006,
+            0.9958513379096985
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation_degrees": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "uv_layers": 1,
+      "material_count": 1,
+      "image_texture_count": 0,
+      "missing_textures": [],
+      "transforms_applied": true,
+      "normal_count": 39120,
+      "zero_normal_count": 0,
+      "degenerate_face_count": 10,
+      "component_count": 233,
+      "boundary_edge_count": 4,
+      "nonmanifold_edge_count": 1,
+      "face_budget": 60000
+    },
+    "reasons": [
+      "10 zero-area faces",
+      "4 boundary edges",
+      "1 non-manifold edges",
+      "233 disconnected mesh components"
+    ],
+    "checks": {
+      "face_budget": 60000,
+      "prototype_scale_meters": [
+        0.05,
+        5.0
+      ],
+      "boundary_edge_count": 4,
+      "nonmanifold_edge_count": 1,
+      "component_count": 233,
+      "transforms_applied": true
+    },
+    "limitations": [
+      "Topology and bounds do not establish that limbs are separated, anatomy is suitable, or skin weights will deform well.",
+      "Review representative poses and deformations after rigging; a pass is not a guarantee of animation quality."
+    ]
+  }
+}

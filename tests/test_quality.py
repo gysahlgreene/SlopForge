@@ -80,7 +80,7 @@ asset_pipeline:
             apply_workflow_inputs(graph, {"8": {"steps": 12}})
 
     def test_generate_cli_and_candidate_provenance_expose_quality(self):
-        args = parse_args(["generate", "icon", "badge", "A badge", "--quality-tier", "draft"])
+        args = parse_args(["generate", "concept", "badge", "A badge", "--quality-tier", "draft"])
         self.assertEqual(args.quality_tier, "draft")
         provenance = generator_provenance("image.json", {"quality": {"tier": "draft", "settings": {}}})
         self.assertEqual(provenance["quality"]["tier"], "draft")
@@ -100,17 +100,19 @@ asset_pipeline:
                          {"tier": "draft", "settings": config["asset_pipeline"]["quality_settings"]})
 
     def test_model_backend_passes_quality_inputs_to_three_d_processor(self):
-        config = {"asset_pipeline": {"tools": {"hunyuan_checkpoint": "model.safetensors"}, "workflows": {},
+        config = {"asset_pipeline": {"tools": {"hunyuan_checkpoint": "model.safetensors"},
+                    "workflows": {"model": "trellis2_image_to_model_h100_api.json"},
                     "selected_quality_tier": "final",
                     "quality_settings": {"workflow_inputs": {"model": {
-                        "hunyuan3d_image_to_model_api.json": {"10": {"resolution": 1024}}}}}}}
+                        "trellis2_image_to_model_h100_api.json": {"10": {"resolution": 1024}}}}}}}
         with patch("slopforge.backends.comfyui.subprocess.run") as run:
             generate_model(self.root, config, self.root / "concept.png", "statue", self.root / "statue.glb",
-                           self.root / "mesh.json", 9)
+                           self.root / "mesh.json", 9, voxel_resolution=120)
         command = run.call_args.args[0]
         self.assertEqual(json.loads(command[command.index("--workflow-inputs") + 1]),
                          {"10": {"resolution": 1024}})
         self.assertEqual(json.loads(command[command.index("--quality") + 1])["tier"], "final")
+        self.assertEqual(command[command.index("--voxel-resolution") + 1], "120")
 
 
 if __name__ == "__main__":

@@ -3,8 +3,8 @@
 Quality tiers select configured generation budgets independently of the ComfyUI host. Use `--quality-tier draft|normal|final` for a one-off generation, or set `asset_pipeline.quality_tier` for the project. `SLOPFORGE_QUALITY_TIER` overrides the project default; an explicit CLI option has highest priority.
 
 ```sh
-slopforge --project ~/UnityProjects/MyGame generate icon fuel_cell "Lunar refinery fuel cell" --quality-tier draft
-slopforge --project ~/UnityProjects/MyGame recipe run starter_icons --name hud --quality-tier normal
+slopforge --project ~/UnityProjects/MyGame generate prop fuel_cell "Lunar refinery fuel cell" --quality-tier draft
+slopforge --project ~/UnityProjects/MyGame recipe run starter_environment_kit --name refinery --quality-tier normal
 ```
 
 The initialized project defaults to one candidate per atomic stage for `draft`, existing project counts for `normal`, and six image / three model / three material candidates for `final`. These are editable candidate budgets, not runtime/cost estimates. Explicit `--count` values continue to override the tier. Existing model face budgets can be overridden per tier with `model_budgets`.
@@ -33,5 +33,7 @@ quality_tiers:
 ```
 
 The tier's `workflow_inputs` shape is `stage -> workflow basename -> node ID -> input values`. SlopForge validates that nodes and input names exist, then applies the configured values before upload/queue. Compute profiles independently choose compatible workflow files for Mac/H100 or other hosts. When a configured estimate is available, place it under `estimate`; SlopForge records it as supplied and does not invent prices or runtimes.
+
+For model approval, `model_candidates` is the maximum number of mesh attempts. Every attempt keeps its raw GLB, generation metadata, source hashes, and material validation reports under the candidate directory. Promotion stops at the first structurally qualified candidate and still waits for human material approval. Blender inspection must include geometry, scale, UV, material, component, topology, texture, and front/side/rear/three-quarter preview evidence; incomplete reports fail closed. Character readiness, deformation review, and Unity animation validation remain separate gates before calling a character game-ready.
 
 Recipes inherit the run tier. A recipe may set top-level `quality_tier`, and individual children may override it. The selected run tier and each child's effective tier are stored for resume/reproducibility. Candidate and mesh provenance records the effective tier/settings, including workflow input overrides; the review board shows these values under provenance.
