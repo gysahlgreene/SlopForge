@@ -105,7 +105,8 @@ asset_pipeline:
                     "selected_quality_tier": "final",
                     "quality_settings": {"workflow_inputs": {"model": {
                         "trellis2_image_to_model_h100_api.json": {"10": {"resolution": 1024}}}}}}}
-        with patch("slopforge.backends.comfyui.subprocess.run") as run:
+        with patch("slopforge.backends.comfyui.subprocess.run") as run, \
+                patch("slopforge.backends.comfyui.blender_executable", return_value="blender"):
             generate_model(self.root, config, self.root / "concept.png", "statue", self.root / "statue.glb",
                            self.root / "mesh.json", 9, voxel_resolution=120)
         command = run.call_args.args[0]
