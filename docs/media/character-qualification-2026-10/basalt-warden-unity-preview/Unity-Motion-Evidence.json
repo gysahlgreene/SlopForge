@@ -4,10 +4,10 @@
   "source_model": "Basalt-Warden.glb",
   "source_sha256": "7275e9aec17c81e97dbf65268ea04f35cae39c934e45e472c6df1b25d4d09c43",
   "export": {
-    "file": "Basalt-Warden-Unity-Humanoid-v3.fbx",
+    "file": "Basalt-Warden-Unity-Humanoid-Arms-v4.fbx",
     "status": "complete",
     "deform_bones": 160,
-    "weighted_vertex_groups": 99,
+    "weighted_vertex_groups": 33,
     "blender_mesh_vertices": 28455,
     "unity_avatar_is_human": true,
     "unity_avatar_is_valid": true,
@@ -28,8 +28,8 @@
     "idle_normalized_time": 0.2,
     "walk_normalized_time": 0.25,
     "unity_mesh_vertices": 49886,
-    "max_vertex_displacement_m": 0.379742146,
-    "mean_vertex_displacement_m": 0.104835704,
+    "max_vertex_displacement_m": 0.405220926,
+    "mean_vertex_displacement_m": 0.1078824898,
     "vertices_moved_over_0_0001_m": 49886,
     "method": "Sample each Humanoid state in Unity, bake SkinnedMeshRenderer, compare corresponding local-space vertices."
   },

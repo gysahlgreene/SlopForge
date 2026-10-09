@@ -23,8 +23,8 @@ Start with the user guides for installation, asset generation, review, and Unity
 
 ## Examples and qualification evidence
 
-- [Basalt Warden](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed deformation, valid Humanoid Avatar, and animation evidence.
-- [Basalt Warden Unity movement preview](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity playback screenshots, clip evidence, and current rig limitations.
+- [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity walk playback, motion measurements, and current rig limitations.
+- [Diagnostic humanoid benchmark](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed body deformation, valid Humanoid Avatar, and animation evidence.
 
 ## For contributors
 

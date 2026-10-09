@@ -1,6 +1,6 @@
 # 3D character rigging
 
-**Current benchmark:** [Basalt Warden](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) has approved body deformation, a valid Unity Humanoid Avatar, and evaluated diagnostic animation. Rigging providers remain experimental; full material/input qualification and third-party motion validation are outstanding.
+**Current references:** [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) demonstrates Unity walk playback; arm deformation and source topology remain under review. The [diagnostic humanoid benchmark](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) has approved body deformation and evaluated animation. Rigging providers remain experimental; broad deformation and production qualification are outstanding.
 
 ## Animation-readiness gate
 

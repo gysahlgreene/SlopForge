@@ -10,18 +10,14 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 ## See it working
 
-| Reviewed humanoid | Prop delivery |
+| Humanoid test 1 | Prop test 2 |
 | :---: | :---: |
-| ![Basalt Warden performing the body-deformation test](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/motion-test.gif) | ![Generated power relay imported into Unity](img/power-relay-unity.png) |
-| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Example commands →](docs/EXAMPLES.md) |
+| ![Humanoid test 1 walking in Unity](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif) | ![Prop test 2 imported into Unity](img/power-relay-unity.png) |
+| **Humanoid test 1** — valid Unity Humanoid Avatar with a looping walk preview. Movement is demonstrated; arm deformation remains under review. [Evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) | **Prop test 2** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Example commands →](docs/EXAMPLES.md) |
 
 These are measured examples. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
-### Current Unity movement preview — 2026-10-09
-
-![Basalt Warden retargeted to the Unity walk cycle](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif)
-
-This is a separate playtest of the older textured Basalt Warden: a valid Unity Humanoid Avatar, looping idle and walk clips, and a WASD movement scene. Unity measured skinned-mesh movement across all 49,886 imported vertices, but this does not establish good arm deformation. The idle clip puts the hands behind the back; arm deformation remains under review. [Idle screenshot](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Idle-GameView.png) · [Walk pose](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Side.png) · [Evidence and limits](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md).
+The Unity preview uses the latest arm-fit candidate and a retargeted walk clip. Unity measured movement on all 49,886 imported vertices; this confirms playback, not deformation quality. [Idle screenshot](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Idle-GameView.png) · [Walk pose](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Side.png) · [Evidence and limits](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md).
 
 ## The workflow
 
@@ -79,11 +75,11 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | --- | --- |
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
-| Humanoid rigging | One generated Basalt candidate has approved body deformation and valid Unity Humanoid evaluation. A separate older Warden now has a valid Humanoid movement preview; source topology still needs cleanup. |
-| Third-party motion retargeting | One Unity preview demonstrates looping idle/walk playback and measured skinned-mesh deformation. Broader movement, attack, and production qualification remain open. |
+| Humanoid rigging | Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. Arm deformation and source topology still need review. A separate diagnostic rig has approved body deformation. |
+| Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
 | Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 
-Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprites; the pipeline remains a qualified asset workflow rather than a game engine.
+Full finger animation is not available on the diagnostic humanoid rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprites; the pipeline remains a qualified asset workflow rather than a game engine.
 
 ## Find your way around
 
