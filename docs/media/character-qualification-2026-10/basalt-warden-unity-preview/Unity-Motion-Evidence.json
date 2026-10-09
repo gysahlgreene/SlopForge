@@ -42,9 +42,9 @@
     "idle_screenshot": "Unity-Idle-GameView.png",
     "walk_pose": "Unity-Walk-Side.png",
     "walk_cycle_gif": "Unity-Walk-Cycle.gif",
-    "walk_cycle_samples": 60,
-    "walk_cycle_frame_rate_fps": 20,
-    "walk_cycle_duration_seconds": 3,
+    "walk_cycle_samples": 120,
+    "walk_cycle_frame_rate_fps": 15,
+    "walk_cycle_duration_seconds": 8,
     "walk_cycle_source": "Direct Unity Game view screen recording"
   }
 }
