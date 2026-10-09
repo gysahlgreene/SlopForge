@@ -367,6 +367,32 @@ class SlopForgeTests(unittest.TestCase):
                 self.assertEqual(record["status"], "failed")
                 self.assertEqual(record["candidates"]["selected"], 1)
 
+    def test_broken_mask_workflow_stops_before_processing_or_candidate_retries(self):
+        config, style = load_project(self.root), load_style(self.root)
+        recipe = load_taxonomy(self.root)["prop"]
+        record = new_record("prop", "relic", "Relic", style, {"strategy": "text_only"})
+        manifest = {"assets": {"prop:relic": record}}
+
+        def backend(_prompt, destination, seed, metadata):
+            Image.new("RGB", (32, 32), "white").save(destination)
+
+        generate_candidates(self.root, config, recipe, style, "relic", "Relic", 1,
+                            manifest, "prop:relic", backend)
+        workflow = self.root / "broken-model.json"
+        workflow.write_text(json.dumps({
+            "image": {"class_type": "LoadImage", "inputs": {}},
+            "crop": {"class_type": "ImageCropToMask", "inputs": {"masks": ["image", 1]}},
+        }))
+        config["_quality_base_pipeline"]["workflows"]["model"] = str(workflow)
+        config["_compute_profile_workflows"] = {}
+        with patch("slopforge.pipelines.model.subprocess.run") as processing, \
+                patch("slopforge.pipelines.model.generate_model") as generation:
+            with self.assertRaisesRegex(ValueError, "crop.*InvertMask"):
+                approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1)
+        processing.assert_not_called()
+        generation.assert_not_called()
+        self.assertIsNone(record["candidates"]["selected"])
+
     def test_model_approval_uses_agent_material_prompt_and_records_mesh_previews(self):
         config, style = load_project(self.root), load_style(self.root)
         config = select_quality_tier(config, "normal")

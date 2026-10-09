@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from .backends.comfyui import ComfyUIClient
+from .backends.comfyui import ComfyUIClient, workflow_mask_errors
 from .provenance import workflow_sha256
 
 
@@ -75,7 +75,7 @@ def load_workflow_requirements(workflow_path):
 
 def validate_workflow_requirements(workflow_path, workflow, manifest):
     """Return static sidecar/graph mismatches. Backend availability is checked separately."""
-    problems = []
+    problems = workflow_mask_errors(workflow)
     expected_hash = manifest.get("workflow_sha256")
     if expected_hash and workflow_sha256(workflow_path) != expected_hash:
         problems.append("workflow_sha256 does not match the selected workflow file")

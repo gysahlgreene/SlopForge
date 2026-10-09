@@ -83,6 +83,8 @@ Full finger animation is not available on the diagnostic humanoid rig. Reference
 
 ## Find your way around
 
+Contributors: read [AGENTS.md](AGENTS.md), the [product contract](docs/PRODUCT_CONTRACT.md), [pipeline contract](docs/PIPELINE_CONTRACT.md), and [current state](CURRENT_STATE.md). Run `make verify` before declaring implementation complete.
+
 | Directory | Purpose |
 | --- | --- |
 | `slopforge/` | CLI, asset lifecycle, recipes, providers, and Unity integration |

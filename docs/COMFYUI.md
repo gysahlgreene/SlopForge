@@ -2,6 +2,18 @@
 
 SlopForge treats ComfyUI as an inference service. The same HTTP API client handles local and networked ComfyUI; changing the service URL does not change the generation pipeline.
 
+## Model input masks
+
+`LoadImage` outputs a transparency mask (`1 - alpha`), while `ImageCropToMask`
+requires foreground (`alpha`). Model graphs must explicitly insert `InvertMask`
+between them. Automatic polarity guessing erased narrow characters and caused
+near-black textures; preflight now rejects that connection. Bundled model runs
+retain the actual `conditioning.png` and reference it in generation metadata.
+Inspect it before debugging downstream materials. Existing project graph overrides
+take precedence: update an unchanged override and its requirements sidecar from
+the bundled pair, or correct custom graph wiring and provenance explicitly.
+See [the regression evidence](media/texture-mask-recovery-2026-10/README.md).
+
 ## Choose where ComfyUI runs
 
 Local ComfyUI is the default:

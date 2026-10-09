@@ -145,6 +145,25 @@ class ComfyUIServiceTests(unittest.TestCase):
                 ComfyUIClient("http://remote:8188").validate_workflow({"1": {
                     "class_type": "UNETLoader", "inputs": {"unet_name": "missing.safetensors"}}})
 
+    def test_transparency_mask_cannot_feed_foreground_crop_before_network_or_queue(self):
+        workflow = {
+            "image": {"class_type": "LoadImage", "inputs": {"image": "narrow.png"}},
+            "crop": {"class_type": "ImageCropToMask", "inputs": {"masks": ["image", 1]}},
+        }
+        with patch("slopforge.backends.comfyui.urlopen") as request:
+            with self.assertRaisesRegex(RuntimeError, "crop.*InvertMask"):
+                ComfyUIClient("http://remote:8188").queue_workflow(workflow)
+        request.assert_not_called()
+
+    def test_explicit_foreground_mask_passes_validation(self):
+        workflow = {
+            "image": {"class_type": "LoadImage", "inputs": {"image": "narrow.png"}},
+            "foreground": {"class_type": "InvertMask", "inputs": {"mask": ["image", 1]}},
+            "crop": {"class_type": "ImageCropToMask", "inputs": {"masks": ["foreground", 0]}},
+        }
+        info = {node["class_type"]: {} for node in workflow.values()}
+        self.assertEqual(ComfyUIClient("http://remote:8188").validate_workflow(workflow, info), info)
+
     def test_workflow_validation_checks_background_removal_model_choices(self):
         body = json.dumps({"LoadBackgroundRemovalModel": {"input": {"required": {
             "bg_removal_name": [["birefnet.safetensors"], {}]}}}}).encode()

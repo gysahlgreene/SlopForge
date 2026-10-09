@@ -1,10 +1,10 @@
 schema_version: 1
 id: model.pixal3d.h100
-version: 1
+version: 2
 capabilities:
   - image_to_3d
   - pbr_texturing
-workflow_sha256: f2127087a591ba20139faaf42042bdb3ad117da9a2963db4b07d8184c4e544ad
+workflow_sha256: cb22fbe4d41011740a4ea4d9ecaf1d1f50119cc5d238accb12b16e765e80d65c
 nodes:
   - {class: ApplyTextureToMesh, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
   - {class: BakeTextureFromVoxel, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
@@ -13,6 +13,7 @@ nodes:
   - {class: DecimateMesh, source: ComfyUI core, revision: unknown}
   - {class: EmptyTrellis2LatentStructure, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
   - {class: ImageCropToMask, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: InvertMask, source: ComfyUI core, revision: unknown}
   - {class: KSampler, source: ComfyUI core, revision: unknown}
   - {class: LoadImage, source: ComfyUI core, revision: unknown}
   - {class: MeshSmoothNormals, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
@@ -56,6 +57,7 @@ inputs:
   - {name: image, type: image}
   - {name: seed, type: integer}
 outputs:
+  - {name: conditioning_image, type: image/png}
   - {name: model, type: model/glb}
   - {name: material_maps, type: image/png}
 profiles:

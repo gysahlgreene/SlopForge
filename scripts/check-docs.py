@@ -7,11 +7,10 @@ from pathlib import Path
 from PIL import Image
 
 root = Path(__file__).resolve().parents[1]
-tracked = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
-# Include new guides before they have been staged.
-paths = {root / p for p in tracked if p}
-paths.update(root.glob('*.md'))
-paths.update((root / 'docs').rglob('*.md'))
+# Include new public files while respecting ignored private working notes.
+listed = subprocess.check_output(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+                                 cwd=root).decode().split('\0')
+paths = {root / p for p in listed if p}
 errors = []
 for path in sorted(paths):
     if not path.is_file():

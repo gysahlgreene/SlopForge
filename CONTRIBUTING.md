@@ -2,18 +2,22 @@
 
 SlopForge focuses on reviewed 3D game assets, character rigging, and Unity delivery. Start with the [architecture](docs/ARCHITECTURE.md), [documentation index](docs/README.md), and [open issues](https://github.com/gysahlgreene/SlopForge/issues).
 
+Agents working on SlopForge must follow [AGENTS.md](AGENTS.md): discoveries must become durable pipeline fixes, validation, regression checks, or documented requirements before production resumes.
+
 ## Development
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
-python -m pytest -q
-python scripts/check-docs.py
-git diff --check
+make verify
 ```
 
 Normal tests use local fixtures and mocks. Blender tests run when a supported Blender installation is available. GPU, Unity, and external rigging integrations are opt-in; their environment switches are documented in the test modules. Passing offline tests does not qualify generated artwork or replace human review.
+
+Read the [product contract](docs/PRODUCT_CONTRACT.md), [pipeline contract](docs/PIPELINE_CONTRACT.md), [roadmap](ROADMAP.md), and [current state](CURRENT_STATE.md) before substantial work. Complete implementation changes only after `make verify` passes; report skipped coverage. Set `PYTHON` when using a specific interpreter, for example `make verify PYTHON=.venv/bin/python`.
+
+`COMFYUI_URL=<service-url> make verify-live` explicitly runs service preflight and real 2D/3D inference, followed by local Blender preparation. It needs the configured models and Blender (`BLENDER_BIN` can select the executable), consumes inference resources, and does not verify Unity playback. Run the native crop regression with ComfyUI's Python: `python scripts/check_comfy_mask_polarity.py <ComfyUI-directory>`.
 
 ## Keep changes reviewable
 

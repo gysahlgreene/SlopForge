@@ -77,6 +77,32 @@ class WorkflowRequirementsTests(unittest.TestCase):
         self.assertFalse(requirements_path(self.workflow_path).exists())
         self.assertIsNone(load_workflow_requirements(self.workflow_path))
 
+    def test_bundled_model_crops_explicitly_convert_transparency_to_foreground(self):
+        from slopforge.paths import tool_root
+
+        for path in (tool_root() / "workflows").glob("*image_to_model*api.json"):
+            workflow = json.loads(path.read_text())
+            for node in workflow.values():
+                if node.get("class_type") != "ImageCropToMask":
+                    continue
+                with self.subTest(workflow=path.name):
+                    source, output = node["inputs"]["masks"]
+                    self.assertEqual(output, 0)
+                    foreground = workflow[source]
+                    self.assertEqual(foreground["class_type"], "InvertMask")
+                    image, mask_output = foreground["inputs"]["mask"]
+                    self.assertEqual(mask_output, 1)
+                    self.assertEqual(workflow[image]["class_type"], "LoadImage")
+
+    def test_static_requirements_reject_direct_transparency_crop(self):
+        workflow = dict(self.workflow)
+        workflow.update({
+            "image": {"class_type": "LoadImage", "inputs": {}},
+            "crop": {"class_type": "ImageCropToMask", "inputs": {"masks": ["image", 1]}},
+        })
+        problems = validate_workflow_requirements(self.workflow_path, workflow, self.manifest)
+        self.assertTrue(any("crop" in problem and "InvertMask" in problem for problem in problems))
+
     def test_manifest_must_declare_every_graph_node_and_model(self):
         self.manifest["nodes"] = self.manifest["nodes"][:1]
         self.manifest["models"] = []

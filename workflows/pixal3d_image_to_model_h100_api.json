@@ -13,8 +13,8 @@
         0
       ],
       "masks": [
-        "image",
-        1
+        "crop_foreground",
+        0
       ],
       "width": 1024,
       "height": 1024,
@@ -471,6 +471,25 @@
       "resolution": 4096,
       "padding": 4,
       "weld_distance": 0.0002
+    }
+  },
+  "crop_foreground": {
+    "class_type": "InvertMask",
+    "inputs": {
+      "mask": [
+        "image",
+        1
+      ]
+    }
+  },
+  "save_conditioning": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "crop",
+        0
+      ],
+      "filename_prefix": "generated_models/conditioning"
     }
   }
 }

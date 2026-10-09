@@ -16,6 +16,7 @@ from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
+from slopforge.validation import validate_image
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -177,6 +178,18 @@ def copy_generated_maps(outputs, destination, client=None, *, baked_normal=None)
     return textures
 
 
+def copy_conditioning_image(outputs, destination, client):
+    images = outputs.get("save_conditioning", {}).get("images", [])
+    if not images:
+        raise ValueError("Model workflow did not produce its conditioning image")
+    target = destination / "conditioning.png"
+    client.download_output(images[0], target)
+    validation = validate_image(target, report_path=target.name)
+    if validation["status"] == "failed":
+        raise ValueError("Invalid conditioning image: " + "; ".join(validation["errors"]))
+    return target.name
+
+
 def write_flat_normal(normal):
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
@@ -280,6 +293,8 @@ def main():
     client.download_output(glb, dest)
     textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
     textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
+    conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
+                          if "save_conditioning" in workflow else None)
     models = sorted({value for node in workflow.values() for value in node.get("inputs", {}).values()
                      if isinstance(value, str) and value.endswith(".safetensors")})
     if args.metadata:
@@ -308,6 +323,7 @@ def main():
                                         "mesh_preparation": mesh_preparation,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
+                                        "conditioning_image": conditioning_image,
                                         "normal_source": "workflow" if entry["outputs"].get("save_normal", {}).get("images") else
                                                          "neutral_placeholder",
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")

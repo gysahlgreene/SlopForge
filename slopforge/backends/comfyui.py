@@ -19,6 +19,22 @@ class ComfyUIError(RuntimeError):
     pass
 
 
+def workflow_mask_errors(workflow):
+    problems = []
+    for name, node in workflow.items():
+        if node.get("class_type") != "ImageCropToMask":
+            continue
+        link = node.get("inputs", {}).get("masks")
+        if not isinstance(link, list) or len(link) != 2:
+            continue
+        source = workflow.get(link[0], {})
+        if source.get("class_type") == "LoadImage" and link[1] == 1:
+            problems.append(f"{name}: LoadImage MASK is transparency, but ImageCropToMask needs "
+                            "foreground. Connect an InvertMask node between them; automatic "
+                            "polarity guessing can erase narrow subjects.")
+    return problems
+
+
 class ComfyUIClient:
     """HTTP boundary for local and remote ComfyUI instances."""
 
@@ -80,6 +96,9 @@ class ComfyUIClient:
     upload_input = upload_file
 
     def validate_workflow(self, workflow, node_info=None):
+        problems = workflow_mask_errors(workflow)
+        if problems:
+            raise ComfyUIError("Invalid workflow mask wiring: " + "; ".join(problems))
         node_info = node_info or self.node_types()
         missing = sorted({node.get("class_type") for node in workflow.values() if node.get("class_type")} - node_info.keys())
         if missing:

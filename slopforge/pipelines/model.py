@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from ..backends.blender import inspect_model, process_model
-from ..backends.comfyui import generate_image, generate_model, python_executable
+from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
 from ..config import select_quality_tier
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
@@ -128,6 +128,9 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
     paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     mesh_path = root / asset["source"]["glb"]
+    if mesh_info.get("conditioning_image"):
+        shutil.copy2(mesh_path.parent / mesh_info["conditioning_image"], paths["directory"] / "conditioning.png")
+        mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
     for key in ("basecolor", "normal", "roughness", "metallic"):
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
@@ -315,6 +318,11 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         raise ValueError("Candidate style has changed; activate the original unchanged style pack or generate new candidates before 3D approval")
     conditioning = resolve_conditioning(root, config, style)
     ensure_supported(conditioning)
+    workflow = pipeline["workflows"].get("model")
+    if workflow:
+        problems = workflow_mask_errors(json.loads(resolve_workflow(root, workflow).read_text()))
+        if problems:
+            raise ValueError("Invalid model workflow mask wiring: " + "; ".join(problems))
     paths = model_paths(root, config, asset["name"], asset_type)
     existing = [path for name, path in paths.items() if name != "directory" and path.exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):

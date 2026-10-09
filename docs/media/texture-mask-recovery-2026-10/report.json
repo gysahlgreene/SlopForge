@@ -1,0 +1,263 @@
+{
+  "root_cause": "LoadImage transparency MASK passed directly to foreground ImageCropToMask; width-dependent auto-inversion failed before conditioning.",
+  "mask_convention": {
+    "LoadImage_MASK": "1-alpha",
+    "ImageCropToMask_masks": "alpha"
+  },
+  "source_file_sha256": "055287335d936da5229288b52d59ef1d22a47080f442797ee5c409afca6f2f0c",
+  "baseline": {
+    "seed": 1551714109,
+    "workflow_sha256": "9b12d76259bef3e99fe3b7c0988b0a90c1c0f7b16a813bbaba0d3ce496d5a40e",
+    "basecolor_black_fraction": 0.9334200620651245,
+    "conditioning_bright_fraction": 0.0
+  },
+  "runs": {
+    "humanoid-test-7-fixed": {
+      "seed": 1551714109,
+      "workflow_sha256": "f65e611c1466431568e0f70f9d1de670c9ca7f17aed80ca34f73dbde8ec5fe38",
+      "quality": {
+        "tier": "final",
+        "settings": {
+          "defaults": {
+            "image_candidates": 6,
+            "model_candidates": 3,
+            "material_candidates": 3
+          },
+          "workflow_inputs": {
+            "model": {
+              "trellis2_image_to_model_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "trellis2_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                },
+                "shape_upsample_stage": {
+                  "target_resolution": 1536
+                },
+                "maps": {
+                  "texture_size": 4096
+                }
+              },
+              "trellis2_image_to_model_h100_final_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "pixal3d_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              }
+            }
+          }
+        }
+      },
+      "conditioning_dimensions": [
+        1024,
+        1024
+      ],
+      "conditioning_bright_fraction": 0.14754867553710938,
+      "conditioning_pixel_sha256": "ee5c631d5fe0ffc55ac76792adadbdce792e97ba822d42378a1e3db8f31667be",
+      "basecolor_dimensions": [
+        4096,
+        4096
+      ],
+      "basecolor_mean_rgb": 0.41876169217178244,
+      "basecolor_black_fraction": 0.0,
+      "basecolor_pixel_sha256": "2604f0e04f9c84df499fabb290c7a713868f8648f147308c912feb083427a225",
+      "fbx_exists": true,
+      "generation_status": "completed",
+      "blender": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "measured": {
+          "vertex_count": 26347,
+          "face_count": 40752,
+          "uv_layers": 1,
+          "mesh_without_uv_count": 0,
+          "material_count": 1,
+          "image_texture_count": 5,
+          "missing_textures": [],
+          "component_count": 1
+        }
+      },
+      "material_candidate_validation": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "candidate_state": "candidate",
+        "approved": false
+      }
+    },
+    "humanoid-test-8": {
+      "seed": 2090109009,
+      "workflow_sha256": "f65e611c1466431568e0f70f9d1de670c9ca7f17aed80ca34f73dbde8ec5fe38",
+      "quality": {
+        "tier": "final",
+        "settings": {
+          "defaults": {
+            "image_candidates": 6,
+            "model_candidates": 3,
+            "material_candidates": 3
+          },
+          "workflow_inputs": {
+            "model": {
+              "trellis2_image_to_model_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "trellis2_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                },
+                "shape_upsample_stage": {
+                  "target_resolution": 1536
+                },
+                "maps": {
+                  "texture_size": 4096
+                }
+              },
+              "trellis2_image_to_model_h100_final_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "pixal3d_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              }
+            }
+          }
+        }
+      },
+      "conditioning_dimensions": [
+        1024,
+        1024
+      ],
+      "conditioning_bright_fraction": 0.13063430786132812,
+      "conditioning_pixel_sha256": "3a48581cd8c235a44e95669e8a77c299f6dcd54b0b0ea481e4b6cadf5b463f8e",
+      "basecolor_dimensions": [
+        4096,
+        4096
+      ],
+      "basecolor_mean_rgb": 0.47872076026754445,
+      "basecolor_black_fraction": 0.0,
+      "basecolor_pixel_sha256": "b82df5660b03efd8b8dd4fa9e9cd28dffd626676b47bee45f7f3adb0d4699d3a",
+      "fbx_exists": true,
+      "generation_status": "completed",
+      "blender": {
+        "status": "passed_with_warnings",
+        "errors": [],
+        "warnings": [
+          "mesh contains 3 disconnected components; inspect for detached geometry"
+        ],
+        "measured": {
+          "vertex_count": 17246,
+          "face_count": 27184,
+          "uv_layers": 1,
+          "mesh_without_uv_count": 0,
+          "material_count": 1,
+          "image_texture_count": 5,
+          "missing_textures": [],
+          "component_count": 3
+        }
+      },
+      "material_candidate_validation": {
+        "status": "passed_with_warnings",
+        "errors": [],
+        "warnings": [
+          "mesh contains 3 disconnected components; inspect for detached geometry"
+        ],
+        "candidate_state": "candidate",
+        "approved": false
+      }
+    },
+    "humanoid-test-7-repeat": {
+      "seed": 1551714109,
+      "workflow_sha256": "f65e611c1466431568e0f70f9d1de670c9ca7f17aed80ca34f73dbde8ec5fe38",
+      "quality": {
+        "tier": "final",
+        "settings": {
+          "defaults": {
+            "image_candidates": 6,
+            "model_candidates": 3,
+            "material_candidates": 3
+          },
+          "workflow_inputs": {
+            "model": {
+              "trellis2_image_to_model_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "trellis2_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                },
+                "shape_upsample_stage": {
+                  "target_resolution": 1536
+                },
+                "maps": {
+                  "texture_size": 4096
+                }
+              },
+              "trellis2_image_to_model_h100_final_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              },
+              "pixal3d_image_to_model_h100_api.json": {
+                "crop": {
+                  "pad_factor": 1.1
+                }
+              }
+            }
+          }
+        }
+      },
+      "conditioning_dimensions": [
+        1024,
+        1024
+      ],
+      "conditioning_bright_fraction": 0.14754867553710938,
+      "conditioning_pixel_sha256": "ee5c631d5fe0ffc55ac76792adadbdce792e97ba822d42378a1e3db8f31667be",
+      "basecolor_dimensions": [
+        4096,
+        4096
+      ],
+      "basecolor_mean_rgb": 0.4302663371453877,
+      "basecolor_black_fraction": 0.0,
+      "basecolor_pixel_sha256": "548959742fa7d7867d81f822f34f1126affd22d039642f366b981d66046a51ef",
+      "fbx_exists": true,
+      "generation_status": "completed",
+      "blender": {
+        "status": "passed",
+        "errors": [],
+        "warnings": [],
+        "measured": {
+          "vertex_count": 26347,
+          "face_count": 40752,
+          "uv_layers": 1,
+          "mesh_without_uv_count": 0,
+          "material_count": 1,
+          "image_texture_count": 5,
+          "missing_textures": [],
+          "component_count": 1
+        }
+      }
+    }
+  },
+  "published_source_file_sha256": "055287335d936da5229288b52d59ef1d22a47080f442797ee5c409afca6f2f0c",
+  "verification": {
+    "native_crop_regression": "passed: narrow, broad, RGB",
+    "verify_live": "3 passed; 5 subtests passed",
+    "verify": "main checkout: 237 passed, 6 opt-in checks skipped, 49 subtests passed; docs and whitespace checks passed"
+  },
+  "repeat_raw_position_sha256": "eeca6ab934a9f24c8f43660f33a3a074bab1abd4c5f9ca6912d162f950570897"
+}

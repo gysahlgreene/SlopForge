@@ -1,10 +1,10 @@
 schema_version: 1
 id: model.trellis2.mac
-version: 1
+version: 2
 capabilities:
 - image_to_3d
 - pbr_texturing
-workflow_sha256: aff134b10245cce812815ddfefbed3605bc052622ab3b6f7ba44960c68eff9b5
+workflow_sha256: 6a24749e183cb8e6585a87c97433282fc50d82efa9224b32bb54dccbf8c596b5
 nodes:
 - class: ApplyTextureToMesh
   source: ComfyUI TRELLIS.2 node extension
@@ -26,6 +26,9 @@ nodes:
   revision: unknown
 - class: ImageCropToMask
   source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: InvertMask
+  source: ComfyUI core
   revision: unknown
 - class: KSampler
   source: ComfyUI core
@@ -108,6 +111,8 @@ outputs:
 - name: model
   type: model/glb
 - name: material_maps
+  type: image/png
+- name: conditioning_image
   type: image/png
 profiles:
 - mac

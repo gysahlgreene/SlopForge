@@ -4,12 +4,41 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
-from processing.comfy_generate_3d import copy_generated_maps
+from processing.comfy_generate_3d import copy_generated_maps, copy_conditioning_image
 from slopforge.pipelines.model import _native_material_candidate, retexture
 from slopforge.unity_material import make_metallic_gloss
 
 
 class MeshPBRTests(unittest.TestCase):
+    def test_actual_conditioning_image_is_downloaded_for_inspection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = {"filename": "crop.png", "subfolder": "generated", "type": "output"}
+
+            class Client:
+                def download_output(self, item, target):
+                    assert item == source
+                    Image.new("RGB", (32, 32), (200, 160, 100)).save(target)
+
+            result = copy_conditioning_image({"save_conditioning": {"images": [source]}}, root, Client())
+            self.assertEqual(result, "conditioning.png")
+            with Image.open(root / result) as image:
+                self.assertEqual(image.getpixel((0, 0)), (200, 160, 100))
+
+    def test_missing_conditioning_output_is_an_actionable_failure(self):
+        with self.assertRaisesRegex(ValueError, "conditioning image"):
+            copy_conditioning_image({}, Path("unused"), object())
+
+    def test_corrupt_conditioning_image_fails_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            class Client:
+                def download_output(self, item, target):
+                    target.write_bytes(b"not an image")
+
+            with self.assertRaisesRegex(ValueError, "conditioning image.*invalid image"):
+                copy_conditioning_image({"save_conditioning": {"images": [{}]}},
+                                        Path(temporary), Client())
+
     def test_native_material_maps_keep_the_high_poly_normal_bake(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -53,6 +82,7 @@ class MeshPBRTests(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             (source / "relay.glb").write_bytes(b"mesh")
+            Image.new("RGB", (32, 32), "teal").save(source / "conditioning.png")
             textures = {}
             originals = {}
             for index, key in enumerate(("basecolor", "normal", "roughness", "metallic")):
@@ -64,7 +94,8 @@ class MeshPBRTests(unittest.TestCase):
             asset = {"name": "relay", "description": "Ceramic and copper relay",
                      "generation_prompt": "Turquoise front plate, copper couplings",
                      "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"}}
-            metadata = {"workflow": "trellis.json", "seed": 42, "textures": textures}
+            metadata = {"workflow": "trellis.json", "seed": 42, "textures": textures,
+                        "conditioning_image": "conditioning.png"}
 
             def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
                 self.assertTrue(options["preserve_uvs"])
@@ -86,6 +117,10 @@ class MeshPBRTests(unittest.TestCase):
                 candidate = _native_material_candidate(root, config, {"face_budget": "prop_faces"}, asset, 1, metadata)
             self.assertEqual(candidate["kind"], "mesh_pbr")
             self.assertEqual(candidate["status"], "candidate")
+            material_directory = (root / candidate["outputs"]["surface"]).parent
+            retained_metadata = json.loads((material_directory / "generation.json").read_text())
+            self.assertEqual((material_directory / retained_metadata["conditioning_image"]).read_bytes(),
+                             (source / "conditioning.png").read_bytes())
             for key, data in originals.items():
                 self.assertEqual((root / candidate["outputs"][key]).read_bytes(), data)
             asset["material_candidates"] = {"items": [candidate]}
