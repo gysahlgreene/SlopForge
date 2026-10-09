@@ -2,6 +2,7 @@
 import json
 import hashlib
 import math
+import statistics
 import sys
 import traceback
 from pathlib import Path
@@ -50,7 +51,7 @@ def bounds(objects):
     return low, high
 
 
-def fit_metarig(metarig, low, high):
+def fit_metarig(metarig, low, high, meshes):
     bpy.context.view_layer.objects.active = metarig
     metarig.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -69,9 +70,42 @@ def fit_metarig(metarig, low, high):
         for point in (bone.head, bone.tail):
             for axis in range(3):
                 point[axis] = low[axis] + (point[axis] - rig_low[axis]) * scale[axis]
+    surface_points = [metarig.matrix_world.inverted() @ (mesh.matrix_world @ vertex.co)
+                      for mesh in meshes for vertex in mesh.data.vertices]
+    sample_radius = max(mesh_span) * 0.04
+    arm_depth_fit = {"strategy": "median mesh depth at the metarig arm-bone cross sections",
+                     "sample_radius": sample_radius, "bones": []}
+    for side in ("L", "R"):
+        for part in ("shoulder", "upper_arm", "forearm", "hand"):
+            bone = metarig.data.edit_bones.get(f"{part}.{side}")
+            if bone is None:
+                continue
+            head, tail = bone.head.copy(), bone.tail.copy()
+            original_y = (head.y, tail.y)
+            segment = Vector((tail.x - head.x, 0.0, tail.z - head.z))
+            if segment.length_squared <= 1e-12:
+                continue
+            samples = [[], []]
+            for point in surface_points:
+                delta = Vector((point.x - head.x, 0.0, point.z - head.z))
+                t = max(0.0, min(1.0, delta.dot(segment) / segment.length_squared))
+                if (delta - segment * t).length > sample_radius:
+                    continue
+                if t <= 0.25:
+                    samples[0].append(point.y)
+                if t >= 0.75:
+                    samples[1].append(point.y)
+            if samples[0]:
+                bone.head.y = statistics.median(samples[0])
+            if samples[1]:
+                bone.tail.y = statistics.median(samples[1])
+            arm_depth_fit["bones"].append({"bone": bone.name, "head_samples": len(samples[0]),
+                "tail_samples": len(samples[1]), "head_depth_delta": bone.head.y - original_y[0],
+                "tail_depth_delta": bone.tail.y - original_y[1]})
     for bone, connected in connections:
         bone.use_connect = connected
     bpy.ops.object.mode_set(mode="OBJECT")
+    return arm_depth_fit
 
 
 def evaluated_points(meshes):
@@ -155,16 +189,28 @@ def cap_influences(mesh, rig, limit):
             bound[name] = bound.get(name, 0) + 1
         component_report.append({"vertices": len(vertices), "bound_bones": bound})
 
+    arm_bones = {side: [bone for bone in rig.data.bones if bone.name.endswith(f".{side}") and
+                         bone.name.startswith(("DEF-shoulder.", "DEF-upper_arm.", "DEF-forearm.", "DEF-hand.")) and
+                         bone.name in allowed] for side in ("L", "R")}
+    torso_bones = [bone for bone in rig.data.bones if bone.name in {
+        "DEF-spine.002", "DEF-spine.003", "DEF-spine.004", "DEF-spine.005"}]
+    arm_radius = max((bone.length for bones in arm_bones.values() for bone in bones
+                      if bone.name.startswith(("DEF-upper_arm.", "DEF-forearm."))), default=0.1) * 0.85
+
     def arm_weights(point):
         point = mesh.matrix_world @ point
-        side = "L" if point.x > 0 else "R"
-        if abs(point.x) < 0.22 or not 0.9 <= point.z <= 1.56:
+        closest = None
+        for side, bones in arm_bones.items():
+            for bone in bones:
+                head, tail = rig.matrix_world @ bone.head_local, rig.matrix_world @ bone.tail_local
+                segment = tail - head
+                t = max(0.0, min(1.0, (point - head).dot(segment) / max(segment.length_squared, 1e-12)))
+                distance = (point - (head + t * segment)).length_squared
+                if closest is None or distance < closest[0]:
+                    closest = distance, side
+        if closest is None or closest[0] > arm_radius * arm_radius:
             return None
-        if abs(point.x) < 0.42 and point.z < 1.10:
-            return None
-        candidates = [rig.data.bones.get(f"DEF-{part}.{side}") for part in (
-            "shoulder", "upper_arm", "upper_arm.001", "forearm", "forearm.001", "hand")]
-        candidates = [bone for bone in candidates if bone and bone.name in allowed]
+        candidates = arm_bones[closest[1]] + torso_bones
         scores = []
         for bone in candidates:
             head, tail = rig.matrix_world @ bone.head_local, rig.matrix_world @ bone.tail_local
@@ -198,7 +244,7 @@ def cap_influences(mesh, rig, limit):
         for name, weight in kept:
             groups[name].add([vertex.index], weight / total, "REPLACE")
         maximum = max(maximum, len(vertex.groups))
-    return maximum, {"strategy": "3D nearest limb segments for arm-zone vertices; nearest core bone on other disconnected islands; remapped heat weights elsewhere",
+    return maximum, {"strategy": "3D nearest arm segments within a rig-scaled envelope, blended with upper torso bones; nearest core bone on other disconnected islands; remapped heat weights elsewhere",
                      "disconnected_islands": component_report}
 
 
@@ -304,7 +350,7 @@ def run(request):
     bpy.ops.preferences.addon_enable(module="rigify")
     bpy.ops.object.armature_human_metarig_add()
     metarig = bpy.context.object
-    fit_metarig(metarig, low, high)
+    arm_depth_fit = fit_metarig(metarig, low, high, meshes)
     bpy.context.view_layer.objects.active = metarig
     metarig.select_set(True)
     bpy.ops.pose.rigify_generate()
@@ -383,6 +429,7 @@ def run(request):
             "LeftUpperLeg": "DEF-thigh.L", "LeftLowerLeg": "DEF-shin.L", "LeftFoot": "DEF-foot.L",
             "RightUpperLeg": "DEF-thigh.R", "RightLowerLeg": "DEF-shin.R", "RightFoot": "DEF-foot.R"},
         "deformation_evidence": evidence_metrics,
+        "arm_depth_fit": arm_depth_fit,
         "max_influences": max_influences,
         "skin_weighting": [item[1] for item in skin_weighting],
         "mesh_repair": {"weld_tolerance": weld_distance, "meshes": mesh_reports,
