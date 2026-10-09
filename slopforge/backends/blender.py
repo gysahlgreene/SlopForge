@@ -17,7 +17,7 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
                   stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/prepare_model.py"
-    command = [blender_executable(config, root), "--background", "--python", str(script), "--",
+    command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python", str(script), "--",
                str(glb), str(fbx), str(blend), *(str(path) for path in textures),
                "--face-budget", str(face_budget)]
     if preserve_uvs:
@@ -33,7 +33,7 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
             command.append("--reuse-stage-mesh")
         else:
             command.extend(("--stage-mesh-output", str(stage_mesh)))
-    return subprocess.run(command, check=True)
+    return subprocess.run(command, check=True, env=blender_environment())
 
 
 def inspect_model(project_root, config, blend, output_json, face_budget):

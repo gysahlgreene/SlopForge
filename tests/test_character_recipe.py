@@ -9,12 +9,28 @@ from slopforge.config import load_project
 from slopforge.initializer import init_project
 from slopforge.pipelines.model import _native_material_candidate, material_candidate_paths, model_paths
 from slopforge.recipes import load_recipe
+from slopforge.recipes import run_recipe
+from slopforge.manifest import load_manifest
 from slopforge.style import build_prompt, load_style
 from slopforge.taxonomy import load_taxonomy
 from slopforge.validation import validate_model_outputs
 
 
 class CharacterRecipeTests(unittest.TestCase):
+    def test_character_recipe_uses_the_concept_candidate_budget(self):
+        config = load_project(self.root)
+        config["asset_pipeline"]["quality_tiers"]["normal"]["defaults"] = {
+            "image_candidates": 4, "model_candidates": 2}
+        manifest = load_manifest(self.root / "ai/assets/manifest.json")
+        def image_backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
+            Image.new("RGB", (32, 32), "gray").save(destination)
+            metadata.write_text('{"model":"fixture"}')
+        with patch("slopforge.pipelines.model.generate_image", side_effect=image_backend):
+            run_recipe(self.root, config, load_style(self.root, config), load_taxonomy(self.root), manifest,
+                       "character_3d_pack", quality_tier="normal")
+        character = next(asset for asset in manifest["assets"].values() if asset["type"] == "character")
+        self.assertEqual(len(character["candidates"]["items"]), 4)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "game"

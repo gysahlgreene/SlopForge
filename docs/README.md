@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the route you need. Current guides describe the shipped 3D pipeline; dated experiments are kept separately.
+Start with the user guides for installation, asset generation, review, and Unity delivery. Examples and qualification reports show what the current pipeline can produce and where human review is still needed.
 
 ## Get started
 
@@ -21,19 +21,14 @@ Start with the route you need. Current guides describe the shipped 3D pipeline; 
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
 - [Unity delivery](UNITY.md)
 
-## Understand the system
+## Examples and qualification evidence
 
-- [Architecture](ARCHITECTURE.md) and [typed asset outputs](ASSET-OUTPUTS.md)
-- [Agent integration](AGENT-INTEGRATION.md) and [domain vocabulary](../CONTEXT.md)
-- [Current roadmap](CAPABILITY-ROADMAP-2026.md) and [repository audit / open issues](AUDIT-2026-10.md)
+- [Basalt Warden](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed deformation, valid Humanoid Avatar, and animation evidence.
+- [Basalt Warden Unity movement preview](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity playback screenshots, clip evidence, and current rig limitations.
+
+## For contributors
+
+- [Architecture](ARCHITECTURE.md), [asset outputs](ASSET-OUTPUTS.md), and [agent integration](AGENT-INTEGRATION.md)
 - [Contributing and verification](../CONTRIBUTING.md)
 
-## Inspect the evidence
-
-- **[Basalt Warden](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md):** reviewed body deformation, valid Humanoid Avatar, and animated evidence.
-- **[3D generation benchmark](media/3d-qualification-bench-2026-10/README.md):** Basalt generation/retry results and Ashen detail-preservation limits.
-- **[Rigging research](research/character-generation-and-rigging-practices-2026-10.md):** primary-source generation and rigging practices.
-- **[Provider audit](research/unirig-rigging-provider-audit.md):** dependency isolation, provenance, and known limitations.
-- **[Golden rig models](research/golden-rig-benchmark-models.md):** licensed fixtures for comparison.
-
-[Historical reports and implementation plans](archive/README.md) preserve the earlier experiments. They are not the current product roadmap. Large raw models, duplicate maps, and superseded frame sequences are kept outside Git; compact reports, hashes, contact sheets, and current animation evidence remain here.
+Personal working notes and generated experiments belong under `private/` or `scratch/`. Git ignores those paths; keep public guides and a few compact, relevant examples under `docs/`.

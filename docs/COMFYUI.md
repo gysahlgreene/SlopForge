@@ -67,7 +67,7 @@ asset_pipeline:
         model: trellis2_image_to_model_h100_api.json
     h100_final:
       workflows:
-        model: trellis2_image_to_model_h100_final_api.json
+        model: pixal3d_image_to_model_h100_api.json
 ```
 
 Then choose the inference service separately:
@@ -82,7 +82,7 @@ COMFYUI_URL=http://127.0.0.1:8188 SLOPFORGE_COMPUTE_PROFILE=mac \
   slopforge --project ~/UnityProjects/MyGame doctor
 ```
 
-The bundled TRELLIS profiles use `trellis_2_int8_convrot.safetensors` at 1024-class shape and 2048 textures for Mac-compatible inference, `trellis_2_bf16.safetensors` at 1024/2048 for H100 drafts, and BF16 at 1536/4096 for H100 final output. A profile can point to project workflow overrides in `ai/workflows/`. Profile entries may override workflows, model budgets, or model-specific tools; they cannot override `comfy_url`, `comfy_backend`, or `comfy_home`.
+The bundled TRELLIS profiles use `trellis_2_int8_convrot.safetensors` at 1024-class shape and 2048 textures for Mac-compatible inference, and `trellis_2_bf16.safetensors` for H100 workflows. The `h100_final` profile uses Pixal3D's camera-conditioned 1536 cascade with 4096 PBR maps; the saved SlopForge graph uses native UDF remeshing and a 60,000-triangle target. This profile was run on the H100 and visually reviewed on a clothed humanoid; it is the strongest tested route so far, while fine facial detail and clean rigging still need improvement. See [quality tiers](QUALITY-TIERS.md). A profile can point to project workflow overrides in `ai/workflows/`. Profile entries may override workflows, model budgets, or model-specific tools; they cannot override `comfy_url`, `comfy_backend`, or `comfy_home`.
 
 ## Models and workflows
 
@@ -100,11 +100,13 @@ The legacy Hunyuan3D v2 graph is assembled by `processing/comfy_generate_3d.py` 
 
 TRELLIS.2 profiles use the models from [Comfy-Org TRELLIS.2](https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main): `diffusion_models/trellis_2_int8_convrot.safetensors` or `diffusion_models/trellis_2_bf16.safetensors`, `clip_vision/dino_v3_vit_l.safetensors`, and both `vae/trellis_2_{shape,texture}_vae_bf16.safetensors`. Check upstream terms and model availability before downloading.
 
+The H100 final Pixal3D graph uses `diffusion_models/pixal3d_bf16.safetensors`, `clip_vision/dino_v3_L_naf_fp32.safetensors`, and the TRELLIS.2 shape and texture VAEs. The Pixal3D and DINO files are from [Comfy-Org/Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D/tree/main); the workflow sidecar records verified SHA-256 hashes for all four installed files.
+
 Project workflows in `ai/workflows/` override bundled workflow files. Put an optional `name.requirements.yaml` next to `name.json`; legacy overrides without sidecars continue to work and doctor reports their requirements as unknown. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, sidecar consistency, workflow node availability, model-choice availability, and unverified dependency revisions/hashes. The doctor preflight does not submit a prompt or test file transfer; it remains read-only.
 
 Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
 
-The bundled text-to-image graph remains text-only. A paired Wan 2.2 TI2V reference-conditioning experiment is retained as historical evidence in [the qualification report](archive/reference-conditioning-2026-10.md); it does not qualify the 3D generation route.
+The bundled text-to-image graph remains text-only. It creates supporting concept images and does not qualify the 3D generation route.
 
 ## Integration checks
 

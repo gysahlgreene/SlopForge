@@ -53,7 +53,13 @@ def build_prompt(style, asset_type, description, mode="asset"):
         requirements = asset_type.get("requirements", []) if asset_type.get("pipeline") != "model" else []
         avoid = asset_type.get("avoid", []) if asset_type.get("pipeline") != "model" else []
         return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
-    rules = asset_type.get("requirements", [])
+    rules = list(asset_type.get("requirements", []))
+    if asset_type["pipeline"] == "model":
+        rules.extend([
+            "Complete centered asset with margin around every extremity; plain neutral background, no scene or cast shadow",
+            "Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
+            "Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
+        ])
     avoid = asset_type.get("avoid", [])
     project_rules = style["asset_rules"].get(asset_type["name"], [])
     if asset_type["pipeline"] == "model" and not project_rules:

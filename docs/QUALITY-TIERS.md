@@ -7,29 +7,26 @@ slopforge --project ~/UnityProjects/MyGame generate prop fuel_cell "Lunar refine
 slopforge --project ~/UnityProjects/MyGame recipe run starter_environment_kit --name refinery --quality-tier normal
 ```
 
-The initialized project defaults to one candidate per atomic stage for `draft`, existing project counts for `normal`, and six image / three model / three material candidates for `final`. These are editable candidate budgets, not runtime/cost estimates. Explicit `--count` values continue to override the tier. Existing model face budgets can be overridden per tier with `model_budgets`.
+New projects default to `final` and use the mesh-aware TRELLIS.2 workflow on Mac and Pixal3D on the H100 final profile. Install the selected workflow's weights before generation. `draft` uses one candidate per atomic stage, `normal` uses project counts, and `final` uses six image / three model / three material candidates. Model recipes use the image budget for concepts and the model budget for mesh attempts. Explicit `--count` values override concept counts. Existing model face budgets can be overridden per tier with `model_budgets`.
+
+Final quality also adds a 10% cutout crop margin and raises the H100 base graph to 1536 shape resolution and a 4096 texture atlas. Mac/default profiles retain compatible 1024/2048 settings. Higher resolution and optional source-normal probes cost more time and memory; an atlas size alone cannot create missing detail. Explicit existing project tiers remain respected. Closed source geometry is preserved; open/nonmanifold sources use controlled repair. Character repair remains at voxel resolution 120 because the live resolution-256 comparison erased whole body regions. Source-normal probes also produced severe black staircase artifacts and remain disabled in the production TRELLIS path. Rigging remains a separate qualification step. Budgets are counted as exported triangles, including triangulation of remeshed quads.
 
 Workflow-specific settings are configured against the selected workflow basename, not a machine or URL. A tier can provide fallback workflow choices, but an explicit compute-profile workflow wins so a profile can keep a host-compatible graph. Node IDs and inputs must already exist in the API-format workflow:
 
 ```yaml
-quality_tier: normal
+quality_tier: final
 quality_tiers:
   draft:
     defaults: {image_candidates: 1, model_candidates: 1}
-    workflow_inputs:
-      image:
-      image_text2img_api.json:
-          "5": {width: 512, height: 512}
-      model:
-        trellis2_image_to_model_api.json:
-          "20": {resolution: 512, texture_resolution: 1024}
   normal: {}
   final:
     defaults: {image_candidates: 6, model_candidates: 3}
     workflow_inputs:
       model:
-        trellis2_image_to_model_api.json:
-          "20": {resolution: 1536, texture_resolution: 4096}
+        trellis2_image_to_model_h100_api.json:
+          crop: {pad_factor: 1.1}
+          shape_upsample_stage: {target_resolution: 1536}
+          maps: {texture_size: 4096}
 ```
 
 The tier's `workflow_inputs` shape is `stage -> workflow basename -> node ID -> input values`. SlopForge validates that nodes and input names exist, then applies the configured values before upload/queue. Compute profiles independently choose compatible workflow files for Mac/H100 or other hosts. When a configured estimate is available, place it under `estimate`; SlopForge records it as supplied and does not invent prices or runtimes.

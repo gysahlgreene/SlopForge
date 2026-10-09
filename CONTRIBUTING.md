@@ -1,6 +1,6 @@
 # Contributing
 
-SlopForge focuses on reviewed 3D game assets, character rigging, and Unity delivery. Start with the [architecture](docs/ARCHITECTURE.md), [roadmap](docs/CAPABILITY-ROADMAP-2026.md), and [open issues](https://github.com/gysahlgreene/SlopForge/issues).
+SlopForge focuses on reviewed 3D game assets, character rigging, and Unity delivery. Start with the [architecture](docs/ARCHITECTURE.md), [documentation index](docs/README.md), and [open issues](https://github.com/gysahlgreene/SlopForge/issues).
 
 ## Development
 
@@ -23,7 +23,7 @@ Normal tests use local fixtures and mocks. Blender tests run when a supported Bl
 - Add a focused regression for changed behavior and update the relevant guide.
 - For a new workflow, include an API graph and adjacent `.requirements.yaml` declaration.
 - Record structural checks, visual review, deformation review, and engine validation separately.
-- Keep current documentation in `docs/`; put dated experiments in `docs/archive/` or `docs/research/`.
+- Keep user and contributor documentation in `docs/`; put personal notes and generated experiments in the ignored `private/` directory.
 
 ## Publishing evidence
 

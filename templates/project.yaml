@@ -26,8 +26,8 @@ asset_pipeline:
 
   workflows:
     image: image_text2img_api.json
-    # Enable after installing TRELLIS.2 models; generates mesh-aware PBR regions.
-    # model: trellis2_image_to_model_api.json
+    model: trellis2_image_to_model_api.json
+    # Requires TRELLIS.2 models; generates mesh-aware PBR regions.
 
   # Select location with COMFYUI_URL; select quality independently with
   # SLOPFORGE_COMPUTE_PROFILE=mac|h100|h100_final.
@@ -41,16 +41,28 @@ asset_pipeline:
         model: trellis2_image_to_model_h100_api.json
     h100_final:
       workflows:
-        model: trellis2_image_to_model_h100_final_api.json
+        model: pixal3d_image_to_model_h100_api.json
 
   # Quality is independent of compute_profile and COMFYUI_URL.
-  quality_tier: normal
+  quality_tier: final
   quality_tiers:
     draft:
       defaults: {image_candidates: 1, model_candidates: 1, material_candidates: 1}
     normal: {}
     final:
       defaults: {image_candidates: 6, model_candidates: 3, material_candidates: 3}
+      workflow_inputs:
+        model:
+          trellis2_image_to_model_api.json:
+            crop: {pad_factor: 1.1}
+          trellis2_image_to_model_h100_api.json:
+            crop: {pad_factor: 1.1}
+            shape_upsample_stage: {target_resolution: 1536}
+            maps: {texture_size: 4096}
+          trellis2_image_to_model_h100_final_api.json:
+            crop: {pad_factor: 1.1}
+          pixal3d_image_to_model_h100_api.json:
+            crop: {pad_factor: 1.1}
       # Optionally map workflow basenames to API node/input overrides.
       # workflow_inputs:
       #   image:

@@ -4,16 +4,22 @@
 
 SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU; keep your assets, approval decisions, and provenance in your own project.
 
-[Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md) · [Roadmap](docs/CAPABILITY-ROADMAP-2026.md)
+[Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md)
 
 ## See it working
 
 | Reviewed humanoid | Prop delivery |
 | :---: | :---: |
 | ![Basalt Warden performing the body-deformation test](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/motion-test.gif) | ![Generated power relay imported into Unity](img/power-relay-unity.png) |
-| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Pipeline notes →](docs/archive/mesh-texturing-2026-10-02.md) |
+| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Example commands →](docs/EXAMPLES.md) |
 
 These are measured examples. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
+
+### Current Unity movement preview — 2026-10-09
+
+![Basalt Warden retargeted to the Unity walk cycle](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif)
+
+This is a separate playtest of the older textured Basalt Warden: a valid Unity Humanoid Avatar, looping idle and walk clips, and a WASD movement scene. Unity measured skinned-mesh movement across all 49,886 imported vertices, but this does not establish good arm deformation. The idle clip puts the hands behind the back; arm deformation remains under review. [Idle screenshot](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Idle-GameView.png) · [Walk pose](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Side.png) · [Evidence and limits](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md).
 
 ## The workflow
 
@@ -71,8 +77,8 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | --- | --- |
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
-| Humanoid rigging | One generated Basalt candidate has approved body deformation and valid Unity Humanoid evaluation. Providers remain experimental. |
-| Third-party motion retargeting | Plumbing and fixture evidence exist; production idle/walk/attack qualification remains open. |
+| Humanoid rigging | One generated Basalt candidate has approved body deformation and valid Unity Humanoid evaluation. A separate older Warden now has a valid Humanoid movement preview; source topology still needs cleanup. |
+| Third-party motion retargeting | One Unity preview demonstrates looping idle/walk playback and measured skinned-mesh deformation. Broader movement, attack, and production qualification remain open. |
 | Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 
 Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprite/UI/VFX generators.
@@ -85,6 +91,6 @@ Full finger animation is not available on the reviewed Basalt rig. Reference-inp
 | `blender/` · `processing/` | Background mesh, rigging, and image helpers |
 | `workflows/` · `templates/` | ComfyUI graphs, requirement declarations, and project defaults |
 | `tests/` | Offline checks and opt-in Blender, Unity, and GPU integrations |
-| `docs/` | Guides, current audit, research, and compact benchmark evidence |
+| `docs/` | User guides, contributor notes, and selected qualification examples |
 
 [Contributing](CONTRIBUTING.md) · [Security and publishing](SECURITY.md) · [MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)

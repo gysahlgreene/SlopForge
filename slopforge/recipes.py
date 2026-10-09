@@ -142,7 +142,7 @@ def _image(root, config, style, asset_type, child, manifest, key):
 
 
 def _model(root, config, style, asset_type, child, manifest, key):
-    count = child.get("count", config["asset_pipeline"]["defaults"]["model_candidates"])
+    count = child.get("count", config["asset_pipeline"]["defaults"]["image_candidates"])
     references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,

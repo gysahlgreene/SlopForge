@@ -173,13 +173,14 @@ class RecipeTests(unittest.TestCase):
         asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
         result = [{"number": 1, "status": "candidate"}]
         self.config["asset_pipeline"]["defaults"]["model_candidates"] = 3
+        self.config["asset_pipeline"]["defaults"]["image_candidates"] = 4
 
         with patch("slopforge.recipes.model.generate", return_value=result) as generate:
             recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
                                "sample_pack", instance_name="demo")
 
         generate.assert_called_once()
-        self.assertEqual(generate.call_args.args[6], 3)
+        self.assertEqual(generate.call_args.args[6], 4)
         self.assertEqual(generate.call_args.kwargs["generation_prompt"], "A blue wall terminal")
         self.assertEqual(self.manifest["assets"]["recipe:demo"]["status"], "awaiting_approval")
 

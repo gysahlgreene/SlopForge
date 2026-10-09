@@ -1,0 +1,71 @@
+schema_version: 1
+id: model.pixal3d.h100
+version: 1
+capabilities:
+  - image_to_3d
+  - pbr_texturing
+workflow_sha256: f2127087a591ba20139faaf42042bdb3ad117da9a2963db4b07d8184c4e544ad
+nodes:
+  - {class: ApplyTextureToMesh, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: BakeTextureFromVoxel, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: CFGOverride, source: ComfyUI core, revision: unknown}
+  - {class: CLIPVisionLoader, source: ComfyUI core, revision: unknown}
+  - {class: DecimateMesh, source: ComfyUI core, revision: unknown}
+  - {class: EmptyTrellis2LatentStructure, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: ImageCropToMask, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: KSampler, source: ComfyUI core, revision: unknown}
+  - {class: LoadImage, source: ComfyUI core, revision: unknown}
+  - {class: MeshSmoothNormals, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: ModelSamplingSD3, source: ComfyUI core, revision: unknown}
+  - {class: Pixal3DConditioning, source: ComfyUI Pixal3D node extension, revision: unknown}
+  - {class: RemeshMesh, source: ComfyUI core, revision: unknown}
+  - {class: RescaleCFG, source: ComfyUI core, revision: unknown}
+  - {class: SaveGLB, source: ComfyUI core, revision: unknown}
+  - {class: SaveImage, source: ComfyUI core, revision: unknown}
+  - {class: Trellis2ShapeStage, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: Trellis2TextureStage, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: Trellis2UpsampleStage, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: UNETLoader, source: ComfyUI core, revision: unknown}
+  - {class: UnwrapMesh, source: ComfyUI core, revision: unknown}
+  - {class: VAELoader, source: ComfyUI core, revision: unknown}
+  - {class: VaeDecodeShapeTrellis, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: VaeDecodeStructureTrellis2, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+  - {class: VaeDecodeTextureTrellis, source: ComfyUI TRELLIS.2 node extension, revision: unknown}
+models:
+  - name: dino_v3_L_naf_fp32.safetensors
+    source: https://huggingface.co/Comfy-Org/Pixal3D/tree/main
+    license: MIT
+    license_source: https://github.com/Comfy-Org/ComfyUI/blob/master/LICENSE
+    sha256: 4ad2ec4e0879a5b5b04cd97325cc37da954a7b6edca5170b86510f17f2b2290f
+  - name: pixal3d_bf16.safetensors
+    source: https://huggingface.co/Comfy-Org/Pixal3D/tree/main
+    license: MIT
+    license_source: https://github.com/Comfy-Org/Pixal3D/blob/main/LICENSE
+    sha256: 5f3cd67b7ff9104d810754bcd89e47a6c2393e41f8c0a808d0dead37802d85fe
+  - name: trellis_2_shape_vae_bf16.safetensors
+    source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+    license: 'upstream model card: MIT; repackaged artifact not independently verified'
+    license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+    sha256: de0cb4949a76c59ee5c091a995a69bcc8c51d5aeda939f0c641a50d2a72341f4
+  - name: trellis_2_texture_vae_bf16.safetensors
+    source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+    license: 'upstream model card: MIT; repackaged artifact not independently verified'
+    license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+    sha256: 714e5ebf094a610e12a8e3b5175c18a62f37f6ea4218acb6073644456b73ab0e
+inputs:
+  - {name: image, type: image}
+  - {name: seed, type: integer}
+outputs:
+  - {name: model, type: model/glb}
+  - {name: material_maps, type: image/png}
+profiles:
+  - h100
+  - h100_final
+estimated_resource_class: very_large_gpu
+tested_on:
+  - {profile: h100, backend: comfyui, date: '2026-10-08'}
+license_notes:
+  - Model sources and licenses follow upstream statements; verify terms for exact installed weights.
+limitations:
+  - Node revisions and model file hashes are not exposed by ComfyUI API and remain unverified.
+  - Visual quality and mesh topology vary by input; outputs require visual inspection.

@@ -9,9 +9,32 @@ from slopforge.quality import apply_workflow_inputs
 from slopforge.backends.comfyui import generate_image, generate_model
 from slopforge.provenance import generator_provenance
 from slopforge.cli import parse_args
+from slopforge.initializer import init_project
+from slopforge.paths import resolve_workflow
 
 
 class QualityTierTests(unittest.TestCase):
+    def test_new_projects_default_to_mesh_pbr_and_hardware_appropriate_final_quality(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            for profile, resolution, texture_size in (("default", 1024, 2048),
+                                                       ("mac", 1024, 2048),
+                                                       ("h100", 1536, 4096),
+                                                       ("h100_final", 1536, 4096)):
+                with self.subTest(profile=profile), patch.dict("os.environ", {
+                        "SLOPFORGE_COMPUTE_PROFILE": profile}, clear=True):
+                    config = load_project(root)
+                    pipeline = config["asset_pipeline"]
+                    self.assertEqual(pipeline["selected_quality_tier"], "final")
+                    workflow = pipeline["workflows"]["model"]
+                    graph = json.loads(resolve_workflow(root, workflow).read_text())
+                    apply_workflow_inputs(graph, workflow_node_inputs(config, "model", workflow))
+                    self.assertEqual(graph["shape_upsample_stage"]["inputs"]["target_resolution"], resolution)
+                    self.assertEqual(graph["maps"]["inputs"]["texture_size"], texture_size)
+                    self.assertGreater(graph["crop"]["inputs"]["pad_factor"], 1.0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -64,8 +87,8 @@ asset_pipeline:
         self.assertEqual(selected["asset_pipeline"]["selected_quality_tier"], "final")
         self.assertEqual(selected["asset_pipeline"]["defaults"]["image_candidates"], 6)
         self.assertEqual(selected["asset_pipeline"]["selected_compute_profile"], "default")
-        self.assertEqual(selected["asset_pipeline"]["quality_settings"], {
-            "defaults": {"image_candidates": 6, "model_candidates": 3, "material_candidates": 3}})
+        self.assertEqual(selected["asset_pipeline"]["quality_settings"]["defaults"],
+                         {"image_candidates": 6, "model_candidates": 3, "material_candidates": 3})
 
     def test_unknown_quality_tier_is_rejected(self):
         config = load_project(self.root)

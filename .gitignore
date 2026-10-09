@@ -36,3 +36,11 @@ ai/styles/*/references/candidates/
 # Local audit archives and scratch databases
 *.ses
 .audit/
+
+# Private working notes and generated review material
+/private/
+/scratch/
+/docs/archive/
+/docs/research/
+/docs/media/local/
+/docs/superpowers/

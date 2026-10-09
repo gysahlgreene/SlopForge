@@ -4,6 +4,7 @@ from pathlib import Path
 from mathutils import Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import remove_isolated_single_faces
+from inspect_model import topology_edge_counts
 
 
 TARGET_FACES = 30000
@@ -56,7 +57,7 @@ def get_args():
             raise SystemExit("--voxel-resolution must be a positive integer")
         if voxel_resolution <= 0:
             raise SystemExit("--voxel-resolution must be a positive integer")
-    for option in ("--surface-source", "--preview-dir", "--material-scale", "--stage-mesh-output"):
+    for option in ("--surface-source", "--preview-dir", "--material-scale", "--stage-mesh-output", "--normal-output", "--texture-size"):
         if option in args:
             index = args.index(option)
             try:
@@ -64,6 +65,9 @@ def get_args():
             except IndexError:
                 raise SystemExit(f"{option} requires a value")
 
+    texture_size = int(options.get("--texture-size", 2048))
+    if not 64 <= texture_size <= 8192:
+        raise SystemExit("--texture-size must be between 64 and 8192")
     return (
         input_glb,
         output_fbx,
@@ -78,6 +82,8 @@ def get_args():
         "--reuse-stage-mesh" in args,
         "--preserve-uvs" in args,
         "--mesh-only" in args,
+        Path(options["--normal-output"]).resolve() if options.get("--normal-output") else None,
+        texture_size,
     )
 
 
@@ -213,15 +219,18 @@ def render_previews(obj, output_dir, prefix):
     output_dir.mkdir(parents=True, exist_ok=True)
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = 512
-    scene.render.resolution_y = 512
+    scene.render.resolution_x = 1024
+    scene.render.resolution_y = 1024
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.film_transparent = False
     scene.view_settings.view_transform = "AgX"
     if scene.world is None:
         scene.world = bpy.data.worlds.new("Preview World")
-    scene.world.color = (0.42, 0.48, 0.55)
+    scene.world.use_nodes = True
+    background = scene.world.node_tree.nodes.get("Background")
+    background.inputs["Color"].default_value = (0.18, 0.18, 0.18, 1.0)
+    background.inputs["Strength"].default_value = 0.5
 
     corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
     bounds_min = Vector(tuple(min(point[axis] for point in corners) for axis in range(3)))
@@ -271,6 +280,8 @@ def render_previews(obj, output_dir, prefix):
     reuse_stage_mesh,
     preserve_uvs,
     mesh_only,
+    normal_output,
+    texture_size,
 ) = get_args()
 
 
@@ -346,15 +357,29 @@ if not reuse_stage_mesh and not mesh_only:
 # GAME-READY DECIMATION
 # -------------------------------------------------
 
+detail_source = None
 if mesh_only:
+    remove_isolated_single_faces(obj.data)
     minimum, maximum = combined_bounds([obj])
-    modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
-    modifier.mode = "VOXEL"
-    modifier.voxel_size = max(maximum - minimum) / voxel_resolution
-    modifier.use_smooth_shade = True
+    if normal_output:
+        detail_source = obj.copy()
+        detail_source.data = obj.data.copy()
+        bpy.context.collection.objects.link(detail_source)
+        detail_source.select_set(False)
+    boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
+    if boundary or nonmanifold:
+        modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
+        modifier.mode = "VOXEL"
+        modifier.voxel_size = max(maximum - minimum) / voxel_resolution
+        modifier.use_smooth_shade = True
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+# Exports use triangles; counting remeshed quads underestimates the budget.
+if any(len(polygon.vertices) > 3 for polygon in obj.data.polygons):
+    modifier = obj.modifiers.new(name="ExportTriangles", type="TRIANGULATE")
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=modifier.name)
-
 face_count = len(obj.data.polygons)
 print(f"Input faces: {face_count}")
 while face_count > target_faces:
@@ -397,6 +422,30 @@ if not reuse_stage_mesh and not preserve_uvs:
     bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.003)
     bpy.ops.object.mode_set(mode="OBJECT")
 if mesh_only:
+    if detail_source is not None:
+        material = bpy.data.materials.new("NormalBake")
+        material.use_nodes = True
+        obj.data.materials.clear()
+        obj.data.materials.append(material)
+        target = bpy.data.images.new("Source Normal", width=texture_size, height=texture_size, alpha=False)
+        target.colorspace_settings.name = "Non-Color"
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = target
+        material.node_tree.nodes.active = node
+        bpy.context.scene.render.engine = "CYCLES"
+        bpy.context.scene.cycles.samples = 1
+        bpy.ops.object.select_all(action="DESELECT")
+        detail_source.select_set(True)
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        # ponytail: a 1% cage fits typical reconstructions; thin overlapping surfaces need visual review.
+        bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_selected_to_active=True,
+                            cage_extrusion=max(maximum - minimum) * 0.01, margin=16)
+        normal_output.parent.mkdir(parents=True, exist_ok=True)
+        target.filepath_raw, target.file_format = str(normal_output), "PNG"
+        target.save()
+        bpy.data.objects.remove(detail_source, do_unlink=True)
+        obj.data.materials.clear()
     # Keep the generator's coordinate frame so its voxel material field still aligns.
     bpy.ops.export_scene.gltf(filepath=str(output_fbx), export_format="GLB")
     bpy.ops.wm.save_as_mainfile(filepath=str(output_blend))

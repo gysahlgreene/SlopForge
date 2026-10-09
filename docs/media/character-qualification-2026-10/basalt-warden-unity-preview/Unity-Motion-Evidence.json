@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-10-09",
+  "unity_version": "6000.6.3f1",
+  "source_model": "Basalt-Warden.glb",
+  "source_sha256": "7275e9aec17c81e97dbf65268ea04f35cae39c934e45e472c6df1b25d4d09c43",
+  "export": {
+    "file": "Basalt-Warden-Unity-Humanoid-v3.fbx",
+    "status": "complete",
+    "deform_bones": 160,
+    "weighted_vertex_groups": 99,
+    "blender_mesh_vertices": 28455,
+    "unity_avatar_is_human": true,
+    "unity_avatar_is_valid": true,
+    "unity_skinned_renderer_bones": 161
+  },
+  "animations": {
+    "idle": {
+      "clip": "HumanM@Idle02",
+      "loop": true
+    },
+    "walk": {
+      "clip": "HumanM@Walk01_Forward",
+      "loop": true
+    },
+    "movement_controller": "WASD and arrow keys; CharacterController speed 2 m/s; root motion disabled"
+  },
+  "baked_pose_comparison": {
+    "idle_normalized_time": 0.2,
+    "walk_normalized_time": 0.25,
+    "unity_mesh_vertices": 49886,
+    "max_vertex_displacement_m": 0.379742146,
+    "mean_vertex_displacement_m": 0.104835704,
+    "vertices_moved_over_0_0001_m": 49886,
+    "method": "Sample each Humanoid state in Unity, bake SkinnedMeshRenderer, compare corresponding local-space vertices."
+  },
+  "source_topology_review": {
+    "nonmanifold_edges": 265,
+    "boundary_edges": 2,
+    "production_cleared": false
+  },
+  "evidence": {
+    "idle_screenshot": "Unity-Idle-GameView.png",
+    "walk_pose": "Unity-Walk-Side.png",
+    "walk_cycle_gif": "Unity-Walk-Cycle.gif",
+    "walk_cycle_samples": 8
+  }
+}

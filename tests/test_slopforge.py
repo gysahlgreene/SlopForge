@@ -10,7 +10,7 @@ from unittest.mock import patch
 from PIL import Image, ImageStat
 
 from slopforge.candidates import approve_image_candidate, generate_candidates
-from slopforge.config import load_project
+from slopforge.config import load_project, select_quality_tier
 from slopforge.manifest import asset_key, load_manifest, new_record, save_manifest
 from slopforge.paths import discover_project_root, resolve_workflow
 from slopforge.style import build_prompt, load_style
@@ -369,6 +369,7 @@ class SlopForgeTests(unittest.TestCase):
 
     def test_model_approval_uses_agent_material_prompt_and_records_mesh_previews(self):
         config, style = load_project(self.root), load_style(self.root)
+        config = select_quality_tier(config, "normal")
         recipe = load_taxonomy(self.root)["prop"]
         record = new_record("prop", "relic", "Ancient relic", style, {"strategy": "text_only"})
         manifest = {"assets": {"prop:relic": record}}

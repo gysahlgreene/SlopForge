@@ -9,8 +9,11 @@ SlopForge stores API-format ComfyUI graphs in `workflows/`; a project override i
 | `trellis2_image_to_model_api.json` | Image-to-3D mesh-aware base color/metallic/roughness | TRELLIS.2 INT8 ConvRot, DINOv3 ViT-L, shape and texture VAEs | Conservative/Mac-oriented profile; API structure checked against H100, no recent INT8 inference run. |
 | `trellis2_image_to_model_h100_api.json` | Image-to-3D mesh-aware PBR | TRELLIS.2 BF16, DINOv3 ViT-L, shape and texture VAEs | H100 profile; earlier runs reached 512³ and 1024³. Shape/material quality remains asset-dependent. |
 | `trellis2_image_to_model_h100_final_api.json` | Higher-resolution image-to-3D mesh-aware PBR | Same BF16 model set | Graph is prepared and passes capability checks; no 1536³ inference is claimed. |
+| `pixal3d_image_to_model_h100_api.json` | Camera-conditioned image-to-3D mesh-aware PBR | Pixal3D BF16, DINOv3+NAF, TRELLIS.2 shape and texture VAEs | H100 inference completed at 1536 cascade and 4096 texture size. Output quality remains asset-dependent; inspect geometry, texture coverage, and topology before use. |
 
-The Z-Image graph uses ComfyUI core nodes. TRELLIS graphs use ComfyUI's TRELLIS.2 node set (`Trellis2*`, `VaeDecode*`, `BakeTextureFromVoxel`, `ApplyTextureToMesh`, `SaveGLB`, and related nodes). On 2026-10-04 the four retained API graph files passed `ComfyUIClient.validate_workflow()` against the live H100 `/object_info` response.
+The Z-Image graph uses ComfyUI core nodes. TRELLIS graphs use ComfyUI's TRELLIS.2 node set (`Trellis2*`, `VaeDecode*`, `BakeTextureFromVoxel`, `ApplyTextureToMesh`, `SaveGLB`, and related nodes). Pixal3D adds `Pixal3DConditioning` and uses ComfyUI's mesh remeshing and UV unwrap nodes. On 2026-10-04 the four TRELLIS API graph files passed `ComfyUIClient.validate_workflow()` against the live H100 `/object_info` response; Pixal3D ran successfully on the H100 on 2026-10-08.
+
+The model and node versions installed in a ComfyUI service can differ from these workflows. Check upstream model and custom-node requirements before running a graph.
 
 ## Requirement sidecars
 
@@ -24,9 +27,11 @@ Availability checks and output qualification are separate. Use `declared`, `pref
 
 ## Resource and quality limits
 
-TRELLIS.2 upstream documents Linux/NVIDIA support, a 24 GB VRAM floor, H100/A100 testing, and 512³–1536³ resolutions. That is a provider capability statement, not a guarantee of manifold, watertight, riggable, or game-ready geometry. Upstream supports open and non-manifold surfaces. The 2026-10-04 H100 character experiment failed mesh QA with 1,189 components and 15,402 boundary/non-manifold edges and remained unapproved. See [character rigging](CHARACTER-RIGGING.md) for the qualification boundary.
+Mesh repair, triangle budgeting, UV preparation, and PBR baking are configurable stages. Review the generated mesh, prepared surface, and material views; higher resolution does not guarantee better geometry or texture quality.
 
-No workflow bundles weights. Weight terms are independent of SlopForge's MIT license. Check the exact selected artifact before use. The Hunyuan3D 2.1 EU/UK/South Korea restriction applies only to that provider component and is recorded in [provider source verification](research/provider-source-verification-2026-10.md).
+Model-provider capabilities do not guarantee manifold, watertight, riggable, or game-ready geometry. See [character rigging](CHARACTER-RIGGING.md) for the review requirements.
+
+No workflow bundles weights. Weight terms are independent of SlopForge's MIT license. Check the selected model and custom-node terms before use; see [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 ## Reproducibility
 

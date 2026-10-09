@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import os
@@ -11,6 +12,7 @@ import time
 import zlib
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
@@ -149,7 +151,7 @@ def load_model_workflow(path, image_name, asset_name, seed, face_budget):
     return workflow
 
 
-def copy_generated_maps(outputs, destination, client=None):
+def copy_generated_maps(outputs, destination, client=None, *, baked_normal=None):
     client = client or ComfyUIClient(COMFY_URL)
     textures = {}
     for key in ("basecolor", "roughness", "metallic"):
@@ -163,13 +165,24 @@ def copy_generated_maps(outputs, destination, client=None):
         textures[key] = target.relative_to(destination).as_posix()
     normal = destination / "native_material" / "normal.png"
     normal.parent.mkdir(parents=True, exist_ok=True)
+    normal_images = outputs.get("save_normal", {}).get("images", [])
+    if normal_images:
+        client.download_output(normal_images[0], normal)
+    elif baked_normal is not None:
+        shutil.copy2(baked_normal, normal)
+    else:
+        # ponytail: neutral normal for legacy workflows without a source mesh or normal output.
+        write_flat_normal(normal)
+    textures["normal"] = normal.relative_to(destination).as_posix()
+    return textures
+
+
+def write_flat_normal(normal):
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
     header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
     pixel = zlib.compress(b"\x00\x80\x80\xff")
     normal.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixel) + chunk(b"IEND", b""))
-    textures["normal"] = normal.relative_to(destination).as_posix()
-    return textures
 
 
 def run_model_workflow(workflow, client):
@@ -249,9 +262,12 @@ def main():
         prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
         script = Path(__file__).resolve().parents[1] / "blender" / "prepare_model.py"
-        subprocess.run([str(args.blender), "--background", "--python", str(script), "--", str(raw_path),
+        subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(raw_path),
                         str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
-                        "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"], check=True)
+                        "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"],
+                       check=True, env=blender_environment())
+        if not prepared.is_file():
+            raise RuntimeError("Blender did not produce the prepared mesh")
         prepared_upload = client.upload_input(prepared, "3d")
         workflow["prepared_mesh"]["inputs"]["model_file"] = f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
         del workflow["save_raw"]
@@ -270,14 +286,30 @@ def main():
         args.metadata.parent.mkdir(parents=True, exist_ok=True)
         temporary = args.metadata.with_name(f".{args.metadata.name}.tmp")
         workflow_digest = workflow_sha256(args.workflow) if args.workflow else None
+        remesh = next((node["inputs"] for node in workflow.values()
+                       if node.get("class_type") == "RemeshMesh"), None)
+        unwrap = next((node["inputs"] for node in workflow.values()
+                       if node.get("class_type") == "UnwrapMesh"), None)
+        mesh_preparation = {"face_budget": args.face_budget, "budget_unit": "triangles"}
+        if remesh is not None:
+            mesh_preparation.update({"method": "native_udf_remesh" if remesh.get("sign_mode") == "udf"
+                                     else "native_signed_remesh", "resolution": remesh.get("resolution")})
+        else:
+            mesh_preparation.update({"method": "preserve_closed_or_remesh",
+                                     "voxel_resolution": args.voxel_resolution})
+        if unwrap is not None:
+            mesh_preparation["uv_unwrap"] = unwrap.get("segmenter")
+            mesh_preparation["uv_resolution"] = unwrap.get("resolution")
+            mesh_preparation["padding"] = unwrap.get("padding")
         temporary.write_text(json.dumps({"workflow": args.workflow.name if args.workflow else "hunyuan3d_image_to_model_api",
                                         "model": models if args.workflow else args.checkpoint, "seed": seed,
                                         "workflow_sha256": workflow_digest,
                                         "workflow_requirements": workflow_requirements,
-                                        "mesh_preparation": {"voxel_resolution": args.voxel_resolution,
-                                                             "face_budget": args.face_budget},
+                                        "mesh_preparation": mesh_preparation,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
+                                        "normal_source": "workflow" if entry["outputs"].get("save_normal", {}).get("images") else
+                                                         "neutral_placeholder",
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")
         temporary.replace(args.metadata)
     print(f"GLB: {dest}")

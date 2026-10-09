@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +15,88 @@ BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applicat
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderMaterialBakeTests(unittest.TestCase):
+    def test_mesh_preparation_preserves_closed_geometry_and_bakes_source_normals(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, target, blend = root / "source.glb", root / "prepared.glb", root / "prepared.blend"
+            normal = root / "normal.png"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy,sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(source)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(source), str(target), str(blend),
+                            "--mesh-only", "--face-budget", "100", "--normal-output", str(normal),
+                            "--texture-size", "128"], check=True, capture_output=True)
+            self.assertTrue(normal.is_file())
+            with Image.open(normal) as image:
+                self.assertEqual(image.size, (128, 128))
+                self.assertEqual(image.getpixel((64, 64))[2], 255)
+            snapshot = root / "snapshot.py"
+            result = root / "snapshot.json"
+            snapshot.write_text(f"""import bpy,json
+bpy.ops.wm.open_mainfile(filepath={str(blend)!r})
+meshes=[obj for obj in bpy.context.scene.objects if obj.type=='MESH']
+json.dump({{'mesh_objects':len(meshes),'face_count':len(meshes[0].data.polygons),
+            'positions':sorted(set(tuple(round(c,5) for c in v.co) for v in meshes[0].data.vertices))}},
+          open({str(result)!r},'w'))
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(snapshot)],
+                           check=True, capture_output=True)
+
+            data = json.loads(result.read_text())
+            self.assertEqual(data["mesh_objects"], 1)
+            self.assertEqual(data["face_count"], 12)
+            self.assertEqual(len(data["positions"]), 8)
+            self.assertEqual(data["positions"][0], [-1.0, -1.0, -1.0])
+            self.assertEqual(data["positions"][-1], [1.0, 1.0, 1.0])
+            fixture.write_text("""import bpy,sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24)
+for polygon in bpy.context.object.data.polygons:
+    polygon.use_smooth=True
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(source)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(source), str(target), str(blend),
+                            "--mesh-only", "--face-budget", "100", "--normal-output", str(normal),
+                            "--texture-size", "128"], check=True, capture_output=True)
+            with Image.open(normal) as image:
+                self.assertGreater(max(ImageStat.Stat(image).stddev), 10)
+            fixture.write_text("""import bpy,sys,bmesh
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add()
+mesh=bpy.context.object.data
+bm=bmesh.new(); bm.from_mesh(mesh); bm.faces.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[bm.faces[0]], context='FACES')
+bm.to_mesh(mesh); bm.free()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(source)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(source), str(target), str(blend),
+                            "--mesh-only", "--face-budget", "10000", "--voxel-resolution", "32"],
+                           check=True, capture_output=True)
+            snapshot.write_text(f"""import bpy,sys
+sys.path.insert(0,{str(ROOT / 'blender')!r})
+from inspect_model import topology_edge_counts
+bpy.ops.wm.open_mainfile(filepath={str(blend)!r})
+mesh=next(obj.data for obj in bpy.context.scene.objects if obj.type=='MESH')
+assert topology_edge_counts(mesh,1e-7)==(0,0)
+mesh.calc_loop_triangles()
+assert len(mesh.loop_triangles)<=10000, len(mesh.loop_triangles)
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(snapshot)],
+                           check=True, capture_output=True)
+
+
     def test_removes_only_single_face_islands(self):
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "check_cleanup.py"

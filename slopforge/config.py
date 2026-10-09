@@ -18,11 +18,19 @@ DEFAULTS = {
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors", "skintokens_python": None, "skintokens_checkout": None, "skintokens_checkpoint": None},
     "compute_profile": "default",
     "compute_profiles": {},
-    "quality_tier": "normal",
+    "quality_tier": "final",
     "quality_tiers": {
         "draft": {"defaults": {"image_candidates": 1, "model_candidates": 1, "material_candidates": 1}},
         "normal": {},
-        "final": {"defaults": {"image_candidates": 6, "model_candidates": 3, "material_candidates": 3}},
+        "final": {"defaults": {"image_candidates": 6, "model_candidates": 3, "material_candidates": 3},
+                  "workflow_inputs": {"model": {
+                      "trellis2_image_to_model_api.json": {"crop": {"pad_factor": 1.1}},
+                      "trellis2_image_to_model_h100_api.json": {
+                          "crop": {"pad_factor": 1.1},
+                          "shape_upsample_stage": {"target_resolution": 1536},
+                          "maps": {"texture_size": 4096}},
+                      "trellis2_image_to_model_h100_final_api.json": {"crop": {"pad_factor": 1.1}},
+                      "pixal3d_image_to_model_h100_api.json": {"crop": {"pad_factor": 1.1}}}}},
     },
     "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65, "workflow_inputs": []},
     "overwrite_existing": False,

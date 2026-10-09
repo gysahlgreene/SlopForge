@@ -10,6 +10,32 @@ from slopforge.unity_material import make_metallic_gloss
 
 
 class MeshPBRTests(unittest.TestCase):
+    def test_native_material_maps_keep_the_high_poly_normal_bake(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baked = root / "baked.png"
+            Image.new("RGB", (128, 128), (80, 160, 240)).save(baked)
+            outputs = {"save_" + key: {"images": [{"filename": key + ".png"}]}
+                       for key in ("basecolor", "roughness", "metallic")}
+            class Client:
+                def download_output(self, item, target):
+                    Image.new("RGB", (128, 128), "gray").save(target)
+            textures = copy_generated_maps(outputs, root, Client(), baked_normal=baked)
+            self.assertEqual((root / textures["normal"]).read_bytes(), baked.read_bytes())
+
+    def test_native_material_maps_keep_a_workflow_generated_normal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outputs = {"save_" + key: {"images": [{"filename": key + ".png"}]}
+                       for key in ("basecolor", "roughness", "metallic", "normal")}
+            class Client:
+                def download_output(self, item, target):
+                    Image.new("RGB", (128, 128), (80, 160, 240)).save(target)
+            textures = copy_generated_maps(outputs, root, Client())
+            with Image.open(root / textures["normal"]) as image:
+                self.assertEqual(image.size, (128, 128))
+                self.assertEqual(image.getpixel((0, 0)), (80, 160, 240))
+
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
