@@ -2,16 +2,18 @@
 
 **Turn an asset brief into a reviewed 3D game asset.**
 
-SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU; keep your assets, approval decisions, and provenance in your own project.
+SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU; keep your assets, approval decisions, and provenance in your own local project.
 
 [Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md) · [Roadmap](docs/CAPABILITY-ROADMAP-2026.md)
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
 
 ## See it working
 
 | Reviewed humanoid | Prop delivery |
 | :---: | :---: |
-| ![Basalt Warden performing the body-deformation test](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/motion-test.gif) | ![Generated power relay imported into Unity](img/power-relay-unity.png) |
-| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Pipeline notes →](docs/archive/mesh-texturing-2026-10-02.md) |
+| ![Basalt Warden performing the body-deformation test](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/motion-test.gif) | ![Generated power relay imported into Unity](img/power-relay.png) |
+| **Basalt Warden** — body deformation approved; valid Unity Humanoid and evaluated diagnostic animation. [Evidence →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) | **Power relay** — surfacing, prop generation, and material preparation evidence. [Evidence →](docs/media/3d-qualification-bench-2026-10/README.md) |
 
 These are measured examples. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
@@ -75,7 +77,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | Third-party motion retargeting | Plumbing and fixture evidence exist; production idle/walk/attack qualification remains open. |
 | Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 
-Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprite/UI/VFX generators.
+Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprites; it is an asset workflow for local-first review and delivery.
 
 ## Find your way around
 
