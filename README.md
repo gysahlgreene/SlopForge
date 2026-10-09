@@ -6,6 +6,8 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 [Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md) · [Roadmap](docs/CAPABILITY-ROADMAP-2026.md)
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
+
 ## See it working
 
 | Reviewed humanoid | Prop delivery |
