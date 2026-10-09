@@ -6,6 +6,8 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 [Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md)
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
+
 ## See it working
 
 | Reviewed humanoid | Prop delivery |
@@ -81,7 +83,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | Third-party motion retargeting | One Unity preview demonstrates looping idle/walk playback and measured skinned-mesh deformation. Broader movement, attack, and production qualification remain open. |
 | Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 
-Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprite/UI/VFX generators.
+Full finger animation is not available on the reviewed Basalt rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprites; the pipeline remains a qualified asset workflow rather than a game engine.
 
 ## Find your way around
 
