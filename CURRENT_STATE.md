@@ -112,13 +112,14 @@ qualification.
 ## Safe resume and invalidation evidence
 
 On 2026-10-10, `make verify PYTHON=.venv/bin/python` passed after Package 2 changes:
-298 tests and 56 subtests passed, 6 opt-in checks skipped, and 3 existing Pillow
+306 tests and 58 subtests passed, 6 opt-in checks skipped, and 3 existing Pillow
 deprecation warnings were reported. Compile, documentation, metadata, and whitespace
-checks passed. The focused package suite passed 83 tests and 9 subtests. Deterministic
+checks passed. The focused package suite passed 91 tests and 11 subtests. Deterministic
 coverage includes identical reuse, concept/geometry/material/processing invalidation,
 missing and hash-mismatched artifacts, interruption and failed-stage resume, recipe
-reload decisions, `retexture` lineage, unknown legacy provenance, and duplicate
-filenames with different content. The initial canonical run exposed an outdated test
+reload decisions, `retexture` lineage, unknown legacy provenance, duplicate filenames
+with different content, style/conditioning validation, worker stage integrity checks,
+and stale recipe child handling. The initial canonical run exposed an outdated test
 expectation for a processed mesh with no recorded lineage; it was changed to require
 recomputation and passed on rerun.
 
