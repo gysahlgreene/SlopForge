@@ -40,6 +40,9 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
     reasons = []
     if stage.get("name") not in _STAGE_ORDER:
         reasons.append("semantic mismatch: stage name is not in the fixed prop route")
+    stage_attempt = stage.get("attempt")
+    if isinstance(stage_attempt, bool) or not isinstance(stage_attempt, int) or stage_attempt < 1:
+        reasons.append("semantic mismatch: stage attempt must be a positive integer")
     if stage.get("status") != "succeeded":
         reasons.append(f"stage status is {stage.get('status', 'unknown')}; only succeeded stages are reusable")
     if not isinstance(stage.get("inputs"), list) or any(

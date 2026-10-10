@@ -54,6 +54,15 @@ class PropReuseTests(unittest.TestCase):
                     "outputs": [{**self.output, **changed}]}, inputs=[self.input], settings={"seed": 1})
                 self.assertFalse(decision["reusable"])
 
+    def test_nonpositive_stage_attempt_is_not_reusable(self):
+        for attempt in (-1, True):
+            with self.subTest(attempt=attempt):
+                malformed = {**self.stage, "attempt": attempt,
+                             "outputs": [{**self.output, "attempt": attempt}]}
+                decision = stage_reuse_decision(self.root, malformed,
+                    inputs=[self.input], settings={"seed": 1})
+                self.assertFalse(decision["reusable"])
+
     def test_missing_or_hash_mismatched_output_is_stale(self):
         missing = {**self.output, "path": "missing.glb"}
         self.assertIn("missing", " ".join(stage_reuse_decision(self.root, {**self.stage, "outputs": [missing]},
