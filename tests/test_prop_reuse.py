@@ -32,6 +32,28 @@ class PropReuseTests(unittest.TestCase):
         self.assertIn("lineage mismatch", " ".join(stage_reuse_decision(self.root, broken,
             inputs=[self.input], settings={"seed": 1})["reasons"]))
 
+    def test_package_stage_outputs_may_record_valid_input_subsets(self):
+        concept = {"id": "concept:1", "sha256": "1" * 64}
+        conditioning = {"id": "conditioning:1", "sha256": "2" * 64}
+        package_shape = {**self.stage, "name": "mesh_workflow_execution",
+                         "inputs": [concept, conditioning],
+                         "outputs": [{**self.output, "stage": "mesh_workflow_execution",
+                             "derived_from": [{"artifact_id": conditioning["id"],
+                                               "sha256": conditioning["sha256"]}]}]}
+        self.assertTrue(stage_reuse_decision(self.root, package_shape,
+            inputs=[concept, conditioning], settings={"seed": 1})["reusable"])
+        unrelated = {**package_shape, "outputs": [{**package_shape["outputs"][0],
+            "derived_from": [{"artifact_id": "foreign", "sha256": "3" * 64}]}]}
+        self.assertIn("lineage mismatch", " ".join(stage_reuse_decision(self.root, unrelated,
+            inputs=[concept, conditioning], settings={"seed": 1})["reasons"]))
+
+    def test_output_identity_must_match_stage(self):
+        for changed in ({"id": ""}, {"stage": "material_assembly_export"}, {"attempt": 2}):
+            with self.subTest(changed=changed):
+                decision = stage_reuse_decision(self.root, {**self.stage,
+                    "outputs": [{**self.output, **changed}]}, inputs=[self.input], settings={"seed": 1})
+                self.assertFalse(decision["reusable"])
+
     def test_missing_or_hash_mismatched_output_is_stale(self):
         missing = {**self.output, "path": "missing.glb"}
         self.assertIn("missing", " ".join(stage_reuse_decision(self.root, {**self.stage, "outputs": [missing]},
@@ -56,6 +78,10 @@ class PropReuseTests(unittest.TestCase):
         self.assertEqual(earliest_stale_stage(self.root, [self.stage], {
             "concept_generation": ([], {}), "material_generation": ([self.input], {"seed": 1})
         }), "concept_generation")
+
+    def test_earliest_stale_stage_rejects_unknown_requested_stage(self):
+        with self.assertRaisesRegex(ValueError, "unsupported prop stage"):
+            earliest_stale_stage(self.root, [], {"mesh_preperation": ([], {})})
 
 
 if __name__ == "__main__":

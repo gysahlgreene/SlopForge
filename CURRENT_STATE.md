@@ -17,7 +17,7 @@ No broad category/workflow/profile is claimed Qualified here.
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
-| Prop execution lineage and stage journal | Implemented; deterministic offline coverage verified for Package 1 | v4 manifest records content-addressed concept, conditioning, mesh, material, export, preview, publication and stage outcomes. No reuse, invalidation, or automatic resume decision; no live inference or visual qualification claim |
+| Prop execution lineage and stage journal | Implemented; deterministic offline coverage verified for Package 1 | v4 manifest records content-addressed concept, conditioning, mesh, material, export, preview, publication and stage outcomes. A fixed prop-stage reuse/integrity policy now checks requested input identities/settings, intact outputs, and output lineage, and records append-only decisions. Deterministic policy tests pass; callers and automatic resume are not integrated yet. No live inference or visual qualification claim |
 | Offline verification baseline | Verified working for tested coverage | Canonical checks and this task's results below; opt-in/live gates remain separate |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
@@ -61,7 +61,9 @@ These gaps remain outside Package 1 or require separate evidence.
   synthesized Hunyuan graph has no source file hash. Live provider-version coverage
   was not exercised during Package 1 implementation.
 - **Resume and invalidation:** [recipe resume](slopforge/recipes.py)
-  (`resume_recipe`) skips completed/approved stages using persisted state; a general
+  (`resume_recipe`) skips completed/approved stages using persisted state. The new
+  fixed prop-stage reuse policy has deterministic offline coverage, but its callers
+  and automatic resume integration remain for later Package 2 tasks; a general
   dependency/requirement/hash-based invalidation guarantee is not established.
   The model approval path also starts new processing attempts rather than providing
   universal resumability at every expensive substage.
@@ -94,3 +96,16 @@ Checks performed on 2026-10-10 for Package 1 implementation:
   Package 1 state and persistence behavior only; they do not qualify output quality,
   readiness, reuse, invalidation, or automatic resume. Historical `make verify` /
   `make verify-live` results in the recovery and benchmark reports remain historical.
+
+## Prop reuse policy evidence
+
+Task 1 of Package 2 adds a fixed-stage policy, not an integrated resume workflow.
+On 2026-10-10, `.venv/bin/python -m pytest tests/test_prop_reuse.py
+tests/test_manifest.py -q` passed with 21 tests and 5 subtests. Coverage includes
+content integrity, output identity, Package 1 output-specific lineage subsets,
+unknown stage rejection, and append-only decisions. `make verify
+PYTHON=.venv/bin/python` passed with 273 tests, 6 opt-in skips, 3 existing Pillow
+deprecation warnings, and 52 subtests. Documentation and whitespace checks passed.
+No caller integration, automatic resume, live inference, visual review, or Unity
+playback was exercised; these results do not establish asset readiness or pipeline
+qualification.

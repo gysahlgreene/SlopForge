@@ -42,27 +42,44 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
         reasons.append("semantic mismatch: stage name is not in the fixed prop route")
     if stage.get("status") != "succeeded":
         reasons.append(f"stage status is {stage.get('status', 'unknown')}; only succeeded stages are reusable")
-    if stage.get("inputs") is None or any(not ref.get("id") or not ref.get("sha256") for ref in stage.get("inputs", [])):
+    if not isinstance(stage.get("inputs"), list) or any(
+            not isinstance(ref, dict) or not ref.get("id") or not ref.get("sha256")
+            for ref in stage.get("inputs", [])):
         reasons.append("semantic mismatch: recorded inputs are incomplete")
     elif _identity(stage.get("inputs", [])) != _identity(inputs):
         reasons.append("semantic mismatch: ordered input artifact identities changed")
     if stage.get("settings") != settings:
         reasons.append("semantic mismatch: settings changed")
+    recorded_inputs = stage.get("inputs") if isinstance(stage.get("inputs"), list) else []
     outputs = stage.get("outputs")
     if not outputs:
         reasons.append("missing output artifacts")
     for output in outputs or []:
+        attempt = output.get("attempt") if isinstance(output, dict) else None
+        if (not isinstance(output, dict) or not isinstance(output.get("id"), str) or not output["id"].strip()
+                or output.get("stage") != stage.get("name") or isinstance(attempt, bool)
+                or not isinstance(attempt, int) or attempt != stage.get("attempt")):
+            reasons.append("semantic mismatch: output artifact identity does not match its stage attempt")
         intact, reason = artifact_integrity(project_root, output)
         if not intact:
             reasons.append(reason)
-        parents = output.get("derived_from")
-        expected = [{"artifact_id": item.get("id"), "sha256": item.get("sha256")} for item in inputs]
-        if parents is None or any(not parent.get("artifact_id") or not parent.get("sha256") for parent in parents) or parents != expected:
+        parents = output.get("derived_from") if isinstance(output, dict) else None
+        allowed = {(item.get("id"), item.get("sha256")) for item in recorded_inputs if isinstance(item, dict)}
+        recorded = {(parent.get("artifact_id"), parent.get("sha256"))
+                    for parent in parents if isinstance(parent, dict)} if isinstance(parents, list) else set()
+        if (not isinstance(parents, list)
+                or len(recorded) != len(parents)
+                or any(not artifact_id or not digest or (artifact_id, digest) not in allowed
+                       for artifact_id, digest in recorded)
+                or (recorded_inputs and not recorded)):
             reasons.append("lineage mismatch: output derivation links differ from requested inputs")
     return {"reusable": not reasons, "reasons": reasons}
 
 
 def earliest_stale_stage(project_root: Path, stages: list[dict], requested: dict[str, tuple[list[dict], dict]]) -> str | None:
+    unknown = [name for name in requested if name not in _STAGE_ORDER]
+    if unknown:
+        raise ValueError(f"unsupported prop stage(s): {', '.join(unknown)}")
     by_name = {}
     for stage in stages:
         by_name.setdefault(stage.get("name"), []).append(stage)
