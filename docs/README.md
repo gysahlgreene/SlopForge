@@ -31,6 +31,10 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity walk playback, motion measurements, and current rig limitations.
 - [Diagnostic humanoid benchmark](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed body deformation, valid Humanoid Avatar, and animation evidence.
 
+## Reliability planning
+
+- [Core 3D pipeline implementation audit](CORE-PIPELINE-AUDIT.md): evidence-backed M0 gaps and ordered implementation packages.
+
 ## For contributors
 
 - [Product contract](PRODUCT_CONTRACT.md), [pipeline contract](PIPELINE_CONTRACT.md), [quality contract](QUALITY_CONTRACT.md), [roadmap](../ROADMAP.md), and [current state](../CURRENT_STATE.md)
