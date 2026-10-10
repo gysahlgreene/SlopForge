@@ -2,6 +2,10 @@
 
 Start with the user guides for installation, asset generation, review, and Unity delivery. Examples and qualification reports show what the current pipeline can produce and where human review is still needed.
 
+Product direction and document precedence live in the [product contract](PRODUCT_CONTRACT.md).
+The [pipeline contract](PIPELINE_CONTRACT.md) and [quality contract](QUALITY_CONTRACT.md)
+define required behavior and evidence; [current state](../CURRENT_STATE.md) records gaps.
+
 ## Get started
 
 | Guide | Use it for |
@@ -29,7 +33,7 @@ Start with the user guides for installation, asset generation, review, and Unity
 
 ## For contributors
 
-- [Product contract](PRODUCT_CONTRACT.md), [pipeline contract](PIPELINE_CONTRACT.md), [roadmap](../ROADMAP.md), and [current state](../CURRENT_STATE.md)
+- [Product contract](PRODUCT_CONTRACT.md), [pipeline contract](PIPELINE_CONTRACT.md), [quality contract](QUALITY_CONTRACT.md), [roadmap](../ROADMAP.md), and [current state](../CURRENT_STATE.md)
 - [Architecture](ARCHITECTURE.md), [asset outputs](ASSET-OUTPUTS.md), and [agent integration](AGENT-INTEGRATION.md)
 - [Contributing and verification](../CONTRIBUTING.md)
 

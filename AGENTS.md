@@ -7,19 +7,23 @@ and engine delivery. A fresh session or developer must be able to reproduce
 qualified results using the repository, without knowledge from an earlier chat.
 One successful asset is evidence for that asset, not proof of pipeline reliability.
 
+Before substantial work, read [Product contract](docs/PRODUCT_CONTRACT.md),
+[Pipeline contract](docs/PIPELINE_CONTRACT.md),
+[Quality contract](docs/QUALITY_CONTRACT.md), [Roadmap](ROADMAP.md), and
+[Current state](CURRENT_STATE.md). Follow the product contract's document precedence;
+expose and reconcile contradictions between peer contracts. AGENTS governs working
+behavior, not independent product direction. User instructions take precedence.
+Work on the active milestone; later work requires a dependency of its gate or
+explicit user direction. Tests/validation check contracts; implementation must
+satisfy them. Update current state with verified evidence and visible gaps.
+
 Before changing a generation or delivery stage, read its existing implementation
 and relevant guidance in [the documentation index](docs/README.md). For generation
-quality, environment requirements, or previously qualified settings, consult
-[Quality tiers](docs/QUALITY-TIERS.md), [ComfyUI](docs/COMFYUI.md),
-[Workflows](docs/WORKFLOWS.md), and [Agent integration](docs/AGENT-INTEGRATION.md).
-Follow [Contributing](CONTRIBUTING.md) for changes and public evidence.
-
-Before substantial work, read [Product contract](docs/PRODUCT_CONTRACT.md),
-[Pipeline contract](docs/PIPELINE_CONTRACT.md), [Roadmap](ROADMAP.md), and
-[Current state](CURRENT_STATE.md). User instructions take precedence. Contracts
-define the product and invariants; tests/validation check them; implementation
-must satisfy them. Preserve product priorities and milestone order unless the
-user explicitly changes them. Update current state with verified evidence.
+settings and environment requirements, consult [Quality tiers](docs/QUALITY-TIERS.md),
+[ComfyUI](docs/COMFYUI.md), [Workflows](docs/WORKFLOWS.md), and
+[Agent integration](docs/AGENT-INTEGRATION.md). Preserve the boundaries in
+[Architecture](docs/ARCHITECTURE.md). Follow [Contributing](CONTRIBUTING.md) for
+changes and public evidence.
 
 ## Turn discoveries into durable fixes
 
@@ -61,10 +65,14 @@ engine playback checks separate. Passing tests or reducing review pose ranges
 does not qualify an asset's appearance or rig. Preserve review gates; publish
 success evidence only for stages actually checked. State asset-specific results
 and pipeline repeatability separately, with the tested conditions and limits.
+Use Experimental, Provisional, and Qualified only with the scope and evidence
+required by the quality contract. The three-brief/two-independent-run protocol is
+provisional initial evidence; six runs do not automatically qualify a pipeline.
+Unknown requirements and undefined thresholds prevent the affected readiness claim.
 
 Run `make verify` before declaring implementation complete. Use `make verify-live`
 for explicitly authorized inference checks; expose unavailable or skipped coverage.
 Improve verification when it misses a discovered failure. For substantial
 completion reports, state goal, root cause, changes, regression protection,
 verification evidence, and remaining uncertainty. Preserve architectural boundaries
-from the pipeline contract and keep personal diagnostics outside public Git.
+from the architecture guide and keep personal diagnostics outside public Git.
