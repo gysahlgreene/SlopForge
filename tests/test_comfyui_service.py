@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from slopforge.backends.comfyui import ComfyUIClient, comfy_environment
+from slopforge.backends.comfyui import ComfyUIClient, comfy_environment, backend_provenance
 from slopforge.config import load_project
 from slopforge.paths import comfy_backend, comfy_home
 
@@ -24,6 +24,18 @@ class Response:
 
 
 class ComfyUIServiceTests(unittest.TestCase):
+    def test_backend_provenance_uses_exposed_facts_or_unavailable(self):
+        facts = backend_provenance({"system": {"comfyui_version": "0.3.1"},
+                                    "devices": [{"name": "NVIDIA GPU"}]}, queried=True)
+        self.assertEqual(facts["provider"], {"status": "known", "value": "ComfyUI"})
+        self.assertEqual(facts["version"], {"status": "known", "value": "0.3.1"})
+        self.assertEqual(facts["device"], {"status": "known", "value": ["NVIDIA GPU"]})
+        self.assertEqual(facts["model_weights"]["status"], "unavailable")
+        self.assertEqual(facts["custom_node_revisions"]["status"], "unavailable")
+        absent = backend_provenance({}, queried=False)
+        self.assertEqual(absent["version"]["status"], "not_recorded")
+        self.assertEqual(absent["device"]["status"], "not_recorded")
+
     def test_local_and_remote_backend_selection_does_not_select_compute_profile(self):
         config = {"asset_pipeline": {"tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto"}}}
         self.assertEqual(comfy_backend(config), "local")

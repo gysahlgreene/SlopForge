@@ -1,15 +1,74 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 from processing.comfy_generate_3d import copy_generated_maps, copy_conditioning_image
+from processing import comfy_generate_3d
 from slopforge.pipelines.model import _native_material_candidate, retexture
 from slopforge.unity_material import make_metallic_gloss
 
 
 class MeshPBRTests(unittest.TestCase):
+    def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = root / "concept.png"
+            image.write_bytes(b"concept")
+            workflow_path = root / "trellis.json"
+            workflow_path.write_text(json.dumps({
+                "prepared_mesh": {"class_type": "LoadMesh", "inputs": {"model_file": "old.glb"}},
+                "save_raw": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "raw"}},
+                "save": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "final"}},
+                "save_basecolor": {"class_type": "SaveImage", "inputs": {"filename_prefix": "base"}},
+                "save_roughness": {"class_type": "SaveImage", "inputs": {"filename_prefix": "rough"}},
+                "save_metallic": {"class_type": "SaveImage", "inputs": {"filename_prefix": "metal"}},
+                "save_normal": {"class_type": "SaveImage", "inputs": {"filename_prefix": "normal"}},
+                "texture": {"class_type": "ApplyTextureToMesh", "inputs": {}},
+                "1": {"class_type": "Checkpoint", "inputs": {"ckpt_name": "configured.safetensors"}},
+            }))
+            mesh, metadata = root / "mesh.glb", root / "generation.json"
+
+            class Client:
+                def __init__(self, _url): self.calls = 0
+                def health(self): return {"system": {"comfyui_version": "0.3.1"}, "devices": []}
+                def upload_input(self, _path, folder): return {"name": f"upload{folder}.png", "subfolder": folder}
+                def queue_workflow(self, _workflow): self.calls += 1; return f"prompt-{self.calls}"
+                def wait_for_completion(self, prompt, timeout=3600):
+                    if prompt == "prompt-1":
+                        return {"outputs": {"save_raw": {"glb": {"filename": "raw.glb"}}}}
+                    return {"outputs": {
+                        "save": {"glb": {"filename": "final.glb"}},
+                        **{f"save_{key}": {"images": [{"filename": f"{key}.png"}]}
+                           for key in ("basecolor", "roughness", "metallic", "normal")},
+                    }}
+                def download_output(self, item, path): Path(path).write_bytes(item["filename"].encode())
+
+            client = Client("http://comfy")
+            def blender(*args, **_kwargs): Path(args[0][8]).write_bytes(b"prepared")
+            with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=client), \
+                    patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
+                    patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image),
+                        "--name", "relay", "--dest", str(mesh), "--workflow", str(workflow_path),
+                        "--blender", "blender", "--seed", "17", "--metadata", str(metadata)]):
+                comfy_generate_3d.main()
+
+            saved = json.loads(metadata.read_text())
+            self.assertEqual(saved["shape_prompt_id"], "prompt-1")
+            self.assertEqual(saved["prompt_id"], "prompt-2")
+            self.assertNotEqual(saved["shape_prompt_id"], saved["prompt_id"])
+            self.assertEqual(saved["model_filenames"][0]["value"], "configured.safetensors")
+            self.assertEqual(saved["provenance"]["model_weights"]["status"], "unavailable")
+            self.assertEqual(saved["provenance"]["custom_node_revisions"]["status"], "unavailable")
+            output_digests = {item["path"]: item["sha256"] for item in saved["outputs"]}
+            self.assertEqual(output_digests[mesh.name], __import__("hashlib").sha256(b"final.glb").hexdigest())
+            self.assertEqual(output_digests["mesh_untextured.glb"],
+                             __import__("hashlib").sha256(b"raw.glb").hexdigest())
+            self.assertEqual(output_digests["native_material/basecolor.png"],
+                             __import__("hashlib").sha256(b"basecolor.png").hexdigest())
+
     def test_actual_conditioning_image_is_downloaded_for_inspection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

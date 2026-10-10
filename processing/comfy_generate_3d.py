@@ -10,17 +10,74 @@ import os
 import struct
 import time
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
 from slopforge.backends.blender import blender_environment
-from slopforge.provenance import workflow_sha256
+from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
+from slopforge.backends.comfyui import backend_provenance
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 from slopforge.validation import validate_image
+from slopforge.manifest import (load_manifest, save_manifest, find_asset, begin_stage,
+                                start_stage, finish_stage)
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 CHECKPOINT = "hunyuan3d-dit-v2_fp16.safetensors"
+
+
+def _journal_execution(context):
+    if not isinstance(context, dict) or not all(context.get(key) for key in
+            ("manifest_path", "asset_selector", "execution_id", "project_root")):
+        return None
+    manifest = load_manifest(context["manifest_path"])
+    asset = find_asset(manifest, context["asset_selector"])
+    execution = next((item for item in asset.get("executions", [])
+                      if item.get("id") == context["execution_id"]), None)
+    return None if execution is None else (context, manifest, execution)
+
+
+@contextmanager
+def _journal_stage(context, name, attempt, settings, provenance=None):
+    state = _journal_execution(context)
+    if state is None:
+        yield
+        return
+    context, manifest, execution = state
+    stage = start_stage(execution, name, attempt, [], settings, provenance or {})
+    save_manifest(context["manifest_path"], manifest)
+    begin_stage(stage)
+    save_manifest(context["manifest_path"], manifest)
+    try:
+        yield stage
+    except Exception as exc:
+        finish_stage(stage, "failed", error=str(exc) or type(exc).__name__)
+        save_manifest(context["manifest_path"], manifest)
+        raise
+
+
+def _journal_finish(context, stage, outputs):
+    if stage is None:
+        return
+    state = _journal_execution(context)
+    if state is None:
+        return
+    context, manifest, execution = state
+    current = next((item for item in execution["stages"] if item is stage), None)
+    if current is None:
+        current = next(item for item in reversed(execution["stages"])
+                       if item["name"] == stage["name"] and item["attempt"] == stage["attempt"])
+    root = Path(context["project_root"]).resolve()
+    refs = []
+    for index, (path, kind) in enumerate(outputs):
+        path = Path(path).resolve()
+        refs.append({"id": f"{execution['id']}:{current['name']}:{current['attempt']}:{index}",
+                     "type": kind, "path": path.relative_to(root).as_posix(),
+                     "sha256": file_sha256(path), "stage": current["name"],
+                     "attempt": current["attempt"], "derived_from": []})
+    finish_stage(current, "succeeded", refs)
+    save_manifest(context["manifest_path"], manifest)
 
 
 def safe_name(value):
@@ -219,6 +276,7 @@ def main():
     parser.add_argument("--blender", type=Path)
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
+    parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
     args = parser.parse_args()
     if args.face_budget <= 0:
         parser.error("--face-budget must be positive")
@@ -238,13 +296,15 @@ def main():
         sys.exit(1)
 
     workflow_requirements = {"status": "unknown"}
+    source_workflow = None
     if args.workflow:
         declared_workflow = json.loads(args.workflow.read_text())
+        source_workflow = json.loads(json.dumps(declared_workflow))
         workflow_requirements = workflow_requirements_identity(args.workflow, declared_workflow)
 
     client = ComfyUIClient(COMFY_URL)
     try:
-        client.health()
+        health = client.health()
     except Exception as exc:
         print(f"ComfyUI is not reachable at {COMFY_URL}: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -257,50 +317,103 @@ def main():
                 if args.workflow else make_workflow(comfy_image_name, name, args.checkpoint, seed))
     if args.workflow_inputs:
         apply_workflow_inputs(workflow, json.loads(args.workflow_inputs))
+    source_content_hash = file_sha256(src)
     dest = Path(args.dest).expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shape_prompt_id = None
+    journal = json.loads(args.journal_context) if args.journal_context else None
+    journal_attempt = (journal or {}).get("attempt", 1)
     if "prepared_mesh" in workflow:
         if args.blender is None:
             raise ValueError("This model workflow requires --blender for mesh reduction and UV preparation")
         raw_workflow = {key: node for key, node in workflow.items()
                         if not key.startswith("save") or key == "save_raw"}
         print("Mesh stage: generating the detailed shape...", flush=True)
-        entry, shape_prompt_id = run_model_workflow(raw_workflow, client)
+        with _journal_stage(journal, "mesh_workflow_execution", journal_attempt,
+                            {"phase": "raw_shape", "seed": seed},
+                            {"backend": backend_provenance(health, queried=True)}) as stage:
+            entry, shape_prompt_id = run_model_workflow(raw_workflow, client)
+            _journal_finish(journal, stage, [])
         raw = find_glb(entry["outputs"].get("save_raw", {}))
         if not raw:
             raise ValueError("Model workflow did not produce its raw mesh")
         raw_path = dest.with_name(dest.stem + "_untextured.glb")
-        client.download_output(raw, raw_path)
+        with _journal_stage(journal, "mesh_output_acquisition", journal_attempt,
+                            {"phase": "raw_shape"}) as stage:
+            client.download_output(raw, raw_path)
+            _journal_finish(journal, stage, [(raw_path, "mesh.raw")])
         prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
         script = Path(__file__).resolve().parents[1] / "blender" / "prepare_model.py"
-        subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(raw_path),
-                        str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
-                        "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"],
-                       check=True, env=blender_environment())
+        with _journal_stage(journal, "mesh_preparation", journal_attempt,
+                            {"face_budget": args.face_budget, "voxel_resolution": args.voxel_resolution}):
+            subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(raw_path),
+                            str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
+                            "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"],
+                           check=True, env=blender_environment())
         if not prepared.is_file():
             raise RuntimeError("Blender did not produce the prepared mesh")
+        state = _journal_execution(journal)
+        if state:
+            _, manifest, execution = state
+            current = execution["stages"][-1]
+            _journal_finish(journal, current, [(prepared, "mesh.prepared")])
         prepared_upload = client.upload_input(prepared, "3d")
         workflow["prepared_mesh"]["inputs"]["model_file"] = f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
+        prepared_content_hash = file_sha256(prepared)
         del workflow["save_raw"]
         print("Material stage: generating and baking mesh-aware PBR textures...", flush=True)
 
-    entry, prompt_id = run_model_workflow(workflow, client)
+    with _journal_stage(journal, "material_generation", journal_attempt,
+                        {"seed": seed, "workflow": args.workflow.name if args.workflow else "hunyuan3d"},
+                        {"backend": backend_provenance(health, queried=True)}) as stage:
+        entry, prompt_id = run_model_workflow(workflow, client)
+        _journal_finish(journal, stage, [])
     glb = find_glb(entry["outputs"].get("save", {})) if args.workflow else find_glb(entry["outputs"])
     if not glb:
         raise ValueError("ComfyUI finished but no final GLB was produced")
-    client.download_output(glb, dest)
-    textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
-    textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
-    conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
-                          if "save_conditioning" in workflow else None)
+    with _journal_stage(journal, "mesh_output_acquisition", journal_attempt + 1,
+                        {"phase": "material_outputs"}) as stage:
+        client.download_output(glb, dest)
+        textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
+        textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
+        conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
+                              if "save_conditioning" in workflow else None)
+        acquired = [(dest, "mesh.final")] + [(dest.parent / path, f"texture.{name}")
+                                              for name, path in textures.items()]
+        if conditioning_image:
+            acquired.append((dest.parent / conditioning_image, "image.conditioning"))
+        _journal_finish(journal, stage, acquired)
     models = sorted({value for node in workflow.values() for value in node.get("inputs", {}).values()
                      if isinstance(value, str) and value.endswith(".safetensors")})
     if args.metadata:
         args.metadata.parent.mkdir(parents=True, exist_ok=True)
         temporary = args.metadata.with_name(f".{args.metadata.name}.tmp")
         workflow_digest = workflow_sha256(args.workflow) if args.workflow else None
+        uploaded_inputs = {}
+        for node_id, node in workflow.items():
+            inputs = node.get("inputs", {})
+            if node.get("class_type") == "LoadImage" and inputs.get("image") == comfy_image_name:
+                uploaded_inputs[f"{node_id}.image"] = source_content_hash
+            elif node.get("class_type") in {"LoadImage", "LoadMesh"} and "prepared_upload" in locals():
+                if inputs.get("image") == f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}" or \
+                        inputs.get("model_file") == f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}":
+                    slot = "image" if "image" in inputs else "model_file"
+                    uploaded_inputs[f"{node_id}.{slot}"] = prepared_content_hash
+        identity = canonical_workflow_identity(source_workflow or workflow, workflow, uploaded_inputs)
+        model_filenames = sorted({value for node in workflow.values() for value in node.get("inputs", {}).values()
+                                  if isinstance(value, str) and value.endswith((".safetensors", ".ckpt", ".gguf", ".onnx"))})
+        output_records = [{"path": dest.name, "sha256": file_sha256(dest), "kind": "mesh"}]
+        if "raw_path" in locals() and raw_path.is_file():
+            output_records.append({"path": raw_path.name, "sha256": file_sha256(raw_path), "kind": "mesh.raw"})
+        if "prepared" in locals() and prepared.is_file():
+            output_records.append({"path": prepared.name, "sha256": file_sha256(prepared), "kind": "mesh.prepared"})
+        for key, relative in textures.items():
+            target = dest.parent / relative
+            output_records.append({"path": Path(relative).as_posix(), "sha256": file_sha256(target), "kind": f"texture.{key}"})
+        if conditioning_image:
+            target = dest.parent / conditioning_image
+            output_records.append({"path": conditioning_image, "sha256": file_sha256(target), "kind": "conditioning_image"})
         remesh = next((node["inputs"] for node in workflow.values()
                        if node.get("class_type") == "RemeshMesh"), None)
         unwrap = next((node["inputs"] for node in workflow.values()
@@ -319,6 +432,21 @@ def main():
         temporary.write_text(json.dumps({"workflow": args.workflow.name if args.workflow else "hunyuan3d_image_to_model_api",
                                         "model": models if args.workflow else args.checkpoint, "seed": seed,
                                         "workflow_sha256": workflow_digest,
+                                        "workflow_source_sha256": workflow_digest,
+                                        "workflow_source": ({"status": "known", "value": workflow_digest}
+                                            if workflow_digest else {"status": "unavailable",
+                                                "reason": "Hunyuan workflow is synthesized in the worker; no source file exists"}),
+                                        "workflow_effective_sha256": identity["effective_sha256"],
+                                        "effective_bindings": {"uploaded_inputs": identity["bindings"],
+                                            "workflow_inputs": json.loads(args.workflow_inputs) if args.workflow_inputs else {},
+                                            "seed": seed, "face_budget": args.face_budget,
+                                            "voxel_resolution": args.voxel_resolution,
+                                            "source_image_sha256": source_content_hash},
+                                        "backend": backend_provenance(health, queried=True),
+                                        "provenance": {"model_weights": backend_provenance(health, queried=True)["model_weights"],
+                                            "custom_node_revisions": backend_provenance(health, queried=True)["custom_node_revisions"]},
+                                        "model_filenames": [{"status": "known", "value": value} for value in model_filenames],
+                                        "outputs": output_records,
                                         "workflow_requirements": workflow_requirements,
                                         "mesh_preparation": mesh_preparation,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,

@@ -6,7 +6,8 @@ import tempfile
 import sys
 from pathlib import Path
 from slopforge.backends.comfyui import ComfyUIClient
-from slopforge.provenance import workflow_sha256
+from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
+from slopforge.backends.comfyui import backend_provenance
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 
@@ -61,7 +62,9 @@ def bind_reference_inputs(client, workflow, references, slots):
         provenance = {key: reference[key] for key in
                       ("library_entry_id", "category", "sha256", "expected_sha256", "source") if key in reference}
         used.append({"path": reference.get("provenance_path", reference["path"]),
-                     "strength": reference["strength"], "comfyui_input": image_name, **provenance})
+                     "strength": reference["strength"], "comfyui_input": image_name,
+                     "workflow_slot": f"{image_target['node']}.{image_target['input']}",
+                     "content_sha256": file_sha256(reference["path"]), **provenance})
     return used
 
 def apply_seed(workflow, seed):
@@ -92,6 +95,7 @@ def main():
         sys.exit(1)
 
     workflow = json.loads(workflow_path.read_text())
+    source_workflow = json.loads(json.dumps(workflow))
     workflow_requirements = workflow_requirements_identity(workflow_path, workflow)
     if args.workflow_inputs:
         overrides = json.loads(args.workflow_inputs)
@@ -169,8 +173,23 @@ def main():
 
     if args.metadata:
         quality = json.loads(args.quality) if args.quality else None
+        uploaded_inputs = {item["workflow_slot"]: item["content_sha256"] for item in references_used}
+        workflow_identity = canonical_workflow_identity(source_workflow, workflow, uploaded_inputs)
+        bindings = {"prompt": args.prompt, "negative_prompt": args.negative, "seed": seed,
+                    "workflow_inputs": json.loads(args.workflow_inputs) if args.workflow_inputs else {},
+                    "uploaded_inputs": workflow_identity["bindings"],
+                    "reference_strengths": [item["strength"] for item in references_used],
+                    "quality": quality}
+        graph_models = sorted(set(models))
+        outputs = [{"index": 0, "source_filename": outputs[0]["source_filename"], "path": dest.name,
+                    "sha256": file_sha256(dest), "kind": "image"}]
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed,
                                        "workflow_sha256": workflow_sha256(workflow_path),
+                                       "workflow_source_sha256": workflow_identity["source_sha256"],
+                                       "workflow_effective_sha256": workflow_identity["effective_sha256"],
+                                       "effective_bindings": bindings,
+                                       "backend": backend_provenance(queried=False),
+                                       "model_filenames": [{"status": "known", "value": name} for name in graph_models],
                                        "workflow_requirements": workflow_requirements,
                                        "prompt_id": prompt_id, "output_kind": "image",
                                        "references_used": references_used,
