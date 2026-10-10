@@ -125,6 +125,23 @@ class ManifestTests(unittest.TestCase):
                 "derived_from": [],
             }])
 
+    def test_reuse_decision_appends_without_rewriting_success_history(self):
+        execution = manifest_module.start_execution(self.make_asset("coin"), {"brief": "coin"})
+        stage = manifest_module.start_stage(execution, "concept_generation", 1, [], {}, {})
+        manifest_module.begin_stage(stage)
+        manifest_module.finish_stage(stage, "succeeded")
+        original = copy.deepcopy(stage)
+
+        result = manifest_module.record_reuse_decision(execution, "concept_generation", 1,
+            "a" * 64, {"reusable": False, "reasons": ["semantic mismatch"]})
+
+        self.assertEqual(stage, original)
+        self.assertEqual(result, execution["reuse_decisions"][-1])
+        self.assertEqual(result["stage"], "concept_generation")
+        self.assertEqual(result["stage_attempt"], 1)
+        self.assertFalse(result["reusable"])
+        self.assertTrue(result["timestamp"])
+
     def test_atomic_record_stays_simple_until_outputs_or_relationships_are_added(self):
         asset = self.make_asset("coin")
         self.assertNotIn("artifacts", asset)
