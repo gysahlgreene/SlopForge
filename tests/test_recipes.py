@@ -26,7 +26,10 @@ class RecipeTests(unittest.TestCase):
         (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
         self.types = {"concept": {"name": "concept", "pipeline": "image"}}
         self.style = {"name": "default", "version": 1}
-        self.config = {"asset_pipeline": {"defaults": {"image_candidates": 1}}}
+        self.style["_directory"] = str(self.root / "styles")
+        (self.root / "styles/references/approved").mkdir(parents=True, exist_ok=True)
+        self.config = {"asset_pipeline": {"defaults": {"image_candidates": 1},
+                                          "workflows": {"image": "image.json"}}}
         self.manifest = {"schema_version": 3, "assets": {}}
         self.events = []
 
@@ -315,6 +318,51 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(len(generated), 1)
         stage = self.manifest["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
         self.assertEqual(stage["reuse_decisions"][-1]["reusable"], True)
+
+    def test_failed_replacement_does_not_restore_stale_recipe_child_as_approved(self):
+        self.style["_directory"] = str(self.root / "styles")
+        (self.root / "styles/references/approved").mkdir(parents=True, exist_ok=True)
+        self.config["asset_pipeline"]["workflows"] = {"image": "image.json"}
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                        "sample_pack", instance_name="demo")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+        asset["status"] = "ready"
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": False, "reasons": ["brief changed"]}), \
+                patch.dict(recipes.PIPELINE_HANDLERS,
+                           {"model": lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("replacement failed"))}):
+            result = recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
+
+        self.assertEqual(stage["status"], "stale")
+        self.assertEqual(asset["status"], "stale")
+        self.assertEqual(result["status"], "partial")
+
+    def test_successful_stale_recipe_replacement_does_not_keep_old_approval(self):
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                        "sample_pack", instance_name="demo")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+        asset["status"] = "ready"
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": False, "reasons": ["brief changed"]}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
+
+        self.assertEqual(stage["status"], "completed")
+        self.assertNotEqual(asset["status"], "ready")
 
 
 if __name__ == "__main__":

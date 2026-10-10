@@ -19,7 +19,7 @@ from ..manifest import (save_manifest, load_manifest, start_execution, start_sta
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
-from .reuse import artifact_integrity, earliest_stale_stage, stage_reuse_decision
+from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
@@ -77,12 +77,19 @@ def _execution_stage(asset, execution_id, name, attempt):
 def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     candidates = asset.get("candidates", {}).get("items", [])
     reasons = []
-    candidate = next((item for item in reversed(candidates)
-                      if item.get("status") == "candidate" and item.get("execution_id")), None)
-    if candidate is None:
-        return {"reusable": False, "reasons": ["prop child has no lineage-backed candidate"]}
+    execution_ids = child_stage.get("candidate_execution_ids")
+    if not isinstance(execution_ids, list) or not execution_ids:
+        return {"reusable": False, "reasons": ["prop child candidate execution identity is unknown"]}
+    selected_candidates = [item for item in candidates if item.get("execution_id") in execution_ids]
+    if not selected_candidates or any(item.get("status") != "candidate" or not item.get("artifact")
+                                       for item in selected_candidates):
+        return {"reusable": False, "reasons": ["prop child candidate set is incomplete"]}
     execution = next((item for item in asset.get("executions", [])
-                      if item.get("id") == candidate["execution_id"]), None)
+                      if item.get("id") == execution_ids[0]), None)
+    candidate = selected_candidates[0]
+    attempts = (execution or {}).get("identity_inputs", {}).get("candidate_attempts", [])
+    if len(execution_ids) != 1 or len(selected_candidates) != len(attempts):
+        reasons.append("prop child candidate set changed or is incomplete")
     if not execution or execution.get("status") != "succeeded":
         reasons.append("candidate execution is missing or incomplete")
     expected_description = child.get("description", asset.get("description"))
@@ -92,6 +99,17 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         reasons.append("prop child brief changed")
     if expected_prompt is not None and identity.get("generation_prompt") != expected_prompt:
         reasons.append("prop child prompt changed")
+    if (not identity.get("style") or not child.get("requested_style_identity") or
+            identity.get("style") != child.get("requested_style_identity")):
+        reasons.append("prop child style identity changed or is unknown")
+    if (not identity.get("conditioning") or not child.get("requested_conditioning") or
+            identity.get("conditioning") != child.get("requested_conditioning")):
+        reasons.append("prop child conditioning or references changed or are unknown")
+    expected_count = child.get("count", config.get("asset_pipeline", {}).get("defaults", {}).get("image_candidates"))
+    variations = child.get("variations", [None] * expected_count) if expected_count is not None else None
+    if (not isinstance(attempts, list) or expected_count is None or len(attempts) != expected_count or
+            [item.get("variation") for item in attempts] != variations):
+        reasons.append("prop child candidate count or variations changed")
     pipeline = config.get("asset_pipeline", {})
     workflow = pipeline.get("workflows", {}).get("image")
     if workflow:
@@ -106,10 +124,11 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
                             "settings": pipeline.get("quality_settings", {})}
         if identity["quality"] != expected_quality:
             reasons.append("prop child quality settings changed")
-    artifact = candidate.get("artifact")
-    if not artifact:
-        reasons.append("candidate provenance is unknown")
-    else:
+    for candidate in selected_candidates:
+        artifact = candidate.get("artifact")
+        if candidate.get("execution_id") != (execution or {}).get("id") or not artifact:
+            reasons.append("candidate provenance is unknown or belongs to another execution")
+            continue
         intact, reason = artifact_integrity(project_root, artifact)
         if not intact:
             reasons.append(reason)
@@ -136,16 +155,23 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                 continue
             if stage.get("status") != "succeeded" or stage.get("settings") != processing_settings:
                 continue
-            if not any(item.get("id") == source_mesh.get("id") and
-                       item.get("sha256") == source_mesh.get("sha256") for item in stage.get("inputs", [])):
+            stage_inputs = stage.get("inputs", [])
+            source_identity = (source_mesh.get("id"), source_mesh.get("sha256"))
+            if not any((item.get("id"), item.get("sha256")) == source_identity or
+                       any((parent.get("artifact_id"), parent.get("sha256")) == source_identity
+                           for parent in item.get("derived_from", []) if isinstance(parent, dict))
+                       for item in stage_inputs if isinstance(item, dict)):
                 continue
+            expected_type = "mesh.prepared" if stage.get("name") == "mesh_preparation" else "mesh.processed"
             prepared = next((item for item in stage.get("outputs", [])
-                             if item.get("type") == "mesh.prepared" and item.get("path") == processed_path), None)
+                             if item.get("type") == expected_type and item.get("path") == processed_path), None)
             if not prepared:
                 continue
             derived = prepared.get("derived_from", [])
-            if not any(item.get("artifact_id") == source_mesh.get("id") and
-                       item.get("sha256") == source_mesh.get("sha256") for item in derived):
+            input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs
+                                if isinstance(item, dict)}
+            if not any((item.get("artifact_id"), item.get("sha256")) in input_identities
+                       for item in derived if isinstance(item, dict)):
                 continue
             intact, reason = artifact_integrity(project_root, prepared)
             if intact:
@@ -160,10 +186,34 @@ def _adopt_stage(context, name, attempt, inputs, settings):
         return None
     old = next((stage for stage in reversed(prior.get("stages", []))
                 if stage["name"] == name and stage["attempt"] == attempt), None)
-    stale = earliest_stale_stage(context["root"], [old] if old else [], {name: (inputs, settings)})
     decision = (stage_reuse_decision(context["root"], old, inputs=inputs, settings=settings)
                 if old else {"reusable": False, "reasons": [f"missing {name} stage"]})
-    assert (stale is None) == decision["reusable"]
+    if name == "mesh_workflow_execution" and decision["reusable"]:
+        worker_stages = [stage for stage in prior.get("stages", [])
+                         if stage.get("attempt") == attempt and stage.get("name") in {
+                             "mesh_raw_acquisition", "mesh_preparation", "material_generation",
+                             "mesh_output_acquisition"}]
+        for worker_stage in worker_stages:
+            outputs = [item for item in worker_stage.get("outputs", [])
+                       if worker_stage.get("name") != "material_generation" or
+                       item.get("type", "").startswith("texture.")]
+            if not outputs:
+                continue
+            if worker_stage.get("status") != "succeeded":
+                decision["reusable"] = False
+                decision["reasons"].append(f"worker stage {worker_stage.get('name')} is incomplete")
+                continue
+            worker_decision = stage_reuse_decision(
+                context["root"], worker_stage, inputs=worker_stage.get("inputs", []),
+                settings=worker_stage.get("settings", {}))
+            if not worker_decision["reusable"]:
+                decision["reusable"] = False
+                decision["reasons"].extend(worker_decision["reasons"])
+            for output in outputs:
+                intact, reason = artifact_integrity(context["root"], output)
+                if not intact:
+                    decision["reusable"] = False
+                    decision["reasons"].append(reason)
     execution = next(item for item in context["manifest"]["assets"][context["key"]]["executions"]
                      if item["id"] == context["execution_id"])
     record = record_reuse_decision(execution, name, old["attempt"] if old else None,
@@ -305,11 +355,14 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                                      material_inputs, material_settings)
         if material_refs is not None:
             candidate["stage_attempts"]["material_generation"] = material_attempt
-            candidate["generator"] = copy.deepcopy(previous.get("generator", {}))
+            metadata_ref = next((item for item in material_refs if item["type"] == "generation.metadata"), None)
+            info = json.loads((root / metadata_ref["path"]).read_text()) if metadata_ref else {}
+            candidate["generator"] = copy.deepcopy((previous or {}).get("generator") or
+                                                     generator_provenance(info.get("workflow"), info))
             candidate["artifacts"].extend(material_refs)
-            paths["surface"] = root / previous["outputs"]["surface"]
-            candidate["path"] = previous["path"]
-            info = {}
+            surface_ref = next(item for item in material_refs if item["type"] == "surface.swatch")
+            paths["surface"] = root / surface_ref["path"]
+            candidate["path"] = surface_ref["path"]
         else:
             _lineage_start(lineage, "material_generation", number, (), material_settings,
                            parents=material_inputs)
@@ -353,8 +406,10 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         if map_refs is not None:
             candidate["stage_attempts"]["material_map_acquisition"] = map_attempt
             candidate["artifacts"].extend(map_refs)
-            for key in ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission"):
-                paths[key] = root / previous["outputs"][key]
+            for key, artifact_type in _MATERIAL_ARTIFACT_TYPES.items():
+                reference = next((item for item in map_refs if item["type"] == artifact_type), None)
+                if reference:
+                    paths[key] = root / reference["path"]
         else:
             _lineage_start(lineage, "material_map_acquisition", number, (), map_settings, parents=surface_ref)
             map_started = bool(lineage)
@@ -382,9 +437,18 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         if assembly_refs is not None:
             candidate["artifacts"].extend(assembly_refs)
             candidate["stage_attempts"]["material_assembly_export"] = assembly_attempt
-            candidate["outputs"] = copy.deepcopy(previous["outputs"])
-            candidate["validation"] = copy.deepcopy(previous["validation"])
-            candidate["status"] = previous["status"]
+            candidate["outputs"] = copy.deepcopy((previous or {}).get("outputs", {}))
+            for key, artifact_type in _MATERIAL_ARTIFACT_TYPES.items():
+                reference = next((item for item in [*material_refs, *map_refs, *assembly_refs]
+                                  if item["type"] == artifact_type), None)
+                if reference:
+                    candidate["outputs"][key] = reference["path"]
+            validation_ref = next((item for item in assembly_refs if item["type"] == "validation.json"), None)
+            if validation_ref:
+                candidate["validation"] = json.loads((root / validation_ref["path"]).read_text())
+            else:
+                candidate["validation"] = copy.deepcopy((previous or {}).get("validation", {}))
+            candidate["status"] = "candidate" if candidate["validation"].get("status") != "failed" else "failed"
             return candidate
         mesh_path = root / asset["source"]["processed_mesh"]
         _lineage_start(lineage, "material_assembly_export", number, (),
@@ -560,7 +624,8 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
                      if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
     processing_settings = {"face_budget": int(pipeline.get("model_budgets", {}).get(
                                asset_type.get("face_budget"), 30000)),
-                           "voxel_resolution": asset_type.get("voxel_resolution")}
+                           "material_scale": float(pipeline.get("material_scale", 3.0)),
+                           "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
     processed_reuse = processed_mesh_reuse_decision(root, asset, mesh_ref, processing_settings) \
         if mesh_ref else {"reusable": False, "reasons": ["source mesh lineage is unknown"]}
     concept_ref = asset.get("source", {}).get("concept_artifact")
@@ -610,10 +675,13 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     paths = model_paths(root, config, asset["name"], asset_type)
     candidate_paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     candidate.setdefault("outputs", {})
-    if not candidate_paths["metallic_gloss"].is_file():
-        make_metallic_gloss(candidate_paths["metallic"], candidate_paths["roughness"],
-                            candidate_paths["metallic_gloss"])
-    candidate["outputs"]["metallic_gloss"] = candidate_paths["metallic_gloss"].relative_to(root).as_posix()
+    metallic = root / candidate["outputs"].get("metallic", candidate_paths["metallic"].relative_to(root).as_posix())
+    roughness = root / candidate["outputs"].get("roughness", candidate_paths["roughness"].relative_to(root).as_posix())
+    packed_ref = candidate["outputs"].get("metallic_gloss")
+    packed = root / packed_ref if packed_ref else metallic.with_name(f"{asset['name']}_metallic_gloss.png")
+    if not packed.is_file():
+        make_metallic_gloss(metallic, roughness, packed)
+    candidate["outputs"]["metallic_gloss"] = packed.relative_to(root).as_posix()
     final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                   "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
     existing = [paths[name] for name in (*final_keys, "glb", "unity_material") if paths[name].exists()]
@@ -922,9 +990,13 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             mesh_seed = mesh_seeds[offset]
             conditioning_refs = conditioning_stage["outputs"]
             mesh_inputs = [candidate_artifact, *conditioning_refs]
+            mesh_quality = copy.deepcopy(execution["identity_inputs"]["quality"])
+            mesh_quality.get("settings", {}).get("workflow_inputs", {}).pop("image", None)
+            if not mesh_quality.get("settings", {}).get("workflow_inputs"):
+                mesh_quality.get("settings", {}).pop("workflow_inputs", None)
             mesh_settings = {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api",
                              "workflow_identity": execution["identity_inputs"]["workflows"]["model"],
-                             "quality": execution["identity_inputs"]["quality"],
+                             "quality": mesh_quality,
                              "face_budget": pipeline["model_budgets"].get(asset_type.get("face_budget")),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}

@@ -143,6 +143,33 @@ class PropReuseTests(unittest.TestCase):
         self.assertIn("no matching processed mesh lineage", " ".join(decision["reasons"]))
         self.assertFalse(processed_mesh_reuse_decision(self.root, asset, None, {})["reusable"])
 
+    def test_retexture_accepts_recorded_mesh_processed_output_with_source_chain(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        source_path = self.root / "source.glb"
+        prepared_path = self.root / "prepared.blend"
+        processed_path = self.root / "processed.blend"
+        source_path.write_bytes(b"source")
+        prepared_path.write_bytes(b"prepared")
+        processed_path.write_bytes(b"processed")
+        source = {"id": "source", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(source_path), "stage": "mesh_workflow_execution", "attempt": 1,
+                  "derived_from": []}
+        prepared = {"id": "prepared", "type": "mesh.prepared", "path": "prepared.blend",
+                    "sha256": file_sha256(prepared_path), "stage": "mesh_preparation", "attempt": 1,
+                    "derived_from": [{"artifact_id": source["id"], "sha256": source["sha256"]}]}
+        processed = {"id": "processed", "type": "mesh.processed", "path": "processed.blend",
+                     "sha256": file_sha256(processed_path), "stage": "material_assembly_export", "attempt": 1,
+                     "derived_from": [{"artifact_id": prepared["id"], "sha256": prepared["sha256"]}]}
+        settings = {"face_budget": 1000, "material_scale": 3.0, "processing_tool_sha256": "tool"}
+        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"stages": [
+            {"name": "mesh_preparation", "attempt": 1, "status": "succeeded", "inputs": [source],
+             "settings": {}, "outputs": [prepared]},
+            {"name": "material_assembly_export", "attempt": 1, "status": "succeeded",
+             "inputs": [prepared], "settings": settings, "outputs": [processed]}]}]}
+
+        self.assertTrue(processed_mesh_reuse_decision(self.root, asset, source, settings)["reusable"])
+
     def test_prop_child_reuse_requires_intact_matching_concept_execution(self):
         from slopforge.pipelines.model import prop_child_reuse_decision
 
@@ -163,7 +190,7 @@ class PropReuseTests(unittest.TestCase):
         child = {"id": "terminal", "type": "prop", "description": "brass relay",
                  "generation_prompt": "brass relay"}
 
-        self.assertTrue(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
+        self.assertFalse(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
         child["description"] = "copper terminal"
         self.assertFalse(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
 
@@ -404,6 +431,16 @@ avoid: [environment]
         self._approve(resume=True)
         self.assertEqual((self.calls["prepare"], self.calls["mesh"]), (1, 2))
 
+    def test_swatches_resume_after_map_or_assembly_failure(self):
+        for failed_stage in ("maps", "assembly"):
+            with self.subTest(stage=failed_stage):
+                self.setUp()
+                self.fail_once = failed_stage
+                with self.assertRaises(ValueError):
+                    self._approve()
+                self._approve(resume=True)
+                self.assertEqual(self.calls["mesh"], 1)
+
     def test_resume_uses_later_successful_mesh_after_an_earlier_attempt_failed(self):
         self.config["asset_pipeline"]["defaults"]["model_candidates"] = 2
         self.config["_quality_base_pipeline"]["defaults"]["model_candidates"] = 2
@@ -460,6 +497,81 @@ avoid: [environment]
         self._approve(resume=True)
 
         self.assertEqual(self.calls["mesh"], 2)
+
+    def test_material_only_image_quality_change_preserves_mesh(self):
+        self._approve()
+        self._mark_interrupted()
+        pipeline = self.config["_quality_base_pipeline"]
+        pipeline.setdefault("quality_tiers", {}).setdefault("normal", {}).setdefault(
+            "workflow_inputs", {})["image"] = {
+                "image_text2img_api.json": {"1": {"inputs": {"steps": 4}}}}
+        self._approve(resume=True)
+
+        self.assertEqual(self.calls["mesh"], 1, self.asset["executions"][-1]["reuse_decisions"])
+        self.assertEqual(self.calls["material"], 2)
+
+    def test_recipe_child_reuse_rejects_unknown_conditioning_and_wrong_candidate(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        candidate = self._candidate(1, self.root / "concept.png")
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "identity_inputs": {"brief": "Copper relay", "generation_prompt": "Copper relay",
+                                          "style": {"name": "plain", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "candidate_attempts": [{"seed": 1, "variation": None}]},
+                     "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                                 "inputs": [], "settings": {}, "outputs": [candidate["artifact"]]}]}
+        candidate["execution_id"] = execution["id"]
+        self.asset["executions"] = [execution]
+        self.asset["candidates"]["items"] = [candidate]
+        child = {"description": "Copper relay", "generation_prompt": "Copper relay"}
+        child.update({"requested_style_identity": {"name": "plain", "version": 1},
+                      "requested_conditioning": {"strategy": "text_only", "references": []}})
+        self.assertTrue(prop_child_reuse_decision(
+            self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})["reusable"])
+
+        execution["identity_inputs"]["conditioning"] = {"status": "unknown"}
+        self.assertFalse(prop_child_reuse_decision(
+            self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})["reusable"])
+
+    def test_corrupt_worker_texture_prevents_mesh_execution_adoption(self):
+        """Worker-owned maps are part of mesh execution integrity, even if GLB is intact."""
+        from slopforge.pipelines.model import _adopt_stage
+
+        mesh_path = self.root / "mesh.glb"
+        map_path = self.root / "basecolor.png"
+        mesh_path.write_bytes(b"mesh")
+        map_path.write_bytes(b"basecolor")
+        concept = {"id": "concept:1", "type": "image.concept", "path": "concept.png",
+                   "sha256": "a" * 64, "stage": "concept_generation", "attempt": 1,
+                   "derived_from": []}
+        conditioning = {"id": "conditioning:1", "type": "image.3d_input", "path": "input.png",
+                        "sha256": "b" * 64, "stage": "conditioning_preparation", "attempt": 1,
+                        "derived_from": []}
+        settings = {"seed": 7}
+        old_stage = {"name": "mesh_workflow_execution", "attempt": 1, "status": "succeeded",
+                     "inputs": [concept, conditioning], "settings": settings,
+                     "outputs": [{"id": "mesh:1", "type": "mesh.glb", "path": "mesh.glb",
+                                  "sha256": file_sha256(mesh_path), "stage": "mesh_workflow_execution",
+                                  "attempt": 1, "derived_from": [{"artifact_id": conditioning["id"],
+                                      "sha256": conditioning["sha256"]}]}]}
+        worker_map = {"id": "map:1", "type": "texture.basecolor", "path": "basecolor.png",
+                      "sha256": file_sha256(map_path), "stage": "mesh_output_acquisition", "attempt": 1,
+                      "derived_from": [{"artifact_id": conditioning["id"], "sha256": conditioning["sha256"]}]}
+        prior = {"id": "prior", "stages": [old_stage,
+                 {"name": "mesh_output_acquisition", "attempt": 1, "status": "succeeded",
+                  "inputs": [conditioning], "settings": {}, "outputs": [worker_map]}]}
+        current = {"id": "current", "stages": [], "reuse_decisions": []}
+        manifest = {"assets": {"prop:relay": {"executions": [current]}}}
+        context = {"root": self.root, "pipeline": {"manifest": "manifest.json"},
+                   "manifest": manifest, "key": "prop:relay", "execution_id": "current",
+                   "reuse_execution": prior}
+
+        map_path.write_bytes(b"corrupted")
+        self.assertIsNone(_adopt_stage(context, "mesh_workflow_execution", 1,
+                                       [concept, conditioning], settings))
 
 
 if __name__ == "__main__":

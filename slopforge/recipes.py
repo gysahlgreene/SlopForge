@@ -10,6 +10,8 @@ from .manifest import add_dependency, asset_key, new_record, register_artifact, 
 from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
+from .conditioning import resolve_conditioning
+from .style import style_identity
 from .taxonomy import canonical_type, validate_asset_name
 
 
@@ -146,7 +148,8 @@ def _model(root, config, style, asset_type, child, manifest, key):
     references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
-                          generation_prompt=child.get("generation_prompt"), reference_entries=references)
+                          generation_prompt=child.get("generation_prompt"), reference_entries=references,
+                          variations=child.get("variations"))
 
 
 PIPELINE_HANDLERS = {"image": _image, "model": _model}
@@ -208,7 +211,7 @@ def _recipe_status(stages):
     states = [stage["status"] for stage in stages.values()]
     if states and all(state == "approved" for state in states):
         return "ready"
-    if any(state in {"failed", "blocked"} for state in states):
+    if any(state in {"failed", "blocked", "stale"} for state in states):
         return "partial"
     if any(state == "running" for state in states):
         return "running"
@@ -340,10 +343,20 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                 asset_type.get("pipeline") == "model"):
             tier = child.get("quality_tier", instance.get("quality_tier", "normal"))
             child_config = select_quality_tier(config, tier)
-            decision = model.prop_child_reuse_decision(root, asset, stage, child, child_config)
+            requested_child = dict(child)
+            requested_child["requested_style_identity"] = style_identity(style)
+            reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
+                                 if child.get("reference_library") else None)
+            conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)
+            requested_child["requested_conditioning"] = {
+                "strategy": conditioning["strategy"],
+                "references": [{"sha256": item.get("sha256"), "strength": item.get("strength")}
+                               for item in conditioning.get("references", [])]}
+            decision = model.prop_child_reuse_decision(root, asset, stage, requested_child, child_config)
             stage.setdefault("reuse_decisions", []).append(decision)
             if not decision["reusable"]:
                 stage["status"] = "stale"
+        stale_replacement = stage["status"] == "stale"
         if not regenerate and stage["status"] in {"completed", "approved"}:
             continue
         if any(stages[dependency]["status"] not in {"completed", "approved"}
@@ -371,11 +384,14 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             child_config = select_quality_tier(config, tier)
             result = handler(root, child_config, style, asset_type, child, manifest, stage["asset_key"])
             generated = [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
+            if asset_type.get("pipeline") == "model":
+                stage["candidate_execution_ids"] = list(dict.fromkeys(
+                    item.get("execution_id") for item in generated if item.get("execution_id")))
             _sync_child_artifacts(root, asset, stage["asset_key"])
             successful = any(item.get("status") == "candidate" for item in generated)
             if not successful:
                 raise RuntimeError(f"No valid candidates generated for recipe child {child['id']!r}")
-            if original.get("status") == "ready":
+            if original.get("status") == "ready" and not stale_replacement:
                 asset["status"] = original["status"]
                 asset["generator"] = original.get("generator")
                 asset["outputs"] = original.get("outputs", {})
@@ -385,7 +401,11 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         except Exception as exc:
             if original.get("status") == "ready":
                 asset.update({key: value for key, value in original.items() if value is not None})
-                stage["status"] = "approved"
+                if stale_replacement:
+                    asset["status"] = "stale"
+                    stage["status"] = "stale"
+                else:
+                    stage["status"] = "approved"
             else:
                 stage["status"] = "failed"
             stage["errors"] = [str(exc)]
