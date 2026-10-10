@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from slopforge import manifest as manifest_module
 from slopforge.manifest import (
     _migrate,
     add_dependency,
@@ -37,9 +38,13 @@ class ManifestTests(unittest.TestCase):
 
         migrated = _migrate(source)
 
-        self.assertEqual(migrated["schema_version"], 3)
+        self.assertEqual(migrated["schema_version"], 4)
         self.assertEqual(migrated["custom_top_level"], source["custom_top_level"])
-        self.assertEqual(migrated["assets"], source["assets"])
+        asset = migrated["assets"]["icon:coin"]
+        self.assertEqual(asset["custom_asset_field"], [1, 2, 3])
+        self.assertEqual(asset["outputs"], {"image": "Assets/coin.png"})
+        self.assertEqual(asset["executions"], [])
+        self.assertEqual(asset["lineage_status"]["status"], "unknown")
 
     def test_legacy_upgrade_preserves_unknown_and_approval_provenance(self):
         old_asset = {
@@ -63,7 +68,62 @@ class ManifestTests(unittest.TestCase):
 
     def test_future_schema_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "newer than supported"):
-            _migrate({"schema_version": 4, "assets": {}})
+            _migrate({"schema_version": 5, "assets": {}})
+
+    def test_v3_manifest_migrates_lineage_as_unknown(self):
+        source = {"schema_version": 3, "active_style": {}, "assets": {"prop:coin": {
+            "id": "coin-id", "name": "coin", "type": "prop", "description": "A brass coin",
+            "generator": {"workflow": "old.json", "model": "model-a", "seed": 41},
+            "outputs": {"fbx": "Assets/coin.fbx"}, "model_attempts": [{"number": 1, "status": "qualified"}],
+        }}}
+
+        migrated = _migrate(source)
+
+        record = migrated["assets"]["prop:coin"]
+        self.assertEqual(migrated["schema_version"], 4)
+        self.assertEqual(record["generator"], source["assets"]["prop:coin"]["generator"])
+        self.assertEqual(record["outputs"], source["assets"]["prop:coin"]["outputs"])
+        self.assertEqual(record["model_attempts"], source["assets"]["prop:coin"]["model_attempts"])
+        self.assertEqual(record["executions"], [])
+        self.assertEqual(record["lineage_status"], {
+            "status": "unknown", "reason": "legacy manifest predates execution lineage"})
+
+    def test_stage_attempt_transitions_and_artifact_refs_round_trip(self):
+        for helper in ("start_execution", "start_stage", "begin_stage", "finish_stage", "finish_execution"):
+            self.assertTrue(callable(getattr(manifest_module, helper, None)), helper)
+        asset = self.make_asset("coin")
+        execution = manifest_module.start_execution(asset, {"brief": "A brass coin"})
+        stage = manifest_module.start_stage(execution, "mesh_preparation", 1, [], {"face_budget": 1000}, {})
+        self.assertEqual(stage["status"], "pending")
+        manifest_module.begin_stage(stage)
+        self.assertEqual(stage["status"], "running")
+        output = {"id": "mesh:1", "type": "model.glb", "path": "ai/mesh.glb",
+                  "sha256": "a" * 64, "stage": "mesh_preparation", "attempt": 1,
+                  "derived_from": []}
+        manifest_module.finish_stage(stage, "succeeded", outputs=[output])
+        manifest_module.finish_execution(execution, "succeeded")
+        manifest = {"schema_version": 4, "assets": {"prop:coin": asset}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            save_manifest(path, manifest)
+            loaded = _migrate(json.loads(path.read_text()))
+
+        self.assertEqual(loaded["assets"]["prop:coin"]["executions"], [execution])
+
+    def test_stage_attempt_rejects_invalid_state_or_external_path(self):
+        self.assertTrue(callable(getattr(manifest_module, "start_execution", None)))
+        execution = manifest_module.start_execution(self.make_asset("coin"), {"brief": "A brass coin"})
+        stage = manifest_module.start_stage(execution, "mesh_preparation", 1, [], {}, {})
+        with self.assertRaisesRegex(ValueError, "stage status"):
+            manifest_module.finish_stage(stage, "stale")
+        manifest_module.begin_stage(stage)
+        with self.assertRaisesRegex(ValueError, "project"):
+            manifest_module.finish_stage(stage, "succeeded", outputs=[{
+                "id": "mesh:1", "type": "model.glb", "path": "../outside.glb",
+                "sha256": "a" * 64, "stage": "mesh_preparation", "attempt": 1,
+                "derived_from": [],
+            }])
 
     def test_atomic_record_stays_simple_until_outputs_or_relationships_are_added(self):
         asset = self.make_asset("coin")
@@ -73,7 +133,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_typed_outputs_keep_legacy_paths_and_independent_approval(self):
         asset = self.make_asset("pilot")
-        manifest = {"schema_version": 3, "assets": {"character:pilot": asset}}
+        manifest = {"schema_version": 4, "assets": {"character:pilot": asset}}
         model = register_artifact(
             manifest, "character:pilot", "model", "model.glb",
             "Assets/Art/Generated/Characters/pilot/model.glb", status="ready", approval_status="approved",
@@ -126,7 +186,7 @@ class ManifestTests(unittest.TestCase):
 
     def test_artifacts_relationships_and_provenance_round_trip_atomically(self):
         asset = self.make_asset("pilot")
-        manifest = {"schema_version": 3, "assets": {"character:pilot": asset}}
+        manifest = {"schema_version": 4, "assets": {"character:pilot": asset}}
         register_artifact(manifest, "character:pilot", "model", "model.glb", "Assets/Pilot/model.glb",
                           provenance={"workflow": "model.json", "seed": 99})
         manifest["assets"]["character:pilot"]["custom"] = {"retained": True}
