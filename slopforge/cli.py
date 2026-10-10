@@ -74,6 +74,7 @@ def parser():
     approve.add_argument("--material-prompt", help="Use this agent-authored surface-material prompt for 3D assets")
     approve.add_argument("--material-count", type=int, help="Number of material candidates to bake onto the saved mesh")
     approve.add_argument("--force", action="store_true")
+    approve.add_argument("--resume", action="store_true", help="Resume an incomplete prop execution")
     approve.add_argument("--quality-tier", help="Override the selected candidate's tier for 3D processing")
     reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
     reject.add_argument("name")
@@ -766,7 +767,8 @@ def _run(args):
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),
-                          quality_tier=getattr(args, "quality_tier", None))
+                          quality_tier=getattr(args, "quality_tier", None),
+                          resume=getattr(args, "resume", False))
         save_manifest(manifest_path, manifest)
         return 0
 

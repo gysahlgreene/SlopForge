@@ -1,5 +1,6 @@
 import json
 import hashlib
+import copy
 import os
 import secrets
 import shutil
@@ -15,9 +16,10 @@ from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
-                        finish_stage, finish_execution)
+                        finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
+from .reuse import artifact_integrity, earliest_stale_stage, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
@@ -70,6 +72,31 @@ def _execution_stage(asset, execution_id, name, attempt):
     execution = next(item for item in asset["executions"] if item["id"] == execution_id)
     return execution, next(item for item in reversed(execution["stages"])
                            if item["name"] == name and item["attempt"] == attempt)
+
+
+def _adopt_stage(context, name, attempt, inputs, settings):
+    prior = (context or {}).get("reuse_execution")
+    if not prior:
+        return None
+    old = next((stage for stage in reversed(prior.get("stages", []))
+                if stage["name"] == name and stage["attempt"] == attempt), None)
+    stale = earliest_stale_stage(context["root"], [old] if old else [], {name: (inputs, settings)})
+    decision = (stage_reuse_decision(context["root"], old, inputs=inputs, settings=settings)
+                if old else {"reusable": False, "reasons": [f"missing {name} stage"]})
+    assert (stale is None) == decision["reusable"]
+    execution = next(item for item in context["manifest"]["assets"][context["key"]]["executions"]
+                     if item["id"] == context["execution_id"])
+    record = record_reuse_decision(execution, name, old["attempt"] if old else None,
+                                   execution_identity({"inputs": inputs, "settings": settings}), decision)
+    record["source_execution_id"] = prior["id"]
+    if not decision["reusable"]:
+        _persist_reload(context["root"], context["pipeline"], context["manifest"])
+        return None
+    stage = start_stage(execution, name, attempt, inputs, settings, copy.deepcopy(old.get("provenance", {})))
+    begin_stage(stage)
+    finish_stage(stage, "succeeded", copy.deepcopy(old["outputs"]))
+    _persist_reload(context["root"], context["pipeline"], context["manifest"])
+    return stage["outputs"]
 
 
 def _lineage_start(context, name, attempt, inputs, settings, *, parents=None):
@@ -181,25 +208,41 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
     pipeline = config["asset_pipeline"]
     material_started = map_started = assembly_started = False
     candidate["artifacts"] = []
+    previous = (lineage or {}).get("prior_candidate")
+    previous_attempts = previous.get("stage_attempts", {}) if previous else {}
+    candidate["stage_attempts"] = {}
     try:
         workflow = pipeline["workflows"].get("image")
         if not workflow:
             raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
         metadata_path = paths["generator"]
-        _lineage_start(lineage, "material_generation", number, (),
-                       {"prompt": prompt, "seed": candidate["seed"]},
-                       parents=(lineage or {}).get("material_inputs", (lineage or {}).get("upstream", [])))
-        material_started = bool(lineage)
-        generate_image(root, config, resolve_workflow(root, workflow), prompt, paths["surface"],
-                       f"slopforge/prop/{asset['name']}/material_{candidate['seed']}",
-                       candidate["seed"], metadata_path)
-        material_check = validate_image(paths["surface"], expected_format="PNG",
-                                        report_path=paths["surface"].relative_to(root))
-        if material_check["status"] == "failed":
-            raise ValueError("Surface material validation failed: " + "; ".join(material_check["errors"]))
-        info = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
-        candidate["generator"] = generator_provenance(info.get("workflow"), info)
-        material_refs = []
+        material_inputs = (lineage or {}).get("material_inputs", (lineage or {}).get("upstream", []))
+        material_settings = {"prompt": prompt, "seed": candidate["seed"],
+                             "workflow_sha256": file_sha256(resolve_workflow(root, workflow)),
+                             "configured_inputs": workflow_node_inputs(config, "image", Path(workflow).name)}
+        material_attempt = previous_attempts.get("material_generation", previous["number"]) if previous else number
+        material_refs = _adopt_stage(lineage, "material_generation", material_attempt,
+                                     material_inputs, material_settings)
+        if material_refs is not None:
+            candidate["stage_attempts"]["material_generation"] = material_attempt
+            candidate["generator"] = copy.deepcopy(previous.get("generator", {}))
+            candidate["artifacts"].extend(material_refs)
+            paths["surface"] = root / previous["outputs"]["surface"]
+            candidate["path"] = previous["path"]
+            info = {}
+        else:
+            _lineage_start(lineage, "material_generation", number, (), material_settings,
+                           parents=material_inputs)
+            material_started = bool(lineage)
+            generate_image(root, config, resolve_workflow(root, workflow), prompt, paths["surface"],
+                           f"slopforge/prop/{asset['name']}/material_{candidate['seed']}",
+                           candidate["seed"], metadata_path)
+            material_check = validate_image(paths["surface"], expected_format="PNG",
+                                            report_path=paths["surface"].relative_to(root))
+            if material_check["status"] == "failed":
+                raise ValueError("Surface material validation failed: " + "; ".join(material_check["errors"]))
+            info = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
+            candidate["generator"] = generator_provenance(info.get("workflow"), info)
         if material_started:
             missing = lambda fact: {"status": "not_recorded", "reason": f"Image worker did not record {fact}"}
             _lineage_provenance(lineage, "material_generation", number, {
@@ -219,36 +262,60 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                 [(paths["surface"], "surface.swatch"), (metadata_path, "generation.metadata")])
             candidate["artifacts"].extend(material_refs)
             material_started = False
+            candidate["stage_attempts"]["material_generation"] = number
 
         python = python_executable(root, config)
         surface_ref = [item for item in material_refs if item["type"] == "surface.swatch"]
-        _lineage_start(lineage, "material_map_acquisition", number, (),
-                       {"map_prompt": prompt}, parents=surface_ref)
-        map_started = bool(lineage)
-        subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["surface"]),
-                        "--prompt", prompt,
-                        "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
-                        "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
-        make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
-        map_refs = []
+        map_settings = {"map_prompt": prompt,
+                        "tool_sha256": file_sha256(tool_root() / "processing/make_pbr_maps.py")}
+        map_attempt = previous_attempts.get("material_map_acquisition", previous["number"]) if previous else number
+        map_refs = _adopt_stage(lineage, "material_map_acquisition", map_attempt, surface_ref, map_settings)
+        if map_refs is not None:
+            candidate["stage_attempts"]["material_map_acquisition"] = map_attempt
+            candidate["artifacts"].extend(map_refs)
+            for key in ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission"):
+                paths[key] = root / previous["outputs"][key]
+        else:
+            _lineage_start(lineage, "material_map_acquisition", number, (), map_settings, parents=surface_ref)
+            map_started = bool(lineage)
+            subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["surface"]),
+                            "--prompt", prompt,
+                            "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
+                            "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
+            make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         if map_started:
             map_refs = _lineage_finish(lineage, "material_map_acquisition", number,
                 [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
                  ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")])
             candidate["artifacts"].extend(map_refs)
             map_started = False
+            candidate["stage_attempts"]["material_map_acquisition"] = number
         face_budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
         textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
-        mesh_path = root / asset["source"]["processed_mesh"]
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
+        assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
+                             "face_budget": face_budget,
+                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
+        assembly_attempt = previous_attempts.get("material_assembly_export", previous["number"]) if previous else number
+        assembly_refs = _adopt_stage(lineage, "material_assembly_export", assembly_attempt,
+                                     assembly_inputs, assembly_settings)
+        if assembly_refs is not None:
+            candidate["artifacts"].extend(assembly_refs)
+            candidate["stage_attempts"]["material_assembly_export"] = assembly_attempt
+            candidate["outputs"] = copy.deepcopy(previous["outputs"])
+            candidate["validation"] = copy.deepcopy(previous["validation"])
+            candidate["status"] = previous["status"]
+            return candidate
+        mesh_path = (paths["directory"] / "processed_mesh.blend" if previous
+                     else root / asset["source"]["processed_mesh"])
         _lineage_start(lineage, "material_assembly_export", number, (),
-                       {"material_scale": float(pipeline.get("material_scale", 3.0))}, parents=assembly_inputs)
+                       assembly_settings, parents=assembly_inputs)
         assembly_started = bool(lineage)
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
                       face_budget, surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
-                      stage_mesh=mesh_path, reuse_stage_mesh=mesh_path.is_file())
+                      stage_mesh=mesh_path, reuse_stage_mesh=mesh_path.is_file() and not previous)
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -260,7 +327,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
         candidate["outputs"] = _relative_outputs(root, paths, check_paths)
-        candidate["generator"].update({"workflow": info.get("workflow") or workflow,
+        candidate["generator"].update({"workflow": info.get("workflow") or candidate["generator"].get("workflow") or workflow,
                                         "seed": candidate["seed"]})
         if assembly_started:
             assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -271,6 +338,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             candidate["artifacts"].extend(_lineage_finish(lineage, "material_assembly_export", number,
                 assembly_outputs))
             assembly_started = False
+            candidate["stage_attempts"]["material_assembly_export"] = number
     except Exception as exc:
         if material_started:
             _lineage_finish(lineage, "material_generation", number, [], error=exc)
@@ -569,7 +637,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
 
 
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
-            material_prompt=None, material_count=None, quality_tier=None):
+            material_prompt=None, material_count=None, quality_tier=None, resume=False):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
@@ -594,7 +662,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             raise ValueError("Invalid model workflow mask wiring: " + "; ".join(problems))
     paths = model_paths(root, config, asset["name"], asset_type)
     existing = [path for name, path in paths.items() if name != "directory" and path.exists()]
-    if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
+    if existing and not (resume or force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Model outputs exist; pass --force to replace: {existing[0]}")
     prompt = candidate.get("description", asset["description"])
     concept_workflow = pipeline["workflows"].get("image")
@@ -612,10 +680,35 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         candidate_artifact = {"id": f"legacy-concept:{number}", "type": "image.concept.legacy",
                               "path": candidate["path"], "sha256": file_sha256(concept_path),
                               "stage": "legacy_concept_selection", "attempt": number, "derived_from": []}
+    intact, reason = artifact_integrity(root, candidate_artifact)
+    if not intact:
+        raise ValueError(f"Selected concept artifact is stale: {reason}")
+    prior = None
+    if resume:
+        prior = next((item for item in reversed(asset.get("executions", []))
+                      if item.get("status") in {"running", "failed"} and
+                      item.get("identity_inputs", {}).get("selected_concept", {}).get("sha256") == candidate_artifact["sha256"]), None)
+        if prior is None:
+            raise ValueError("Cannot resume: no incomplete execution matches the selected concept")
+        selected = prior["identity_inputs"].get("selected_concept", {})
+        if selected.get("id") not in (None, candidate_artifact["id"]) or selected.get("number") not in (None, number):
+            raise ValueError("Cannot resume: selected concept candidate identity changed")
+        old_seeds = prior["identity_inputs"].get("mesh", {}).get("seeds")
+        if not isinstance(old_seeds, list) or len(old_seeds) != attempts:
+            raise ValueError("Cannot resume: mesh attempt seeds are missing or the attempt budget changed")
+        mesh_seeds = old_seeds
+        old_material_seeds = prior["identity_inputs"].get("material_seeds")
+        if not workflow and (not isinstance(old_material_seeds, list) or len(old_material_seeds) != attempts * material_count):
+            raise ValueError("Cannot resume: material seeds are missing or the candidate budget changed")
+        material_seeds = old_material_seeds
+        prior = copy.deepcopy(prior)
+        old_attempts = [stage["attempt"] for stage in prior["stages"] if stage["name"] == "mesh_workflow_execution"]
+        if old_attempts:
+            next_attempt = min(old_attempts)
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     execution = start_execution(asset, {
         "asset_type": asset_type.get("name"), "brief": candidate.get("description", asset.get("description")),
-        "selected_concept": {"sha256": candidate_artifact["sha256"]},
+        "selected_concept": {"number": number, "id": candidate_artifact["id"], "sha256": candidate_artifact["sha256"]},
         "workflows": {"concept": concept_workflow,
                       "material": {"identifier": Path(concept_workflow).name if concept_workflow else None,
                                    "sha256": (file_sha256(resolve_workflow(root, concept_workflow))
@@ -633,13 +726,20 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         "material_prompt": material_prompt, "material_count": material_count,
         "material_seeds": material_seeds,
         "material_scale": pipeline.get("material_scale", 3.0),
-    }, parent_execution_id=candidate.get("execution_id"))
+    }, parent_execution_id=prior["id"] if prior else candidate.get("execution_id"))
     paths["concept"].parent.mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(concept_path, paths["concept"])
-    selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
-                                      "image.concept.approved", "conditioning_preparation", 1,
-                                      [candidate_artifact])
+    old_selected = asset.get("source", {}).get("concept_artifact") if prior else None
+    old_parent = (old_selected or {}).get("derived_from", [])
+    selected_intact = artifact_integrity(root, old_selected)[0] if old_selected else False
+    if (selected_intact and old_parent == [{"artifact_id": candidate_artifact["id"],
+                                            "sha256": candidate_artifact["sha256"]}]):
+        selected_artifact = old_selected
+    else:
+        shutil.copy2(concept_path, paths["concept"])
+        selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
+                                          "image.concept.approved", "conditioning_preparation", 1,
+                                          [candidate_artifact])
     candidate["approval"] = "approved"
     asset["candidates"]["selected"] = number
     asset["status"] = "processing"
@@ -655,29 +755,45 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
     python = python_executable(root, config)
     try:
-        stage = start_stage(execution, "conditioning_preparation", 1, [candidate_artifact],
-                            {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"},
-                            {"concept_lineage": asset["source"]["concept_lineage"]})
-        save_manifest(root / pipeline["manifest"], manifest)
-        begin_stage(stage)
-        _persist_reload(root, pipeline, manifest)
+        context = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
+                   "execution_id": execution["id"], "reuse_execution": prior}
+        conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
+        conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
+                                         [selected_artifact], conditioning_settings)
+        if conditioning_refs is None:
+            if prior:
+                conditioning_dir = (root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] /
+                                    f"conditioning_{execution['id']}")
+                conditioning_dir.mkdir(parents=True, exist_ok=True)
+                paths["cutout"] = conditioning_dir / "concept_cutout.png"
+                paths["input_3d"] = conditioning_dir / "concept_3d_input.png"
+            asset = manifest["assets"][key]
+            execution = next(item for item in asset["executions"] if item["id"] == context["execution_id"])
+            stage = start_stage(execution, "conditioning_preparation", 1, [selected_artifact],
+                                conditioning_settings, {"concept_lineage": asset["source"]["concept_lineage"]})
+            save_manifest(root / pipeline["manifest"], manifest)
+            begin_stage(stage)
+            _persist_reload(root, pipeline, manifest)
+            asset = manifest["assets"][key]
+            print("3D stage: background removal and isolated reconstruction input...", flush=True)
+            subprocess.run([python, str(tool_root() / "processing/prepare_3d_input.py"), "--input", str(paths["concept"]),
+                            "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"])], check=True)
+            cutout_check = validate_image(paths["cutout"], expected_format="PNG", require_alpha=True, report_path=paths["cutout"].relative_to(root))
+            input_check = validate_image(paths["input_3d"], expected_format="PNG", report_path=paths["input_3d"].relative_to(root))
+            if cutout_check["status"] == "failed" or input_check["status"] == "failed":
+                raise ValueError(f"Prepared concept validation failed: {cutout_check['errors'] + input_check['errors']}")
+            conditioning_refs = [_artifact_ref(root, paths["cutout"], f"cutout:{execution['id']}",
+                                             "image.cutout", "conditioning_preparation", 1, [selected_artifact]),
+                                 _artifact_ref(root, paths["input_3d"], f"3d-input:{execution['id']}",
+                                             "image.3d_input", "conditioning_preparation", 1, [selected_artifact])]
+            _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
+            finish_stage(conditioning_stage, "succeeded", conditioning_refs)
+            _persist_reload(root, pipeline, manifest)
+        else:
+            paths["cutout"] = root / next(item["path"] for item in conditioning_refs if item["type"] == "image.cutout")
+            paths["input_3d"] = root / next(item["path"] for item in conditioning_refs if item["type"] == "image.3d_input")
         asset = manifest["assets"][key]
-        print("3D stage: background removal and isolated reconstruction input...", flush=True)
-        subprocess.run([python, str(tool_root() / "processing/prepare_3d_input.py"), "--input", str(paths["concept"]),
-                        "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"])], check=True)
-        cutout_check = validate_image(paths["cutout"], expected_format="PNG", require_alpha=True, report_path=paths["cutout"].relative_to(root))
-        input_check = validate_image(paths["input_3d"], expected_format="PNG", report_path=paths["input_3d"].relative_to(root))
-        if cutout_check["status"] == "failed" or input_check["status"] == "failed":
-            raise ValueError(f"Prepared concept validation failed: {cutout_check['errors'] + input_check['errors']}")
-        outputs = [_artifact_ref(root, paths["cutout"], f"cutout:{execution['id']}",
-                                 "image.cutout", "conditioning_preparation", 1, [selected_artifact]),
-                   _artifact_ref(root, paths["input_3d"], f"3d-input:{execution['id']}",
-                                 "image.3d_input", "conditioning_preparation", 1, [selected_artifact])]
-        _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
-        finish_stage(conditioning_stage, "succeeded", outputs)
-        _persist_reload(root, pipeline, manifest)
-        asset = manifest["assets"][key]
-        execution, _ = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
+        execution, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
 
         workflow = pipeline["workflows"].get("model")
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
@@ -685,22 +801,68 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         viable = []
         attempt_errors = []
         attempt_reports = asset.setdefault("model_attempts", [])
-        next_attempt = max((int(item.get("number", 0)) for item in attempt_reports), default=0) + 1
+        next_attempt = (min(stage["attempt"] for stage in prior["stages"]
+                            if stage["name"] == "mesh_workflow_execution")
+                        if prior and any(stage["name"] == "mesh_workflow_execution" for stage in prior["stages"])
+                        else max((int(item.get("number", 0)) for item in attempt_reports), default=0) + 1)
         next_material = max((int(item["number"]) for item in asset.get("material_candidates", {}).get("items", [])), default=0) + 1
-        for offset in range(attempts):
-            attempt_number = next_attempt + offset
+        fresh_mesh_attempt = max(
+            [int(item.get("number", 0)) for item in attempt_reports] +
+            [stage["attempt"] for stage in (prior or {}).get("stages", []) if stage["name"] == "mesh_workflow_execution"],
+            default=0) + 1
+        if prior:
+            prior_seeds = [stage.get("settings", {}).get("seed") for stage in prior["stages"]
+                           if stage.get("name") == "mesh_workflow_execution" and stage.get("status") == "succeeded"]
+            resume_offsets = []
+            for seed in reversed(prior_seeds):
+                offset = next((index for index, value in enumerate(mesh_seeds) if value == seed), None)
+                if offset is not None and offset not in resume_offsets:
+                    resume_offsets.append(offset)
+            attempt_plan = [(next((stage["attempt"] for stage in reversed(prior["stages"])
+                                  if stage.get("name") == "mesh_workflow_execution" and
+                                  stage.get("status") == "succeeded" and
+                                  stage.get("settings", {}).get("seed") == mesh_seeds[offset]), None), offset)
+                            for offset in resume_offsets]
+            attempt_plan.extend((None, offset) for offset in range(attempts) if offset not in resume_offsets)
+        else:
+            attempt_plan = [(next_attempt + offset, offset) for offset in range(attempts)]
+        fresh_attempt_offset = 0
+        for planned_attempt, offset in attempt_plan:
+            attempt_number = planned_attempt if planned_attempt is not None else fresh_mesh_attempt + fresh_attempt_offset
             attempt_dir = root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"mesh_{attempt_number:02d}"
             attempt_dir.mkdir(parents=True, exist_ok=True)
             source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
             stage_mesh = attempt_dir / "processed_mesh.blend"
             mesh_seed = mesh_seeds[offset]
             conditioning_refs = conditioning_stage["outputs"]
-            mesh_stage = start_stage(execution, "mesh_workflow_execution", attempt_number,
-                                     [candidate_artifact, *conditioning_refs],
-                                     {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api"},
-                                     {"concept_lineage": asset["source"]["concept_lineage"]})
-            save_manifest(root / pipeline["manifest"], manifest)
-            begin_stage(mesh_stage)
+            mesh_inputs = [candidate_artifact, *conditioning_refs]
+            mesh_settings = {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api",
+                             "workflow_identity": execution["identity_inputs"]["workflows"]["model"],
+                             "quality": execution["identity_inputs"]["quality"],
+                             "face_budget": pipeline["model_budgets"].get(asset_type.get("face_budget")),
+                             "voxel_resolution": asset_type.get("voxel_resolution"),
+                             "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            mesh_outputs = _adopt_stage(context, "mesh_workflow_execution", attempt_number,
+                                        mesh_inputs, mesh_settings)
+            if mesh_outputs is None:
+                if prior:
+                    attempt_number = fresh_mesh_attempt + fresh_attempt_offset
+                    fresh_attempt_offset += 1
+                    attempt_dir = (root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] /
+                                   f"mesh_{attempt_number:02d}")
+                    attempt_dir.mkdir(parents=True, exist_ok=True)
+                    source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
+                    stage_mesh = attempt_dir / "processed_mesh.blend"
+                asset = manifest["assets"][key]
+                execution = next(item for item in asset["executions"] if item["id"] == context["execution_id"])
+                mesh_stage = start_stage(execution, "mesh_workflow_execution", attempt_number,
+                                         mesh_inputs, mesh_settings,
+                                         {"concept_lineage": asset["source"]["concept_lineage"]})
+                save_manifest(root / pipeline["manifest"], manifest)
+                begin_stage(mesh_stage)
+            else:
+                source_mesh = root / next(item["path"] for item in mesh_outputs if item["type"] == "mesh.glb")
+                model_metadata = root / next(item["path"] for item in mesh_outputs if item["type"] == "generation.metadata")
             _persist_reload(root, pipeline, manifest)
             asset = manifest["assets"][key]
             execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
@@ -709,14 +871,15 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                "execution_id": execution["id"], "attempt": attempt_number,
                                "upstream_artifacts": [candidate_artifact, *conditioning_refs]}
             try:
-                config["_journal_context"] = journal_context
-                if workflow:
-                    budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
-                    generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
-                                   mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"))
-                else:
-                    generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
-                config.pop("_journal_context", None)
+                if mesh_outputs is None:
+                    config["_journal_context"] = journal_context
+                    if workflow:
+                        budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+                        generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
+                                       mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"))
+                    else:
+                        generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                    config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]
                 execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
@@ -725,7 +888,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 missing = lambda reason: {"status": "not_recorded", "reason": reason}
                 backend = mesh_info.get("backend") or {}
                 facts = mesh_info.get("provenance") or {}
-                mesh_stage["provenance"].update({
+                if mesh_outputs is None:
+                    mesh_stage["provenance"].update({
                     "backend": {name: backend.get(name, missing(f"Worker did not record backend {name}"))
                                 for name in ("provider", "version", "device")},
                     "model_weights": facts.get("model_weights", missing("Worker did not record exact model weights")),
@@ -737,7 +901,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         if mesh_info.get("workflow_effective_sha256") else
                         missing("Worker did not record the effective workflow hash")),
                     "effective_bindings": mesh_info.get("effective_bindings", missing("Worker did not record effective bindings")),
-                })
+                    })
             except Exception as exc:
                 config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
@@ -761,11 +925,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 asset = manifest["assets"][key]
                 execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
                 continue
-            mesh_outputs = [_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
-                "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs)]
-            if model_metadata.is_file():
-                mesh_outputs.append(_artifact_ref(root, model_metadata, f"mesh-metadata:{execution['id']}:{attempt_number}",
-                    "generation.metadata", "mesh_workflow_execution", attempt_number, conditioning_refs))
+            if mesh_outputs is None:
+                mesh_outputs = [_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
+                    "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs)]
+                if model_metadata.is_file():
+                    mesh_outputs.append(_artifact_ref(root, model_metadata, f"mesh-metadata:{execution['id']}:{attempt_number}",
+                        "generation.metadata", "mesh_workflow_execution", attempt_number, conditioning_refs))
             if mesh_stage["status"] == "running":
                 finish_stage(mesh_stage, "succeeded", mesh_outputs)
             _persist_reload(root, pipeline, manifest)
@@ -792,14 +957,19 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             lineage = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                        "execution_id": execution["id"], "attempt": attempt_number,
                        "upstream": upstream, "material_inputs": material_inputs,
-                       "assembly_inputs": assembly_inputs}
+                           "assembly_inputs": assembly_inputs, "reuse_execution": prior}
+            previous_materials = ([item for item in asset.get("material_candidates", {}).get("items", [])
+                                   if item.get("execution_id") == prior["id"] and
+                                   item.get("mesh_attempt") == attempt_number] if prior else [])
             if mesh_info.get("textured"):
                 start = next_material
                 generated = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info,
                                                         lineage=lineage)]
             else:
                 generated = [_generate_material_candidate(root, config, asset_type, asset, number,
-                            material_prompt, stage_mesh, lineage=lineage,
+                                material_prompt, stage_mesh,
+                                lineage={**lineage, "prior_candidate": previous_materials[index]
+                                         if index < len(previous_materials) else None},
                             seed=material_seeds[offset * material_count + index])
                              for index, number in enumerate(range(next_material, next_material + material_count))]
             asset = manifest["assets"][key]
@@ -810,7 +980,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 item["mesh_source"] = source_mesh.relative_to(root).as_posix()
                 item["mesh_attempt"] = attempt_number
                 item["execution_id"] = execution["id"]
-                item["stage_attempt"] = item["number"]
+                item["stage_attempt"] = item.get("stage_attempts", {}).get("material_assembly_export", item["number"])
                 item["upstream_artifacts"] = [*lineage["upstream"], *texture_artifacts]
                 if not item.get("artifacts"):
                     candidate_paths = material_candidate_paths(root, config, asset["name"], item["number"], asset_type)

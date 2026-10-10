@@ -1,7 +1,18 @@
 import hashlib
+import json
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
+
+from PIL import Image
+from slopforge.config import load_project
+from slopforge.manifest import load_manifest, new_record, save_manifest
+from slopforge.pipelines.model import approve, material_candidate_paths
+from slopforge.provenance import file_sha256
+from slopforge.style import load_style
+from slopforge.taxonomy import load_taxonomy
 
 from slopforge.pipelines.reuse import artifact_integrity, earliest_stale_stage, stage_reuse_decision
 
@@ -91,6 +102,244 @@ class PropReuseTests(unittest.TestCase):
     def test_earliest_stale_stage_rejects_unknown_requested_stage(self):
         with self.assertRaisesRegex(ValueError, "unsupported prop stage"):
             earliest_stale_stage(self.root, [], {"mesh_preperation": ([], {})})
+
+
+class PropApprovalReuseTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "Assets").mkdir()
+        (self.root / "ai/styles/plain/references/approved").mkdir(parents=True)
+        (self.root / "ai/asset_types").mkdir()
+        (self.root / "ai/project.yaml").write_text("""project: {name: Test}
+asset_pipeline:
+  active_style: plain
+  workflows: {image: image_text2img_api.json}
+""")
+        (self.root / "ai/styles/plain/style.yaml").write_text("""name: Plain
+version: 1
+identity: {genre: fantasy, rendering: painted, mood: [warm]}
+shape_language: {preferred: [rounded], avoid: [photorealistic]}
+palette: {}
+materials: {}
+surface_language: {preferred: [matte], avoid: []}
+lighting: {description: soft, avoid: []}
+asset_rules: {}
+material_generation: {rules: [surface only]}
+""")
+        (self.root / "ai/asset_types/prop.yaml").write_text("""name: prop
+pipeline: model
+output_folder: Models
+face_budget: prop_faces
+requirements: [isolated object]
+avoid: [environment]
+""")
+        self.config = load_project(self.root)
+        self.config["asset_pipeline"]["defaults"].update(model_candidates=1, material_candidates=1)
+        self.config["_quality_base_pipeline"]["defaults"].update(model_candidates=1, material_candidates=1)
+        self.style = load_style(self.root)
+        self.asset_type = load_taxonomy(self.root)["prop"]
+        self.asset = new_record("prop", "relay", "Copper relay", self.style, {"strategy": "text_only"})
+        self.manifest = {"schema_version": 4, "assets": {"prop:relay": self.asset}}
+        concept = self.root / "concept.png"
+        Image.new("RGB", (512, 512), "red").save(concept)
+        self.asset["candidates"] = {"selected": None, "items": [self._candidate(1, concept)]}
+        self.calls = {name: 0 for name in ("prepare", "mesh", "material", "maps", "assembly")}
+        self.fail_once = None
+        self.fail_times = {}
+        self.interrupt_once = None
+
+    def _candidate(self, number, path):
+        return {"number": number, "status": "candidate", "path": path.relative_to(self.root).as_posix(),
+                "description": "Copper relay", "artifact": {"id": f"concept:{number}", "type": "image.concept",
+                "path": path.relative_to(self.root).as_posix(), "sha256": file_sha256(path),
+                "stage": "concept_generation", "attempt": number, "derived_from": []}}
+
+    def _maybe_fail(self, name):
+        self.calls[name] += 1
+        if self.interrupt_once == name:
+            self.interrupt_once = None
+            raise KeyboardInterrupt(f"interrupted {name}")
+        if self.fail_times.get(name, 0):
+            self.fail_times[name] -= 1
+            raise RuntimeError(f"interrupted {name}")
+        if self.fail_once == name:
+            self.fail_once = None
+            raise RuntimeError(f"interrupted {name}")
+
+    def _commands(self, command, check):
+        if "prepare_3d_input.py" in command[1]:
+            self._maybe_fail("prepare")
+            Image.new("RGBA", (32, 32), "white").save(command[command.index("--cutout") + 1])
+            Image.new("RGB", (32, 32), "white").save(command[command.index("--output") + 1])
+        elif "make_pbr_maps.py" in command[1]:
+            self._maybe_fail("maps")
+            for name in ("normal", "roughness", "metallic", "emission"):
+                Image.new("RGB", (32, 32), "white").save(command[command.index("--" + name) + 1])
+
+    def _mesh(self, _root, _config, _image, _name, destination, metadata, seed, _budget=None, **_kwargs):
+        self._maybe_fail("mesh")
+        destination.write_bytes(b"mesh")
+        info = {"workflow": "model.json", "seed": seed, "model": "mesh"}
+        if _config["asset_pipeline"]["workflows"].get("model"):
+            info["textured"] = True
+            info["textures"] = {}
+            for name in ("basecolor", "normal", "roughness", "metallic"):
+                texture = destination.parent / f"{name}.png"
+                Image.new("RGB", (32, 32), "white").save(texture)
+                info["textures"][name] = texture.name
+        metadata.write_text(json.dumps(info))
+
+    def _material(self, _root, _config, _workflow, _prompt, destination, _prefix, seed, metadata, **_kwargs):
+        self._maybe_fail("material")
+        Image.new("RGB", (32, 32), "blue").save(destination)
+        metadata.write_text(json.dumps({"workflow": "image.json", "seed": seed}))
+
+    def _assembly(self, _root, _config, _source, fbx, blend, _textures, _budget, **kwargs):
+        self._maybe_fail("assembly")
+        for path in (fbx, blend, kwargs["stage_mesh"]):
+            path.write_bytes(b"assembled")
+        kwargs["preview_dir"].mkdir(parents=True, exist_ok=True)
+        for name in ("front", "side", "rear", "three_quarter"):
+            (kwargs["preview_dir"] / f"{fbx.stem}_{name}.png").write_bytes(b"preview")
+
+    def _approve(self, *, resume=False, material_prompt=None):
+        with ExitStack() as stack:
+            stack.enter_context(patch("slopforge.pipelines.model.subprocess.run", side_effect=self._commands))
+            stack.enter_context(patch("slopforge.pipelines.model.generate_model", side_effect=self._mesh))
+            stack.enter_context(patch("slopforge.pipelines.model.generate_image", side_effect=self._material))
+            stack.enter_context(patch("slopforge.pipelines.model.process_model", side_effect=self._assembly))
+            stack.enter_context(patch("slopforge.pipelines.model.inspect_model", return_value={}))
+            stack.enter_context(patch("slopforge.pipelines.model.validate_model_outputs",
+                                      return_value={"status": "passed", "errors": [], "warnings": [], "measured": {}}))
+            return approve(self.root, self.config, self.asset_type, self.style, self.manifest,
+                           "prop:relay", 1, resume=resume, material_prompt=material_prompt,
+                           material_count=1, quality_tier="normal")
+
+    def _mark_interrupted(self):
+        self.asset = self.manifest["assets"]["prop:relay"]
+        self.asset["executions"][-1]["status"] = "running"
+        self.asset["executions"][-1].pop("finished_at", None)
+        save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
+
+    def test_identical_execution_reuses_completed_outputs(self):
+        self._approve()
+        before = dict(self.calls)
+        self._mark_interrupted()
+        self._approve(resume=True)
+        self.assertEqual(self.calls, before)
+        self.assertTrue(self.asset["executions"][-1]["reuse_decisions"])
+
+    def test_approve_cli_exposes_explicit_resume_flag(self):
+        from slopforge.cli import parse_args
+
+        self.assertTrue(parse_args(["approve", "relay", "1", "--resume"]).resume)
+
+    def test_selected_concept_change_invalidates_mesh_material_and_publication(self):
+        self._approve()
+        self._mark_interrupted()
+        other = self.root / "other.png"
+        Image.new("RGB", (512, 512), "green").save(other)
+        self.asset["candidates"]["items"][0] = self._candidate(1, other)
+        with self.assertRaisesRegex(ValueError, "concept|candidate"):
+            self._approve(resume=True)
+        self.assertEqual(self.calls["mesh"], 1)
+
+    def test_material_only_change_reuses_mesh_and_rebuilds_descendants(self):
+        self._approve()
+        self._mark_interrupted()
+        self._approve(resume=True, material_prompt="oxidized copper")
+        self.assertEqual((self.calls["mesh"], self.calls["material"], self.calls["assembly"]), (1, 2, 2))
+
+    def test_geometry_settings_change_invalidates_geometry_and_descendants(self):
+        self._approve()
+        self._mark_interrupted()
+        self.asset_type["voxel_resolution"] = 128
+        self._approve(resume=True)
+        self.assertEqual((self.calls["mesh"], self.calls["material"]), (2, 2))
+
+    def test_model_workflow_content_change_invalidates_geometry(self):
+        workflows = self.root / "ai/workflows"
+        workflows.mkdir()
+        workflow = workflows / "model.json"
+        workflow.write_text(json.dumps({"1": {"class_type": "Example", "inputs": {"resolution": 128}}}))
+        self.config["asset_pipeline"]["workflows"]["model"] = "model.json"
+        self._approve()
+        self._mark_interrupted()
+        workflow.write_text(json.dumps({"1": {"class_type": "Example", "inputs": {"resolution": 256}}}))
+        self._approve(resume=True)
+        self.assertEqual(self.calls["mesh"], 2)
+
+    def test_processing_settings_change_invalidates_assembly_only(self):
+        self._approve()
+        self._mark_interrupted()
+        self.config["asset_pipeline"]["material_scale"] = 2.0
+        self.config["_quality_base_pipeline"]["material_scale"] = 2.0
+        self._approve(resume=True)
+        self.assertEqual((self.calls["mesh"], self.calls["material"], self.calls["maps"], self.calls["assembly"]),
+                         (1, 1, 1, 2))
+
+    def test_missing_preview_rebuilds_assembly_without_inference(self):
+        self._approve()
+        self._mark_interrupted()
+        previous = self.asset["material_candidates"]["items"][-1]
+        (self.root / previous["outputs"]["preview_front"]).unlink()
+        self._approve(resume=True)
+        self.assertEqual((self.calls["mesh"], self.calls["material"], self.calls["assembly"]), (1, 1, 2))
+
+    def test_interruption_resumes_at_earliest_incomplete_stage(self):
+        self.fail_once = "prepare"
+        with self.assertRaises(RuntimeError):
+            self._approve()
+        self._approve(resume=True)
+        self.assertEqual((self.calls["prepare"], self.calls["mesh"]), (2, 1))
+
+    def test_process_interruption_resumes_from_persisted_running_stage(self):
+        self.interrupt_once = "mesh"
+        with self.assertRaisesRegex(KeyboardInterrupt, "interrupted mesh"):
+            self._approve()
+        manifest_path = self.root / self.config["asset_pipeline"]["manifest"]
+        self.manifest = load_manifest(manifest_path)
+        self.asset = self.manifest["assets"]["prop:relay"]
+        execution = self.asset["executions"][-1]
+        self.assertEqual(execution["status"], "running")
+        self.assertEqual(next(stage for stage in execution["stages"]
+                              if stage["name"] == "conditioning_preparation")["status"], "succeeded")
+        self.assertEqual(next(stage for stage in execution["stages"]
+                              if stage["name"] == "mesh_workflow_execution")["status"], "running")
+        self._approve(resume=True)
+        self.assertEqual((self.calls["prepare"], self.calls["mesh"]), (1, 2))
+
+    def test_failed_stage_retries_without_regenerating_valid_ancestors(self):
+        self.fail_times["mesh"] = 1
+        with self.assertRaises(ValueError):
+            self._approve()
+        self._approve(resume=True)
+        self.assertEqual((self.calls["prepare"], self.calls["mesh"]), (1, 2))
+
+    def test_resume_uses_later_successful_mesh_after_an_earlier_attempt_failed(self):
+        self.config["asset_pipeline"]["defaults"]["model_candidates"] = 2
+        self.config["_quality_base_pipeline"]["defaults"]["model_candidates"] = 2
+        self.fail_times["mesh"] = 1
+        self.fail_once = "material"
+        with self.assertRaises(ValueError):
+            self._approve()
+        self.assertEqual(self.calls["mesh"], 2)
+        self._approve(resume=True)
+        self.assertEqual(self.calls["mesh"], 2)
+
+    def test_prior_succeeded_status_does_not_override_fingerprint_mismatch(self):
+        self._approve()
+        self._mark_interrupted()
+        old = self.asset["executions"][-1]
+        self.config["asset_pipeline"]["material_scale"] = 2.0
+        self.config["_quality_base_pipeline"]["material_scale"] = 2.0
+        self._approve(resume=True)
+        self.assertEqual(self.calls["assembly"], 2)
+        self.assertEqual(next(stage for stage in old["stages"] if stage["name"] == "material_assembly_export")["status"],
+                         "succeeded")
+        self.assertTrue(any(not item["reusable"] for item in self.asset["executions"][-1]["reuse_decisions"]))
 
 
 if __name__ == "__main__":
