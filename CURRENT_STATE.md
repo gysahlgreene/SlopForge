@@ -17,7 +17,7 @@ No broad category/workflow/profile is claimed Qualified here.
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
-| Prop execution lineage and stage journal | Implemented; deterministic offline coverage verified for Package 1 | v4 manifest records content-addressed concept, conditioning, mesh, material, export, preview, publication and stage outcomes. A fixed prop-stage reuse/integrity policy now checks requested input identities/settings, intact outputs, and output lineage, and records append-only decisions. Deterministic policy tests pass; callers and automatic resume are not integrated yet. No live inference or visual qualification claim |
+| Prop execution lineage and safe reuse | Implemented; deterministic offline Package 2 verification passed | v4 manifest records content-addressed prop stage outputs. Approval resume, recipe prop-child reuse, and `retexture` processed-mesh reuse check stage inputs/settings, artifact lineage, and hashes; stale decisions preserve prior stage history. Exact backend weight/node revisions may remain unknown, and publication outputs are not a resume cache. No live inference or visual qualification claim |
 | Offline verification baseline | Verified working for tested coverage | Canonical checks and this task's results below; opt-in/live gates remain separate |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
@@ -60,13 +60,12 @@ These gaps remain outside Package 1 or require separate evidence.
   revisions remain unavailable unless ComfyUI exposes trustworthy revisions; the
   synthesized Hunyuan graph has no source file hash. Live provider-version coverage
   was not exercised during Package 1 implementation.
-- **Resume and invalidation:** [recipe resume](slopforge/recipes.py)
-  (`resume_recipe`) skips completed/approved stages using persisted state. The new
-  fixed prop-stage reuse policy has deterministic offline coverage, but its callers
-  and automatic resume integration remain for later Package 2 tasks; a general
-  dependency/requirement/hash-based invalidation guarantee is not established.
-  The model approval path also starts new processing attempts rather than providing
-  universal resumability at every expensive substage.
+- **Resume and invalidation limits:** prop approval resume now reuses compatible
+  lineage-backed work and restarts at the earliest stale prop boundary. Recipe
+  resume applies this check only to prop/model children; other recipe handlers keep
+  their existing behavior. Missing/unknown provenance remains conservative, and
+  relocation is unsupported. Broad failure classification and retry policy remain
+  Package 3 work; this implementation does not provide a generic workflow scheduler.
 - **Evidence terminology in operational guides:** [workflow levels](docs/WORKFLOWS.md)
   use provider capability labels such as `visually_qualified` and `production_default`;
   [agent integration](docs/AGENT-INTEGRATION.md) calls repair resolution 120 qualified.
@@ -109,3 +108,20 @@ deprecation warnings, and 52 subtests. Documentation and whitespace checks passe
 No caller integration, automatic resume, live inference, visual review, or Unity
 playback was exercised; these results do not establish asset readiness or pipeline
 qualification.
+
+## Safe resume and invalidation evidence
+
+On 2026-10-10, `make verify PYTHON=.venv/bin/python` passed after Package 2 changes:
+298 tests and 56 subtests passed, 6 opt-in checks skipped, and 3 existing Pillow
+deprecation warnings were reported. Compile, documentation, metadata, and whitespace
+checks passed. The focused package suite passed 83 tests and 9 subtests. Deterministic
+coverage includes identical reuse, concept/geometry/material/processing invalidation,
+missing and hash-mismatched artifacts, interruption and failed-stage resume, recipe
+reload decisions, `retexture` lineage, unknown legacy provenance, and duplicate
+filenames with different content. The initial canonical run exposed an outdated test
+expectation for a processed mesh with no recorded lineage; it was changed to require
+recomputation and passed on rerun.
+
+These checks establish deterministic control flow and manifest persistence only.
+The opt-in Blender/live ComfyUI/provider checks remained skipped. No inference quality,
+appearance, qualification, readiness, or Unity runtime claim is established.

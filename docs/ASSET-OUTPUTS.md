@@ -10,6 +10,29 @@ An artifact reference includes an execution-scoped ID, type, project-relative pa
 
 Prop executions use the durable boundaries `concept_generation`, `conditioning_preparation`, `mesh_workflow_execution`, `mesh_raw_acquisition` where a workflow returns a separate raw mesh, `mesh_preparation` where used, `material_generation`, `mesh_output_acquisition`, `material_map_acquisition` for swatch-derived maps, `material_assembly_export`, and `final_publication`. Repeated stage entries retain attempt/outcome history. The 3D worker saves fully bound workflow identities and bindings as stage provenance before queueing; successful image-generation sidecars record source/effective graph identity and bindings after output acquisition. Generated-output bindings remain stage evidence and do not alter the semantic execution identity. Package 1 records these facts; it does not decide whether an artifact can be reused or whether a run can resume.
 
+## Prop reuse and resume
+
+`approve --resume` selects the latest incomplete or failed execution whose recorded selected-concept hash and candidate identity match the requested candidate. It preserves that execution's seeds. A changed selected concept is rejected before conditioning or model inference. At each stage boundary, the pipeline compares the prior stage's semantic inputs, settings, and required output references with the requested stage. A current execution records a separate reuse decision and an adopted stage that points at the original artifact references; the earlier execution and its stage status remain unchanged.
+
+The invalidation boundaries follow the prop stages:
+
+| Change or evidence failure | First recomputed stage | Preserved compatible work |
+| --- | --- | --- |
+| Selected concept identity or content changes | Resume is rejected; select the intended candidate and start a new approval | No descendants are adopted under the changed concept |
+| Conditioning strategy/input or conditioning output changes | `conditioning_preparation` | The selected concept artifact |
+| Model workflow content, mesh settings, seed, or generated mesh integrity changes | `mesh_workflow_execution` | The selected concept and compatible conditioning images |
+| Material prompt/workflow/maps change | `material_generation` or `material_map_acquisition` | Concept, conditioning, and compatible generated mesh |
+| Material scale, face budget, Blender processing inputs, or assembly output changes | `material_assembly_export` | Compatible concept, mesh, and material/map artifacts |
+| A candidate preview is missing or hash-mismatched | `material_assembly_export` for that candidate | Mesh and material/map artifacts; inference is not rerun |
+
+Reuse requires the recorded artifact at its recorded project-relative path to exist and match its SHA-256. The stage's output IDs, stage/attempt identity, derivation links, ordered inputs, and settings must also match. A duplicate basename elsewhere does not substitute for a missing file. Relocation is not supported. A prior `succeeded` status is historical truth and does not make its output valid for a new request. Unknown or absent lineage is not treated as a match.
+
+An ordinary exception leaves the failed stage and execution recorded as failed; a process interruption can leave the last persisted stage running. `--resume` reevaluates both and starts at the earliest stage whose evidence is incomplete or stale, while retaining valid upstream artifacts. It retries the necessary stage only; it does not change the package's global retry policy.
+
+Recipe resume applies the same conservative check to prop/model children. Reuse requires a succeeded concept-generation record, an intact candidate artifact, and matching child brief/prompt and configured workflow/quality identity where available. Missing legacy provenance makes the child stale. `retexture` reuses a processed mesh only when a succeeded mesh-preparation or material-assembly record links the exact source mesh and settings to the processed-mesh artifact and its hash still matches; otherwise Blender receives the source GLB for processing.
+
+The recorded backend facts remain bounded by what the worker observes. Unknown model-weight or custom-node revisions cannot establish equivalence across executions. Final publication records hashes and derivation links, but `approve-texture` does not adopt publication outputs as a resume cache; existing final files require the explicit overwrite path before replacement. Reuse evidence is not visual, structural, readiness, qualification, live-inference, or Unity-runtime evidence.
+
 Provenance wrappers distinguish `{ "status": "known", "value": ... }`, `{ "status": "unavailable", "reason": ... }`, and `{ "status": "not_recorded", "reason": ... }`. A workflow hash identifies graph bytes, not installed weights or custom-node revisions. A configured model filename is only a filename fact. Legacy v3 assets migrate with no synthetic execution or artifact records and carry `lineage_status.status: "unknown"` with the reason `legacy manifest predates execution lineage`.
 
 ```json

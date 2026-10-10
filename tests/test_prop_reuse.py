@@ -168,6 +168,28 @@ class PropReuseTests(unittest.TestCase):
         self.assertFalse(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
 
 
+    def test_legacy_unknown_provenance_does_not_reuse_unproven_mesh(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        source = {"path": "legacy.glb", "type": "mesh.glb", "sha256": "a" * 64,
+                  "id": "legacy-mesh", "stage": "legacy", "attempt": 1, "derived_from": []}
+        decision = processed_mesh_reuse_decision(
+            self.root, {"source": {"processed_mesh": "processed.blend"}, "executions": []}, source, {})
+        self.assertFalse(decision["reusable"])
+
+    def test_duplicate_filename_with_different_content_is_not_reused(self):
+        duplicate = self.root / "other"
+        duplicate.mkdir()
+        (self.root / "mesh.glb").write_bytes(b"recorded content")
+        (duplicate / "mesh.glb").write_bytes(b"different content")
+        reference = {**self.output, "path": "other/mesh.glb",
+                     "sha256": hashlib.sha256(b"recorded content").hexdigest()}
+
+        decision = artifact_integrity(self.root, reference)
+        self.assertFalse(decision[0])
+        self.assertIn("hash mismatch", decision[1])
+
+
 class PropApprovalReuseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -404,6 +426,40 @@ avoid: [environment]
         self.assertEqual(next(stage for stage in old["stages"] if stage["name"] == "material_assembly_export")["status"],
                          "succeeded")
         self.assertTrue(any(not item["reusable"] for item in self.asset["executions"][-1]["reuse_decisions"]))
+
+    def test_manifest_reload_preserves_same_reuse_decision(self):
+        self._approve()
+        execution = self.asset["executions"][-1]
+        stage = next(item for item in execution["stages"]
+                     if item["name"] == "material_assembly_export")
+        before = stage_reuse_decision(self.root, stage, inputs=stage["inputs"], settings=stage["settings"])
+        manifest_path = self.root / self.config["asset_pipeline"]["manifest"]
+        save_manifest(manifest_path, self.manifest)
+        self.manifest = load_manifest(manifest_path)
+        self.asset = self.manifest["assets"]["prop:relay"]
+        stage = next(item for item in self.asset["executions"][-1]["stages"]
+                     if item["name"] == "material_assembly_export")
+        after = stage_reuse_decision(self.root, stage, inputs=stage["inputs"], settings=stage["settings"])
+
+        self.assertEqual(before, after)
+
+    def test_missing_artifact_recomputes_at_owning_stage(self):
+        self._approve()
+        self._mark_interrupted()
+        previous = self.asset["material_candidates"]["items"][-1]
+        (self.root / previous["outputs"]["surface"]).unlink()
+        self._approve(resume=True)
+
+        self.assertEqual((self.calls["mesh"], self.calls["material"], self.calls["assembly"]), (1, 2, 2))
+
+    def test_hash_mismatch_recomputes_at_owning_stage(self):
+        self._approve()
+        self._mark_interrupted()
+        source = self.asset["source"]["glb"]
+        (self.root / source).write_bytes(b"replaced mesh content")
+        self._approve(resume=True)
+
+        self.assertEqual(self.calls["mesh"], 2)
 
 
 if __name__ == "__main__":

@@ -86,6 +86,12 @@ The order follows dependencies: first make execution state attributable, then us
 - **Dependencies:** Package 1. Package 4 later adds resolved requirement identity to the same invalidation rules.
 - **Exit criteria:** no reuse decision is based only on status, candidate count, path, or existence; deterministic tests cover each invalidation boundary.
 
+**Implementation evidence (2026-10-10):** The deterministic package suite
+`python -m pytest tests/test_prop_reuse.py tests/test_prop_lineage.py tests/test_mesh_pbr.py tests/test_recipes.py tests/test_manifest.py -q`
+passed (83 tests, 9 subtests). The cases cover matching and stale fingerprints, material-only versus geometry changes, missing and hash-mismatched outputs, interruption and failed-stage resume, recipe child reuse, processed-mesh lineage, manifest reload, and unknown legacy provenance. `approve --resume` rejects a changed selected concept and resumes compatible stage-local work from its earliest stale boundary. Prior stage outcomes remain intact while the new execution records reuse decisions.
+
+This evidence verifies deterministic control flow only. Model weights and custom-node revisions may remain unavailable; relocation is unsupported. Final publication hashes are recorded, but publication outputs are not adopted as a resume cache. No inference quality, asset appearance, qualification, or Unity runtime claim follows from these tests.
+
 ### Package 3 — Stage failure classification and bounded retries
 
 - **Problem:** errors are broad text; retry boundaries differ between mesh generation, native map processing and swatch processing.

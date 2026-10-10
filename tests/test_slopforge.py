@@ -462,7 +462,7 @@ class SlopForgeTests(unittest.TestCase):
                          "relic_front.png")
         self.assertEqual(Path(process.call_args.kwargs["surface_source"]).name, "surface_source.png")
         self.assertNotIn("concept", process.call_args.kwargs)
-        self.assertTrue(process.call_args.kwargs["reuse_stage_mesh"])
+        self.assertFalse(process.call_args.kwargs["reuse_stage_mesh"])
         pbr_command = next(call.args[0] for call in run_scripts.call_args_list
                            if "make_pbr_maps.py" in call.args[0][1])
         self.assertEqual(Path(pbr_command[pbr_command.index("--basecolor") + 1]).name, "surface_source.png")
