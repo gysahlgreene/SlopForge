@@ -1,5 +1,4 @@
 import copy
-import hashlib
 import json
 import os
 import re
@@ -9,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from . import SCHEMA_VERSION
+from .provenance import execution_identity
 
 
 def asset_key(asset_type, name):
@@ -151,11 +151,6 @@ def _validate_artifact_ref(reference):
     return copy.deepcopy(reference)
 
 
-def _execution_identity_digest(identity_inputs):
-    encoded = json.dumps(identity_inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def start_execution(asset, identity_inputs, parent_execution_id=None):
     if not isinstance(identity_inputs, dict):
         raise ValueError("Execution identity inputs must be an object")
@@ -166,7 +161,7 @@ def start_execution(asset, identity_inputs, parent_execution_id=None):
     execution = {
         "id": str(uuid.uuid4()),
         "parent_execution_id": parent_execution_id,
-        "identity_sha256": _execution_identity_digest(identity_inputs),
+        "identity_sha256": execution_identity(identity_inputs),
         "identity_inputs": copy.deepcopy(identity_inputs),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "running",
@@ -182,7 +177,7 @@ def set_execution_identity(execution, identity_inputs):
     if not isinstance(identity_inputs, dict):
         raise ValueError("Execution identity inputs must be an object")
     execution["identity_inputs"] = copy.deepcopy(identity_inputs)
-    execution["identity_sha256"] = _execution_identity_digest(identity_inputs)
+    execution["identity_sha256"] = execution_identity(identity_inputs)
     return execution
 
 
