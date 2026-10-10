@@ -58,6 +58,13 @@ class WorkflowProvenanceTests(unittest.TestCase):
                 changed[section][key] = value
             self.assertNotEqual(baseline, provenance_module.execution_identity(changed), (section, key))
 
+    def test_artifact_role_ids_do_not_define_execution_identity(self):
+        first = {"candidate_artifacts": [{"id": "run-a:material:1:basecolor",
+                                           "type": "texture.basecolor", "sha256": "a" * 64}]}
+        second = {"candidate_artifacts": [{"id": "run-b:material:9:basecolor",
+                                            "type": "texture.basecolor", "sha256": "a" * 64}]}
+        self.assertEqual(provenance_module.execution_identity(first), provenance_module.execution_identity(second))
+
     def test_effective_workflow_identity_tracks_bound_values_but_ignores_upload_names(self):
         self.assertTrue(callable(getattr(provenance_module, "canonical_workflow_identity", None)))
         source = {"1": {"class_type": "LoadImage", "inputs": {"image": "placeholder.png"}},

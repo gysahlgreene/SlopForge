@@ -82,11 +82,11 @@ These gaps remain outside Package 1 or require separate evidence.
 Checks performed on 2026-10-10 for Package 1 implementation:
 
 - `make verify` using the repository's existing virtual-environment interpreter: passed;
-  257 tests and 49 subtests passed, 6 skipped, with 3 existing Pillow deprecation
+  263 tests and 49 subtests passed, 6 skipped, with 3 existing Pillow deprecation
   warnings. Compile, documentation, metadata and whitespace checks passed; available
   deterministic Blender fixtures ran.
 - Package 1 lineage, manifest, provenance, mesh-PBR, texture-publication and ComfyUI
-  focused suite: 56 passed and 6 subtests passed.
+  focused suite: 62 passed and 6 subtests passed.
 - Skips: opt-in Blender animation retarget, live ComfyUI 2D and 3D inference,
   real Rigify smoke, external SkinTokens runtime, and live workflow preflight.
 - No live inference, new asset generation, visual approval, deformation review, or

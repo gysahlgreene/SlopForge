@@ -6,7 +6,7 @@ from pathlib import Path
 
 _VOLATILE_FIELDS = {
     "uuid", "run_uuid", "started_at", "finished_at", "timestamp", "created_at", "updated_at",
-    "candidate_number", "attempt_number", "prompt_id", "output_filename", "filename_prefix",
+    "id", "candidate_number", "attempt_number", "prompt_id", "output_filename", "filename_prefix",
     "temporary_filename", "subfolder",
 }
 _FACT_STATUSES = {"known", "unavailable", "not_recorded"}

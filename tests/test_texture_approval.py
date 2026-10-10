@@ -57,8 +57,9 @@ class TextureApprovalRollbackTests(unittest.TestCase):
 
                 def fail_copy(source_path, destination):
                     nonlocal replacements
-                    replacements += 1
-                    if failure_stage == 'copy' and replacements == 2:
+                    if Path(destination).resolve() != (root / config['asset_pipeline']['manifest']).resolve():
+                        replacements += 1
+                    if failure_stage == 'copy' and Path(destination).resolve() != (root / config['asset_pipeline']['manifest']).resolve() and replacements == 2:
                         raise RuntimeError('Unity failed publication')
                     return replace(source_path, destination)
 

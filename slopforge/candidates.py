@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .manifest import (add_candidate, find_asset, start_execution, start_stage, begin_stage,
                        finish_stage, finish_execution)
+from .manifest import save_manifest
 from .provenance import generator_provenance, file_sha256
 from .style import style_identity
 from .taxonomy import output_path
@@ -47,6 +48,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                                         "variation": variations[index] if variations is not None else None}
                                        for index in range(count)]
         execution = start_execution(asset, basis)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     results = []
     for offset, number in enumerate(range(start, start + count)):
         candidate_path = candidate_dir / f"candidate_{number:02d}.png"
@@ -66,7 +68,9 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         if execution:
             stage = start_stage(execution, "concept_generation", number, [],
                                 {"prompt": prompt, "variation": variation, "seed": seed}, {})
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
             begin_stage(stage)
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         try:
             print(f"Generating {name} candidate {number} ({len(results) + 1}/{count})...", flush=True)
             backend_generate(prompt, candidate_path, seed, metadata_path)
@@ -88,8 +92,12 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         except Exception as exc:
             record["error"] = str(exc)
             record["validation"]["errors"].append(str(exc))
+            if stage and stage["status"] == "running":
+                finish_stage(stage, "failed", error=record["error"])
         add_candidate(manifest, key, record)
         results.append(record)
+        if execution:
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     asset = manifest["assets"][key]
     if final_path is not None:
         asset.setdefault("outputs", {})["final_path"] = final_path.relative_to(root).as_posix()
@@ -97,9 +105,11 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         asset["status"] = "failed"
         if execution:
             finish_execution(execution, "failed")
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         raise RuntimeError(f"No valid candidates generated for {name}; see manifest candidate errors")
     if execution:
         finish_execution(execution, "succeeded")
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     return results
 
 

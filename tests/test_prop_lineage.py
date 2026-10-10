@@ -7,9 +7,9 @@ from unittest.mock import patch
 from PIL import Image
 
 from slopforge.config import load_project
-from slopforge.manifest import load_manifest, new_record
+from slopforge.manifest import load_manifest, new_record, save_manifest
 from slopforge.pipelines.image import generate as generate_concepts
-from slopforge.pipelines.model import approve as approve_model
+from slopforge.pipelines.model import approve as approve_model, generate as generate_prop_concepts
 from slopforge.style import load_style
 from slopforge.taxonomy import load_taxonomy
 
@@ -64,7 +64,7 @@ avoid: [environment]
             generate_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 2,
                               self.manifest, "prop:relay", generation_prompt="A copper relay")
 
-    def _approve(self, generator, materializer=None, native_materializer=None):
+    def _approve(self, generator, materializer=None, native_materializer=None, force=False):
         def commands(command, check):
             if "prepare_3d_input.py" in command[1]:
                 Image.new("RGBA", (32, 32), (120, 120, 120, 255)).save(command[command.index("--cutout") + 1])
@@ -78,7 +78,7 @@ avoid: [environment]
                 patch("slopforge.pipelines.model._native_material_candidate", side_effect=native_materializer), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=commands):
             return approve_model(self.root, self.config, self.asset_type, self.style, self.manifest,
-                                 "prop:relay", 2, material_count=1)
+                                 "prop:relay", 2, force=force, material_count=1)
 
     def _materializer(self, root, config, asset_type, asset, number, prompt, _stage_mesh, lineage=None, seed=None):
         from slopforge.pipelines.model import material_candidate_paths
@@ -262,6 +262,122 @@ avoid: [environment]
         self.assertIn(provenance["backend"]["version"]["status"], {"unavailable", "not_recorded"})
         self.assertIn(provenance["model_weights"]["status"], {"unavailable", "not_recorded"})
         self.assertIn(provenance["custom_node_revisions"]["status"], {"unavailable", "not_recorded"})
+
+    def test_normal_prop_generation_identity_uses_brief_and_prompt(self):
+        def backend(_root, _config, _workflow, _prompt, destination, _prefix, _seed, metadata, **_kwargs):
+            Image.new("RGB", (512, 512), "teal").save(destination)
+            metadata.write_text(json.dumps({"workflow": "image.json"}))
+        with patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay")
+            first = self.record["executions"][-1]["identity_sha256"]
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Silver relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A silver relay")
+        self.assertNotEqual(first, self.record["executions"][-1]["identity_sha256"])
+
+    def test_concept_attempt_state_is_persisted_before_boundary_and_failure(self):
+        save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
+        def backend(*_args, **_kwargs):
+            saved = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])
+            execution = saved["assets"]["prop:relay"]["executions"][-1]
+            self.assertEqual(execution["stages"][-1]["status"], "running")
+            raise RuntimeError("concept boundary failed")
+        with patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+            with self.assertRaisesRegex(RuntimeError, "No valid candidates"):
+                generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                       self.manifest, "prop:relay", generation_prompt="A copper relay")
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stage = record["executions"][-1]["stages"][-1]
+        self.assertEqual(stage["status"], "failed")
+        self.assertIn("concept boundary failed", stage["error"])
+
+    def test_concept_stage_persists_pending_before_running(self):
+        from slopforge import candidates as candidates_module
+        real_begin = candidates_module.begin_stage
+        save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
+        def begin(stage):
+            saved = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])
+            persisted = saved["assets"]["prop:relay"]["executions"][-1]["stages"][-1]
+            self.assertEqual(persisted["status"], "pending")
+            real_begin(stage)
+        def backend(_root, _config, _workflow, _prompt, destination, _prefix, _seed, metadata, **_kwargs):
+            Image.new("RGB", (512, 512), "teal").save(destination)
+            metadata.write_text(json.dumps({"workflow": "image.json"}))
+        with patch("slopforge.candidates.begin_stage", side_effect=begin), \
+                patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay")
+
+    def test_model_identity_changes_with_checkpoint_and_material_settings(self):
+        self._concept_candidates()
+        pipeline = self.config["asset_pipeline"]
+        pipeline["overwrite_existing"] = True
+        pipeline["tools"]["hunyuan_checkpoint"] = "weights-a.safetensors"
+        pipeline["material_scale"] = 3
+        with patch("slopforge.pipelines.model.secrets.randbits", return_value=17):
+            self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+                dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))))
+            first = self.record["executions"][-1]["identity_sha256"]
+            pipeline["tools"]["hunyuan_checkpoint"] = "weights-b.safetensors"
+            pipeline["material_scale"] = 9
+            self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+                dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+                force=True)
+        self.assertNotEqual(first, self.record["executions"][-1]["identity_sha256"])
+
+    def test_retexture_with_real_helper_persists_candidate_and_terminal_execution(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        from slopforge.pipelines.model import approve_texture, retexture
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material",
+                      side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"mat")):
+            approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
+
+        def generate_image(_root, _config, _workflow, _prompt, destination, _prefix, _seed, metadata):
+            Image.new("RGB", (32, 32), "orange").save(destination)
+            metadata.write_text("{}")
+        def command(args, check):
+            if "make_pbr_maps.py" in args[1]:
+                for key in ("basecolor", "normal", "roughness", "metallic", "emission"):
+                    Image.new("RGB", (32, 32), "gray").save(args[args.index("--" + key) + 1])
+        def process(_root, _config, _mesh, fbx, blend, _maps, _budget, **options):
+            fbx.write_bytes(b"fbx")
+            blend.write_bytes(b"blend")
+            options["preview_dir"].mkdir(parents=True)
+            for view in ("front", "side", "rear", "three_quarter"):
+                Image.new("RGB", (8, 8), "gray").save(options["preview_dir"] / f"relay_{view}.png")
+        with patch("slopforge.pipelines.model.generate_image", side_effect=generate_image), \
+                patch("slopforge.pipelines.model.subprocess.run", side_effect=command), \
+                patch("slopforge.pipelines.model.process_model", side_effect=process), \
+                patch("slopforge.pipelines.model.inspect_model", return_value={}), \
+                patch("slopforge.pipelines.model.validate_model_outputs", return_value={"status": "passed", "errors": []}):
+            retexture(self.root, self.config, self.asset_type, self.style, self.manifest, "prop:relay")
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual(len(record["material_candidates"]["items"]), 2)
+        execution = record["executions"][-1]
+        self.assertEqual(execution["status"], "succeeded")
+        material_generation = next(stage for stage in execution["stages"]
+                                  if stage["name"] == "material_generation")
+        unknown_workflow = material_generation["provenance"]["workflow_effective_sha256"]
+        self.assertEqual(unknown_workflow["status"], "not_recorded")
+        self.assertTrue(unknown_workflow["reason"])
+        swatch = next(item for stage in execution["stages"] for item in stage["outputs"]
+                      if item["type"] == "surface.swatch")
+        maps = next(stage for stage in execution["stages"] if stage["name"] == "material_map_acquisition")
+        self.assertIn(swatch["id"], {item["id"] for item in maps["inputs"]})
+        self.assertTrue(all({parent["artifact_id"] for parent in item["derived_from"]} == {swatch["id"]}
+                            for item in maps["outputs"]))
+        assembly = next(stage for stage in execution["stages"] if stage["name"] == "material_assembly_export")
+        self.assertTrue(assembly["inputs"])
+        assembly_input_ids = {item["id"] for item in assembly["inputs"]}
+        self.assertTrue(all({parent["artifact_id"] for parent in item["derived_from"]} == assembly_input_ids
+                            for item in assembly["outputs"]))
 
 
 if __name__ == "__main__":
