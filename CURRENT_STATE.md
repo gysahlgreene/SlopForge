@@ -17,6 +17,7 @@ No broad category/workflow/profile is claimed Qualified here.
 
 | Capability | State | Evidence and limits |
 | --- | --- | --- |
+| Prop execution lineage and stage journal | Implemented; deterministic offline coverage verified for Package 1 | v4 manifest records content-addressed concept, conditioning, mesh, material, export, preview, publication and stage outcomes. No reuse, invalidation, or automatic resume decision; no live inference or visual qualification claim |
 | Offline verification baseline | Verified working for tested coverage | Canonical checks and this task's results below; opt-in/live gates remain separate |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
@@ -38,9 +39,9 @@ The guided workflow remains development work in the registered
 `feat/guided-character-to-unity` worktree, confirmed by `git worktree list` during
 this task. Preserve it; its existence is not integration or qualification evidence.
 
-## Implementation divergences found in the documentation review
+## Remaining gaps after Package 1
 
-These are follow-up gaps, not implementation changes in this task.
+These gaps remain outside Package 1 or require separate evidence.
 
 - **Qualification vocabulary:** [model pipeline](slopforge/pipelines/model.py),
   lines 414 and 423, calls an individual mesh attempt `qualified` when it has a
@@ -53,13 +54,12 @@ These are follow-up gaps, not implementation changes in this task.
   and optional topology limits, not all visual/style/performance/runtime requirements.
   [Material approval](slopforge/pipelines/model.py), line 297, sets `ready` after
   publication/Unity material creation, without evidence of all project/runtime gates.
-- **Backend provenance:** [generation metadata](processing/comfy_generate_3d.py),
-  lines 319–329, records graph/sidecar identity, seeds and model names, not installed
-  custom-node revisions or verified weight identities for each run. The generated
-  legacy Hunyuan graph has no file hash or sidecar.
-  [Provenance projection](slopforge/provenance.py) also omits some retained metadata
-  (such as mesh preparation and actual conditioning paths) from generator records.
-  [Architecture](docs/ARCHITECTURE.md) and [ComfyUI](docs/COMFYUI.md) describe these limits.
+- **Backend provenance limits:** generation sidecars and mesh stage records now retain
+  source/effective graph identity, effective bindings, content hashes, and backend
+  facts surfaced by the existing health boundary. Exact model weights and custom-node
+  revisions remain unavailable unless ComfyUI exposes trustworthy revisions; the
+  synthesized Hunyuan graph has no source file hash. Live provider-version coverage
+  was not exercised during Package 1 implementation.
 - **Resume and invalidation:** [recipe resume](slopforge/recipes.py)
   (`resume_recipe`) skips completed/approved stages using persisted state; a general
   dependency/requirement/hash-based invalidation guarantee is not established.
@@ -77,29 +77,20 @@ These are follow-up gaps, not implementation changes in this task.
   or every category's visual/deformation gates. The new provisional protocol has
   not been run here; six runs would still require declared qualification criteria.
 
-## Verification during this documentation task
+## Verification during Package 1 implementation
 
-Checks performed on 2026-10-10 for this documentation-only change:
+Checks performed on 2026-10-10 for Package 1 implementation:
 
-- `.venv/bin/python scripts/check-docs.py`: passed (local links and private metadata).
-- `git diff --check`: passed.
-- `make verify PYTHON=.venv/bin/python`: passed; 237 tests and 49 subtests passed,
-  6 skipped, 3 existing Pillow deprecation warnings. Compile, documentation and
-  whitespace checks also passed; available deterministic Blender fixtures ran.
+- `make verify` using the repository's existing virtual-environment interpreter: passed;
+  263 tests and 49 subtests passed, 6 skipped, with 3 existing Pillow deprecation
+  warnings. Compile, documentation, metadata and whitespace checks passed; available
+  deterministic Blender fixtures ran.
+- Package 1 lineage, manifest, provenance, mesh-PBR, texture-publication and ComfyUI
+  focused suite: 62 passed and 6 subtests passed.
 - Skips: opt-in Blender animation retarget, live ComfyUI 2D and 3D inference,
   real Rigify smoke, external SkinTokens runtime, and live workflow preflight.
-- Initial plain `python scripts/check-docs.py` was unavailable because `python`
-  was not on PATH; system `python3` lacked Pillow. Plain `make verify` failed
-  collection with 20 import errors in that interpreter. Using the existing project
-  virtual environment, as documented in Contributing, resolved the environment
-  mismatch without dependency or runtime changes.
-- The six contracts/state/agent documents were reviewed together and compared with
-  configuration, manifests, pipeline code, operational guides and public evidence;
-  an independent read-only review found no substantive contradictions.
-
-No live inference, new asset generation, visual approval, deformation review, or
-Unity playback was performed. No product functionality, schema, workflow settings,
-dependencies, or runtime statuses changed. Existing regression fixtures and public
-checks provide protection for this documentation change; no new runtime tests were
-needed. Historical `make verify` / `make verify-live` results in the recovery and
-benchmark reports remain historical, not reruns or expanded qualification claims.
+- No live inference, new asset generation, visual approval, deformation review, or
+  Unity playback was performed. These results establish deterministic offline
+  Package 1 state and persistence behavior only; they do not qualify output quality,
+  readiness, reuse, invalidation, or automatic resume. Historical `make verify` /
+  `make verify-live` results in the recovery and benchmark reports remain historical.

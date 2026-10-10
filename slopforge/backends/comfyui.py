@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from pathlib import Path
+from ..provenance import provenance_fact
 
 from ..paths import blender_executable, comfy_backend, comfy_url, resolve_workflow, tool_root
 from ..config import workflow_node_inputs
@@ -33,6 +34,28 @@ def workflow_mask_errors(workflow):
                             "foreground. Connect an InvertMask node between them; automatic "
                             "polarity guessing can erase narrow subjects.")
     return problems
+
+
+def backend_provenance(health=None, *, queried=False):
+    health = health if isinstance(health, dict) else {}
+    system = health.get("system") if isinstance(health.get("system"), dict) else {}
+    devices = health.get("devices") if isinstance(health.get("devices"), list) else []
+    facts = {"provider": provenance_fact("known", value="ComfyUI")}
+    version = system.get("comfyui_version")
+    facts["version"] = (provenance_fact("known", value=version) if version else
+                         provenance_fact("unavailable" if queried else "not_recorded",
+                                         reason="ComfyUI did not expose a version" if queried else
+                                                "Backend health was not queried"))
+    names = [item["name"] for item in devices if isinstance(item, dict) and item.get("name")]
+    facts["device"] = (provenance_fact("known", value=names) if names else
+                        provenance_fact("unavailable" if queried else "not_recorded",
+                                        reason="ComfyUI did not expose device identity" if queried else
+                                               "Backend health was not queried"))
+    facts["model_weights"] = provenance_fact("unavailable",
+        reason="ComfyUI health does not expose exact model weight identity")
+    facts["custom_node_revisions"] = provenance_fact("unavailable",
+        reason="ComfyUI object metadata does not expose custom-node revisions")
+    return facts
 
 
 class ComfyUIClient:
@@ -234,13 +257,16 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
-                  voxel_resolution=None):
+                  voxel_resolution=None, journal_context=None):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     command = [python_executable(root, config), str(script), "--image", str(image),
                "--name", name, "--dest", str(destination),
                "--checkpoint", config["asset_pipeline"]["tools"]["hunyuan_checkpoint"],
                "--seed", str(seed), "--metadata", str(metadata)]
+    journal_context = journal_context or config.get("_journal_context")
+    if journal_context:
+        command.extend(["--journal-context", json.dumps({**journal_context, "project_root": str(root)})])
     workflow = config["asset_pipeline"]["workflows"].get("model")
     if workflow:
         command.extend(["--workflow", str(resolve_workflow(root, workflow)), "--face-budget", str(face_budget),

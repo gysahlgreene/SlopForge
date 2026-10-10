@@ -1,12 +1,14 @@
 import copy
 import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from . import SCHEMA_VERSION
+from .provenance import execution_identity
 
 
 def asset_key(asset_type, name):
@@ -14,13 +16,21 @@ def asset_key(asset_type, name):
 
 
 def _migrate(data):
-    if data.get("schema_version") == SCHEMA_VERSION:
-        return data
     version = data.get("schema_version")
+    if version == SCHEMA_VERSION:
+        return data
     if isinstance(version, int) and version > SCHEMA_VERSION:
         raise ValueError(f"Manifest schema {version} is newer than supported schema {SCHEMA_VERSION}")
     if version == 2:
         migrated = copy.deepcopy(data)
+        migrated["schema_version"] = 3
+        return _migrate(migrated)
+    if version == 3:
+        migrated = copy.deepcopy(data)
+        for asset in migrated.get("assets", {}).values():
+            asset.setdefault("executions", [])
+            asset.setdefault("lineage_status", {
+                "status": "unknown", "reason": "legacy manifest predates execution lineage"})
         migrated["schema_version"] = SCHEMA_VERSION
         return migrated
     old_style = data.get("style") or {}
@@ -54,11 +64,11 @@ def _migrate(data):
     active_style = copy.deepcopy(old_style)
     active_style.update({"name": old_style.get("name"), "version": old_style.get("version")})
     migrated.update({
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": 3,
         "active_style": active_style,
         "assets": assets,
     })
-    return migrated
+    return _migrate(migrated)
 
 
 def load_manifest(path):
@@ -113,6 +123,119 @@ def _manifest_asset(manifest, selector):
         return manifest["assets"][selector]
     except KeyError:
         return find_asset(manifest, selector)
+
+
+def _validate_digest(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise ValueError("Artifact SHA-256 must be 64 lowercase hexadecimal characters")
+
+
+def _validate_artifact_ref(reference):
+    if not isinstance(reference, dict):
+        raise ValueError("Artifact references must be objects")
+    for field in ("id", "type", "stage"):
+        if not isinstance(reference.get(field), str) or not reference[field].strip():
+            raise ValueError(f"Artifact reference requires {field}")
+    _project_path(reference.get("path"))
+    _validate_digest(reference.get("sha256"))
+    attempt = reference.get("attempt")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("Artifact attempt must be a positive integer")
+    derived = reference.get("derived_from", [])
+    if not isinstance(derived, list):
+        raise ValueError("Artifact derived_from must be a list")
+    for parent in derived:
+        if not isinstance(parent, dict) or not isinstance(parent.get("artifact_id"), str):
+            raise ValueError("Derived artifact references require artifact_id and sha256")
+        _validate_digest(parent.get("sha256"))
+    return copy.deepcopy(reference)
+
+
+def start_execution(asset, identity_inputs, parent_execution_id=None):
+    if not isinstance(identity_inputs, dict):
+        raise ValueError("Execution identity inputs must be an object")
+    executions = asset.setdefault("executions", [])
+    if parent_execution_id is not None and not any(
+            item.get("id") == parent_execution_id for item in executions):
+        raise ValueError(f"Unknown parent execution {parent_execution_id!r}")
+    execution = {
+        "id": str(uuid.uuid4()),
+        "parent_execution_id": parent_execution_id,
+        "identity_sha256": execution_identity(identity_inputs),
+        "identity_inputs": copy.deepcopy(identity_inputs),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+        "stages": [],
+    }
+    executions.append(execution)
+    return execution
+
+
+def set_execution_identity(execution, identity_inputs):
+    if execution.get("stages"):
+        raise ValueError("Execution identity cannot change after a stage starts")
+    if not isinstance(identity_inputs, dict):
+        raise ValueError("Execution identity inputs must be an object")
+    execution["identity_inputs"] = copy.deepcopy(identity_inputs)
+    execution["identity_sha256"] = execution_identity(identity_inputs)
+    return execution
+
+
+def start_stage(execution, name, attempt, inputs, settings, provenance):
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Stage name must be a non-empty string")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("Stage attempt must be a positive integer")
+    if not isinstance(inputs, list) or not isinstance(settings, dict) or not isinstance(provenance, dict):
+        raise ValueError("Stage inputs must be a list and settings/provenance must be objects")
+    stage = {
+        "name": name,
+        "attempt": attempt,
+        "status": "pending",
+        "started_at": None,
+        "finished_at": None,
+        "inputs": [_validate_artifact_ref(item) for item in inputs],
+        "outputs": [],
+        "settings": copy.deepcopy(settings),
+        "provenance": copy.deepcopy(provenance),
+        "error": None,
+    }
+    execution.setdefault("stages", []).append(stage)
+    return stage
+
+
+def begin_stage(stage):
+    if stage.get("status") != "pending":
+        raise ValueError("Only pending stages can start")
+    stage["status"] = "running"
+    stage["started_at"] = datetime.now(timezone.utc).isoformat()
+    return stage
+
+
+def finish_stage(stage, status, outputs=(), error=None):
+    if status not in {"succeeded", "failed"}:
+        raise ValueError(f"Unknown stage status {status!r}")
+    if stage.get("status") != "running":
+        raise ValueError("Only running stages can finish")
+    if status == "failed" and (not isinstance(error, str) or not error):
+        raise ValueError("Failed stages require an error message")
+    if status == "succeeded" and error is not None:
+        raise ValueError("Succeeded stages cannot have an error message")
+    stage["outputs"] = [_validate_artifact_ref(item) for item in outputs]
+    stage["status"] = status
+    stage["finished_at"] = datetime.now(timezone.utc).isoformat()
+    stage["error"] = error
+    return stage
+
+
+def finish_execution(execution, status):
+    if status not in {"succeeded", "failed"}:
+        raise ValueError(f"Unknown execution status {status!r}")
+    if execution.get("status") != "running":
+        raise ValueError("Only running executions can finish")
+    execution["status"] = status
+    execution["finished_at"] = datetime.now(timezone.utc).isoformat()
+    return execution
 
 
 def register_artifact(manifest, asset_selector, artifact_id, artifact_type, path, *, status="ready",
@@ -227,5 +350,5 @@ def new_record(asset_type, name, description, style, conditioning):
             "created_at": datetime.now(timezone.utc).isoformat(),
             "generator": {"workflow": None, "model": None, "seed": None},
             "conditioning": {"strategy": conditioning["strategy"], "references_used": []},
-            "candidates": {"items": [], "selected": None}, "source": {}, "outputs": {},
+            "candidates": {"items": [], "selected": None}, "source": {}, "outputs": {}, "executions": [],
             "validation": {"status": "not_run", "warnings": [], "measured": {}}}

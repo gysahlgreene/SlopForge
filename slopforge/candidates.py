@@ -6,8 +6,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .manifest import add_candidate, find_asset
-from .provenance import generator_provenance
+from .manifest import (add_candidate, find_asset, start_execution, start_stage, begin_stage,
+                       finish_stage, finish_execution)
+from .manifest import save_manifest
+from .provenance import generator_provenance, file_sha256
 from .style import style_identity
 from .taxonomy import output_path
 from .validation import validate_image
@@ -29,7 +31,7 @@ def reject_candidate(manifest, asset_selector, number, reason=None):
 
 
 def generate_candidates(project_root, config, asset_type, style, name, description, count, manifest, key, backend_generate,
-                        *, semantic_description=None, variations=None):
+                        *, semantic_description=None, variations=None, identity_inputs=None):
     root = Path(project_root).resolve()
     final_path = output_path(root, config, asset_type, name)
     candidate_dir = root / config["asset_pipeline"]["candidate_root"] / asset_type["name"] / name
@@ -37,12 +39,22 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
     if variations is not None and len(variations) != count:
         raise ValueError("Candidate count must match the number of deliberate variations")
     start = max((int(item["number"]) for item in existing), default=0) + 1
+    asset = manifest["assets"][key]
+    seeds = [secrets.randbits(32) for _ in range(count)]
+    execution = None
+    if asset_type.get("name") == "prop":
+        basis = dict(identity_inputs or {})
+        basis["candidate_attempts"] = [{"seed": seeds[index],
+                                        "variation": variations[index] if variations is not None else None}
+                                       for index in range(count)]
+        execution = start_execution(asset, basis)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     results = []
-    for number in range(start, start + count):
+    for offset, number in enumerate(range(start, start + count)):
         candidate_path = candidate_dir / f"candidate_{number:02d}.png"
         metadata_path = candidate_dir / f"candidate_{number:02d}.json"
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
-        seed = secrets.randbits(32)
+        seed = seeds[offset]
         variation = variations[len(results)] if variations is not None else None
         prompt = description
         if variation:
@@ -52,6 +64,13 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             record["variation"] = dict(variation)
         record["description"] = description if semantic_description is None else semantic_description
         record["style"] = style_identity(style)
+        stage = None
+        if execution:
+            stage = start_stage(execution, "concept_generation", number, [],
+                                {"prompt": prompt, "variation": variation, "seed": seed}, {})
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+            begin_stage(stage)
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         try:
             print(f"Generating {name} candidate {number} ({len(results) + 1}/{count})...", flush=True)
             backend_generate(prompt, candidate_path, seed, metadata_path)
@@ -62,17 +81,35 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                 record["generator"] = generator_provenance(metadata.get("workflow"), metadata)
                 asset = manifest["assets"][key]
                 asset["generator"] = generator_provenance(metadata.get("workflow"), metadata)
+            if execution and candidate_path.is_file() and not record.get("error"):
+                artifact = {"id": f"concept-candidate:{number}", "type": "image.concept",
+                            "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),
+                            "stage": "concept_generation", "attempt": number, "derived_from": []}
+                record.update({"execution_id": execution["id"], "stage_attempt": number, "artifact": artifact})
+                finish_stage(stage, "succeeded", [artifact])
+            elif stage:
+                finish_stage(stage, "failed", error=record.get("error", "Concept image generation failed"))
         except Exception as exc:
             record["error"] = str(exc)
             record["validation"]["errors"].append(str(exc))
+            if stage and stage["status"] == "running":
+                finish_stage(stage, "failed", error=record["error"])
         add_candidate(manifest, key, record)
         results.append(record)
+        if execution:
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     asset = manifest["assets"][key]
     if final_path is not None:
         asset.setdefault("outputs", {})["final_path"] = final_path.relative_to(root).as_posix()
     if not any(item["status"] == "candidate" for item in results):
         asset["status"] = "failed"
+        if execution:
+            finish_execution(execution, "failed")
+            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         raise RuntimeError(f"No valid candidates generated for {name}; see manifest candidate errors")
+    if execution:
+        finish_execution(execution, "succeeded")
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     return results
 
 
