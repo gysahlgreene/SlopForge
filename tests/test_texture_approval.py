@@ -1,4 +1,3 @@
-import copy
 import os
 from itertools import product
 import tempfile
@@ -37,7 +36,8 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                              'items': [{'number': 1, 'status': 'candidate', 'prompt': 'steel',
                                         'outputs': outputs, 'validation': {'status': 'passed'}}]}}
                 manifest = {'assets': {'prop:relic': asset}}
-                before = copy.deepcopy(manifest)
+                before_status = asset["status"]
+                before_selected = asset["material_candidates"]["selected"]
                 destinations = [final[name] for name in (*keys, 'glb', 'unity_material', 'validation')]
                 metadata = [path.with_suffix(path.suffix + '.meta') for path in destinations]
                 if previously_approved:
@@ -67,7 +67,11 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                         patch('slopforge.pipelines.model.build_unity_material', side_effect=fail_material):
                     with self.assertRaisesRegex(RuntimeError, 'Unity failed'):
                         model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
-                self.assertEqual(manifest, before)
+                self.assertEqual(asset["status"], before_status)
+                self.assertEqual(asset["material_candidates"]["selected"], before_selected)
+                publication = asset["executions"][-1]
+                self.assertEqual(publication["status"], "failed")
+                self.assertEqual(publication["stages"][-1]["status"], "failed")
                 self.assertEqual(source.read_bytes(), b'original source')
                 for path in destinations + metadata:
                     if path in originals:

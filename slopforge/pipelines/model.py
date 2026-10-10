@@ -72,6 +72,59 @@ def _execution_stage(asset, execution_id, name, attempt):
                            if item["name"] == name and item["attempt"] == attempt)
 
 
+def _lineage_start(context, name, attempt, inputs, settings):
+    if not context:
+        return None
+    asset = context["manifest"]["assets"][context["key"]]
+    execution = next(item for item in asset["executions"] if item["id"] == context["execution_id"])
+    stage = start_stage(execution, name, attempt, inputs, settings, {})
+    begin_stage(stage)
+    _persist_reload(context["root"], context["pipeline"], context["manifest"])
+    asset = context["manifest"]["assets"][context["key"]]
+    return _execution_stage(asset, context["execution_id"], name, attempt)[1]
+
+
+def _lineage_finish(context, name, attempt, outputs, *, error=None):
+    if not context:
+        return []
+    asset = context["manifest"]["assets"][context["key"]]
+    execution, stage = _execution_stage(asset, context["execution_id"], name, attempt)
+    refs = []
+    if error is None:
+        root = context["root"]
+        parents = context["upstream"]
+        for index, (path, kind) in enumerate(outputs):
+            path = Path(path)
+            if path.is_file():
+                refs.append(_artifact_ref(root, path, f"{execution['id']}:{name}:{attempt}:{index}",
+                                          kind, name, attempt, parents))
+        finish_stage(stage, "succeeded", refs)
+    else:
+        finish_stage(stage, "failed", error=str(error) or type(error).__name__)
+    _persist_reload(context["root"], context["pipeline"], context["manifest"])
+    return refs
+
+
+_MATERIAL_ARTIFACT_TYPES = {
+    "surface": "surface.swatch", "fbx": "mesh.fbx", "blend": "project.blend",
+    "basecolor": "texture.basecolor", "normal": "texture.normal", "roughness": "texture.roughness",
+    "metallic": "texture.metallic", "metallic_gloss": "texture.metallic_gloss",
+    "emission": "texture.emission", "preview_front": "preview.front", "preview_side": "preview.side",
+    "preview_rear": "preview.rear", "preview_three_quarter": "preview.three_quarter",
+    "validation": "validation.json",
+}
+
+
+def _material_artifact_refs(root, paths, execution_id, attempt, upstream):
+    refs = []
+    for key, kind in _MATERIAL_ARTIFACT_TYPES.items():
+        path = paths[key]
+        if path.is_file():
+            refs.append(_artifact_ref(root, path, f"{execution_id}:material:{attempt}:{key}", kind,
+                                      "material_assembly_export", attempt, upstream))
+    return refs
+
+
 def model_paths(project_root, config, name, asset_type="prop"):
     directory = output_path(project_root, config, asset_type, name)
     source, materials, previews = directory / "Source", directory / "Materials", directory / "Previews"
@@ -109,19 +162,24 @@ def _relative_outputs(root, paths, keys):
     return {key: paths[key].relative_to(root).as_posix() for key in keys}
 
 
-def _generate_material_candidate(root, config, asset_type, asset, number, prompt, stage_mesh):
+def _generate_material_candidate(root, config, asset_type, asset, number, prompt, stage_mesh, lineage=None, seed=None):
     paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["directory"].mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     candidate = {"number": number, "prompt": prompt, "status": "failed", "kind": "surface_swatch",
-                 "seed": secrets.randbits(32), "path": paths["surface"].relative_to(root).as_posix(),
+                 "seed": seed if seed is not None else secrets.randbits(32), "path": paths["surface"].relative_to(root).as_posix(),
                  "validation": {"status": "not_run", "errors": [], "warnings": [], "measured": {}}}
     pipeline = config["asset_pipeline"]
+    material_started = assembly_started = False
+    candidate["artifacts"] = []
     try:
         workflow = pipeline["workflows"].get("image")
         if not workflow:
             raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
         metadata_path = paths["generator"]
+        _lineage_start(lineage, "material_generation", number, (lineage or {}).get("upstream", []),
+                       {"prompt": prompt, "seed": candidate["seed"]})
+        material_started = bool(lineage)
         generate_image(root, config, resolve_workflow(root, workflow), prompt, paths["surface"],
                        f"slopforge/prop/{asset['name']}/material_{candidate['seed']}",
                        candidate["seed"], metadata_path)
@@ -131,8 +189,15 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             raise ValueError("Surface material validation failed: " + "; ".join(material_check["errors"]))
         info = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
         candidate["generator"] = generator_provenance(info.get("workflow"), info)
+        if material_started:
+            candidate["artifacts"].extend(_lineage_finish(lineage, "material_generation", number,
+                [(paths["surface"], "surface.swatch"), (metadata_path, "generation.metadata")]))
+            material_started = False
 
         python = python_executable(root, config)
+        _lineage_start(lineage, "material_assembly_export", number, (lineage or {}).get("upstream", []),
+                       {"material_scale": float(pipeline.get("material_scale", 3.0))})
+        assembly_started = bool(lineage)
         subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["surface"]),
                         "--prompt", prompt,
                         "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
@@ -159,16 +224,27 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         candidate["outputs"] = _relative_outputs(root, paths, check_paths)
         candidate["generator"].update({"workflow": info.get("workflow") or workflow,
                                         "seed": candidate["seed"]})
+        if assembly_started:
+            candidate["artifacts"].extend(_lineage_finish(lineage, "material_assembly_export", number,
+                [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in _MATERIAL_ARTIFACT_TYPES]))
+            assembly_started = False
     except Exception as exc:
+        if material_started:
+            _lineage_finish(lineage, "material_generation", number, [], error=exc)
+        if assembly_started:
+            _lineage_finish(lineage, "material_assembly_export", number, [], error=exc)
         candidate["error"] = str(exc)
         candidate["validation"]["errors"].append(str(exc))
     return candidate
 
 
-def _native_material_candidate(root, config, asset_type, asset, number, mesh_info):
+def _native_material_candidate(root, config, asset_type, asset, number, mesh_info, lineage=None):
     paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     mesh_path = root / asset["source"]["glb"]
+    artifacts = []
+    _lineage_start(lineage, "material_generation", number, (lineage or {}).get("upstream", []),
+                   {"workflow": "mesh_pbr", "seed": mesh_info.get("seed")})
     if mesh_info.get("conditioning_image"):
         shutil.copy2(mesh_path.parent / mesh_info["conditioning_image"], paths["directory"] / "conditioning.png")
         mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
@@ -179,8 +255,14 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
     with Image.open(paths["basecolor"]) as image:
         Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
     paths["generator"].write_text(json.dumps(mesh_info, indent=2) + "\n")
+    artifacts.extend(_lineage_finish(lineage, "material_generation", number,
+        [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
+         ("surface", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")]
+        + [(paths["generator"], "generation.metadata")]))
     budget = int(config["asset_pipeline"]["model_budgets"].get(asset_type.get("face_budget"), 30000))
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
+    _lineage_start(lineage, "material_assembly_export", number, (lineage or {}).get("upstream", []),
+                   {"preserve_uvs": True, "face_budget": budget})
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"])
@@ -192,12 +274,14 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+    artifacts.extend(_lineage_finish(lineage, "material_assembly_export", number,
+        [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in _MATERIAL_ARTIFACT_TYPES]))
     return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
             "status": "candidate" if validation["status"] != "failed" else "failed",
             "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
-            "outputs": _relative_outputs(root, paths, keys)}
+            "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts}
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
@@ -254,11 +338,42 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     prompt = material_prompt or build_prompt(style, asset_type, asset["description"], mode="material")
     existing = asset.setdefault("material_candidates", {"items": [], "selected": None})["items"]
     start = max((int(item["number"]) for item in existing), default=0) + 1
+    seeds = [secrets.randbits(32) for _ in range(count)]
+    selected_number = asset.get("material_candidates", {}).get("selected")
+    selected_candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
+                               if item["number"] == selected_number), None)
+    parent_execution = next((execution for execution in asset.get("executions", [])
+                             if selected_candidate and execution["id"] == selected_candidate.get("execution_id")), None)
+    mesh_ref = next((artifact for stage in reversed(parent_execution.get("stages", []) if parent_execution else [])
+                     for artifact in reversed(stage.get("outputs", []))
+                     if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
+    concept_ref = asset.get("source", {}).get("concept_artifact")
+    upstream = ([concept_ref] if concept_ref else []) + ([mesh_ref] if mesh_ref else [])
+    execution = start_execution(asset, {"asset_type": asset.get("type"), "brief": asset.get("description"),
+        "mesh_sha256": mesh_ref.get("sha256") if mesh_ref else file_sha256(paths["glb"]),
+        "material_prompt": prompt, "material_scale": config["asset_pipeline"].get("material_scale", 3.0),
+        "quality": config["asset_pipeline"].get("quality_settings", {}), "seeds": seeds},
+        parent_execution_id=parent_execution.get("id") if parent_execution else None)
+    lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest, "key": key,
+               "execution_id": execution["id"], "upstream": upstream}
     results = []
-    for number in range(start, start + count):
-        candidate = _generate_material_candidate(root, config, asset_type, asset, number, prompt, paths["processed_mesh"])
+    for index, number in enumerate(range(start, start + count)):
+        candidate = _generate_material_candidate(root, config, asset_type, asset, number, prompt,
+            paths["processed_mesh"], lineage=lineage, seed=seeds[index])
+        if not candidate.get("artifacts"):
+            candidate["artifacts"] = _material_artifact_refs(root,
+                material_candidate_paths(root, config, asset["name"], number, asset_type),
+                execution["id"], number, upstream)
+        candidate.update({"execution_id": execution["id"], "stage_attempt": number,
+                          "mesh_source": paths["glb"].relative_to(root).as_posix(),
+                          "mesh_attempt": mesh_ref.get("attempt") if mesh_ref else None,
+                          "upstream_artifacts": upstream})
         existing.append(candidate)
         results.append(candidate)
+    finish_execution(execution, "succeeded" if any(item["status"] == "candidate" for item in results) else "failed")
+    from .. import SCHEMA_VERSION
+    manifest.setdefault("schema_version", SCHEMA_VERSION)
+    save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     return results
 
 
@@ -289,6 +404,19 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
+    candidate_artifacts = candidate.get("artifacts", [])
+    pipeline = config["asset_pipeline"]
+    execution = start_execution(asset, {
+        "asset_type": asset.get("type"), "candidate_artifacts": [
+            {"id": item["id"], "sha256": item["sha256"]} for item in candidate_artifacts],
+        "publication_roles": ["surface", "fbx", "blend", "maps", "previews", "unity_material", "validation"],
+    }, parent_execution_id=candidate.get("execution_id"))
+    publication_stage = start_stage(execution, "final_publication", 1, candidate_artifacts,
+                                    {"approval": "selected material candidate"}, {})
+    begin_stage(publication_stage)
+    from .. import SCHEMA_VERSION
+    manifest.setdefault("schema_version", SCHEMA_VERSION)
+    save_manifest(root / pipeline["manifest"], manifest)
     publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "validation")]
     publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
     with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
@@ -320,12 +448,15 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
-        except Exception:
+        except Exception as exc:
             for destination in publication_paths:
                 if destination in backups:
                     shutil.copy2(backups[destination], destination)
                 else:
                     destination.unlink(missing_ok=True)
+            finish_stage(publication_stage, "failed", error=str(exc) or type(exc).__name__)
+            finish_execution(execution, "failed")
+            save_manifest(root / pipeline["manifest"], manifest)
             raise
     candidate["approval"] = "approved"
     asset["material_candidates"]["selected"] = number
@@ -337,6 +468,34 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     asset["validation"] = validation
     asset["status"] = "ready"
     asset["updated_at"] = datetime.now(timezone.utc).isoformat()
+    candidate_refs = candidate.get("artifacts", [])
+    mesh_ref = next((item for item in candidate.get("upstream_artifacts", []) if item["type"].startswith("mesh.")), None)
+    by_type = {}
+    for item in candidate_refs:
+        by_type.setdefault(item["type"], []).append(item)
+    published = []
+    output_types = {"surface": "surface.swatch", "fbx": "mesh.fbx", "blend": "project.blend",
+                    "basecolor": "texture.basecolor", "normal": "texture.normal", "roughness": "texture.roughness",
+                    "metallic": "texture.metallic", "metallic_gloss": "texture.metallic_gloss",
+                    "emission": "texture.emission", "preview_front": "preview.front", "preview_side": "preview.side",
+                    "preview_rear": "preview.rear", "preview_three_quarter": "preview.three_quarter",
+                    "unity_material": "material.unity", "validation": "validation.json", "glb": "mesh.glb"}
+    for key_name, kind in output_types.items():
+        path = paths[key_name]
+        parents = by_type.get(kind, [])
+        if key_name == "glb" and mesh_ref:
+            parents = [mesh_ref]
+        if key_name == "unity_material":
+            parents = [item for item in candidate_refs if item["type"].startswith("texture.")]
+        if key_name == "validation":
+            parents = candidate_refs
+        if path.is_file():
+            published.append(_artifact_ref(root, path, f"{execution['id']}:published:{key_name}", kind,
+                                           "final_publication", 1, parents))
+    finish_stage(publication_stage, "succeeded", published)
+    finish_execution(execution, "succeeded")
+    asset["published_artifacts"] = published
+    save_manifest(root / pipeline["manifest"], manifest)
     return validation
 
 
@@ -377,6 +536,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         raise ValueError("Material and model candidate budgets must be at least 1")
     next_attempt = max((int(item.get("number", 0)) for item in asset.get("model_attempts", [])), default=0) + 1
     mesh_seeds = [secrets.randbits(32) for _ in range(attempts)]
+    material_seeds = [] if workflow else [secrets.randbits(32) for _ in range(attempts * material_count)]
     concept_path = root / candidate["path"]
     candidate_artifact = candidate.get("artifact")
     if candidate_artifact is None:
@@ -396,6 +556,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         "mesh": {"face_budget": pipeline.get("model_budgets", {}).get(asset_type.get("face_budget")),
                  "voxel_resolution": asset_type.get("voxel_resolution"), "seeds": mesh_seeds},
         "material_prompt": material_prompt, "material_count": material_count,
+        "material_seeds": material_seeds,
     }, parent_execution_id=candidate.get("execution_id"))
     paths["concept"].parent.mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
@@ -521,17 +682,36 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                     "3d_input": paths["input_3d"].relative_to(root).as_posix(),
                                     "glb": source_mesh.relative_to(root).as_posix(),
                                     "processed_mesh": stage_mesh.relative_to(root).as_posix()})
+            execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+            mesh_artifact = next((artifact for stage_record in reversed(execution["stages"])
+                                  for artifact in reversed(stage_record.get("outputs", []))
+                                  if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), mesh_outputs[0])
+            lineage = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
+                       "execution_id": execution["id"], "attempt": attempt_number,
+                       "upstream": [candidate_artifact, mesh_artifact]}
             if mesh_info.get("textured"):
                 start = next_material
-                generated = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info)]
+                generated = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info,
+                                                        lineage=lineage)]
             else:
                 generated = [_generate_material_candidate(root, config, asset_type, asset, number,
-                            material_prompt, stage_mesh)
-                             for number in range(next_material, next_material + material_count)]
+                            material_prompt, stage_mesh, lineage=lineage,
+                            seed=material_seeds[offset * material_count + index])
+                             for index, number in enumerate(range(next_material, next_material + material_count))]
+            asset = manifest["assets"][key]
+            execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+            attempt_reports = asset.setdefault("model_attempts", [])
             next_material += len(generated)
             for item in generated:
                 item["mesh_source"] = source_mesh.relative_to(root).as_posix()
                 item["mesh_attempt"] = attempt_number
+                item["execution_id"] = execution["id"]
+                item["stage_attempt"] = item["number"]
+                item["upstream_artifacts"] = lineage["upstream"]
+                if not item.get("artifacts"):
+                    candidate_paths = material_candidate_paths(root, config, asset["name"], item["number"], asset_type)
+                    item["artifacts"] = _material_artifact_refs(root, candidate_paths, execution["id"],
+                                                                  item["number"], lineage["upstream"])
             material_candidates.extend(generated)
             viable = [item for item in generated if item["status"] == "candidate"]
             attempt_reports.append({"number": attempt_number, "source": source_mesh.relative_to(root).as_posix(),
