@@ -11,7 +11,7 @@ from PIL import Image
 
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
-from ..config import select_quality_tier
+from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
@@ -546,11 +546,11 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     execution = start_execution(asset, {
         "asset_type": asset_type.get("name"), "brief": candidate.get("description", asset.get("description")),
-        "selected_concept": {"artifact_id": candidate_artifact["id"], "sha256": candidate_artifact["sha256"]},
-        "legacy_concept_lineage": ("unknown" if not candidate.get("execution_id") else None),
+        "selected_concept": {"sha256": candidate_artifact["sha256"]},
         "workflows": {"concept": concept_workflow,
                       "model": {"identifier": Path(workflow).name if workflow else "hunyuan3d_image_to_model_api",
-                                "sha256": file_sha256(model_workflow_path) if model_workflow_path and model_workflow_path.is_file() else None}},
+                                "sha256": file_sha256(model_workflow_path) if model_workflow_path and model_workflow_path.is_file() else None,
+                                "configured_inputs": workflow_node_inputs(config, "model", Path(workflow).name) if workflow else {}}},
         "quality": {"tier": pipeline.get("selected_quality_tier", "normal"),
                     "settings": pipeline.get("quality_settings", {})},
         "mesh": {"face_budget": pipeline.get("model_budgets", {}).get(asset_type.get("face_budget")),
@@ -644,6 +644,22 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
                 attempt_reports = asset.setdefault("model_attempts", [])
                 mesh_info = json.loads(model_metadata.read_text())
+                missing = lambda reason: {"status": "not_recorded", "reason": reason}
+                backend = mesh_info.get("backend") or {}
+                facts = mesh_info.get("provenance") or {}
+                mesh_stage["provenance"].update({
+                    "backend": {name: backend.get(name, missing(f"Worker did not record backend {name}"))
+                                for name in ("provider", "version", "device")},
+                    "model_weights": facts.get("model_weights", missing("Worker did not record exact model weights")),
+                    "custom_node_revisions": facts.get("custom_node_revisions",
+                        missing("Worker did not record custom-node revisions")),
+                    "model_filenames": mesh_info.get("model_filenames", missing("Worker did not record configured model filenames")),
+                    "workflow_source": mesh_info.get("workflow_source", missing("Worker did not record source workflow provenance")),
+                    "workflow_effective_sha256": ({"status": "known", "value": mesh_info["workflow_effective_sha256"]}
+                        if mesh_info.get("workflow_effective_sha256") else
+                        missing("Worker did not record the effective workflow hash")),
+                    "effective_bindings": mesh_info.get("effective_bindings", missing("Worker did not record effective bindings")),
+                })
             except Exception as exc:
                 config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)

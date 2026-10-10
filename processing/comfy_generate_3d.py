@@ -358,13 +358,13 @@ def main():
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
                             "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"],
                            check=True, env=blender_environment())
-        if not prepared.is_file():
-            raise RuntimeError("Blender did not produce the prepared mesh")
-        state = _journal_execution(journal)
-        if state:
-            _, manifest, execution = state
-            current = execution["stages"][-1]
-            _journal_finish(journal, current, [(prepared, "mesh.prepared")])
+            if not prepared.is_file():
+                raise RuntimeError("Blender did not produce the prepared mesh")
+            state = _journal_execution(journal)
+            if state:
+                _, manifest, execution = state
+                current = execution["stages"][-1]
+                _journal_finish(journal, current, [(prepared, "mesh.prepared")])
         prepared_upload = client.upload_input(prepared, "3d")
         workflow["prepared_mesh"]["inputs"]["model_file"] = f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
         prepared_content_hash = file_sha256(prepared)

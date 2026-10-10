@@ -43,7 +43,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
     execution = None
     if asset_type.get("name") == "prop":
         basis = dict(identity_inputs or {})
-        basis["candidate_attempts"] = [{"number": start + index, "seed": seeds[index],
+        basis["candidate_attempts"] = [{"seed": seeds[index],
                                         "variation": variations[index] if variations is not None else None}
                                        for index in range(count)]
         execution = start_execution(asset, basis)

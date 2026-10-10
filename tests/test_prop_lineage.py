@@ -250,6 +250,19 @@ avoid: [environment]
         self.assertEqual(child["parent_execution_id"], generation["id"])
         self.assertEqual(child["identity_inputs"]["mesh_sha256"], generation["stages"][1]["outputs"][0]["sha256"])
 
+    def test_unknown_backend_facts_remain_unknown_after_full_prop_reload(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        execution = next(item for item in record["executions"] if item["id"] == record["model_attempts"][-1]["execution_id"])
+        mesh = next(stage for stage in execution["stages"] if stage["name"] == "mesh_workflow_execution")
+        provenance = mesh["provenance"]
+        self.assertIn(provenance["backend"]["version"]["status"], {"unavailable", "not_recorded"})
+        self.assertIn(provenance["model_weights"]["status"], {"unavailable", "not_recorded"})
+        self.assertIn(provenance["custom_node_revisions"]["status"], {"unavailable", "not_recorded"})
+
 
 if __name__ == "__main__":
     unittest.main()

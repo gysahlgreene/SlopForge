@@ -61,10 +61,11 @@ def bind_reference_inputs(client, workflow, references, slots):
             workflow[str(strength_target["node"])]["inputs"][strength_target["input"]] = reference["strength"]
         provenance = {key: reference[key] for key in
                       ("library_entry_id", "category", "sha256", "expected_sha256", "source") if key in reference}
+        content_hash = file_sha256(reference["path"]) if Path(reference["path"]).is_file() else None
         used.append({"path": reference.get("provenance_path", reference["path"]),
                      "strength": reference["strength"], "comfyui_input": image_name,
                      "workflow_slot": f"{image_target['node']}.{image_target['input']}",
-                     "content_sha256": file_sha256(reference["path"]), **provenance})
+                     **({"content_sha256": content_hash} if content_hash else {}), **provenance})
     return used
 
 def apply_seed(workflow, seed):
@@ -153,6 +154,8 @@ def main():
             if not isinstance(references, list) or not isinstance(reference_inputs, list):
                 raise ValueError("Reference paths and workflow input mappings must be JSON arrays")
             references_used = bind_reference_inputs(client, workflow, references, reference_inputs)
+            if any("content_sha256" not in item for item in references_used):
+                raise ValueError("A selected reference is missing local content and cannot be fingerprinted")
         prompt_id = client.queue_workflow(workflow)
         history = client.wait_for_completion(prompt_id, timeout=600)
     except Exception as exc:

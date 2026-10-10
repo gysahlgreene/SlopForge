@@ -5,6 +5,7 @@ from ..candidates import approve_image_candidate, generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..paths import resolve_workflow
 from ..provenance import file_sha256
+from ..config import workflow_node_inputs
 from ..style import build_prompt, style_identity
 
 
@@ -30,7 +31,8 @@ def generate(project_root, config, asset_type, style, name, description, count, 
         identity_inputs = {"asset_type": "prop", "brief": description, "generation_prompt": prompt,
                            "style": style_identity(style),
                            "workflow": {"identifier": Path(workflow_path).name,
-                                        "sha256": file_sha256(workflow_path) if Path(workflow_path).is_file() else None},
+                                        "sha256": file_sha256(workflow_path) if Path(workflow_path).is_file() else None,
+                                        "configured_inputs": workflow_node_inputs(config, "image", Path(workflow_path).name)},
                            "quality": {"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                                        "settings": config["asset_pipeline"].get("quality_settings", {})},
                            "conditioning": {"strategy": conditioning["strategy"],
