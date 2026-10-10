@@ -264,6 +264,7 @@ def generate_model(project_root, config, image, name, destination, metadata, see
                "--name", name, "--dest", str(destination),
                "--checkpoint", config["asset_pipeline"]["tools"]["hunyuan_checkpoint"],
                "--seed", str(seed), "--metadata", str(metadata)]
+    journal_context = journal_context or config.get("_journal_context")
     if journal_context:
         command.extend(["--journal-context", json.dumps({**journal_context, "project_root": str(root)})])
     workflow = config["asset_pipeline"]["workflows"].get("model")

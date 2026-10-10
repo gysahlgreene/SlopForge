@@ -14,9 +14,10 @@ from ..backends.comfyui import generate_image, generate_model, python_executable
 from ..config import select_quality_tier
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
-from ..manifest import save_manifest
+from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
+                        finish_stage, finish_execution)
 from ..paths import resolve_workflow, tool_root
-from ..provenance import generator_provenance
+from ..provenance import generator_provenance, file_sha256
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
@@ -29,6 +30,46 @@ def _sha256(path):
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _artifact_ref(root, path, artifact_id, kind, stage, attempt, derived_from=()):
+    path = Path(path)
+    return {"id": artifact_id, "type": kind, "path": path.resolve().relative_to(Path(root).resolve()).as_posix(),
+            "sha256": file_sha256(path), "stage": stage, "attempt": attempt,
+            "derived_from": [{"artifact_id": item["id"], "sha256": item["sha256"]}
+                             for item in derived_from]}
+
+
+def _persist_reload(root, pipeline, manifest):
+    path = Path(root) / pipeline["manifest"]
+    from .. import SCHEMA_VERSION
+    manifest.setdefault("schema_version", SCHEMA_VERSION)
+    save_manifest(path, manifest)
+    return _reload_manifest(root, pipeline, manifest)
+
+
+def _reload_manifest(root, pipeline, manifest):
+    latest = load_manifest(Path(root) / pipeline["manifest"])
+    assets = manifest.setdefault("assets", {})
+    latest_assets = latest.get("assets", {})
+    for key in list(assets):
+        if key not in latest_assets:
+            del assets[key]
+    for key, latest_asset in latest_assets.items():
+        if key in assets:
+            assets[key].clear()
+            assets[key].update(latest_asset)
+        else:
+            assets[key] = latest_asset
+    manifest.update({key: value for key, value in latest.items() if key != "assets"})
+    manifest["assets"] = assets
+    return manifest
+
+
+def _execution_stage(asset, execution_id, name, attempt):
+    execution = next(item for item in asset["executions"] if item["id"] == execution_id)
+    return execution, next(item for item in reversed(execution["stages"])
+                           if item["name"] == name and item["attempt"] == attempt)
 
 
 def model_paths(project_root, config, name, asset_type="prop"):
@@ -327,21 +368,62 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     existing = [path for name, path in paths.items() if name != "directory" and path.exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Model outputs exist; pass --force to replace: {existing[0]}")
+    prompt = candidate.get("description", asset["description"])
+    concept_workflow = pipeline["workflows"].get("image")
+    material_prompt = material_prompt or build_prompt(style, asset_type, prompt, mode="material")
+    material_count = material_count or int(pipeline["defaults"].get("material_candidates", 2))
+    attempts = int(pipeline["defaults"].get("model_candidates", 1))
+    if material_count < 1 or attempts < 1:
+        raise ValueError("Material and model candidate budgets must be at least 1")
+    next_attempt = max((int(item.get("number", 0)) for item in asset.get("model_attempts", [])), default=0) + 1
+    mesh_seeds = [secrets.randbits(32) for _ in range(attempts)]
+    concept_path = root / candidate["path"]
+    candidate_artifact = candidate.get("artifact")
+    if candidate_artifact is None:
+        candidate_artifact = {"id": f"legacy-concept:{number}", "type": "image.concept.legacy",
+                              "path": candidate["path"], "sha256": file_sha256(concept_path),
+                              "stage": "legacy_concept_selection", "attempt": number, "derived_from": []}
+    model_workflow_path = resolve_workflow(root, workflow) if workflow else None
+    execution = start_execution(asset, {
+        "asset_type": asset_type.get("name"), "brief": candidate.get("description", asset.get("description")),
+        "selected_concept": {"artifact_id": candidate_artifact["id"], "sha256": candidate_artifact["sha256"]},
+        "legacy_concept_lineage": ("unknown" if not candidate.get("execution_id") else None),
+        "workflows": {"concept": concept_workflow,
+                      "model": {"identifier": Path(workflow).name if workflow else "hunyuan3d_image_to_model_api",
+                                "sha256": file_sha256(model_workflow_path) if model_workflow_path and model_workflow_path.is_file() else None}},
+        "quality": {"tier": pipeline.get("selected_quality_tier", "normal"),
+                    "settings": pipeline.get("quality_settings", {})},
+        "mesh": {"face_budget": pipeline.get("model_budgets", {}).get(asset_type.get("face_budget")),
+                 "voxel_resolution": asset_type.get("voxel_resolution"), "seeds": mesh_seeds},
+        "material_prompt": material_prompt, "material_count": material_count,
+    }, parent_execution_id=candidate.get("execution_id"))
     paths["concept"].parent.mkdir(parents=True, exist_ok=True)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(root / candidate["path"], paths["concept"])
+    shutil.copy2(concept_path, paths["concept"])
+    selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
+                                      "image.concept.approved", "conditioning_preparation", 1,
+                                      [candidate_artifact])
     candidate["approval"] = "approved"
     asset["candidates"]["selected"] = number
     asset["status"] = "processing"
     asset["description"] = candidate.get("description", asset["description"])
     asset["style"], asset["style_version"] = style["name"], style["version"]
-    asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix()}
+    asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix(),
+                       "concept_artifact": selected_artifact,
+                       "concept_lineage": {"status": "known" if candidate.get("execution_id") else "unknown",
+                           "reason": None if candidate.get("execution_id") else "legacy concept candidate has no execution record"}}
     pipeline = config["asset_pipeline"]
-    save_manifest(root / pipeline["manifest"], manifest)
-    prompt = asset["description"]
-    concept_workflow = pipeline["workflows"].get("image")
+    _persist_reload(root, pipeline, manifest)
+    asset = manifest["assets"][key]
+    execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
     python = python_executable(root, config)
     try:
+        stage = start_stage(execution, "conditioning_preparation", 1, [candidate_artifact],
+                            {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"},
+                            {"concept_lineage": asset["source"]["concept_lineage"]})
+        begin_stage(stage)
+        _persist_reload(root, pipeline, manifest)
+        asset = manifest["assets"][key]
         print("3D stage: background removal and isolated reconstruction input...", flush=True)
         subprocess.run([python, str(tool_root() / "processing/prepare_3d_input.py"), "--input", str(paths["concept"]),
                         "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"])], check=True)
@@ -349,16 +431,18 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         input_check = validate_image(paths["input_3d"], expected_format="PNG", report_path=paths["input_3d"].relative_to(root))
         if cutout_check["status"] == "failed" or input_check["status"] == "failed":
             raise ValueError(f"Prepared concept validation failed: {cutout_check['errors'] + input_check['errors']}")
+        outputs = [_artifact_ref(root, paths["cutout"], f"cutout:{execution['id']}",
+                                 "image.cutout", "conditioning_preparation", 1, [selected_artifact]),
+                   _artifact_ref(root, paths["input_3d"], f"3d-input:{execution['id']}",
+                                 "image.3d_input", "conditioning_preparation", 1, [selected_artifact])]
+        _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
+        finish_stage(conditioning_stage, "succeeded", outputs)
+        _persist_reload(root, pipeline, manifest)
+        asset = manifest["assets"][key]
+        execution, _ = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
 
         workflow = pipeline["workflows"].get("model")
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
-        material_prompt = material_prompt or build_prompt(style, asset_type, prompt, mode="material")
-        material_count = material_count or int(pipeline["defaults"].get("material_candidates", 2))
-        if material_count < 1:
-            raise ValueError("Material candidate count must be at least 1")
-        attempts = int(pipeline["defaults"].get("model_candidates", 1))
-        if attempts < 1:
-            raise ValueError("Model candidate budget must be at least 1")
         material_candidates = []
         viable = []
         attempt_errors = []
@@ -371,24 +455,68 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             attempt_dir.mkdir(parents=True, exist_ok=True)
             source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
             stage_mesh = attempt_dir / "processed_mesh.blend"
-            mesh_seed = secrets.randbits(32)
+            mesh_seed = mesh_seeds[offset]
+            conditioning_refs = conditioning_stage["outputs"]
+            mesh_stage = start_stage(execution, "mesh_workflow_execution", attempt_number,
+                                     [candidate_artifact, *conditioning_refs],
+                                     {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api"},
+                                     {"concept_lineage": asset["source"]["concept_lineage"]})
+            begin_stage(mesh_stage)
+            _persist_reload(root, pipeline, manifest)
+            asset = manifest["assets"][key]
+            execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
+            attempt_reports = asset.setdefault("model_attempts", [])
+            journal_context = {"manifest_path": str(root / pipeline["manifest"]), "asset_selector": key,
+                               "execution_id": execution["id"], "attempt": attempt_number,
+                               "upstream_artifacts": [candidate_artifact, *conditioning_refs]}
             try:
+                config["_journal_context"] = journal_context
                 if workflow:
                     budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
                     generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                    mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"))
                 else:
                     generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                config.pop("_journal_context", None)
+                _reload_manifest(root, pipeline, manifest)
+                asset = manifest["assets"][key]
+                execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
+                attempt_reports = asset.setdefault("model_attempts", [])
                 mesh_info = json.loads(model_metadata.read_text())
             except Exception as exc:
+                config.pop("_journal_context", None)
+                _reload_manifest(root, pipeline, manifest)
+                asset = manifest["assets"][key]
+                execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
                 reason = f"mesh generation failed: {exc}"
                 attempt_errors.append(reason)
+                if mesh_stage["status"] == "running":
+                    partial = []
+                    if source_mesh.is_file():
+                        partial.append(_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
+                            "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs))
+                    finish_stage(mesh_stage, "failed", partial, error=reason)
                 attempt_reports.append({"number": attempt_number,
                                         "seed": mesh_seed,
                                         "source": source_mesh.relative_to(root).as_posix() if source_mesh.is_file() else None,
                                         "generation": model_metadata.relative_to(root).as_posix(),
-                                        "status": "rejected", "error": reason})
+                                        "status": "rejected", "error": reason,
+                                        "execution_id": execution["id"], "stage_attempt": attempt_number})
+                _persist_reload(root, pipeline, manifest)
+                asset = manifest["assets"][key]
+                execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
                 continue
+            mesh_outputs = [_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
+                "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs)]
+            if model_metadata.is_file():
+                mesh_outputs.append(_artifact_ref(root, model_metadata, f"mesh-metadata:{execution['id']}:{attempt_number}",
+                    "generation.metadata", "mesh_workflow_execution", attempt_number, conditioning_refs))
+            if mesh_stage["status"] == "running":
+                finish_stage(mesh_stage, "succeeded", mesh_outputs)
+            _persist_reload(root, pipeline, manifest)
+            asset = manifest["assets"][key]
+            execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+            attempt_reports = asset.setdefault("model_attempts", [])
             asset["source"].update({"cutout": paths["cutout"].relative_to(root).as_posix(),
                                     "3d_input": paths["input_3d"].relative_to(root).as_posix(),
                                     "glb": source_mesh.relative_to(root).as_posix(),
@@ -411,9 +539,14 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                     "generation": model_metadata.relative_to(root).as_posix(),
                                     "source_sha256": _sha256(source_mesh),
                                     "input_sha256": _sha256(paths["cutout"] if workflow else paths["input_3d"]),
-                                    "status": "qualified" if viable else "rejected",
+                                        "status": "qualified" if viable else "rejected",
+                                        "execution_id": execution["id"], "stage_attempt": attempt_number,
                                     "materials": [{"number": item["number"], "status": item["status"],
                                                    "validation": item.get("validation")} for item in generated]})
+            _persist_reload(root, pipeline, manifest)
+            asset = manifest["assets"][key]
+            execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+            attempt_reports = asset.setdefault("model_attempts", [])
             if viable:
                 break
         previous = asset.get("material_candidates", {}).get("items", [])
@@ -435,12 +568,22 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             "Choose a material candidate and approve it before using the Unity output."], "measured": {}}
         asset["status"] = "awaiting_texture_approval"
         asset["updated_at"] = datetime.now(timezone.utc).isoformat()
+        execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+        finish_execution(execution, "succeeded")
         save_manifest(root / pipeline["manifest"], manifest)
         print("Material candidate previews:")
         for item in material_candidates:
             print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item['path'])} ({item['status']})")
         return {"status": asset["status"], "material_candidates": material_candidates}
     except Exception as exc:
+        _reload_manifest(root, pipeline, manifest)
+        asset = manifest["assets"][key]
+        execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+        for stage in execution.get("stages", []):
+            if stage["status"] == "running":
+                finish_stage(stage, "failed", error=str(exc) or type(exc).__name__)
+        if execution.get("status") == "running":
+            finish_execution(execution, "failed")
         asset["status"] = "failed"
         validation = asset.setdefault("validation", {})
         validation["status"] = "failed"

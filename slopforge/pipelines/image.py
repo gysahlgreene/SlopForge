@@ -4,7 +4,8 @@ from ..backends.comfyui import generate_image
 from ..candidates import approve_image_candidate, generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..paths import resolve_workflow
-from ..style import build_prompt
+from ..provenance import file_sha256
+from ..style import build_prompt, style_identity
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
@@ -24,8 +25,20 @@ def generate(project_root, config, asset_type, style, name, description, count, 
                               f"slopforge/{asset_type['name']}/{name}/candidate_{seed}", seed, metadata,
                               **conditioning_args)
 
+    identity_inputs = None
+    if asset_type.get("name") == "prop":
+        identity_inputs = {"asset_type": "prop", "brief": description, "generation_prompt": prompt,
+                           "style": style_identity(style),
+                           "workflow": {"identifier": Path(workflow_path).name,
+                                        "sha256": file_sha256(workflow_path) if Path(workflow_path).is_file() else None},
+                           "quality": {"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
+                                       "settings": config["asset_pipeline"].get("quality_settings", {})},
+                           "conditioning": {"strategy": conditioning["strategy"],
+                               "references": [{"sha256": item.get("sha256"), "strength": item.get("strength")}
+                                              for item in conditioning.get("references", [])]}}
     candidates = generate_candidates(project_root, config, asset_type, style, name, prompt, count, manifest, key, backend,
-                                     semantic_description=description, variations=variations)
+                                    semantic_description=description, variations=variations,
+                                    identity_inputs=identity_inputs)
     record = manifest["assets"][key]
     record["description"] = description
     record["generation_prompt"] = prompt

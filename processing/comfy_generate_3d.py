@@ -45,10 +45,15 @@ def _journal_stage(context, name, attempt, settings, provenance=None):
         yield
         return
     context, manifest, execution = state
-    stage = start_stage(execution, name, attempt, [], settings, provenance or {})
-    save_manifest(context["manifest_path"], manifest)
-    begin_stage(stage)
-    save_manifest(context["manifest_path"], manifest)
+    stage = next((item for item in reversed(execution.get("stages", []))
+                  if item["name"] == name and item["attempt"] == attempt
+                  and item["status"] in {"pending", "running"}), None)
+    if stage is None:
+        stage = start_stage(execution, name, attempt, context.get("upstream_artifacts", []), settings, provenance or {})
+        save_manifest(context["manifest_path"], manifest)
+    if stage["status"] == "pending":
+        begin_stage(stage)
+        save_manifest(context["manifest_path"], manifest)
     try:
         yield stage
     except Exception as exc:
@@ -75,7 +80,9 @@ def _journal_finish(context, stage, outputs):
         refs.append({"id": f"{execution['id']}:{current['name']}:{current['attempt']}:{index}",
                      "type": kind, "path": path.relative_to(root).as_posix(),
                      "sha256": file_sha256(path), "stage": current["name"],
-                     "attempt": current["attempt"], "derived_from": []})
+                     "attempt": current["attempt"],
+                     "derived_from": [{"artifact_id": parent["id"], "sha256": parent["sha256"]}
+                                      for parent in current.get("inputs", [])]})
     finish_stage(current, "succeeded", refs)
     save_manifest(context["manifest_path"], manifest)
 
