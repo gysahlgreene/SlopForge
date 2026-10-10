@@ -267,6 +267,55 @@ class RecipeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid dependencies"):
             recipes.load_recipe(self.root, "sample_pack", self.types)
 
+    def test_completed_prop_recipe_child_with_changed_inputs_is_regenerated(self):
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+        generated = []
+
+        def generate(*_args, **_kwargs):
+            generated.append(True)
+            return [{"number": len(generated), "status": "candidate"}]
+
+        persist = lambda data: save_manifest(self.root / "manifest.json", data)
+        with patch("slopforge.recipes.model.generate", side_effect=generate), \
+                patch("slopforge.recipes.model.prop_child_reuse_decision",
+                      return_value={"reusable": False, "reasons": ["prop child brief changed"]}):
+            recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                               "sample_pack", instance_name="demo", save=persist)
+            self.manifest = load_manifest(self.root / "manifest.json")
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                  "demo", save=persist)
+
+        self.assertEqual(len(generated), 2)
+        stage = self.manifest["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
+        self.assertEqual(stage["status"], "completed")
+        self.assertEqual(stage["reuse_decisions"][-1]["reasons"], ["prop child brief changed"])
+
+    def test_recipe_resume_reuses_intact_child_after_manifest_reload(self):
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+        generated = []
+
+        def generate(*_args, **_kwargs):
+            generated.append(True)
+            return [{"number": 1, "status": "candidate"}]
+
+        persist = lambda data: save_manifest(self.root / "manifest.json", data)
+        with patch("slopforge.recipes.model.generate", side_effect=generate), \
+                patch("slopforge.recipes.model.prop_child_reuse_decision",
+                      return_value={"reusable": True, "reasons": []}):
+            recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                               "sample_pack", instance_name="demo", save=persist)
+            self.manifest = load_manifest(self.root / "manifest.json")
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                  "demo", save=persist)
+
+        self.assertEqual(len(generated), 1)
+        stage = self.manifest["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
+        self.assertEqual(stage["reuse_decisions"][-1]["reusable"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

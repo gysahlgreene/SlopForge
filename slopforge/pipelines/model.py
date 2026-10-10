@@ -74,6 +74,86 @@ def _execution_stage(asset, execution_id, name, attempt):
                            if item["name"] == name and item["attempt"] == attempt)
 
 
+def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
+    candidates = asset.get("candidates", {}).get("items", [])
+    reasons = []
+    candidate = next((item for item in reversed(candidates)
+                      if item.get("status") == "candidate" and item.get("execution_id")), None)
+    if candidate is None:
+        return {"reusable": False, "reasons": ["prop child has no lineage-backed candidate"]}
+    execution = next((item for item in asset.get("executions", [])
+                      if item.get("id") == candidate["execution_id"]), None)
+    if not execution or execution.get("status") != "succeeded":
+        reasons.append("candidate execution is missing or incomplete")
+    expected_description = child.get("description", asset.get("description"))
+    expected_prompt = child.get("generation_prompt")
+    identity = (execution or {}).get("identity_inputs", {})
+    if identity.get("brief") != expected_description:
+        reasons.append("prop child brief changed")
+    if expected_prompt is not None and identity.get("generation_prompt") != expected_prompt:
+        reasons.append("prop child prompt changed")
+    pipeline = config.get("asset_pipeline", {})
+    workflow = pipeline.get("workflows", {}).get("image")
+    if workflow:
+        workflow_path = resolve_workflow(project_root, workflow)
+        expected_workflow = {"identifier": Path(workflow).name,
+                             "sha256": file_sha256(workflow_path) if workflow_path.is_file() else None,
+                             "configured_inputs": workflow_node_inputs(config, "image", Path(workflow).name)}
+        if identity.get("workflow") != expected_workflow:
+            reasons.append("prop child workflow identity changed or is unknown")
+    if "quality" in identity:
+        expected_quality = {"tier": pipeline.get("selected_quality_tier", "normal"),
+                            "settings": pipeline.get("quality_settings", {})}
+        if identity["quality"] != expected_quality:
+            reasons.append("prop child quality settings changed")
+    artifact = candidate.get("artifact")
+    if not artifact:
+        reasons.append("candidate provenance is unknown")
+    else:
+        intact, reason = artifact_integrity(project_root, artifact)
+        if not intact:
+            reasons.append(reason)
+        stage = next((item for item in (execution or {}).get("stages", [])
+                      if item.get("name") == artifact.get("stage") and
+                      item.get("attempt") == artifact.get("attempt")), None)
+        decision = stage_reuse_decision(project_root, stage, inputs=[], settings=stage.get("settings", {})) \
+            if stage else {"reusable": False, "reasons": ["candidate stage is missing"]}
+        if not decision["reusable"]:
+            reasons.extend(decision["reasons"])
+    return {"reusable": not reasons, "reasons": reasons}
+
+
+def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_settings):
+    processed_path = asset.get("source", {}).get("processed_mesh")
+    if not processed_path:
+        return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
+    source_ok, source_reason = artifact_integrity(project_root, source_mesh)
+    if not source_ok:
+        return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
+    for execution in reversed(asset.get("executions", [])):
+        for stage in reversed(execution.get("stages", [])):
+            if stage.get("name") not in {"mesh_preparation", "material_assembly_export"}:
+                continue
+            if stage.get("status") != "succeeded" or stage.get("settings") != processing_settings:
+                continue
+            if not any(item.get("id") == source_mesh.get("id") and
+                       item.get("sha256") == source_mesh.get("sha256") for item in stage.get("inputs", [])):
+                continue
+            prepared = next((item for item in stage.get("outputs", [])
+                             if item.get("type") == "mesh.prepared" and item.get("path") == processed_path), None)
+            if not prepared:
+                continue
+            derived = prepared.get("derived_from", [])
+            if not any(item.get("artifact_id") == source_mesh.get("id") and
+                       item.get("sha256") == source_mesh.get("sha256") for item in derived):
+                continue
+            intact, reason = artifact_integrity(project_root, prepared)
+            if intact:
+                return {"reusable": True, "reasons": []}
+            return {"reusable": False, "reasons": [reason]}
+    return {"reusable": False, "reasons": ["no matching processed mesh lineage and settings"]}
+
+
 def _adopt_stage(context, name, attempt, inputs, settings):
     prior = (context or {}).get("reuse_execution")
     if not prior:
@@ -306,8 +386,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             candidate["validation"] = copy.deepcopy(previous["validation"])
             candidate["status"] = previous["status"]
             return candidate
-        mesh_path = (paths["directory"] / "processed_mesh.blend" if previous
-                     else root / asset["source"]["processed_mesh"])
+        mesh_path = root / asset["source"]["processed_mesh"]
         _lineage_start(lineage, "material_assembly_export", number, (),
                        assembly_settings, parents=assembly_inputs)
         assembly_started = bool(lineage)
@@ -315,7 +394,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       face_budget, surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
-                      stage_mesh=mesh_path, reuse_stage_mesh=mesh_path.is_file() and not previous)
+                      stage_mesh=mesh_path,
+                      reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")))
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -478,6 +558,11 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     mesh_ref = next((artifact for stage in reversed(parent_execution.get("stages", []) if parent_execution else [])
                      for artifact in reversed(stage.get("outputs", []))
                      if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
+    processing_settings = {"face_budget": int(pipeline.get("model_budgets", {}).get(
+                               asset_type.get("face_budget"), 30000)),
+                           "voxel_resolution": asset_type.get("voxel_resolution")}
+    processed_reuse = processed_mesh_reuse_decision(root, asset, mesh_ref, processing_settings) \
+        if mesh_ref else {"reusable": False, "reasons": ["source mesh lineage is unknown"]}
     concept_ref = asset.get("source", {}).get("concept_artifact")
     upstream = ([concept_ref] if concept_ref else []) + ([mesh_ref] if mesh_ref else [])
     execution = start_execution(asset, {"asset_type": asset.get("type"), "brief": asset.get("description"),
@@ -488,7 +573,8 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
                      "configured_inputs": workflow_node_inputs(config, "image", Path(workflow).name)}},
         parent_execution_id=parent_execution.get("id") if parent_execution else None)
     lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest, "key": key,
-               "execution_id": execution["id"], "upstream": upstream}
+               "execution_id": execution["id"], "upstream": upstream,
+               "processed_mesh_reusable": processed_reuse["reusable"]}
     results = []
     for index, number in enumerate(range(start, start + count)):
         candidate = _generate_material_candidate(root, config, asset_type, asset, number, prompt,

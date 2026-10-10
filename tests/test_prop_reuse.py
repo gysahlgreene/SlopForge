@@ -104,6 +104,70 @@ class PropReuseTests(unittest.TestCase):
             earliest_stale_stage(self.root, [], {"mesh_preperation": ([], {})})
 
 
+    def test_retexture_reuses_processed_mesh_only_for_matching_source_and_settings(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source_path.write_bytes(b"source mesh")
+        processed_path.write_bytes(b"processed mesh")
+        source = {"id": "mesh:1", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(source_path), "stage": "mesh_workflow_execution", "attempt": 1,
+                  "derived_from": []}
+        settings = {"face_budget": 1000, "material_scale": 3.0}
+        prepared = {"id": "prepared:1", "type": "mesh.prepared", "path": "processed.blend",
+                    "sha256": file_sha256(processed_path), "stage": "mesh_preparation", "attempt": 1,
+                    "derived_from": [{"artifact_id": source["id"], "sha256": source["sha256"]}]}
+        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"stages": [{
+            "name": "mesh_preparation", "attempt": 1, "status": "succeeded",
+            "inputs": [source], "settings": settings, "outputs": [prepared]}]}]}
+
+        self.assertTrue(processed_mesh_reuse_decision(self.root, asset, source, settings)["reusable"])
+        self.assertFalse(processed_mesh_reuse_decision(
+            self.root, asset, source, {**settings, "material_scale": 2.0})["reusable"])
+        processed_path.write_bytes(b"changed mesh")
+        self.assertFalse(processed_mesh_reuse_decision(self.root, asset, source, settings)["reusable"])
+
+    def test_retexture_rebuilds_missing_or_unknown_lineage_mesh(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        source_path = self.root / "source.glb"
+        source_path.write_bytes(b"source mesh")
+        source = {"id": "mesh:legacy", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(source_path), "stage": "mesh_workflow_execution", "attempt": 1,
+                  "derived_from": []}
+        asset = {"source": {"processed_mesh": "missing.blend"}, "executions": []}
+
+        decision = processed_mesh_reuse_decision(self.root, asset, source, {})
+        self.assertFalse(decision["reusable"])
+        self.assertIn("no matching processed mesh lineage", " ".join(decision["reasons"]))
+        self.assertFalse(processed_mesh_reuse_decision(self.root, asset, None, {})["reusable"])
+
+    def test_prop_child_reuse_requires_intact_matching_concept_execution(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "candidate.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "concept-candidate:1", "type": "image.concept", "path": "candidate.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation", "attempt": 1,
+                    "derived_from": []}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded", "inputs": [],
+                 "settings": {"prompt": "brass relay", "seed": 7}, "outputs": [artifact]}
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "identity_inputs": {"asset_type": "prop", "brief": "brass relay",
+                                          "generation_prompt": "brass relay"}, "stages": [stage]}
+        asset = {"type": "prop", "description": "brass relay", "generation_prompt": "brass relay",
+                 "candidates": {"items": [{"number": 1, "status": "candidate", "path": "candidate.png",
+                                              "execution_id": "execution:1", "artifact": artifact}]},
+                 "executions": [execution]}
+        child = {"id": "terminal", "type": "prop", "description": "brass relay",
+                 "generation_prompt": "brass relay"}
+
+        self.assertTrue(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
+        child["description"] = "copper terminal"
+        self.assertFalse(prop_child_reuse_decision(self.root, asset, {"status": "completed"}, child, {})["reusable"])
+
+
 class PropApprovalReuseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

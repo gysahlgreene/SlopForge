@@ -335,6 +335,15 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         stage = stages[child["id"]]
         asset = manifest["assets"][stage["asset_key"]]
         original = {key: copy.deepcopy(asset.get(key)) for key in ("status", "generator", "outputs", "candidates")}
+        asset_type = asset_types[child["type"]]
+        if (not regenerate and stage["status"] in {"completed", "approved"} and
+                asset_type.get("pipeline") == "model"):
+            tier = child.get("quality_tier", instance.get("quality_tier", "normal"))
+            child_config = select_quality_tier(config, tier)
+            decision = model.prop_child_reuse_decision(root, asset, stage, child, child_config)
+            stage.setdefault("reuse_decisions", []).append(decision)
+            if not decision["reusable"]:
+                stage["status"] = "stale"
         if not regenerate and stage["status"] in {"completed", "approved"}:
             continue
         if any(stages[dependency]["status"] not in {"completed", "approved"}
@@ -354,7 +363,6 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         recipe_asset["status"] = "running"
         _save(save, manifest)
         try:
-            asset_type = asset_types[child["type"]]
             pipeline = asset_type["pipeline"]
             handler = PIPELINE_HANDLERS.get(pipeline)
             if handler is None:
