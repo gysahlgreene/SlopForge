@@ -332,16 +332,42 @@ class RecipeTests(unittest.TestCase):
         stage = recipe["recipe_instance"]["stages"]["terminal"]
         asset = self.manifest["assets"][stage["asset_key"]]
         asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["candidates"]["items"][0]["approval"] = "approved"
+        asset["artifacts"] = {"output.model": {"id": "output.model", "type": "mesh.fbx",
+                                                 "status": "ready", "path": "old.fbx",
+                                                 "approval": {"status": "approved"}}}
         stage["status"] = "approved"
+        handler_state = []
+
+        def fail_at_handler_boundary(*_args):
+            handler_state.append((asset["status"], asset["candidates"]["selected"],
+                                  asset.get("generator"), stage["status"]))
+            raise RuntimeError("replacement failed")
+
+        def persist(data):
+            saved_stage = data["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
+            if saved_stage["status"] == "running":
+                saved_asset = data["assets"][saved_stage["asset_key"]]
+                self.assertNotEqual(saved_asset["status"], "ready")
+                self.assertIsNone(saved_asset["candidates"]["selected"])
+                self.assertNotIn("generator", saved_asset)
 
         with patch("slopforge.recipes.model.prop_child_reuse_decision",
                    return_value={"reusable": False, "reasons": ["brief changed"]}), \
                 patch.dict(recipes.PIPELINE_HANDLERS,
-                           {"model": lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("replacement failed"))}):
-            result = recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
+                           {"model": fail_at_handler_boundary}):
+            result = recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                           "demo", save=persist)
 
         self.assertEqual(stage["status"], "stale")
         self.assertEqual(asset["status"], "stale")
+        self.assertEqual(handler_state, [("stale", None, None, "running")])
+        self.assertIsNone(asset["candidates"]["selected"])
+        self.assertNotIn("generator", asset)
+        self.assertEqual(asset["candidates"]["items"][0]["approval"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["approval"]["status"], "approved")
         self.assertEqual(result["status"], "partial")
 
     def test_successful_stale_recipe_replacement_does_not_keep_old_approval(self):
@@ -354,15 +380,37 @@ class RecipeTests(unittest.TestCase):
         stage = recipe["recipe_instance"]["stages"]["terminal"]
         asset = self.manifest["assets"][stage["asset_key"]]
         asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["candidates"]["items"][0]["approval"] = "approved"
+        asset["outputs"] = {"model": "old.fbx"}
         stage["status"] = "approved"
+        handler_state = []
+
+        def replace_at_handler_boundary(*_args):
+            handler_state.append((asset["status"], asset["candidates"]["selected"],
+                                  asset.get("generator"), stage["status"]))
+            candidate = {"number": 2, "status": "candidate", "path": "fresh.glb",
+                         "execution_id": "fresh-execution"}
+            asset["candidates"]["items"].append(candidate)
+            asset["generator"] = {"workflow": "fresh.json", "seed": 2}
+            return [candidate]
 
         with patch("slopforge.recipes.model.prop_child_reuse_decision",
                    return_value={"reusable": False, "reasons": ["brief changed"]}), \
-                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": replace_at_handler_boundary}):
             recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
 
         self.assertEqual(stage["status"], "completed")
+        self.assertEqual(handler_state, [("stale", None, None, "running")])
         self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["status"], "stale")
+        self.assertNotIn("generator", asset)
+        self.assertEqual(stage["provenance"], {"workflow": "fresh.json", "seed": 2})
+        self.assertEqual(asset["candidates"]["items"][0]["approval"], "approved")
+        self.assertEqual(asset["candidates"]["items"][1]["status"], "candidate")
+        self.assertEqual(asset["artifacts"]["candidate.2"]["status"], "candidate")
+        self.assertEqual(asset["outputs"]["model"], "old.fbx")
 
     def test_stale_recipe_child_replacement_clears_readiness_before_regeneration(self):
         """A stale prop child must lose ready status and require approval of the new result."""

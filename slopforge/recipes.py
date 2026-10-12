@@ -374,6 +374,10 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         stage["attempts"] += 1
         stage["errors"] = []
         recipe_asset["status"] = "running"
+        if stale_replacement:
+            asset["status"] = "stale"
+            asset["candidates"]["selected"] = None
+            asset.pop("generator", None)
         _save(save, manifest)
         try:
             pipeline = asset_type["pipeline"]
@@ -419,7 +423,7 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                     stage["status"] = "stale"
                     # Clear stale state that was already cleared before regeneration
                     asset.pop("generator", None)
-                    asset["candidates"].pop("selected", None)
+                    asset["candidates"]["selected"] = None
                 else:
                     asset.update({key: value for key, value in original.items() if value is not None})
                     stage["status"] = "approved"
