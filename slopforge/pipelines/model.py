@@ -119,7 +119,9 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
                              "configured_inputs": workflow_node_inputs(config, "image", Path(workflow).name)}
         if identity.get("workflow") != expected_workflow:
             reasons.append("prop child workflow identity changed or is unknown")
-    if "quality" in identity:
+    if "quality" not in identity:
+        reasons.append("prop child quality identity is unknown")
+    else:
         expected_quality = {"tier": pipeline.get("selected_quality_tier", "normal"),
                             "settings": pipeline.get("quality_settings", {})}
         if identity["quality"] != expected_quality:
@@ -135,8 +137,18 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         stage = next((item for item in (execution or {}).get("stages", [])
                       if item.get("name") == artifact.get("stage") and
                       item.get("attempt") == artifact.get("attempt")), None)
-        decision = stage_reuse_decision(project_root, stage, inputs=[], settings=stage.get("settings", {})) \
-            if stage else {"reusable": False, "reasons": ["candidate stage is missing"]}
+        if not stage:
+            reasons.append("candidate stage is missing")
+            continue
+        # Verify candidate artifact matches an output of the recorded stage attempt
+        stage_outputs = stage.get("outputs", [])
+        if not any(isinstance(out, dict) and out.get("id") == artifact.get("id") and
+                   out.get("stage") == artifact.get("stage") and
+                   out.get("attempt") == artifact.get("attempt")
+                   for out in stage_outputs):
+            reasons.append("candidate artifact does not match a recorded stage output")
+            continue
+        decision = stage_reuse_decision(project_root, stage, inputs=[], settings=stage.get("settings", {}))
         if not decision["reusable"]:
             reasons.extend(decision["reasons"])
     return {"reusable": not reasons, "reasons": reasons}

@@ -518,6 +518,8 @@ avoid: [environment]
                      "identity_inputs": {"brief": "Copper relay", "generation_prompt": "Copper relay",
                                           "style": {"name": "plain", "version": 1},
                                           "conditioning": {"strategy": "text_only", "references": []},
+                                          "workflow": {"identifier": "image.json", "sha256": None, "configured_inputs": {}},
+                                          "quality": {"tier": "normal", "settings": {}},
                                           "candidate_attempts": [{"seed": 1, "variation": None}]},
                      "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
                                  "inputs": [], "settings": {}, "outputs": [candidate["artifact"]]}]}

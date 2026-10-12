@@ -1,5 +1,6 @@
 """Data-driven orchestration of existing atomic asset pipelines."""
 import copy
+import hashlib
 import math
 import re
 from pathlib import Path
@@ -368,6 +369,28 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             stage.setdefault("reuse_decisions", []).append(decision)
             if not decision["reusable"]:
                 stage["status"] = "stale"
+            elif asset.get("status") == "ready":
+                # Verify output integrity before approving ready asset
+                for output_id, path in asset.get("outputs", {}).items():
+                    if output_id.startswith("candidate."):
+                        continue
+                    if not isinstance(path, str):
+                        continue
+                    # Check if file exists and matches recorded hash
+                    file_path = root / path
+                    if not file_path.is_file():
+                        stage["status"] = "stale"
+                        stage.setdefault("reuse_decisions", []).append(
+                            {"reusable": False, "reasons": [f"output {output_id} file is missing: {path}"]})
+                        break
+                    artifact = asset.get("artifacts", {}).get(f"output.{output_id}")
+                    if artifact and artifact.get("sha256"):
+                        current_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                        if current_hash != artifact.get("sha256"):
+                            stage["status"] = "stale"
+                            stage.setdefault("reuse_decisions", []).append(
+                                {"reusable": False, "reasons": [f"output {output_id} hash mismatch: expected {artifact.get('sha256')}, got {current_hash}"]})
+                            break
         stale_replacement = stage["status"] == "stale"
         if not regenerate and stage["status"] in {"completed", "approved"}:
             continue
