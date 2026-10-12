@@ -1,6 +1,5 @@
 """Data-driven orchestration of existing atomic asset pipelines."""
 import copy
-import hashlib
 import math
 import re
 from pathlib import Path
@@ -11,6 +10,7 @@ from .manifest import add_dependency, asset_key, new_record, register_artifact, 
 from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
+from .pipelines.reuse import artifact_integrity
 from .conditioning import resolve_conditioning
 from .style import style_identity
 from .taxonomy import canonical_type, validate_asset_name
@@ -169,6 +169,49 @@ def _asset_artifact_type(asset, output_id, path):
             "blend": "model.blend", "mat": "unity.material", "json": "data.json"}.get(suffix, f"file.{suffix}")
 
 
+def _published_output_ref(asset, output_id, path):
+    references = asset.get("published_artifacts")
+    if not isinstance(references, list):
+        return None
+    suffix = f":published:{output_id}"
+    matches = [item for item in references
+               if isinstance(item, dict) and isinstance(item.get("id"), str)
+               and item["id"].endswith(suffix) and item.get("path") == path]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _ready_output_error(root, asset):
+    outputs = asset.get("outputs")
+    if not isinstance(outputs, dict):
+        return "published output path map is missing or invalid"
+    required = [(output_id, path) for output_id, path in outputs.items()
+                if not (isinstance(output_id, str) and output_id.startswith("candidate."))]
+    if not required:
+        return "published output path map is empty"
+    for output_id, path in required:
+        if not isinstance(output_id, str) or not isinstance(path, str) or not path:
+            return f"published output {output_id!r} has an invalid path"
+        reference = _published_output_ref(asset, output_id, path)
+        if (not reference or reference.get("stage") != "final_publication" or
+                type(reference.get("attempt")) is not int or reference["attempt"] != 1 or
+                not reference.get("sha256")):
+            return f"published output {output_id} has missing or ambiguous integrity evidence"
+        intact, reason = artifact_integrity(root, reference)
+        if not intact:
+            return f"published output {output_id}: {reason}"
+        artifacts = asset.get("artifacts")
+        artifact = artifacts.get(f"output.{output_id}") if isinstance(artifacts, dict) else None
+        approval = artifact.get("approval") if isinstance(artifact, dict) else None
+        if (not isinstance(artifact, dict) or artifact.get("status") != "ready" or
+                artifact.get("id") != f"output.{output_id}" or artifact.get("path") != path or
+                not isinstance(approval, dict) or approval.get("status") != "approved" or
+                (artifact.get("sha256") and artifact["sha256"] != reference["sha256"])):
+            return f"published output {output_id} has no current typed artifact record"
+        if not artifact.get("sha256"):
+            artifact["sha256"] = reference["sha256"]
+    return None
+
+
 def _sync_child_artifacts(root, asset, key):
     for candidate in asset.get("candidates", {}).get("items", []):
         if not candidate.get("path") or candidate.get("status") not in {"candidate", "failed"}:
@@ -188,17 +231,27 @@ def _sync_child_artifacts(root, asset, key):
                           validation=candidate.get("validation"))
     if asset.get("status") != "ready":
         return
-    for output_id, path in list(asset.get("outputs", {}).items()):
-        if output_id.startswith("candidate.") or not isinstance(path, str) or not (Path(root) / path).is_file():
+    outputs = asset.get("outputs")
+    if not isinstance(outputs, dict):
+        return
+    for output_id, path in list(outputs.items()):
+        if (not isinstance(output_id, str) or output_id.startswith("candidate.") or
+                not isinstance(path, str) or not (Path(root) / path).is_file()):
             continue
         validation = asset.get("validation", {})
         existing = asset.get("artifacts", {}).get(f"output.{output_id}", {})
         if existing.get("status") == "ready" and existing.get("path") == path:
+            reference = _published_output_ref(asset, output_id, path)
+            if reference and reference.get("sha256") and not existing.get("sha256"):
+                existing["sha256"] = reference["sha256"]
             continue
-        register_artifact({"assets": {key: asset}}, key, f"output.{output_id}",
-                          _asset_artifact_type(asset, output_id, path), path, status="ready",
-                          provenance=asset.get("generator") or {}, approval_status="approved",
-                          validation=validation or existing.get("validation"))
+        registered = register_artifact({"assets": {key: asset}}, key, f"output.{output_id}",
+                                        _asset_artifact_type(asset, output_id, path), path, status="ready",
+                                        provenance=asset.get("generator") or {}, approval_status="approved",
+                                        validation=validation or existing.get("validation"))
+        reference = _published_output_ref(asset, output_id, path)
+        if reference and reference.get("sha256"):
+            registered["sha256"] = reference["sha256"]
 
 
 def _sync_recipe_artifacts(recipe_asset, stages, manifest):
@@ -218,6 +271,8 @@ def _sync_recipe_artifacts(recipe_asset, stages, manifest):
                 validation=artifact.get("validation"))
             if approval and approval.get("status") == approval_status:
                 aggregate["approval"] = approval
+            if artifact.get("sha256"):
+                aggregate["sha256"] = artifact["sha256"]
 
 
 def _recipe_status(stages):
@@ -370,30 +425,31 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             if not decision["reusable"]:
                 stage["status"] = "stale"
             elif asset.get("status") == "ready":
-                # Verify output integrity before approving ready asset
-                for output_id, path in asset.get("outputs", {}).items():
-                    if output_id.startswith("candidate."):
-                        continue
-                    if not isinstance(path, str):
-                        continue
-                    # Check if file exists and matches recorded hash
-                    file_path = root / path
-                    if not file_path.is_file():
-                        stage["status"] = "stale"
-                        stage.setdefault("reuse_decisions", []).append(
-                            {"reusable": False, "reasons": [f"output {output_id} file is missing: {path}"]})
-                        break
-                    artifact = asset.get("artifacts", {}).get(f"output.{output_id}")
-                    if artifact and artifact.get("sha256"):
-                        current_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-                        if current_hash != artifact.get("sha256"):
-                            stage["status"] = "stale"
-                            stage.setdefault("reuse_decisions", []).append(
-                                {"reusable": False, "reasons": [f"output {output_id} hash mismatch: expected {artifact.get('sha256')}, got {current_hash}"]})
-                            break
+                integrity_error = _ready_output_error(root, asset)
+                if integrity_error:
+                    stage["status"] = "stale"
+                    stage.setdefault("reuse_decisions", []).append(
+                        {"reusable": False, "reasons": [integrity_error]})
         stale_replacement = stage["status"] == "stale"
         if not regenerate and stage["status"] in {"completed", "approved"}:
             continue
+        if stale_replacement:
+            asset["status"] = "stale"
+            asset["candidates"]["selected"] = None
+            asset.pop("generator", None)
+            outputs = asset.get("outputs", {})
+            output_paths = ({path for path in outputs.values() if isinstance(path, str)}
+                            if isinstance(outputs, dict) else set())
+            output_artifact_ids = ({f"output.{output_id}" for output_id in outputs
+                                    if isinstance(output_id, str) and not output_id.startswith("candidate.")}
+                                   if isinstance(outputs, dict) else set())
+            for artifact_id, artifact in asset.get("artifacts", {}).items():
+                if (isinstance(artifact, dict) and artifact.get("status") == "ready" and
+                        (artifact_id in output_artifact_ids or artifact.get("path") in output_paths)):
+                    artifact["status"] = "superseded"
+                    aggregate = recipe_asset.get("artifacts", {}).get(f"{child['id']}.{artifact_id}")
+                    if aggregate and aggregate.get("status") == "ready":
+                        aggregate["status"] = "superseded"
         if any(stages[dependency]["status"] not in {"completed", "approved"}
                for dependency in child["depends_on"]):
             stage["status"] = "blocked"
@@ -409,17 +465,6 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         stage["attempts"] += 1
         stage["errors"] = []
         recipe_asset["status"] = "running"
-        if stale_replacement:
-            asset["status"] = "stale"
-            asset["candidates"]["selected"] = None
-            asset.pop("generator", None)
-            output_paths = set(asset.get("outputs", {}).values())
-            for artifact_id, artifact in asset.get("artifacts", {}).items():
-                if artifact.get("status") == "ready" and artifact.get("path") in output_paths:
-                    artifact["status"] = "superseded"
-                    aggregate = recipe_asset.get("artifacts", {}).get(f"{child['id']}.{artifact_id}")
-                    if aggregate and aggregate.get("status") == "ready":
-                        aggregate["status"] = "superseded"
         _save(save, manifest)
         try:
             pipeline = asset_type["pipeline"]

@@ -8,6 +8,7 @@ import yaml
 
 from slopforge import recipes
 from slopforge.manifest import load_manifest, new_record, save_manifest
+from slopforge.provenance import file_sha256
 
 
 class RecipeTests(unittest.TestCase):
@@ -48,6 +49,113 @@ class RecipeTests(unittest.TestCase):
         asset["candidates"]["items"].append(candidate)
         asset["status"] = "candidate"
         return [candidate]
+
+    def ready_prop_recipe(self, *, with_dependency=False):
+        children = []
+        if with_dependency:
+            children.append({"id": "source", "type": "concept", "description": "Source"})
+        children.append({"id": "terminal", "type": "prop", "description": "Brass relay",
+                         "depends_on": ["source"] if with_dependency else []})
+        self.definition["children"] = children
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                        "sample_pack", instance_name="integrity")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+        path = "Assets/Published/terminal.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready", "path": path,
+            "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        asset["published_artifacts"] = [{
+            "id": "execution:published:model", "type": "model.fbx", "path": path,
+            "sha256": file_sha256(published), "stage": "final_publication", "attempt": 1,
+            "derived_from": [],
+        }]
+        stage["status"] = "approved"
+        return recipe, stage, asset, published, asset_types
+
+    def test_ready_recipe_output_deleted_invalidates_current_approval(self):
+        recipe, stage, asset, published, asset_types = self.ready_prop_recipe()
+        published.unlink()
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "integrity")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+        self.assertEqual(recipe["artifacts"]["terminal.output.model"]["status"], "superseded")
+
+    def test_ready_recipe_output_hash_mismatch_invalidates_current_approval(self):
+        recipe, stage, asset, published, asset_types = self.ready_prop_recipe()
+        published.write_bytes(b"changed output")
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "integrity")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+        self.assertEqual(recipe["artifacts"]["terminal.output.model"]["status"], "superseded")
+
+    def test_invalid_ready_output_is_invalidated_before_dependency_block(self):
+        _, stage, asset, published, asset_types = self.ready_prop_recipe(with_dependency=True)
+        published.unlink()
+        source_stage = self.manifest["assets"]["recipe:integrity"]["recipe_instance"]["stages"]["source"]
+        source_stage["status"] = "failed"
+
+        def fail_source(*_args):
+            raise RuntimeError("source remains unavailable")
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"image": fail_source}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "integrity")
+
+        self.assertEqual(stage["status"], "blocked")
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_missing_ready_output_hash_invalidates_approval(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["artifacts"]["output.model"].pop("sha256")
+        asset["published_artifacts"][0].pop("sha256")
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_invalid_ready_output_path_invalidates_approval(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["outputs"]["model"] = None
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
 
     def test_dependency_order_and_aggregate_outputs(self):
         snapshots = []

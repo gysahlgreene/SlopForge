@@ -128,25 +128,44 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
             reasons.append("prop child quality settings changed")
     for candidate in selected_candidates:
         artifact = candidate.get("artifact")
-        if candidate.get("execution_id") != (execution or {}).get("id") or not artifact:
+        if candidate.get("execution_id") != (execution or {}).get("id") or not isinstance(artifact, dict):
             reasons.append("candidate provenance is unknown or belongs to another execution")
+            continue
+        attempt = artifact.get("attempt")
+        if (not isinstance(artifact.get("id"), str) or not artifact["id"] or
+                not isinstance(artifact.get("type"), str) or not artifact["type"] or
+                isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1 or
+                not isinstance(artifact.get("path"), str) or candidate.get("path") != artifact.get("path") or
+                not isinstance(artifact.get("sha256"), str) or not artifact["sha256"]):
+            reasons.append("candidate artifact identity is incomplete or inconsistent")
             continue
         intact, reason = artifact_integrity(project_root, artifact)
         if not intact:
             reasons.append(reason)
-        stage = next((item for item in (execution or {}).get("stages", [])
-                      if item.get("name") == artifact.get("stage") and
-                      item.get("attempt") == artifact.get("attempt")), None)
-        if not stage:
-            reasons.append("candidate stage is missing")
+        execution_stages = (execution or {}).get("stages", [])
+        if not isinstance(execution_stages, list):
+            reasons.append("candidate execution stages are missing or malformed")
             continue
-        # Verify candidate artifact matches an output of the recorded stage attempt
-        stage_outputs = stage.get("outputs", [])
-        if not any(isinstance(out, dict) and out.get("id") == artifact.get("id") and
-                   out.get("stage") == artifact.get("stage") and
-                   out.get("attempt") == artifact.get("attempt")
-                   for out in stage_outputs):
-            reasons.append("candidate artifact does not match a recorded stage output")
+        matches = [item for item in execution_stages
+                   if isinstance(item, dict) and item.get("name") == artifact.get("stage") and
+                   type(item.get("attempt")) is int and item.get("attempt") == attempt]
+        if len(matches) != 1:
+            reasons.append("candidate stage is missing or ambiguous")
+            continue
+        stage = matches[0]
+        stage_outputs = stage.get("outputs")
+        if not isinstance(stage_outputs, list):
+            reasons.append("candidate stage outputs are missing or malformed")
+            continue
+        output_matches = [out for out in stage_outputs
+                          if isinstance(out, dict) and out.get("id") == artifact["id"]]
+        if len(output_matches) != 1:
+            reasons.append("candidate artifact is missing or ambiguous in recorded stage outputs")
+            continue
+        output = output_matches[0]
+        identity_fields = ("id", "type", "stage", "attempt", "path", "sha256")
+        if any(output.get(field) != artifact.get(field) for field in identity_fields):
+            reasons.append("candidate artifact identity differs from recorded stage output")
             continue
         decision = stage_reuse_decision(project_root, stage, inputs=[], settings=stage.get("settings", {}))
         if not decision["reusable"]:

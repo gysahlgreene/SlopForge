@@ -269,6 +269,81 @@ avoid: [environment]
                 "path": path.relative_to(self.root).as_posix(), "sha256": file_sha256(path),
                 "stage": "concept_generation", "attempt": number, "derived_from": []}}
 
+    def _recipe_candidate_reuse_case(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        candidate = self._candidate(1, self.root / "concept.png")
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "identity_inputs": {"brief": "Copper relay", "generation_prompt": "Copper relay",
+                                          "style": {"name": "plain", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "candidate_attempts": [{"seed": 1, "variation": None}]},
+                     "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                                 "inputs": [], "settings": {}, "outputs": [dict(candidate["artifact"])]}]}
+        candidate["execution_id"] = execution["id"]
+        self.asset["executions"] = [execution]
+        self.asset["candidates"]["items"] = [candidate]
+        child = {"description": "Copper relay", "generation_prompt": "Copper relay",
+                 "requested_style_identity": {"name": "plain", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+        config = {"asset_pipeline": {"defaults": {"image_candidates": 1}}}
+        decide = lambda: prop_child_reuse_decision(
+            self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child, config)
+        return candidate, execution, decide
+
+    def test_recipe_candidate_path_must_match_recorded_stage_output(self):
+        candidate, _, decide = self._recipe_candidate_reuse_case()
+        unrelated = self.root / "unrelated.png"
+        unrelated.write_bytes(b"unrelated but intact")
+        candidate["path"] = "unrelated.png"
+        candidate["artifact"]["path"] = "unrelated.png"
+        candidate["artifact"]["sha256"] = file_sha256(unrelated)
+
+        decision = decide()
+
+        self.assertFalse(decision["reusable"])
+
+    def test_recipe_candidate_hash_must_match_recorded_stage_output(self):
+        candidate, _, decide = self._recipe_candidate_reuse_case()
+        candidate["artifact"]["sha256"] = "0" * 64
+
+        decision = decide()
+
+        self.assertFalse(decision["reusable"])
+
+    def test_recipe_candidate_path_field_must_match_its_artifact(self):
+        candidate, _, decide = self._recipe_candidate_reuse_case()
+        unrelated = self.root / "unrelated.png"
+        unrelated.write_bytes(b"unrelated but intact")
+        candidate["path"] = "unrelated.png"
+
+        decision = decide()
+
+        self.assertFalse(decision["reusable"])
+
+    def test_recipe_candidate_rejects_duplicate_stage_attempt_provenance(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        execution["stages"].append(dict(execution["stages"][0]))
+
+        decision = decide()
+
+        self.assertFalse(decision["reusable"])
+
+    def test_recipe_candidate_reuses_exact_unambiguous_stage_output(self):
+        _, _, decide = self._recipe_candidate_reuse_case()
+
+        self.assertTrue(decide()["reusable"])
+
+    def test_recipe_child_reuse_rejects_missing_quality_identity(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        del execution["identity_inputs"]["quality"]
+
+        decision = decide()
+
+        self.assertFalse(decision["reusable"])
+        self.assertIn("quality identity is unknown", " ".join(decision["reasons"]))
+
     def _maybe_fail(self, name):
         self.calls[name] += 1
         if self.interrupt_once == name:
