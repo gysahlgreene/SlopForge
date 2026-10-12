@@ -396,19 +396,32 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                 asset["generator"] = original.get("generator")
                 asset["outputs"] = original.get("outputs", {})
                 asset["candidates"]["selected"] = original.get("candidates", {}).get("selected")
+                stage["status"] = "approved"
             elif stale_replacement:
-                # Clear stale ready-state provenance
+                # Clear stale ready-state provenance BEFORE regeneration
+                # Capture fresh provenance from pipeline output (already set by handler)
+                fresh_provenance = copy.deepcopy(asset.get("generator", {}))
+                # Clear stale state
                 asset.pop("generator", None)
                 asset["candidates"]["selected"] = None
-            stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
-            stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
+                # Copy fresh provenance directly to stage.provenance
+                stage["provenance"] = fresh_provenance
+                # Set stage status (asset.status is not ready after stale replacement)
+                stage["status"] = "completed"
+            else:
+                stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
+                stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
         except Exception as exc:
             if original.get("status") == "ready":
-                asset.update({key: value for key, value in original.items() if value is not None})
+                # For stale replacement, do NOT restore stale state
                 if stale_replacement:
                     asset["status"] = "stale"
                     stage["status"] = "stale"
+                    # Clear stale state that was already cleared before regeneration
+                    asset.pop("generator", None)
+                    asset["candidates"].pop("selected", None)
                 else:
+                    asset.update({key: value for key, value in original.items() if value is not None})
                     stage["status"] = "approved"
             else:
                 stage["status"] = "failed"
