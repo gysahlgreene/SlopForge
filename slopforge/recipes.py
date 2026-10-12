@@ -396,6 +396,10 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                 asset["generator"] = original.get("generator")
                 asset["outputs"] = original.get("outputs", {})
                 asset["candidates"]["selected"] = original.get("candidates", {}).get("selected")
+            elif stale_replacement:
+                # Clear stale ready-state provenance
+                asset.pop("generator", None)
+                asset["candidates"]["selected"] = None
             stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
             stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
         except Exception as exc:

@@ -364,6 +364,50 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(stage["status"], "completed")
         self.assertNotEqual(asset["status"], "ready")
 
+    def test_stale_recipe_child_replacement_clears_readiness_before_regeneration(self):
+        """A stale prop child must lose ready status and require approval of the new result."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+
+        # First run to create a ready asset
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                                        "sample_pack", instance_name="demo")
+
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        # Mark as ready with outputs and selected candidate
+        asset["status"] = "ready"
+        asset["outputs"] = {"mesh": "Assets/mesh.fbx"}
+        asset["generator"] = {"workflow": "test.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        stage["status"] = "approved"
+
+        # Simulate a changed brief that makes the child stale
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": False, "reasons": ["prop child brief changed"]}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            result = recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
+
+        # The stage should be completed (not approved) since it's a fresh generation
+        self.assertEqual(stage["status"], "completed")
+        # The asset should NOT be ready - it needs approval of the new result
+        self.assertNotEqual(asset.get("status"), "ready")
+        # The new generation should have produced candidates
+        self.assertGreater(len(asset.get("candidates", {}).get("items", [])), 0)
+        # The recipe should not be ready since the child needs approval
+        self.assertNotEqual(result["status"], "ready")
+        # Fresh candidate paths in asset.outputs are valid before approval
+        self.assertIsNotNone(asset.get("outputs"))
+        # The old selected candidate pointer must be cleared
+        self.assertIsNone(asset.get("candidates", {}).get("selected"))
+        # Historical candidate evidence must be preserved
+        self.assertGreaterEqual(len(asset.get("candidates", {}).get("items", [])), 1)
+        # Current generator provenance must not identify the old ready result
+        self.assertIsNone(asset.get("generator"))
+
 
 if __name__ == "__main__":
     unittest.main()
