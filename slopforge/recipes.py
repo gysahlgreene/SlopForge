@@ -173,11 +173,17 @@ def _sync_child_artifacts(root, asset, key):
         if not candidate.get("path") or candidate.get("status") not in {"candidate", "failed"}:
             continue
         candidate_id = f"candidate.{candidate['number']}"
+        status = "candidate" if candidate["status"] == "candidate" else "failed"
+        approval_status = "approved" if candidate.get("approval") == "approved" else "pending"
+        existing = asset.get("artifacts", {}).get(candidate_id, {})
+        if (existing.get("status") == status and existing.get("path") == candidate["path"] and
+                existing.get("approval", {}).get("status") == approval_status):
+            continue
         register_artifact({"assets": {key: asset}}, key, candidate_id,
                           f"{asset['type']}.candidate", candidate["path"],
-                          status="candidate" if candidate["status"] == "candidate" else "failed",
+                          status=status,
                           provenance=candidate.get("generator") or {"seed": candidate.get("seed")},
-                          approval_status="approved" if candidate.get("approval") == "approved" else "pending",
+                          approval_status=approval_status,
                           validation=candidate.get("validation"))
     if asset.get("status") != "ready":
         return
@@ -186,6 +192,8 @@ def _sync_child_artifacts(root, asset, key):
             continue
         validation = asset.get("validation", {})
         existing = asset.get("artifacts", {}).get(f"output.{output_id}", {})
+        if existing.get("status") == "ready" and existing.get("path") == path:
+            continue
         register_artifact({"assets": {key: asset}}, key, f"output.{output_id}",
                           _asset_artifact_type(asset, output_id, path), path, status="ready",
                           provenance=asset.get("generator") or {}, approval_status="approved",
@@ -199,12 +207,16 @@ def _sync_recipe_artifacts(recipe_asset, stages, manifest):
             continue
         for artifact_id, artifact in child.get("artifacts", {}).items():
             aggregate_id = f"{child_id}.{artifact_id}"
-            register_artifact(manifest, f"recipe:{recipe_asset['name']}", aggregate_id,
-                              artifact["type"], artifact["path"], status=artifact["status"],
-                              derived_from=[{"asset_id": child["id"], "output_id": artifact_id}],
-                              provenance=artifact.get("provenance"),
-                              approval_status=artifact.get("approval", {}).get("status", "pending"),
-                              validation=artifact.get("validation"))
+            approval = copy.deepcopy(recipe_asset.get("artifacts", {}).get(aggregate_id, {}).get("approval"))
+            approval_status = artifact.get("approval", {}).get("status", "pending")
+            aggregate = register_artifact(
+                manifest, f"recipe:{recipe_asset['name']}", aggregate_id, artifact["type"], artifact["path"],
+                status=artifact["status"],
+                derived_from=[{"asset_id": child["id"], "output_id": artifact_id}],
+                provenance=artifact.get("provenance"), approval_status=approval_status,
+                validation=artifact.get("validation"))
+            if approval and approval.get("status") == approval_status:
+                aggregate["approval"] = approval
 
 
 def _recipe_status(stages):
@@ -378,6 +390,13 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             asset["status"] = "stale"
             asset["candidates"]["selected"] = None
             asset.pop("generator", None)
+            output_paths = set(asset.get("outputs", {}).values())
+            for artifact_id, artifact in asset.get("artifacts", {}).items():
+                if artifact.get("status") == "ready" and artifact.get("path") in output_paths:
+                    artifact["status"] = "superseded"
+                    aggregate = recipe_asset.get("artifacts", {}).get(f"{child['id']}.{artifact_id}")
+                    if aggregate and aggregate.get("status") == "ready":
+                        aggregate["status"] = "superseded"
         _save(save, manifest)
         try:
             pipeline = asset_type["pipeline"]

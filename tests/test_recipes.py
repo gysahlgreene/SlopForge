@@ -1,3 +1,4 @@
+import copy
 import tempfile
 import unittest
 from pathlib import Path
@@ -335,24 +336,65 @@ class RecipeTests(unittest.TestCase):
         asset["generator"] = {"workflow": "old.json", "seed": 1}
         asset["candidates"]["selected"] = 1
         asset["candidates"]["items"][0]["approval"] = "approved"
-        asset["artifacts"] = {"output.model": {"id": "output.model", "type": "mesh.fbx",
-                                                 "status": "ready", "path": "old.fbx",
-                                                 "approval": {"status": "approved"}}}
+        self.root.joinpath("old.fbx").write_bytes(b"old output")
+        self.root.joinpath("archive.fbx").write_bytes(b"unrelated output")
+        asset["outputs"] = {"model": "old.fbx"}
+        asset["artifacts"] = {
+            "output.model": {"id": "output.model", "type": "mesh.fbx", "status": "ready",
+                             "path": "old.fbx", "provenance": {"seed": 1},
+                             "derived_from": [{"asset_id": "source-id", "output_id": "concept"}],
+                             "approval": {"status": "approved", "approved_at": "historical-approval"}},
+            "candidate.1": {"id": "candidate.1", "type": "prop.candidate", "status": "candidate",
+                            "path": asset["candidates"]["items"][0]["path"],
+                            "provenance": {"historical": True},
+                            "approval": {"status": "approved", "approved_at": "historical-candidate-approval"}},
+            "archive": {"id": "archive", "type": "mesh.fbx", "status": "ready",
+                        "path": "archive.fbx", "approval": {"status": "approved"}},
+        }
+        old_outputs = copy.deepcopy(asset["outputs"])
+        old_approval = copy.deepcopy(asset["artifacts"]["output.model"]["approval"])
+        old_provenance = copy.deepcopy(asset["artifacts"]["output.model"]["provenance"])
+        old_lineage = copy.deepcopy(asset["artifacts"]["output.model"]["derived_from"])
+        old_candidate_artifact = copy.deepcopy(asset["artifacts"]["candidate.1"])
+        old_aggregate_approval = {"status": "approved", "approved_at": "historical-aggregate-approval"}
+        self.manifest["assets"]["recipe:demo"]["artifacts"] = {
+            "terminal.output.model": {"id": "terminal.output.model", "type": "mesh.fbx",
+                                      "status": "ready", "path": "old.fbx",
+                                      "derived_from": [{"asset_id": asset["id"], "output_id": "output.model"}],
+                                      "provenance": {"seed": 1}, "approval": copy.deepcopy(old_aggregate_approval)}
+        }
         stage["status"] = "approved"
         handler_state = []
 
         def fail_at_handler_boundary(*_args):
             handler_state.append((asset["status"], asset["candidates"]["selected"],
-                                  asset.get("generator"), stage["status"]))
+                                  asset.get("generator"), stage["status"],
+                                  copy.deepcopy(asset["artifacts"]),
+                                  copy.deepcopy(self.manifest["assets"]["recipe:demo"].get("artifacts", {})),
+                                  copy.deepcopy(asset["outputs"])))
             raise RuntimeError("replacement failed")
+
+        running_snapshots = []
 
         def persist(data):
             saved_stage = data["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
             if saved_stage["status"] == "running":
+                data = copy.deepcopy(data)
+                running_snapshots.append(data)
                 saved_asset = data["assets"][saved_stage["asset_key"]]
                 self.assertNotEqual(saved_asset["status"], "ready")
                 self.assertIsNone(saved_asset["candidates"]["selected"])
                 self.assertNotIn("generator", saved_asset)
+                self.assertEqual(saved_asset["artifacts"]["output.model"]["status"], "superseded")
+                self.assertEqual(saved_asset["artifacts"]["output.model"]["approval"], old_approval)
+                self.assertEqual(saved_asset["artifacts"]["output.model"]["provenance"], old_provenance)
+                self.assertEqual(saved_asset["artifacts"]["output.model"]["derived_from"], old_lineage)
+                self.assertEqual(saved_asset["artifacts"]["candidate.1"], old_candidate_artifact)
+                self.assertEqual(saved_asset["artifacts"]["archive"]["status"], "ready")
+                self.assertEqual(saved_asset["outputs"], old_outputs)
+                aggregate = data["assets"]["recipe:demo"]["artifacts"]["terminal.output.model"]
+                self.assertEqual(aggregate["status"], "superseded")
+                self.assertEqual(aggregate["approval"], old_aggregate_approval)
 
         with patch("slopforge.recipes.model.prop_child_reuse_decision",
                    return_value={"reusable": False, "reasons": ["brief changed"]}), \
@@ -363,11 +405,19 @@ class RecipeTests(unittest.TestCase):
 
         self.assertEqual(stage["status"], "stale")
         self.assertEqual(asset["status"], "stale")
-        self.assertEqual(handler_state, [("stale", None, None, "running")])
+        self.assertEqual(len(handler_state), 1)
+        self.assertEqual(handler_state[0][:4], ("stale", None, None, "running"))
+        self.assertEqual(handler_state[0][4]["output.model"]["status"], "superseded")
+        self.assertEqual(handler_state[0][4]["output.model"]["approval"], old_approval)
+        self.assertEqual(handler_state[0][5]["terminal.output.model"]["status"], "superseded")
+        self.assertEqual(handler_state[0][5]["terminal.output.model"]["approval"], old_aggregate_approval)
+        self.assertEqual(handler_state[0][4]["candidate.1"], old_candidate_artifact)
+        self.assertEqual(handler_state[0][6], old_outputs)
+        self.assertEqual(len(running_snapshots), 1)
         self.assertIsNone(asset["candidates"]["selected"])
         self.assertNotIn("generator", asset)
         self.assertEqual(asset["candidates"]["items"][0]["approval"], "approved")
-        self.assertEqual(asset["artifacts"]["output.model"]["approval"]["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["approval"], old_approval)
         self.assertEqual(result["status"], "partial")
 
     def test_successful_stale_recipe_replacement_does_not_keep_old_approval(self):
