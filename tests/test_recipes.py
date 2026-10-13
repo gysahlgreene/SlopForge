@@ -81,7 +81,7 @@ class RecipeTests(unittest.TestCase):
         }}
         candidate_input = {
             "id": "candidate:1", "type": "surface.swatch",
-            "path": "Assets/src.png", "sha256": "src_sha",
+            "path": "Assets/src.png", "sha256": "b" * 64,
             "stage": "material_assembly_export", "attempt": 1,
             "derived_from": []}
         parent_exe = {"id": "parent-exec-1", "status": "succeeded",
@@ -1110,7 +1110,7 @@ class Finding2PublicationLineageTests(unittest.TestCase):
 
         stage_input = {
             "id": "candidate:1", "type": "surface.swatch",
-            "path": "Assets/src.png", "sha256": "src_sha256",
+            "path": "Assets/src.png", "sha256": "b" * 64,
             "stage": "concept_generation", "attempt": 1, "derived_from": []
         }
 
@@ -1166,6 +1166,12 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
 
     # A. otherwise valid publication execution with wrong/unrelated parent_execution_id
     #     -> readiness rejected
+    def test_malformed_dictionary_publication_output_sibling_invalidates_readiness(self):
+        from slopforge.recipes import _ready_output_error
+        asset, _, publication, _, _ = self.make_fixture()
+        publication["stages"][0]["outputs"].append({"id": "malformed"})
+        self.assertIsNotNone(_ready_output_error(self.root, asset))
+
     def test_wrong_parent_execution_id_invalidates_readiness(self):
         """A publication execution whose parent points to an unrelated source
         should invalidate readiness."""
@@ -1514,6 +1520,49 @@ class Finding1PublicationMalformedMemberTests(unittest.TestCase):
         error = _published_output_provenance(self.ref, executions)
         self.assertIsNotNone(error,
             "expected rejection for non-dict parent stage entry")
+
+    def test_valid_publication_with_malformed_dictionary_output_sibling_rejects(self):
+        from slopforge.recipes import _published_output_provenance
+        stage = {**self.valid_stage,
+                 "outputs": [self.valid_stage["outputs"][0], {"id": "malformed"}]}
+        execution = {"id": "pub-exec", "status": "succeeded",
+                     "parent_execution_id": "source-exec", "identity_inputs": {},
+                     "stages": [stage]}
+        self.assertIsNotNone(_published_output_provenance(self.ref, [execution, self.source]))
+
+    def test_malformed_dictionary_stage_sibling_rejects(self):
+        from slopforge.recipes import _published_output_provenance
+        execution = {"id": "pub-exec", "status": "succeeded",
+                     "parent_execution_id": "source-exec", "identity_inputs": {},
+                     "stages": [self.valid_stage, {"name": "final_publication"}]}
+        self.assertIsNotNone(_published_output_provenance(self.ref, [execution, self.source]))
+
+    def test_malformed_dictionary_execution_sibling_rejects(self):
+        from slopforge.recipes import _published_output_provenance
+        execution = {"id": "pub-exec", "status": "succeeded",
+                     "parent_execution_id": "source-exec", "identity_inputs": {},
+                     "stages": [self.valid_stage]}
+        self.assertIsNotNone(
+            _published_output_provenance(self.ref, [execution, {"id": "malformed"}, self.source]))
+
+    def test_unhashable_publication_output_id_rejects_without_exception(self):
+        from slopforge.recipes import _published_output_provenance
+        output = {**self.valid_stage["outputs"][0], "id": []}
+        stage = {**self.valid_stage, "outputs": [output]}
+        execution = {"id": "pub-exec", "status": "succeeded",
+                     "parent_execution_id": "source-exec", "identity_inputs": {},
+                     "stages": [stage]}
+        self.assertIsNotNone(_published_output_provenance(self.ref, [execution, self.source]))
+
+    def test_unhashable_publication_lineage_hash_rejects_without_exception(self):
+        from slopforge.recipes import _published_output_provenance
+        output = {**self.valid_stage["outputs"][0],
+                  "derived_from": [{"artifact_id": "mesh:1", "sha256": []}]}
+        stage = {**self.valid_stage, "outputs": [output]}
+        execution = {"id": "pub-exec", "status": "succeeded",
+                     "parent_execution_id": "source-exec", "identity_inputs": {},
+                     "stages": [stage]}
+        self.assertIsNotNone(_published_output_provenance(self.ref, [execution, self.source]))
 
 
 class RemainingPublicationMalformedParentOutputTest(unittest.TestCase):

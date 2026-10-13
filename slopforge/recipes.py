@@ -195,13 +195,71 @@ def _published_output_provenance(reference, executions):
     """Validate that a published-artifact reference points to a real succeeded
     final_publication stage with a matching output identity. Returns None on
     success or an error string describing the provenance failure."""
+    if not isinstance(reference, dict):
+        return "published reference is malformed"
     if not isinstance(executions, list):
         return "published reference executions are missing"
-    if not all(isinstance(e, dict) for e in executions):
+    if not all(isinstance(item, dict) for item in executions):
         return "published reference execution list contains malformed members"
+    stage_lists = [item.get("stages") for item in executions]
+    if not all(isinstance(stages, list) for stages in stage_lists):
+        return "published reference execution stages are missing"
+    stages = [stage for records in stage_lists for stage in records]
+    if not all(isinstance(stage, dict) for stage in stages):
+        return "published reference execution stages contain malformed members"
+    artifact_lists = [(stage, field, stage.get(field)) for stage in stages
+                      for field in ("inputs", "outputs")]
+    if not all(isinstance(records, list) for _, _, records in artifact_lists):
+        return "published reference stage inputs or outputs are malformed"
+    artifacts = [(field, record) for _, field, records in artifact_lists for record in records]
+    if not all(isinstance(record, dict) for _, record in artifacts):
+        return "published reference stage inputs or outputs contain malformed members"
+    parent_lists = [(record, record.get("derived_from", []))
+                    for field, record in artifacts if field == "outputs"]
+    if not all(isinstance(parents, list) for _, parents in parent_lists):
+        return "published reference output derivation is malformed"
+    parents = [parent for _, records in parent_lists for parent in records]
+    if not all(isinstance(parent, dict) for parent in parents):
+        return "published reference output derivation contains malformed members"
+    if (any("id" not in item for item in executions)
+            or any("name" not in stage or "attempt" not in stage for stage in stages)
+            or any("id" not in record or "sha256" not in record for _, record in artifacts)
+            or any(field == "outputs" and any(key not in record for key in
+                                                  ("type", "path", "stage", "attempt"))
+                   for field, record in artifacts)
+            or any("artifact_id" not in parent or "sha256" not in parent for parent in parents)):
+        return "published reference provenance identity fields are incomplete"
+    if (any(not isinstance(item["id"], str) or not item["id"] for item in executions)
+            or any(not isinstance(stage["name"], str) or type(stage["attempt"]) is not int
+                   or stage["attempt"] < 1 for stage in stages)
+            or any(not isinstance(record["id"], str) or not record["id"]
+                   or not isinstance(record["sha256"], str) or len(record["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in record["sha256"])
+                   for _, record in artifacts)
+            or any(field == "outputs" and (
+                       not isinstance(record["type"], str) or not record["type"]
+                       or not isinstance(record["path"], str) or not record["path"]
+                       or not isinstance(record["stage"], str)
+                       or type(record["attempt"]) is not int or record["attempt"] < 1)
+                   for field, record in artifacts)
+            or any(not isinstance(parent["artifact_id"], str) or not parent["artifact_id"]
+                   or not isinstance(parent["sha256"], str) or len(parent["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in parent["sha256"])
+                   for parent in parents)):
+        return "published reference provenance identities are malformed"
+    execution_ids = [item["id"] for item in executions]
+    if len(set(execution_ids)) != len(execution_ids):
+        return "published reference execution identity is ambiguous"
     ref_id = reference.get("id", "")
     if not isinstance(ref_id, str):
         return "published reference identity is not a string"
+    if (not ref_id or not isinstance(reference.get("type"), str) or not reference["type"]
+            or not isinstance(reference.get("path"), str) or not reference["path"]
+            or not isinstance(reference.get("sha256"), str) or len(reference["sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in reference["sha256"])
+            or not isinstance(reference.get("stage"), str)
+            or type(reference.get("attempt")) is not int or reference["attempt"] < 1):
+        return "published reference identity is malformed"
     delim = ":published:"
     prefix = ref_id[:ref_id.find(delim)]
     if delim not in ref_id:
@@ -219,9 +277,9 @@ def _published_output_provenance(reference, executions):
     if not all(isinstance(s, dict) for s in stages):
         return "published reference execution stages contain malformed members"
     publication_stages = [s for s in stages if s.get("name") == "final_publication"]
-    if any(type(stage.get("attempt")) is not int or stage["attempt"] < 1
-           for stage in publication_stages):
-        return "published reference final_publication stage identity is malformed"
+    stage_ids = [(stage["name"], stage["attempt"]) for stage in publication_stages]
+    if len(set(stage_ids)) != len(stage_ids):
+        return "published reference final_publication stage identity is ambiguous"
     matches = [stage for stage in publication_stages if stage.get("attempt") == 1]
     if len(matches) != 1:
         return "published reference final_publication stage is missing or ambiguous"
@@ -231,6 +289,9 @@ def _published_output_provenance(reference, executions):
         return "published reference stage outputs are malformed"
     if not all(isinstance(o, dict) for o in stage_outputs):
         return "published reference stage outputs contain malformed members"
+    output_ids = [item["id"] for item in stage_outputs]
+    if len(set(output_ids)) != len(output_ids):
+        return "published reference output has duplicate artifact IDs in stage records"
     stage_inputs = publication.get("inputs", [])
     if not isinstance(stage_inputs, list):
         return "final_publication stage inputs are malformed"
@@ -273,6 +334,8 @@ def _published_output_provenance(reference, executions):
     parent_exec_id = execution.get("parent_execution_id")
     if parent_exec_id is None:
         return "published execution has no parent_execution_id; lineage is incomplete"
+    if not isinstance(parent_exec_id, str) or not parent_exec_id:
+        return "published execution parent identity is malformed"
     parent_matches = [e for e in executions if e.get("id") == parent_exec_id]
     if len(parent_matches) == 0:
         return f"published execution parent {parent_exec_id!r} is absent from executions"

@@ -225,21 +225,57 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     executions = asset.get("executions", [])
     malformed = {"reusable": False,
                  "reasons": ["malformed processed-mesh provenance: authoritative records are malformed"]}
-    if not isinstance(executions, list) or not all(isinstance(e, dict) for e in executions):
+    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
         return malformed
-    for execution in executions:
-        stages = execution.get("stages", [])
-        if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
-            return malformed
-        for stage in stages:
-            for field in ("inputs", "outputs"):
-                records = stage.get(field, [])
-                if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
-                    return malformed
-                for item in records:
-                    derived = item.get("derived_from", [])
-                    if not isinstance(derived, list) or not all(isinstance(parent, dict) for parent in derived):
-                        return malformed
+    stage_lists = [execution.get("stages") for execution in executions]
+    if not all(isinstance(stages, list) for stages in stage_lists):
+        return malformed
+    stages = [stage for records in stage_lists for stage in records]
+    if not all(isinstance(stage, dict) for stage in stages):
+        return malformed
+    artifact_lists = [(stage, field, stage.get(field)) for stage in stages
+                      for field in ("inputs", "outputs")]
+    if not all(isinstance(records, list) for _, _, records in artifact_lists):
+        return malformed
+    artifacts = [(field, item) for _, field, records in artifact_lists for item in records]
+    if not all(isinstance(item, dict) for _, item in artifacts):
+        return malformed
+    parent_lists = [(item, item.get("derived_from", [])) for _, item in artifacts]
+    if not all(isinstance(parents, list) for _, parents in parent_lists):
+        return malformed
+    parents = [parent for _, records in parent_lists for parent in records]
+    if not all(isinstance(parent, dict) for parent in parents):
+        return malformed
+    if (any("id" not in execution for execution in executions)
+            or any("name" not in stage or "attempt" not in stage for stage in stages)
+            or any("id" not in item or "sha256" not in item for _, item in artifacts)
+            or any(field == "outputs" and any(key not in item for key in
+                                                  ("type", "path", "stage", "attempt"))
+                   for field, item in artifacts)
+            or any("artifact_id" not in parent or "sha256" not in parent for parent in parents)):
+        return malformed
+    if (any(not isinstance(execution["id"], str) or not execution["id"] for execution in executions)
+            or any(not isinstance(stage["name"], str) or type(stage["attempt"]) is not int
+                   or stage["attempt"] < 1 for stage in stages)
+            or any(not isinstance(item["id"], str) or not item["id"]
+                   or not isinstance(item["sha256"], str) or len(item["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in item["sha256"])
+                   for _, item in artifacts)
+            or any(field == "outputs" and (
+                       not isinstance(item["type"], str) or not item["type"]
+                       or not isinstance(item["path"], str) or not item["path"]
+                       or not isinstance(item["stage"], str)
+                       or type(item["attempt"]) is not int or item["attempt"] < 1)
+                   for field, item in artifacts)
+            or any(not isinstance(parent["artifact_id"], str) or not parent["artifact_id"]
+                   or not isinstance(parent["sha256"], str) or len(parent["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in parent["sha256"])
+                   for parent in parents)):
+        return malformed
+    execution_ids = [execution["id"] for execution in executions]
+    if len(set(execution_ids)) != len(execution_ids):
+        return {"reusable": False,
+                "reasons": ["ambiguous processed-mesh provenance: duplicate execution identity"]}
     # Step 1: Collect ALL stages with matching name and attempt across executions
     # to verify unique and unambiguous provenance.
     target_names = {"mesh_preparation", "material_assembly_export"}
@@ -272,12 +308,14 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     source_record = asset.get("source", {})
     if not isinstance(source_record, dict):
         return malformed
+    if (not isinstance(source_mesh, dict) or not isinstance(source_mesh.get("id"), str)
+            or not source_mesh["id"] or not isinstance(source_mesh.get("sha256"), str)
+            or len(source_mesh["sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in source_mesh["sha256"])):
+        return {"reusable": False, "reasons": ["source mesh identity is malformed"]}
     processed_path = source_record.get("processed_mesh")
-    if not processed_path:
+    if not isinstance(processed_path, str) or not processed_path:
         return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
-    source_ok, source_reason = artifact_integrity(project_root, source_mesh)
-    if not source_ok:
-        return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
 
     # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(executions):
@@ -294,6 +332,9 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                            for parent in item.get("derived_from", []) if isinstance(parent, dict))
                        for item in stage_inputs if isinstance(item, dict)):
                 continue
+            source_ok, source_reason = artifact_integrity(project_root, source_mesh)
+            if not source_ok:
+                return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
             stage_outs = stage.get("outputs", [])
             expected_type = "mesh.prepared" if stage.get("name") == "mesh_preparation" else "mesh.processed"
             prepared_matches = [item for item in stage_outs

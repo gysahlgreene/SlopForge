@@ -147,7 +147,7 @@ class PropReuseTests(unittest.TestCase):
         prepared = {"id": "prepared:1", "type": "mesh.prepared", "path": "processed.blend",
                     "sha256": file_sha256(processed_path), "stage": "mesh_preparation", "attempt": 1,
                     "derived_from": [{"artifact_id": source["id"], "sha256": source["sha256"]}]}
-        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"stages": [{
+        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"id": "exec:1", "stages": [{
             "name": "mesh_preparation", "attempt": 1, "status": "succeeded",
             "inputs": [source], "settings": settings, "outputs": [prepared]}]}]}
 
@@ -191,7 +191,7 @@ class PropReuseTests(unittest.TestCase):
                      "sha256": file_sha256(processed_path), "stage": "material_assembly_export", "attempt": 1,
                      "derived_from": [{"artifact_id": prepared["id"], "sha256": prepared["sha256"]}]}
         settings = {"face_budget": 1000, "material_scale": 3.0, "processing_tool_sha256": "tool"}
-        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"stages": [
+        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": [{"id": "exec:1", "stages": [
             {"name": "mesh_preparation", "attempt": 1, "status": "succeeded", "inputs": [source],
              "settings": {}, "outputs": [prepared]},
             {"name": "material_assembly_export", "attempt": 1, "status": "succeeded",
@@ -311,7 +311,8 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
                   "status": "failed", "inputs": [prepared],
                   "settings": settings, "outputs": []}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [succeeded, failed]}]}
+                 "executions": [{"id": "exec:1", "stages": [succeeded]},
+                                {"id": "exec:2", "stages": [failed]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertNotReusable(decision)
@@ -329,7 +330,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
               "status": "succeeded", "inputs": [prepared],
               "settings": settings, "outputs": [processed]}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [s1, s2]}]}
+                 "executions": [{"id": "exec:1", "stages": [s1, s2]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertNotReusable(decision)
@@ -345,7 +346,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
                  "status": "succeeded", "inputs": [prepared],
                  "settings": settings, "outputs": [processed, processed]}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [stage]}]}
+                 "executions": [{"id": "exec:1", "stages": [stage]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertNotReusable(decision)
@@ -371,7 +372,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
                  "status": "succeeded", "inputs": [prepared],
                  "settings": settings, "outputs": [bad_output]}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [stage]}]}
+                 "executions": [{"id": "exec:1", "stages": [stage]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertNotReusable(decision)
@@ -386,7 +387,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
                  "status": "succeeded", "inputs": [prepared],
                  "settings": settings, "outputs": [processed]}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [stage]}]}
+                 "executions": [{"id": "exec:1", "stages": [stage]}]}
         # source_mesh must be the input to the stage that matches stage inputs
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
@@ -416,7 +417,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
                  "status": "succeeded", "inputs": [prepared],
                  "settings": settings, "outputs": [bad_output]}
         asset = {"source": {"processed_mesh": "processed.blend"},
-                 "executions": [{"stages": [stage]}]}
+                 "executions": [{"id": "exec:1", "stages": [stage]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertNotReusable(decision)
@@ -872,10 +873,72 @@ class Finding4ProcessedMeshMalformedProvenanceTests(unittest.TestCase):
                              "source_mesh_id": "mesh:1",
                              "source_mesh_path": "source.glb",
                              "source_mesh_sha256": file_sha256(source_path)},
-                 "executions": [{"stages": [valid_stage]}]}
+                 "executions": [{"id": "exec:1", "stages": [valid_stage]}]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
         self.assertTrue(decision["reusable"])
+
+    def test_valid_output_with_malformed_dictionary_sibling_rejects(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source = {"id": "mesh:1", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(source_path), "stage": "mesh_preparation",
+                  "attempt": 1, "derived_from": []}
+        prepared = {"id": "prepared:1", "type": "mesh.prepared", "path": "processed.blend",
+                    "sha256": file_sha256(processed_path), "stage": "mesh_preparation",
+                    "attempt": 1, "derived_from": [{"artifact_id": source["id"], "sha256": source["sha256"]}]}
+        processed = {"id": "processed:1", "type": "mesh.processed", "path": "processed.blend",
+                     "sha256": file_sha256(processed_path), "stage": "material_assembly_export",
+                     "attempt": 1, "derived_from": [{"artifact_id": prepared["id"], "sha256": prepared["sha256"]}]}
+        settings = {"face_budget": 1000, "material_scale": 3.0}
+        stage = {"name": "material_assembly_export", "attempt": 1, "status": "succeeded",
+                 "inputs": [prepared], "settings": settings, "outputs": [processed, {"id": "malformed"}]}
+        asset = {"source": {"processed_mesh": "processed.blend"},
+                 "executions": [{"id": "exec:1", "stages": [stage]}]}
+        decision = processed_mesh_reuse_decision(self.root, asset, prepared, settings)
+        self.assertFalse(decision["reusable"])
+
+    def test_malformed_processed_stage_attempt_rejects_without_exception(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source = {"id": "mesh:1", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(self.root / "source.glb"), "stage": "mesh_preparation",
+                  "attempt": 1, "derived_from": []}
+        stage = {"name": "mesh_preparation", "attempt": [], "status": "succeeded",
+                 "inputs": [source], "settings": {}, "outputs": []}
+        result = processed_mesh_reuse_decision(
+            self.root, {"source": {"processed_mesh": "processed.blend"},
+                        "executions": [{"id": "exec:1", "stages": [stage]}]}, source, {})
+        self.assertFalse(result["reusable"])
+
+    def test_malformed_dictionary_execution_and_stage_siblings_reject(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source = {"id": "mesh:1", "type": "mesh.glb", "path": "source.glb",
+                  "sha256": file_sha256(self.root / "source.glb"), "stage": "mesh_preparation",
+                  "attempt": 1, "derived_from": []}
+        stage = {"name": "mesh_preparation", "attempt": 1, "status": "succeeded",
+                 "inputs": [source], "settings": {}, "outputs": []}
+        executions = [{"id": "exec:1", "stages": [stage, {"name": "mesh_preparation"}]},
+                      {"id": "malformed"}]
+        result = processed_mesh_reuse_decision(
+            self.root, {"source": {"processed_mesh": "processed.blend"},
+                        "executions": executions}, source, {})
+        self.assertFalse(result["reusable"])
+
+class MalformedStageIdentityTypeTests(unittest.TestCase):
+    def test_unhashable_output_id_rejects_without_exception(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "out.glb"
+            path.write_bytes(b"out")
+            output = {"id": [], "type": "mesh.glb", "path": "out.glb",
+                      "sha256": file_sha256(path), "stage": "material_generation",
+                      "attempt": 1, "derived_from": []}
+            stage = {"name": "material_generation", "attempt": 1, "status": "succeeded",
+                     "inputs": [], "outputs": [output], "settings": {}}
+            decision = stage_reuse_decision(root, stage, inputs=[], settings={})
+            self.assertFalse(decision["reusable"])
+
 
 class PropApprovalReuseTests(unittest.TestCase):
     def setUp(self):
@@ -1632,7 +1695,8 @@ class RemainingProcessedMeshMalformedProvenanceTests(unittest.TestCase):
         duplicate = {"name": "mesh_preparation", "attempt": 1,
                      "inputs": [], "outputs": []}
         asset = {"source": {}, "executions": [
-            {"stages": [duplicate]}, {"stages": [dict(duplicate)]},
+            {"id": "execution:1", "stages": [duplicate]},
+            {"id": "execution:2", "stages": [dict(duplicate)]},
         ]}
         decision = processed_mesh_reuse_decision(
             self.root, asset, self.source, self.settings)

@@ -136,3 +136,16 @@ on an unrestricted rerun; the sandboxed run had unrelated Blender 5.1 subprocess
 segfaults and a loopback bind permission failure. Six opt-in checks remained skipped.
 This verifies offline structural decisions only; it does not establish inference
 quality, appearance, readiness qualification, or Unity runtime behavior.
+
+The follow-up for the two remaining Important findings now validates every execution,
+stage, input, output, and derivation member before matching or uniqueness checks.
+Required identities are execution ID; stage name and positive integer attempt;
+artifact ID and lowercase SHA-256; outputs also require type, path, stage, and
+positive integer attempt; derivation members require artifact ID and SHA-256.
+Unhashable identity shapes reject without exceptions. On 2026-10-13, the complete
+Package 2 focused suite passed: 193 tests and 11 subtests. Unrestricted
+`make verify PYTHON=.venv/bin/python` passed: 408 tests, 58 subtests, 6 opt-in
+skips, and 3 existing Pillow deprecation warnings; compile, documentation, and
+whitespace checks passed. The restricted run again showed Blender 5.1 SIGSEGVs and
+loopback bind denial. These results cover offline provenance decisions only; no
+live inference or asset-quality/runtime gates were run.
