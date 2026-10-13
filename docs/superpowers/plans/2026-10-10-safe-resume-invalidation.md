@@ -231,4 +231,3 @@ git commit -m "test: cover prop invalidation and safe resume"
 - Interfaces are consistent: Task 1 owns the policy and append-only journal helper; Tasks 2–3 consume it; Task 4 adds no runtime API.
 - Package 3 failure classification/retry redesign, Package 4 readiness/qualification, live inference, providers, non-prop categories, and unrelated features are excluded.
 - Runtime/backend provenance that Package 1 cannot observe remains explicitly unknown; a changed known workflow/config invalidates its dependent stages, while unobservable weights/node revisions are reported as a reproducibility limit rather than fabricated identity.
-

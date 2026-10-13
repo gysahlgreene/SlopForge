@@ -252,11 +252,11 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                 continue
             key = (stage.get("name"), stage.get("attempt"))
             by_name_attempt.setdefault(key, []).append(stage)
-    
+
     # Require exactly one matching stage per (name, attempt) to avoid ambiguous provenance.
     ambiguous_keys = [key for key, stages in by_name_attempt.items() if len(stages) > 1]
     if ambiguous_keys:
-        return {"reusable": False, 
+        return {"reusable": False,
                 "reasons": ["ambiguous processed-mesh provenance: duplicate stage identity "
                              + ", ".join(f"{s[0]}:{s[1]}" for s in ambiguous_keys)]}
 
@@ -279,7 +279,7 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     source_ok, source_reason = artifact_integrity(project_root, source_mesh)
     if not source_ok:
         return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
-    
+
     # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(executions):
         exec_stages = execution.get("stages", [])
@@ -307,13 +307,13 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
             prepared = prepared_matches[0]
             output_matches = [o for o in stage_outs if o.get("id") == prepared.get("id")]
             if len(output_matches) != 1:
-                return {"reusable": False, 
+                return {"reusable": False,
                         "reasons": ["ambiguous processed-mesh output: duplicate artifact ID "
                                      f"{prepared.get('id')!r} found in {len(output_matches)} outputs"]}
             # Validate that the output's recorded attempt matches the containing stage.
-            if (type(prepared.get("attempt")) is not int or 
+            if (type(prepared.get("attempt")) is not int or
                     prepared.get("attempt") != stage.get("attempt")):
-                return {"reusable": False, 
+                return {"reusable": False,
                         "reasons": [f"output attempt {prepared.get('attempt')} does not match "
                                      f"stage attempt {stage.get('attempt')} at {processed_path}"]}
             # Validate that the output's recorded stage matches the containing stage name.

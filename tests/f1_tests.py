@@ -6,7 +6,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
 
     def make_valid_chain(self):
         """Create a valid processed-mesh provenance chain.
-        
+
         source (mesh.glb) -> prepared (mesh.prepared) -> processed (mesh.processed)
         """
         source_path = self.root / "source.glb"
@@ -43,7 +43,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
     # A. succeeded processed-mesh stage + failed duplicate with same name/attempt -\u003e reject reuse
     def test_succeeded_and_failed_duplicate_same_name_attempt_rejects_reuse(self):
         """A failed duplicate with same stage name and attempt should not create ambiguity.
-        
+
         The invariant: two stages with same name+attempt across executions means
         ambiguous provenance - we reject rather than guess."""
         from slopforge.pipelines.model import processed_mesh_reuse_decision
@@ -98,7 +98,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
     # D. output records stage/attempt values that disagree with containing stage -\u003e reject reuse
     def test_output_stage_attempt_disagree_with_containing_stage_rejects_reuse(self):
         """Output artifact whose stage or attempt does not match its containing stage is invalid.
-        
+
         The invariant: the output's recorded attempt must agree with the containing
         stage's attempt. An output claiming a different attempt is not reliably
         attributable to this stage."""

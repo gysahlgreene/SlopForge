@@ -16,13 +16,13 @@ class Finding2PublicationLineageTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"approved output")
         real_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        
+
         stage_input = {
             "id": "candidate:1", "type": "surface.swatch",
             "path": "Assets/src.png", "sha256": "src_sha256",
             "stage": "concept_generation", "attempt": 1, "derived_from": []
         }
-        
+
         candidate_output = {
             "id": stage_input["id"], "type": stage_input["type"],
             "path": stage_input["path"],
@@ -35,7 +35,7 @@ class Finding2PublicationLineageTests(unittest.TestCase):
         source_exec = {"id": "source-exec:1", "status": "succeeded",
                        "parent_execution_id": None, "identity_inputs": {},
                        "stages": [candidate_stage]}
-        
+
         # pub-exec-1 is a clean ID (no :published: in it)
         pub_exec = {"id": "pub-exec-1", "status": "succeeded",
                     "parent_execution_id": parent_id or "source-exec:1",
@@ -43,7 +43,7 @@ class Finding2PublicationLineageTests(unittest.TestCase):
                     "stages": [{"name": "final_publication", "attempt": 1,
                                 "status": "succeeded", "inputs": [stage_input],
                                 "settings": {}, "outputs": []}]}
-        
+
         published_ref = {
             "id": "pub-exec-1:published:model",
             "type": "model.fbx",
@@ -64,11 +64,11 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, _, _ = self.make_fixture(
             parent_id="unrelated-exec:999")
-        
+
         # Also remove the real source so the parent is unresolvable
         asset["executions"] = [e for e in asset["executions"]
                                if e["id"] != "source-exec:1"]
-        
+
         error = _ready_output_error(self.root, asset)
         self.assertIsNotNone(error)
         self.assertNotEqual(asset["status"], "ready")
@@ -81,11 +81,11 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _published_output_provenance
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         # Break the lineage: derived_from no longer matches stage inputs
         published_ref["derived_from"] = [
             {"artifact_id": "ghost-input", "sha256": "fake_sha"}]
-        
+
         error = _published_output_provenance(published_ref, asset["executions"])
         self.assertIsNotNone(error)
 
@@ -97,7 +97,7 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _published_output_provenance, _ready_output_error
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         # Create a separate source and make everything point to different things
         other_exe = {"id": "other-source:1", "status": "succeeded",
                      "parent_execution_id": None, "identity_inputs": {},
@@ -105,13 +105,13 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         other_input = {"id": "other:cand:1", "type": "surface.swatch",
                        "path": "Assets/other.png", "sha256": "other_sha",
                        "stage": "concept_generation", "attempt": 1, "derived_from": []}
-        
+
         # Make parent point to another source
         pub_exec["parent_execution_id"] = other_exe["id"]
         # While stage inputs + derived_from point to source_exec
         # This is the inconsistency: parent and derivation disagree
         asset["executions"].append(other_exe)
-        
+
         error = _published_output_provenance(published_ref, asset["executions"])
         self.assertIsNotNone(error,
             "expected lineage inconsistency to be rejected")
@@ -122,12 +122,12 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         missing source execution, readiness must be rejected."""
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, _, _ = self.make_fixture()
-        
+
         # Remove source from executions and reference a non-existent parent
         pub_exec["parent_execution_id"] = "absent-exec"
         asset["executions"] = [e for e in asset["executions"]
                                if e["id"] != "source-exec:1"]
-        
+
         error = _ready_output_error(self.root, asset)
         self.assertIsNotNone(error)
         self.assertNotEqual(asset["status"], "ready")
@@ -138,7 +138,7 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         error = _ready_output_error(self.root, asset)
         # Valid lineage: error should be None and status stays "ready"
         self.assertIsNone(error)
