@@ -1261,5 +1261,121 @@ closed."""
             error,
             "expected rejection for valid dict stage + non-dict malformed entry")
 
+
+# ================================================================
+# Finding 1 — Publication malformed-member rejection
+# ================================================================
+class Finding1PublicationMalformedMemberTests(unittest.TestCase):
+    """Regression tests for Finding 1: _published_output_provenance
+    must reject malformed provenance lists (not silently filter them
+    out). Each test constructs a fixture that would PASS if the bad
+    member is skipped, to prove the specific anti-pattern is fixed."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        # Create a valid fixture that passes all checks:
+        # - publication execution exists
+        # - final_publication stage unique and succeeded
+        # - stage output matches reference
+        # - parent execution has required derived_from artifacts
+        # - inputs match derived_from IDs
+        self.ref = {"id": "pub-exec:published:model", "type": "model.fbx",
+                    "path": "test.glb", "sha256": "a" * 64,
+                    "stage": "final_publication", "attempt": 1,
+                    "derived_from": [{"artifact_id": "mesh:1", "sha256": "b" * 64}]}
+        self.source = {"id": "source-exec", "status": "succeeded",
+                       "parent_execution_id": None, "identity_inputs": {},
+                       "stages": [{"name": "mesh_preparation", "attempt": 1,
+                                   "status": "succeeded",
+                                   "outputs": [{"id": "mesh:1", "type": "mesh.prepared",
+                                              "path": "s.glb", "sha256": "b" * 64,
+                                              "stage": "mesh_preparation", "attempt": 1,
+                                              "derived_from": []}],
+                                   "inputs": [], "settings": {}}]}
+        matching_output = {"id": "pub-exec:published:model", "type": "model.fbx",
+                           "path": "test.glb", "sha256": "a" * 64,
+                           "stage": "final_publication", "attempt": 1,
+                           "derived_from": [{"artifact_id": "mesh:1",
+                                              "sha256": "b" * 64}]}
+        self.valid_stage = {"name": "final_publication", "attempt": 1,
+                            "status": "succeeded",
+                            "outputs": [matching_output],
+                            "inputs": [{"id": "mesh:1", "sha256": "b" * 64}],
+                            "settings": {}}
+
+    # A. valid publication execution + None execution sibling
+    def test_valid_publication_execution_with_none_execution_sibling_rejects(self):
+        """An executions list containing a valid publication execution
+        plus a None sibling member must reject provenance."""
+        from slopforge.recipes import _published_output_provenance
+        pub_exec = {"id": "pub-exec", "status": "succeeded",
+                    "parent_execution_id": "source-exec", "identity_inputs": {},
+                    "stages": [self.valid_stage]}
+        # None is a malformed member in the authoritative executions list
+        executions = [pub_exec, None, self.source]
+        error = _published_output_provenance(self.ref, executions)
+        self.assertIsNotNone(error,
+            "expected rejection for None sibling in executions list")
+
+    # B. valid final_publication stage + None stage sibling
+    def test_valid_publication_stage_with_none_stage_sibling_rejects(self):
+        """A publication execution containing one valid final_publication
+        stage plus a None sibling stage must reject provenance."""
+        from slopforge.recipes import _published_output_provenance
+        pub_exec = {"id": "pub-exec", "status": "succeeded",
+                    "parent_execution_id": "source-exec", "identity_inputs": {},
+                    "stages": [self.valid_stage, None]}  # None is malformed
+        executions = [pub_exec, self.source]
+        error = _published_output_provenance(self.ref, executions)
+        self.assertIsNotNone(error,
+            "expected rejection for None sibling in publication stages")
+
+    # C. valid publication output + None output sibling
+    def test_valid_publication_output_with_none_output_sibling_rejects(self):
+        """A final_publication stage whose outputs list contains a valid
+        matching output plus a None sibling must reject provenance."""
+        from slopforge.recipes import _published_output_provenance
+        # Construct a stage with proper derived_from + None sibling
+        bad_stage = {
+            "name": "final_publication", "attempt": 1,
+            "status": "succeeded",
+            "outputs": [  # None is malformed sibling
+                {"id": "pub-exec:published:model", "type": "model.fbx",
+                 "path": "test.glb", "sha256": "a" * 64,
+                 "stage": "final_publication", "attempt": 1,
+                 "derived_from": [{"artifact_id": "mesh:1",
+                                    "sha256": "b" * 64}]},
+                None
+            ],
+            "inputs": [{"id": "mesh:1", "sha256": "b" * 64}],
+            "settings": {}
+        }
+        pub_exec = {"id": "pub-exec", "status": "succeeded",
+                    "parent_execution_id": "source-exec", "identity_inputs": {},
+                    "stages": [bad_stage]}
+        executions = [pub_exec, self.source]
+        error = _published_output_provenance(self.ref, executions)
+        self.assertIsNotNone(error,
+            "expected rejection for None sibling in output list")
+
+    # D. non-dict member in parent execution stages
+    def test_non_dict_parent_stage_member_rejects_provenance(self):
+        """A parent execution containing a non-dict stage entry alongside
+        a valid one must reject provenance."""
+        from slopforge.recipes import _published_output_provenance
+        bad_parent = {"id": "source-exec", "status": "succeeded",
+                      "parent_execution_id": None, "identity_inputs": {},
+                      "stages": [self.source["stages"][0], "corrupted_entry"]}
+        pub_exec = {"id": "pub-exec", "status": "succeeded",
+                    "parent_execution_id": "source-exec", "identity_inputs": {},
+                    "stages": [self.valid_stage]}
+        executions = [pub_exec, bad_parent]
+        error = _published_output_provenance(self.ref, executions)
+        self.assertIsNotNone(error,
+            "expected rejection for non-dict parent stage entry")
+
+
 if __name__ == "__main__":
     unittest.main()
