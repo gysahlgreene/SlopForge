@@ -86,6 +86,12 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         return {"reusable": False, "reasons": ["prop child candidate set is incomplete"]}
     execution = next((item for item in asset.get("executions", [])
                       if item.get("id") == execution_ids[0]), None)
+    exec_matches = [e for e in asset.get("executions", [])
+                    if isinstance(e, dict) and e.get("id") == execution_ids[0]]
+    if len(exec_matches) > 1:
+        reasons.append("candidate execution identity is ambiguous")
+    elif len(exec_matches) == 0:
+        reasons.append("candidate execution is missing")
     candidate = selected_candidates[0]
     attempts = (execution or {}).get("identity_inputs", {}).get("candidate_attempts", [])
     if len(execution_ids) != 1 or len(selected_candidates) != len(attempts):

@@ -180,6 +180,55 @@ def _published_output_ref(asset, output_id, path):
     return matches[0] if len(matches) == 1 else None
 
 
+def _published_output_provenance(reference, executions):
+    """Validate that a published-artifact reference points to a real succeeded
+    final_publication stage with a matching output identity. Returns None on
+    success or an error string describing the provenance failure."""
+    ref_id = reference.get("id", "")
+    if not isinstance(ref_id, str):
+        return "published reference identity is not a string"
+    delim = ":published:"
+    prefix = ref_id[:ref_id.find(delim)]
+    if delim not in ref_id:
+        return "published reference identity is malformed"
+    exec_id = prefix
+    matches = [e for e in executions if isinstance(e, dict) and e.get("id") == exec_id]
+    if len(matches) == 0:
+        return f"published reference execution {exec_id!r} is absent"
+    if len(matches) > 1:
+        return f"published reference execution {exec_id!r} is ambiguous"
+    execution = matches[0]
+    if execution.get("status") != "succeeded":
+        return f"published reference execution {exec_id!r} is not succeeded"
+    stages = execution.get("stages")
+    if not isinstance(stages, list):
+        return "published reference execution stages are missing"
+    matches = [
+        s for s in stages
+        if isinstance(s, dict) and s.get("name") == "final_publication"
+        and type(s.get("attempt")) is int and s.get("attempt") == 1
+        and s.get("status") == "succeeded"
+    ]
+    if len(matches) != 1:
+        return "published reference final_publication stage is missing or ambiguous"
+    publication = matches[0]
+    stage_outputs = publication.get("outputs")
+    if not isinstance(stage_outputs, list):
+        return "published reference stage outputs are malformed"
+    output_matches = [
+        o for o in stage_outputs
+        if isinstance(o, dict) and o.get("id") == reference.get("id")
+        and o.get("type") == reference.get("type")
+        and o.get("path") == reference.get("path")
+        and o.get("sha256") == reference.get("sha256")
+        and type(o.get("attempt")) is int and o.get("attempt") == reference.get("attempt")
+        and o.get("stage") == reference.get("stage")
+    ]
+    if len(output_matches) != 1:
+        return "published reference output is missing or ambiguous in recorded stage outputs"
+    return None
+
+
 def _ready_output_error(root, asset):
     outputs = asset.get("outputs")
     if not isinstance(outputs, dict):
@@ -199,6 +248,9 @@ def _ready_output_error(root, asset):
         intact, reason = artifact_integrity(root, reference)
         if not intact:
             return f"published output {output_id}: {reason}"
+        provenance_reason = _published_output_provenance(reference, asset.get("executions") or [])
+        if provenance_reason:
+            return f"published output {output_id} has unproven reference: {provenance_reason}"
         artifacts = asset.get("artifacts")
         artifact = artifacts.get(f"output.{output_id}") if isinstance(artifacts, dict) else None
         approval = artifact.get("approval") if isinstance(artifact, dict) else None

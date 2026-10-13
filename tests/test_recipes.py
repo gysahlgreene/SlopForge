@@ -83,6 +83,14 @@ class RecipeTests(unittest.TestCase):
             "sha256": file_sha256(published), "stage": "final_publication", "attempt": 1,
             "derived_from": [],
         }]
+        asset["executions"] = [{"id": "execution", "status": "succeeded",
+            "stages": [{"name": "final_publication", "attempt": 1,
+                        "status": "succeeded",
+                        "outputs": [{"id": "execution:published:model", "type": "model.fbx",
+                                     "path": path, "sha256": file_sha256(published),
+                                     "stage": "final_publication", "attempt": 1,
+                                     "derived_from": []}],
+                        "inputs": [], "settings": {}}]}]
         stage["status"] = "approved"
         return recipe, stage, asset, published, asset_types
 
@@ -613,6 +621,155 @@ class RecipeTests(unittest.TestCase):
         self.assertGreaterEqual(len(asset.get("candidates", {}).get("items", [])), 1)
         # Current generator provenance must not identify the old ready result
         self.assertIsNone(asset.get("generator"))
+
+    # ---------------------------------------------------------------
+    # Finding 1  — publication provenance must match recorded stage output
+    # All tests below MUST be RED before the production fix is applied.
+    # ---------------------------------------------------------------
+
+    def test_fabricated_publication_reference_without_recorded_execution_is_rejected(self):
+        """A reference with plausible ID/path/hash but no matching
+        final_publication execution must reject readiness."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/fake.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl1")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        # Fabricated reference pointing at a non-existent execution
+        asset["published_artifacts"] = [{"id": "nonexistent-run:published:model",
+            "type": "model.fbx", "path": path, "sha256": file_sha256(published),
+            "stage": "final_publication", "attempt": 1, "derived_from": []}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl1")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_reference_to_real_execution_but_wrong_output_id_is_rejected(self):
+        """A reference pointing at a real execution that does not match the
+        recorded output identity must reject readiness."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/match.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl2")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        # Reference with WRONG output_id (mesh instead of model)
+        asset["published_artifacts"] = [{"id": "execution:published:mesh",
+            "type": "model.fbx", "path": path, "sha256": file_sha256(published),
+            "stage": "final_publication", "attempt": 1, "derived_from": []}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl2")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_duplicate_ambiguous_output_references_is_rejected(self):
+        """Duplicate or ambiguous matching publication provenance must reject readiness."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/ambig.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl3")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        # Two references with same suffix and path — ambiguous
+        asset["published_artifacts"] = [
+            {"id": "execution-a:published:model", "type": "model.fbx",
+             "path": path, "sha256": file_sha256(published),
+             "stage": "final_publication", "attempt": 1, "derived_from": []},
+            {"id": "execution-b:published:model", "type": "model.fbx",
+             "path": path, "sha256": file_sha256(published),
+             "stage": "final_publication", "attempt": 1, "derived_from": []}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl3")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_one_exact_unambiguous_recorded_publication_output_remains_valid(self):
+        """A single exact matching published artifact must leave readiness intact."""
+        recipe, stage, asset, published, asset_types = self.ready_prop_recipe()
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "integrity")
+
+        self.assertEqual(asset["status"], "ready")
+        self.assertEqual(stage["status"], "approved")
 
 
 if __name__ == "__main__":

@@ -650,6 +650,129 @@ avoid: [environment]
         self.assertIsNone(_adopt_stage(context, "mesh_workflow_execution", 1,
                                        [concept, conditioning], settings))
 
+    # ---------------------------------------------------------------
+    # Finding 2  — execution ID must resolve uniquely
+    # All tests below MUST be RED before the production fix is applied.
+    # ---------------------------------------------------------------
 
+    def test_prop_child_reuse_rejects_valid_execution_plus_failed_duplicate_with_same_id(self):
+        """A valid execution with a failed duplicate sharing the same ID must reject."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "concept.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "c:1", "type": "image.concept", "path": "concept.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation",
+                    "attempt": 1, "derived_from": []}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                 "inputs": [], "settings": {}, "outputs": [artifact]}
+        good_exec = {"id": "dup-id", "status": "succeeded",
+                     "identity_inputs": {"asset_type": "prop", "brief": "b",
+                                          "generation_prompt": "b",
+                                          "candidate_attempts": [{"seed": 1, "variation": None}],
+                                          "style": {"name": "default", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "workflow": {"identifier": "i.json", "sha256": None,
+                                                       "configured_inputs": {}}},
+                     "stages": [stage]}
+        failed_exec = {"id": "dup-id", "status": "failed",
+                       "identity_inputs": {}, "stages": [stage]}
+        asset = {"type": "prop", "description": "b", "generation_prompt": "b",
+                 "candidates": {"items": [{"number": 1, "status": "candidate",
+                                            "path": "concept.png",
+                                            "execution_id": "dup-id",
+                                            "artifact": artifact}]},
+                 "executions": [good_exec, failed_exec]}
+        child = {"id": "t", "type": "prop", "description": "b", "generation_prompt": "b",
+                 "requested_style_identity": {"name": "default", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+
+        decision = prop_child_reuse_decision(self.root, asset,
+                                             {"candidate_execution_ids": ["dup-id"]},
+                                             child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(decision["reusable"])
+
+    def test_prop_child_reuse_rejects_two_seemingly_valid_executions_same_id(self):
+        """Two valid executions with the same ID must be rejected."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "concept.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "c:1", "type": "image.concept", "path": "concept.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation",
+                    "attempt": 1, "derived_from": []}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                 "inputs": [], "settings": {}, "outputs": [artifact]}
+        exec_a = {"id": "dup-id", "status": "succeeded",
+                  "identity_inputs": {"asset_type": "prop", "brief": "b",
+                                      "generation_prompt": "b",
+                                      "candidate_attempts": [{"seed": 1, "variation": None}],
+                                      "style": {"name": "default", "version": 1},
+                                      "conditioning": {"strategy": "text_only", "references": []},
+                                      "quality": {"tier": "normal", "settings": {}},
+                                      "workflow": {"identifier": "i.json", "sha256": None,
+                                                   "configured_inputs": {}}},
+                  "stages": [stage]}
+        exec_b = {"id": "dup-id", "status": "succeeded",
+                  "identity_inputs": {"asset_type": "prop", "brief": "b",
+                                      "generation_prompt": "b",
+                                      "candidate_attempts": [{"seed": 1, "variation": None}],
+                                      "style": {"name": "default", "version": 1},
+                                      "conditioning": {"strategy": "text_only", "references": []},
+                                      "quality": {"tier": "normal", "settings": {}},
+                                      "workflow": {"identifier": "i.json", "sha256": None,
+                                                   "configured_inputs": {}}},
+                  "stages": [stage]}
+        asset = {"type": "prop", "description": "b", "generation_prompt": "b",
+                 "candidates": {"items": [{"number": 1, "status": "candidate",
+                                            "path": "concept.png",
+                                            "execution_id": "dup-id",
+                                            "artifact": artifact}]},
+                 "executions": [exec_a, exec_b]}
+        child = {"id": "t", "type": "prop", "description": "b", "generation_prompt": "b",
+                 "requested_style_identity": {"name": "default", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+
+        decision = prop_child_reuse_decision(self.root, asset,
+                                             {"candidate_execution_ids": ["dup-id"]},
+                                             child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(decision["reusable"])
+
+    def test_prop_child_reuse_succeeds_with_exactly_one_valid_execution(self):
+        """Exactly one matching execution must allow reuse to proceed."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "concept.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "c:1", "type": "image.concept", "path": "concept.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation",
+                    "attempt": 1, "derived_from": []}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                 "inputs": [], "settings": {}, "outputs": [artifact]}
+        execution = {"id": "single-id", "status": "succeeded",
+                     "identity_inputs": {"asset_type": "prop", "brief": "b",
+                                          "generation_prompt": "b",
+                                          "candidate_attempts": [{"seed": 1, "variation": None}],
+                                          "style": {"name": "default", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "workflow": {"identifier": "i.json", "sha256": None,
+                                                       "configured_inputs": {}}},
+                     "stages": [stage]}
+        asset = {"type": "prop", "description": "b", "generation_prompt": "b",
+                 "candidates": {"items": [{"number": 1, "status": "candidate",
+                                            "path": "concept.png",
+                                            "execution_id": "single-id",
+                                            "artifact": artifact}]},
+                 "executions": [execution]}
+        child = {"id": "t", "type": "prop", "description": "b", "generation_prompt": "b",
+                 "requested_style_identity": {"name": "default", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+
+        decision = prop_child_reuse_decision(self.root, asset,
+                                             {"candidate_execution_ids": ["single-id"]},
+                                             child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertTrue(decision["reusable"])
 if __name__ == "__main__":
     unittest.main()
