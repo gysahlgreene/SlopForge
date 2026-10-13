@@ -130,6 +130,62 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
         self.assertEqual(recipe["artifacts"]["terminal.output.model"]["status"], "superseded")
 
+    def test_malformed_asset_artifact_and_missing_output_invalidate_before_sync(self):
+        _, stage, asset, published, asset_types = self.ready_prop_recipe()
+        self.events.clear()
+        published.unlink()
+        asset["artifacts"]["corrupt"] = {}
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertEqual(self.events, ["terminal"])
+        self.assertEqual(stage["status"], "completed")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+        self.assertNotIn("corrupt", asset["artifacts"])
+
+    def test_recipe_artifact_sync_marks_malformed_record_stale_without_raising(self):
+        recipe_asset = {"name": "test", "artifacts": {}}
+        child = {"id": "child", "artifacts": {"corrupt": {}}}
+        stages = {"child": {"asset_key": "child", "status": "approved"}}
+        recipes._sync_recipe_artifacts(recipe_asset, stages,
+                                      {"assets": {"child": child, "recipe:test": recipe_asset}})
+        self.assertEqual(stages["child"]["status"], "stale")
+
+    def test_child_artifact_sync_rejects_unhashable_candidate_status_without_raising(self):
+        asset = {"status": "candidate", "candidates": {"items": [
+            {"number": 1, "path": "candidate.png", "status": []}]}, "artifacts": {}}
+        self.assertFalse(recipes._sync_child_artifacts(self.root, asset, "child"))
+
+    def test_recipe_artifact_sync_rejects_unhashable_approval_status_without_raising(self):
+        recipe_asset = {"name": "test", "artifacts": {}}
+        child = {"id": "child", "artifacts": {"output": {
+            "id": "output", "type": "model.fbx", "path": "output.fbx",
+            "status": "ready", "approval": {"status": []}}}}
+        stages = {"child": {"asset_key": "child", "status": "approved"}}
+        recipes._sync_recipe_artifacts(recipe_asset, stages, {"assets": {"child": child}})
+        self.assertEqual(stages["child"]["status"], "stale")
+
+    def test_recipe_artifact_sync_rejects_approval_without_status(self):
+        recipe_asset = {"name": "test", "artifacts": {}}
+        child = {"id": "child", "artifacts": {"output": {
+            "id": "output", "type": "model.fbx", "path": "output.fbx",
+            "status": "ready", "approval": {}}}}
+        stages = {"child": {"asset_key": "child", "status": "approved"}}
+        recipes._sync_recipe_artifacts(recipe_asset, stages,
+                                      {"assets": {"child": child, "recipe:test": recipe_asset}})
+        self.assertEqual(stages["child"]["status"], "stale")
+
+    def test_recipe_artifact_sync_rejects_invalid_artifact_id_without_raising(self):
+        recipe_asset = {"name": "test", "artifacts": {}}
+        child = {"id": "child", "artifacts": {"output ": {
+            "id": "output ", "type": "model.fbx", "path": "output.fbx", "status": "ready"}}}
+        stages = {"child": {"asset_key": "child", "status": "approved"}}
+        recipes._sync_recipe_artifacts(recipe_asset, stages, {"assets": {"child": child}})
+        self.assertEqual(stages["child"]["status"], "stale")
+
     def test_ready_recipe_output_hash_mismatch_invalidates_current_approval(self):
         recipe, stage, asset, published, asset_types = self.ready_prop_recipe()
         published.write_bytes(b"changed output")

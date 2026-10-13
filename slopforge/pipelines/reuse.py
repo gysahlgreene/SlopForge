@@ -9,6 +9,18 @@ _STAGE_ORDER = (
     "mesh_output_acquisition", "material_map_acquisition", "material_assembly_export",
     "final_publication",
 )
+_REQUIRED_OUTPUT_TYPES = {
+    "conditioning_preparation": {"image.cutout", "image.3d_input"},
+    "mesh_workflow_execution": {"mesh.glb"},
+    "material_map_acquisition": {
+        "texture.normal", "texture.roughness", "texture.metallic",
+        "texture.metallic_gloss", "texture.emission",
+    },
+    "material_assembly_export": {
+        "mesh.fbx", "project.blend", "preview.front", "preview.side",
+        "preview.rear", "preview.three_quarter", "validation.json",
+    },
+}
 
 
 def artifact_integrity(project_root: Path, reference: dict) -> tuple[bool, str | None]:
@@ -18,7 +30,7 @@ def artifact_integrity(project_root: Path, reference: dict) -> tuple[bool, str |
     if not isinstance(path, str) or not path or "\\" in path:
         return False, "missing artifact path"
     relative = PurePosixPath(path)
-    if relative.is_absolute() or ".." in relative.parts or relative.parts[0].endswith(":"):
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts or relative.parts[0].endswith(":"):
         return False, "missing artifact: path is not project-relative"
     root = Path(project_root).resolve()
     file = root / Path(*relative.parts)
@@ -103,10 +115,16 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
         reasons.append("semantic mismatch: ordered input artifact identities changed")
     if stage.get("settings") != settings:
         reasons.append("semantic mismatch: settings changed")
-    required_types = {"mesh_workflow_execution": {"mesh.glb"}}
-    required = required_types.get(name, set())
-    if required and not any(output.get("type") in required for output in outputs):
-        reasons.append("missing required output artifact type: " + ", ".join(sorted(required)))
+    required = _REQUIRED_OUTPUT_TYPES.get(name, set())
+    recorded_types = {output["type"] for output in outputs}
+    missing = required - recorded_types
+    if name == "material_generation" and not (
+            {"surface.swatch", "generation.metadata"} <= recorded_types or
+            {"texture.basecolor", "texture.normal", "texture.roughness",
+             "texture.metallic"} <= recorded_types):
+        missing.update({"surface.swatch", "generation.metadata"} - recorded_types)
+    if missing:
+        reasons.append("missing required output artifact type: " + ", ".join(sorted(missing)))
     for output in outputs:
         intact, reason = artifact_integrity(project_root, output)
         if not intact:

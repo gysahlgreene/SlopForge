@@ -24,12 +24,13 @@ class PropReuseTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "mesh.glb").write_bytes(b"mesh")
         self.input = {"id": "mesh:1", "sha256": hashlib.sha256(b"mesh").hexdigest()}
-        self.output = {"id": "material:1", "type": "texture", "path": "mesh.glb",
+        self.output = {"id": "material:1", "type": "surface.swatch", "path": "mesh.glb",
                        "sha256": hashlib.sha256(b"mesh").hexdigest(), "stage": "material_generation",
                        "attempt": 1, "derived_from": [{"artifact_id": self.input["id"],
                                                           "sha256": self.input["sha256"]}]}
+        metadata = {**self.output, "id": "material:metadata", "type": "generation.metadata"}
         self.stage = {"name": "material_generation", "attempt": 1, "status": "succeeded",
-                      "inputs": [self.input], "outputs": [self.output], "settings": {"seed": 1}}
+                      "inputs": [self.input], "outputs": [self.output, metadata], "settings": {"seed": 1}}
 
     def test_identical_semantic_inputs_and_intact_artifact_are_reusable(self):
         self.assertTrue(stage_reuse_decision(self.root, self.stage, inputs=[self.input], settings={"seed": 1})["reusable"])
@@ -544,6 +545,47 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
             decision["reusable"],
             f"expected reusable, got: {decision['reasons']}")
 
+    def test_valid_candidate_execution_with_malformed_execution_sibling_rejects(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        asset, child, child_stage = self._make_base_fixture([])
+        asset["executions"][0]["stages"] = [{
+            "name": "concept_generation", "attempt": 1, "status": "succeeded",
+            "inputs": [], "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
+            "outputs": [asset["candidates"]["items"][0]["artifact"]],
+        }]
+        asset["executions"].append({"id": "broken", "status": "failed", "stages": "malformed"})
+        decision = prop_child_reuse_decision(self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(decision["reusable"])
+
+    def test_valid_candidate_stage_with_malformed_dict_sibling_rejects(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        asset, child, child_stage = self._make_base_fixture([])
+        asset["executions"][0]["stages"] = [{
+            "name": "concept_generation", "attempt": 1, "status": "succeeded",
+            "inputs": [], "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
+            "outputs": [asset["candidates"]["items"][0]["artifact"]],
+        }, {"name": "unrelated_stage"}]
+        decision = prop_child_reuse_decision(self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(decision["reusable"])
+
+    def test_valid_candidate_stage_with_malformed_artifact_identity_sibling_rejects(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        asset, child, child_stage = self._make_base_fixture([])
+        artifact = asset["candidates"]["items"][0]["artifact"]
+        malformed_output = {**artifact, "id": "broken", "sha256": "z" * 64,
+                            "stage": "unrelated_stage"}
+        asset["executions"][0]["stages"] = [{
+            "name": "concept_generation", "attempt": 1, "status": "succeeded",
+            "inputs": [], "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
+            "outputs": [artifact],
+        }, {"name": "unrelated_stage", "attempt": 1, "status": "failed",
+            "inputs": [], "settings": {}, "outputs": [malformed_output]}]
+        decision = prop_child_reuse_decision(self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(decision["reusable"])
+
 
 class Finding2AdoptStageDuplicateRejectTests(unittest.TestCase):
     """Regression tests for Finding 2: _adopt_stage must reject duplicate
@@ -600,7 +642,7 @@ class Finding2AdoptStageDuplicateRejectTests(unittest.TestCase):
                      "status": "failed", "inputs": [], "outputs": [], "settings": {}}
         ctx = self.make_context([valid, unrelated])
 
-        self.assertIsNotNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
+        self.assertIsNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
 
     def test_adopt_stage_rejects_ambiguous_current_execution_identity(self):
         from slopforge.pipelines.model import _adopt_stage
@@ -618,15 +660,101 @@ class Finding2AdoptStageDuplicateRejectTests(unittest.TestCase):
         path = Path(self.root) / "mesh.glb"
         path.write_bytes(b"mesh")
         sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        output = {"id": "output:1", "type": "mesh.glb", "path": "mesh.glb",
-                  "sha256": sha, "stage": "material_assembly_export",
+        output = {"id": "output:1", "type": "image.concept", "path": "mesh.glb",
+                  "sha256": sha, "stage": "concept_generation",
                   "attempt": 1, "derived_from": []}
-        valid = {"name": "material_assembly_export", "attempt": 1,
+        valid = {"name": "concept_generation", "attempt": 1,
                  "status": "succeeded", "inputs": [], "settings": {},
                  "outputs": [output]}
         ctx = self.make_context([valid])
-        result = _adopt_stage(ctx, "material_assembly_export", 1, [], {})
+        result = _adopt_stage(ctx, "concept_generation", 1, [], {})
         self.assertIsNotNone(result)
+
+    def test_adopt_stage_rejects_valid_target_with_malformed_dict_sibling(self):
+        from slopforge.pipelines.model import _adopt_stage
+        valid = {"name": "concept_generation", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([valid, {"name": "broken"}])
+        self.assertIsNone(_adopt_stage(ctx, "concept_generation", 1, [], {}))
+
+    def test_adopt_stage_rejects_malformed_artifact_in_unrelated_stage(self):
+        from slopforge.pipelines.model import _adopt_stage
+        target = {"name": "concept_generation", "attempt": 1,
+                  "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        bad = {"id": "bad", "type": "image.concept", "path": "mesh.glb", "sha256": "z" * 64,
+               "stage": "unrelated_stage", "attempt": 1, "derived_from": []}
+        sibling = {"name": "unrelated_stage", "attempt": 1, "status": "failed",
+                   "inputs": [], "outputs": [bad], "settings": {}}
+        self.assertIsNone(_adopt_stage(self.make_context([target, sibling]),
+                                       "concept_generation", 1, [], {}))
+
+
+class AssemblyStageOutputContractTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.input = {"id": "in:1", "sha256": "a" * 64}
+        self.required_types = {"mesh.fbx", "project.blend", "preview.front", "preview.side",
+                               "preview.rear", "preview.three_quarter", "validation.json"}
+        self.outputs = []
+        for index, kind in enumerate(sorted(self.required_types)):
+            path = f"out-{index}.bin"
+            (self.root / path).write_bytes(kind.encode())
+            self.outputs.append({"id": f"out:{index}", "type": kind, "path": path,
+                                 "sha256": file_sha256(self.root / path),
+                                 "stage": "material_assembly_export", "attempt": 1,
+                                 "derived_from": [{"artifact_id": "in:1", "sha256": "a" * 64}]})
+        self.stage = {"name": "material_assembly_export", "attempt": 1, "status": "succeeded",
+                      "inputs": [self.input], "outputs": self.outputs, "settings": {}}
+
+    def test_assembly_stage_without_outputs_is_not_reusable(self):
+        decision = stage_reuse_decision(self.root, {**self.stage, "outputs": []},
+                                        inputs=[self.input], settings={})
+        self.assertFalse(decision["reusable"])
+
+    def test_assembly_stage_missing_required_type_is_not_reusable(self):
+        decision = stage_reuse_decision(self.root, {**self.stage,
+            "outputs": [output for output in self.outputs if output["type"] != "validation.json"]},
+            inputs=[self.input], settings={})
+        self.assertFalse(decision["reusable"])
+
+    def test_assembly_stage_with_required_output_is_reusable(self):
+        decision = stage_reuse_decision(self.root, self.stage, inputs=[self.input], settings={})
+        self.assertTrue(decision["reusable"], decision["reasons"])
+
+    def test_empty_project_relative_output_path_fails_closed_without_raising(self):
+        decision = stage_reuse_decision(self.root, {**self.stage,
+            "outputs": [{**self.outputs[0], "path": "."}]}, inputs=[self.input], settings={})
+        self.assertFalse(decision["reusable"])
+
+    def test_other_consumed_stages_cannot_reuse_without_producer_outputs(self):
+        for name in ("conditioning_preparation", "material_generation", "material_map_acquisition"):
+            with self.subTest(name=name):
+                stage = {**self.stage, "name": name, "outputs": []}
+                decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={})
+                self.assertFalse(decision["reusable"])
+
+    def test_incomplete_textured_mesh_worker_material_outputs_are_not_reusable(self):
+        output = {**self.outputs[0], "type": "texture.basecolor",
+                  "stage": "material_generation"}
+        stage = {**self.stage, "name": "material_generation", "outputs": [output]}
+        decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={})
+        self.assertFalse(decision["reusable"])
+
+    def test_complete_textured_mesh_worker_material_outputs_are_reusable(self):
+        outputs = []
+        for index, kind in enumerate(("texture.basecolor", "texture.normal",
+                                      "texture.roughness", "texture.metallic")):
+            path = f"texture-{index}.bin"
+            (self.root / path).write_bytes(kind.encode())
+            outputs.append({"id": f"texture:{index}", "type": kind, "path": path,
+                            "sha256": file_sha256(self.root / path),
+                            "stage": "material_generation", "attempt": 1,
+                            "derived_from": [{"artifact_id": "in:1", "sha256": "a" * 64}]})
+        stage = {**self.stage, "name": "material_generation", "outputs": outputs}
+        decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={})
+        self.assertTrue(decision["reusable"], decision["reasons"])
 
 
 class Finding3DuplicateOutputIDRejectTests(unittest.TestCase):
@@ -685,9 +813,10 @@ class Finding3DuplicateOutputIDRejectTests(unittest.TestCase):
     def test_stage_reuse_unique_outputs_succeeds(self):
         sha = file_sha256(Path(self.root, "test.glb"))
         outputs = [
-            {"id": "mesh:1", "type": "mesh.glb", "path": "test.glb",
-             "sha256": sha, "stage": "material_generation",
-             "attempt": 1, "derived_from": []}
+            {"id": "surface:1", "type": "surface.swatch", "path": "test.glb",
+             "sha256": sha, "stage": "material_generation", "attempt": 1, "derived_from": []},
+            {"id": "metadata:1", "type": "generation.metadata", "path": "test.glb",
+             "sha256": sha, "stage": "material_generation", "attempt": 1, "derived_from": []},
         ]
         stage = {"name": "material_generation", "attempt": 1,
                  "status": "succeeded", "inputs": [], "outputs": outputs,

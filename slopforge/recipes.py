@@ -2,7 +2,7 @@
 import copy
 import math
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -431,26 +431,57 @@ def _ready_output_error(root, asset):
     return None
 
 
+def _sync_artifact_valid(artifact_id, artifact):
+    if not isinstance(artifact, dict):
+        return False
+    path = artifact.get("path")
+    relative = PurePosixPath(path) if isinstance(path, str) and path else None
+    digest = artifact.get("sha256")
+    return (isinstance(artifact_id, str) and bool(artifact_id) and artifact_id == artifact_id.strip() and
+            all(isinstance(artifact.get(field), str) and artifact[field]
+                for field in ("id", "type", "path", "status")) and
+            artifact["id"] == artifact_id and artifact["id"] == artifact["id"].strip() and
+            artifact["type"] == artifact["type"].strip() and
+            relative is not None and not relative.is_absolute() and relative.parts and
+            ".." not in relative.parts and not relative.parts[0].endswith(":") and "\\" not in path and
+            artifact["status"] in {"planned", "candidate", "ready", "failed", "superseded"} and
+            ("approval" not in artifact or
+             (isinstance(artifact["approval"], dict) and
+              isinstance(artifact["approval"].get("status"), str) and
+              artifact["approval"]["status"] in
+              {"pending", "approved", "rejected", "not_required"})) and
+            ("derived_from" not in artifact or isinstance(artifact["derived_from"], list)) and
+            ("provenance" not in artifact or isinstance(artifact["provenance"], dict)) and
+            ("validation" not in artifact or isinstance(artifact["validation"], dict)) and
+            ("sha256" not in artifact or
+             (isinstance(digest, str) and len(digest) == 64 and
+              all(c in "0123456789abcdef" for c in digest))))
+
+
 def _sync_child_artifacts(root, asset, key):
     candidates = asset.get("candidates")
     items = candidates.get("items") if isinstance(candidates, dict) else None
     artifacts = asset.get("artifacts", {})
+    invalid_artifacts = ([artifact_id for artifact_id, item in artifacts.items()
+                          if not _sync_artifact_valid(artifact_id, item)]
+                         if isinstance(artifacts, dict) else [])
     malformed = (not isinstance(items, list) or not all(isinstance(item, dict) for item in items)
                  or not isinstance(artifacts, dict)
-                 or not all(isinstance(item, dict) and
-                            ("approval" not in item or isinstance(item["approval"], dict))
-                            for item in artifacts.values()))
+                 or bool(invalid_artifacts))
     if not malformed:
         numbers = [item.get("number") for item in items]
         malformed = (any(isinstance(number, bool) or not isinstance(number, int) or number < 1
                          for number in numbers) or len(numbers) != len(set(numbers)) or
                      any(not isinstance(item.get("path"), str) or not item["path"] or
-                         item.get("status") not in {"candidate", "failed", "rejected"}
+                         not isinstance(item.get("status"), str) or
+                         item["status"] not in {"candidate", "failed", "rejected"}
                          for item in items))
     if malformed:
         asset["status"] = "stale"
         if isinstance(candidates, dict):
             candidates["selected"] = None
+        for artifact_id in invalid_artifacts:
+            del artifacts[artifact_id]
         return False
     for candidate in items:
         if candidate.get("status") == "rejected":
@@ -500,15 +531,19 @@ def _sync_recipe_artifacts(recipe_asset, stages, manifest):
         if child is None:
             continue
         artifacts = child.get("artifacts", {})
+        recipe_artifacts = recipe_asset.get("artifacts", {})
         if (not isinstance(artifacts, dict) or
-                not all(isinstance(artifact, dict) and
-                        ("approval" not in artifact or isinstance(artifact["approval"], dict))
-                        for artifact in artifacts.values())):
+                not isinstance(recipe_artifacts, dict) or
+                not all(_sync_artifact_valid(artifact_id, artifact)
+                        for artifact_id, artifact in artifacts.items()) or
+                not all(_sync_artifact_valid(artifact_id, artifact)
+                        for artifact_id, artifact in recipe_artifacts.items())):
             stage["status"] = "stale"
             continue
         for artifact_id, artifact in artifacts.items():
             aggregate_id = f"{child_id}.{artifact_id}"
-            approval = copy.deepcopy(recipe_asset.get("artifacts", {}).get(aggregate_id, {}).get("approval"))
+            old_aggregate = recipe_artifacts.get(aggregate_id, {})
+            approval = copy.deepcopy(old_aggregate.get("approval"))
             approval_status = artifact.get("approval", {}).get("status", "pending")
             aggregate = register_artifact(
                 manifest, f"recipe:{recipe_asset['name']}", aggregate_id, artifact["type"], artifact["path"],

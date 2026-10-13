@@ -137,15 +137,28 @@ segfaults and a loopback bind permission failure. Six opt-in checks remained ski
 This verifies offline structural decisions only; it does not establish inference
 quality, appearance, readiness qualification, or Unity runtime behavior.
 
-The follow-up for the two remaining Important findings now validates every execution,
-stage, input, output, and derivation member before matching or uniqueness checks.
-Required identities are execution ID; stage name and positive integer attempt;
-artifact ID and lowercase SHA-256; outputs also require type, path, stage, and
-positive integer attempt; derivation members require artifact ID and SHA-256.
-Unhashable identity shapes reject without exceptions. On 2026-10-13, the complete
-Package 2 focused suite passed: 193 tests and 11 subtests. Unrestricted
-`make verify PYTHON=.venv/bin/python` passed: 408 tests, 58 subtests, 6 opt-in
-skips, and 3 existing Pillow deprecation warnings; compile, documentation, and
-whitespace checks passed. The restricted run again showed Blender 5.1 SIGSEGVs and
-loopback bind denial. These results cover offline provenance decisions only; no
-live inference or asset-quality/runtime gates were run.
+The earlier follow-up validated selected publication and processed-mesh provenance
+collections; it did not establish that every execution and stage sibling was valid.
+Reuse now validates all execution IDs before resolving candidate identity, rejects
+malformed execution stage collections, validates every stage record in the selected
+execution, and validates every stage record in an adoption collection before matching.
+Output contracts are explicit for reusable stages whose producers and consumers
+require them: conditioning preparation, mesh workflow execution, material
+generation, material map acquisition, and material assembly export. Material
+generation accepts its swatch plus metadata route or the base color, normal,
+roughness, and metallic outputs recorded by a textured mesh worker. Other recorded
+worker outputs remain optional where the producer/consumer path permits absence.
+
+Recipe artifact synchronization validates each artifact record before indexing;
+malformed records invalidate current readiness before synchronization. Resume removes
+unusable malformed records from the active artifact map, proceeds through stale
+regeneration, and retains valid prior outputs as superseded history.
+
+The Package 2 focused suite passed: 211 tests and 14 subtests across
+`test_prop_reuse.py`, `test_prop_lineage.py`, `test_mesh_pbr.py`, `test_recipes.py`,
+and `test_manifest.py`. Unrestricted `make verify PYTHON=.venv/bin/python` passed:
+426 tests, 61 subtests, 6 opt-in skips, and 3 existing Pillow deprecation warnings;
+compile, documentation metadata/link, and whitespace checks passed. The restricted
+run had 9 failures caused by Blender 5.1 subprocess SIGSEGVs and loopback bind
+permission denial; the unrestricted rerun passed. No live inference, visual review,
+readiness qualification, deformation review, or Unity runtime checks were performed.

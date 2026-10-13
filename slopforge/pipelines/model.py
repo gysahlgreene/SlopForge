@@ -74,6 +74,40 @@ def _execution_stage(asset, execution_id, name, attempt):
                            if item["name"] == name and item["attempt"] == attempt)
 
 
+def _stage_record_shape(stage):
+    if (not isinstance(stage, dict) or
+            not isinstance(stage.get("name"), str) or not stage["name"] or
+            type(stage.get("attempt")) is not int or stage["attempt"] < 1 or
+            not isinstance(stage.get("status"), str) or
+            stage["status"] not in {"pending", "running", "succeeded", "failed"} or
+            not isinstance(stage.get("settings"), dict) or
+            not isinstance(stage.get("inputs"), list) or
+            not isinstance(stage.get("outputs"), list)):
+        return False
+    for reference in stage["inputs"]:
+        if (not isinstance(reference, dict) or
+                not isinstance(reference.get("id"), str) or not reference["id"] or
+                not isinstance(reference.get("sha256"), str) or len(reference["sha256"]) != 64 or
+                any(c not in "0123456789abcdef" for c in reference["sha256"])):
+            return False
+    for reference in stage["outputs"]:
+        parents = reference.get("derived_from") if isinstance(reference, dict) else None
+        if (not isinstance(reference, dict) or
+                any(not isinstance(reference.get(field), str) or not reference[field]
+                    for field in ("id", "type", "path", "sha256", "stage")) or
+                len(reference["sha256"]) != 64 or
+                any(c not in "0123456789abcdef" for c in reference["sha256"]) or
+                type(reference.get("attempt")) is not int or
+                reference["attempt"] < 1 or not isinstance(parents, list) or
+                not all(isinstance(parent, dict) and isinstance(parent.get("artifact_id"), str)
+                        and parent["artifact_id"] and isinstance(parent.get("sha256"), str)
+                        and len(parent["sha256"]) == 64
+                        and all(c in "0123456789abcdef" for c in parent["sha256"])
+                        for parent in parents)):
+            return False
+    return True
+
+
 def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     reasons = []
     candidate_records = asset.get("candidates")
@@ -81,7 +115,8 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     executions = asset.get("executions")
     if not isinstance(candidates, list) or not all(isinstance(item, dict) for item in candidates):
         return {"reusable": False, "reasons": ["prop child candidate records are missing or malformed"]}
-    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
+    if (not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions) or
+            any(not isinstance(item.get("id"), str) or not item["id"] for item in executions)):
         return {"reusable": False, "reasons": ["prop child execution records are missing or malformed"]}
     execution_ids = child_stage.get("candidate_execution_ids")
     if not isinstance(execution_ids, list) or not execution_ids:
@@ -97,6 +132,11 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     if not exec_matches:
         return {"reusable": False, "reasons": ["candidate execution is missing"]}
     execution = exec_matches[0]
+    if (any(not isinstance(item.get("stages"), list) for item in executions) or
+            not isinstance(execution.get("identity_inputs"), dict) or
+            not isinstance(execution.get("status"), str) or
+            execution["status"] not in {"running", "succeeded", "failed"}):
+        return {"reusable": False, "reasons": ["prop child execution identity or stages are malformed"]}
     candidate = selected_candidates[0]
     identity = (execution or {}).get("identity_inputs")
     if not isinstance(identity, dict):
@@ -166,7 +206,7 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         if not isinstance(execution_stages, list):
             reasons.append("candidate execution stages are missing or malformed")
             continue
-        if not all(isinstance(s, dict) for s in execution_stages):
+        if not all(_stage_record_shape(stage) for stage in execution_stages):
             reasons.append("candidate execution stages are missing or malformed")
             continue
         target_stages = [item for item in execution_stages
@@ -387,7 +427,7 @@ def _adopt_stage(context, name, attempt, inputs, settings):
         return None
     # Collect ALL matching stages first, require exactly one
     stages = prior.get("stages", [])
-    if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
+    if not isinstance(stages, list) or not all(_stage_record_shape(stage) for stage in stages):
         return None
     targets = [stage for stage in stages if stage.get("name") == name]
     if any(isinstance(stage.get("attempt"), bool) or
