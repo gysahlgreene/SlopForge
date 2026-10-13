@@ -79,19 +79,42 @@ class RecipeTests(unittest.TestCase):
             "sha256": file_sha256(published),
             "approval": {"status": "approved", "approved_at": "historical"},
         }}
+        candidate_input = {
+            "id": "candidate:1", "type": "surface.swatch",
+            "path": "Assets/src.png", "sha256": "src_sha",
+            "stage": "material_assembly_export", "attempt": 1,
+            "derived_from": []}
+        parent_exe = {"id": "parent-exec-1", "status": "succeeded",
+                      "parent_execution_id": None, "identity_inputs": {},
+                      "stages": [{"name": "material_assembly_export", "attempt": 1,
+                                   "status": "succeeded", "inputs": [], "settings": {},
+                                   "outputs": [candidate_input]}]}
+        # candidate_ref for derived_from uses artifact_id format
+        candidate_ref = {"artifact_id": candidate_input["id"],
+                         "sha256": candidate_input["sha256"]}
+        # candidate_input_for_stage uses id format (for stage inputs)
+        candidate_input_for_stage = {"id": candidate_input["id"],
+                                      "sha256": candidate_input["sha256"]}
         asset["published_artifacts"] = [{
             "id": "execution:published:model", "type": "model.fbx", "path": path,
-            "sha256": file_sha256(published), "stage": "final_publication", "attempt": 1,
-            "derived_from": [],
+            "sha256": file_sha256(published), "stage": "final_publication",
+            "attempt": 1, "derived_from": [candidate_ref],
         }]
         asset["executions"] = [{"id": "execution", "status": "succeeded",
+                                  "parent_execution_id": "parent-exec-1",
+                                  "identity_inputs": {},
             "stages": [{"name": "final_publication", "attempt": 1,
                         "status": "succeeded",
-                        "outputs": [{"id": "execution:published:model", "type": "model.fbx",
-                                     "path": path, "sha256": file_sha256(published),
-                                     "stage": "final_publication", "attempt": 1,
-                                     "derived_from": []}],
-                        "inputs": [], "settings": {}}]}]
+                        "outputs": [{"id": "execution:published:model",
+                                     "type": "model.fbx",
+                                     "path": path,
+                                     "sha256": file_sha256(published),
+                                     "stage": "final_publication",
+                                     "attempt": 1,
+                                     "derived_from": [candidate_ref]}],
+                        "inputs": [candidate_input_for_stage],
+                        "settings": {}}]},
+            parent_exe]
         stage["status"] = "approved"
         return recipe, stage, asset, published, asset_types
 
