@@ -186,9 +186,29 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     source_ok, source_reason = artifact_integrity(project_root, source_mesh)
     if not source_ok:
         return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
+    
+    # Step 1: Collect ALL stages with matching name and attempt across executions
+    # to verify unique and unambiguous provenance.
+    target_names = {"mesh_preparation", "material_assembly_export"}
+    by_name_attempt = {}
+    for execution in asset.get("executions", []):
+        for stage in execution.get("stages", []):
+            if stage.get("name") not in target_names:
+                continue
+            key = (stage.get("name"), stage.get("attempt"))
+            by_name_attempt.setdefault(key, []).append(stage)
+    
+    # Require exactly one matching stage per (name, attempt) to avoid ambiguous provenance.
+    ambiguous_keys = [key for key, stages in by_name_attempt.items() if len(stages) > 1]
+    if ambiguous_keys:
+        return {"reusable": False, 
+                "reasons": ["ambiguous processed-mesh provenance: duplicate stage identity "
+                             + ", ".join(f"{s[0]}:{s[1]}" for s in ambiguous_keys)]}
+    
+    # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(asset.get("executions", [])):
         for stage in reversed(execution.get("stages", [])):
-            if stage.get("name") not in {"mesh_preparation", "material_assembly_export"}:
+            if stage.get("name") not in target_names:
                 continue
             if stage.get("status") != "succeeded" or stage.get("settings") != processing_settings:
                 continue
@@ -204,6 +224,19 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                              if item.get("type") == expected_type and item.get("path") == processed_path), None)
             if not prepared:
                 continue
+            # Require exactly one matching output identity to reject duplicates.
+            output_matches = [o for o in stage.get("outputs", [])
+                              if isinstance(o, dict) and o.get("id") == prepared.get("id")]
+            if len(output_matches) != 1:
+                return {"reusable": False, 
+                        "reasons": ["ambiguous processed-mesh output: duplicate artifact ID "
+                                     f"{prepared.get('id')!r} found in {len(output_matches)} outputs"]}
+            # Validate that the output's recorded attempt matches the containing stage.
+            if (type(prepared.get("attempt")) is not int or 
+                    prepared.get("attempt") != stage.get("attempt")):
+                return {"reusable": False, 
+                        "reasons": [f"output attempt {prepared.get('attempt')} does not match "
+                                     f"stage attempt {stage.get('attempt')} at {processed_path}"]}
             derived = prepared.get("derived_from", [])
             input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs
                                 if isinstance(item, dict)}
