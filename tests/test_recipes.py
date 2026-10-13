@@ -172,6 +172,124 @@ class RecipeTests(unittest.TestCase):
         self.assertNotEqual(stage["status"], "approved")
         self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
 
+    def test_malformed_published_reference_sibling_invalidates_approval(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["published_artifacts"].append(None)
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_incomplete_published_reference_sibling_invalidates_approval(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["published_artifacts"].append({"id": None})
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_wrong_current_output_artifact_type_invalidates_approval(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["artifacts"]["output.model"]["type"] = "image.prop"
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_malformed_candidate_sibling_invalidates_and_regenerates(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        self.events.clear()
+        asset["candidates"]["items"].append(None)
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertEqual(self.events, ["terminal"])
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_incomplete_candidate_member_invalidates_and_regenerates(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        self.events.clear()
+        asset["candidates"]["items"].append({"number": 2, "status": "candidate"})
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertEqual(self.events, ["terminal"])
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_malformed_candidate_collection_invalidates_and_regenerates(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        self.events.clear()
+        asset["candidates"]["items"] = {"malformed": "collection"}
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertEqual(self.events, ["terminal"])
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_malformed_candidate_container_does_not_raise_and_invalidates(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        self.events.clear()
+        asset["candidates"] = None
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertEqual(self.events, ["terminal"])
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_malformed_candidate_artifact_approval_does_not_raise(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["artifacts"]["candidate.1"] = {
+            "id": "candidate.1", "type": "prop.candidate", "status": "candidate",
+            "path": asset["candidates"]["items"][0]["path"], "approval": None}
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_malformed_artifact_collection_does_not_raise_and_invalidates(self):
+        _, stage, asset, _, asset_types = self.ready_prop_recipe()
+        asset["artifacts"] = None
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types,
+                                  self.manifest, "integrity")
+
+        self.assertNotEqual(stage["status"], "approved")
+        self.assertEqual(asset["status"], "stale")
+
     def test_invalid_ready_output_path_invalidates_approval(self):
         _, stage, asset, _, asset_types = self.ready_prop_recipe()
         asset["outputs"]["model"] = None
@@ -205,6 +323,20 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(aggregate["provenance"]["seed"], 1)
         self.assertIn("running", snapshots)
         self.assertIn("awaiting_approval", snapshots)
+
+    def test_malformed_pipeline_candidate_member_fails_child_stage(self):
+        self.definition["children"] = [{"id": "source", "type": "concept",
+                                        "description": "Source concept"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+
+        def malformed_pipeline(*args):
+            return [*self.fake_pipeline(*args), None]
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"image": malformed_pipeline}):
+            result = recipes.run_recipe(self.root, self.config, self.style, self.types,
+                                        self.manifest, "sample_pack", instance_name="malformed")
+
+        self.assertEqual(result["recipe_instance"]["stages"]["source"]["status"], "failed")
 
     def test_child_content_overrides_are_used_and_snapshotted_for_resume(self):
         captured = []
@@ -1063,6 +1195,13 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
 
         error = _published_output_provenance(published_ref, asset["executions"])
         self.assertIsNotNone(error)
+
+    def test_malformed_same_name_publication_attempt_invalidates_readiness(self):
+        from slopforge.recipes import _ready_output_error
+        asset, _, publication, _, _ = self.make_fixture()
+        publication["stages"].append({**publication["stages"][0], "attempt": "1"})
+
+        self.assertIsNotNone(_ready_output_error(self.root, asset))
 
     # C. publication execution parent and output derivation disagree with each other
     #     -> readiness rejected
