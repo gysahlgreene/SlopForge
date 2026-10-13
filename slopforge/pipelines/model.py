@@ -152,8 +152,11 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         if not isinstance(execution_stages, list):
             reasons.append("candidate execution stages are missing or malformed")
             continue
+        if not all(isinstance(s, dict) for s in execution_stages):
+            reasons.append("candidate execution stages are missing or malformed")
+            continue
         matches = [item for item in execution_stages
-                   if isinstance(item, dict) and item.get("name") == artifact.get("stage") and
+                   if item.get("name") == artifact.get("stage") and
                    type(item.get("attempt")) is int and item.get("attempt") == attempt]
         if len(matches) != 1:
             reasons.append("candidate stage is missing or ambiguous")
@@ -163,8 +166,11 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         if not isinstance(stage_outputs, list):
             reasons.append("candidate stage outputs are missing or malformed")
             continue
+        if not all(isinstance(o, dict) for o in stage_outputs):
+            reasons.append("candidate stage outputs are missing or malformed")
+            continue
         output_matches = [out for out in stage_outputs
-                          if isinstance(out, dict) and out.get("id") == artifact["id"]]
+                          if out.get("id") == artifact["id"]]
         if len(output_matches) != 1:
             reasons.append("candidate artifact is missing or ambiguous in recorded stage outputs")
             continue

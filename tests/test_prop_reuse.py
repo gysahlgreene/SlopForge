@@ -396,6 +396,387 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
             f"expected stage-related reason, got: {decision['reasons']}")
 
 
+class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
+    """Regression tests for Finding 1: malformed members in authoritative
+    provenance lists must fail closed rather than be silently skipped."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def _make_base_fixture(self, stages):
+        """Create a base fixture with identity checks that pass."""
+        path = self.root / "candidate.png"
+        path.write_bytes(b"concept")
+        sha = file_sha256(path)
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [],
+            "settings": {"prompt": "brass relay", "seed": 7},
+            "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
+                         "path": "candidate.png", "sha256": sha,
+                         "stage": "concept_generation", "attempt": 1,
+                         "derived_from": []}]
+        }
+        execution = {
+            "id": "execution:1", "status": "succeeded",
+            "identity_inputs": {"asset_type": "prop", "brief": "brass relay",
+                                 "generation_prompt": "brass relay",
+                                 "style": "default",
+                                 "conditioning": {"strategy": "text_only"},
+                                 "quality": {"tier": "normal", "settings": {}},
+                                 "candidate_attempts": [{"variation": None}]},
+            "stages": stages
+        }
+        artifact = {"id": "concept-candidate:1", "type": "image.concept",
+                    "path": "candidate.png", "sha256": sha,
+                    "stage": "concept_generation", "attempt": 1,
+                    "derived_from": []}
+        asset = {
+            "type": "prop", "description": "brass relay",
+            "generation_prompt": "brass relay",
+            "candidates": {"items": [{"number": 1, "status": "candidate",
+                                       "path": "candidate.png",
+                                       "execution_id": "execution:1",
+                                       "artifact": artifact}]},
+            "executions": [execution]
+        }
+        child = {"id": "terminal", "type": "prop", "description": "brass relay",
+                 "generation_prompt": "brass relay",
+                 "requested_style_identity": "default",
+                 "requested_conditioning": {"strategy": "text_only"}}
+        child_stage = {"status": "completed",
+                       "candidate_execution_ids": ["execution:1"]}
+        return asset, child, child_stage
+
+    # A. model.py candidate provenance: valid evidence + None sibling
+    def test_candidate_provenance_with_malformed_none_stage_sibling_rejects(self):
+        """A valid candidate stage + None sibling in execution_stages must reject."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [],
+            "settings": {"prompt": "brass relay", "seed": 7},
+            "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
+                         "path": "candidate.png", "sha256": "s", "stage": "concept_generation",
+                         "attempt": 1, "derived_from": []}]
+        }
+        asset, child, child_stage = self._make_base_fixture([valid_stage, None])
+        decision = prop_child_reuse_decision(
+            self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(
+            decision["reusable"],
+            f"expected rejected for corrupted stage, got: {decision['reasons']}")
+
+    # B. model.py candidate provenance: valid evidence + non-dict sibling
+    def test_candidate_provenance_with_malformed_string_stage_sibling_rejects(self):
+        """A valid candidate stage + string entry in execution_stages must reject."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [],
+            "settings": {"prompt": "brass relay", "seed": 7},
+            "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
+                         "path": "candidate.png", "sha256": "s", "stage": "concept_generation",
+                         "attempt": 1, "derived_from": []}]
+        }
+        asset, child, child_stage = self._make_base_fixture([valid_stage, "corrupted_entry"])
+        decision = prop_child_reuse_decision(
+            self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertFalse(
+            decision["reusable"],
+            f"expected rejected for corrupted stage, got: {decision['reasons']}")
+
+    # C. single valid stage must still succeed
+    def test_single_valid_stage_still_succeeds(self):
+        """An execution with exactly one valid, uniquely-matching stage must pass."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+        path = self.root / "candidate.png"
+        path.write_bytes(b"concept")
+        sha = file_sha256(path)
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [],
+            "settings": {"prompt": "brass relay", "seed": 7},
+            "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
+                         "path": "candidate.png", "sha256": sha,
+                         "stage": "concept_generation", "attempt": 1,
+                         "derived_from": []}]
+        }
+        asset, child, child_stage = self._make_base_fixture([valid_stage])
+        decision = prop_child_reuse_decision(
+            self.root, asset, child_stage, child,
+            {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
+        self.assertTrue(
+            decision["reusable"],
+            f"expected reusable, got: {decision['reasons']}")
+
+
+class Finding2AdoptStageDuplicateRejectTests(unittest.TestCase):
+    """Regression tests for Finding 2: _adopt_stage must reject duplicate
+    stage identity, not silently pick first/last."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def make_context(self, stages):
+        manifest = {"assets": {"test-key": {
+            "executions": [{"id": "exec-1", "status": "running"}]}}}
+        return {"manifest": manifest, "key": "test-key",
+                "execution_id": "exec-1", "root": self.root,
+                "pipeline": {"manifest": "manifest.json"},
+                "reuse_execution": {"id": "prior-exe", "stages": stages}}
+
+    # A. _adopt_stage: succeeded + failed duplicate same name/attempt -> no adoption
+    def test_adopt_stage_succeeded_failed_duplicate_rejects(self):
+        from slopforge.pipelines.model import _adopt_stage
+        succeeded = {"name": "concept_generation", "attempt": 1,
+                     "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        failed = {"name": "concept_generation", "attempt": 1,
+                  "status": "failed", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([succeeded, failed])
+        self.assertIsNone(_adopt_stage(ctx, "concept_generation", 1, [], {}))
+
+    # B. _adopt_stage: two succeeded duplicates same name/attempt -> no adoption
+    def test_adopt_stage_two_succeeded_duplicates_rejects(self):
+        from slopforge.pipelines.model import _adopt_stage
+        s1 = {"name": "material_assembly_export", "attempt": 1,
+              "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        s2 = {"name": "material_assembly_export", "attempt": 1,
+              "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([s1, s2])
+        self.assertIsNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
+
+    # C. _adopt_stage: exactly one valid -> adoption still succeeds
+    def test_adopt_stage_single_valid_succeeds(self):
+        from slopforge.pipelines.model import _adopt_stage
+        path = Path(self.root) / "mesh.glb"
+        path.write_bytes(b"mesh")
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        output = {"id": "output:1", "type": "mesh.glb", "path": "mesh.glb",
+                  "sha256": sha, "stage": "material_assembly_export",
+                  "attempt": 1, "derived_from": []}
+        valid = {"name": "material_assembly_export", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "settings": {},
+                 "outputs": [output]}
+        ctx = self.make_context([valid])
+        result = _adopt_stage(ctx, "material_assembly_export", 1, [], {})
+        self.assertIsNotNone(result)
+
+
+class Finding3DuplicateOutputIDRejectTests(unittest.TestCase):
+    """Regression tests for Finding 3: stage_reuse_decision must reject
+    duplicate output IDs, not silently reuse."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "test.glb").write_bytes(b"mesh")
+
+    # A. duplicate output ID with both valid hashes -> reject reuse
+    def test_stage_reuse_duplicate_output_id_different_path_rejects(self):
+        from slopforge.pipelines.reuse import stage_reuse_decision
+        sha1 = file_sha256(Path(self.root, "test.glb"))
+        # Two outputs with same ID, different paths
+        valid_file = Path(self.root) / "valid.glb"
+        valid_file.write_bytes(b"valid")
+        sha2 = hashlib.sha256(valid_file.read_bytes()).hexdigest()
+        outputs = [
+            {"id": "mesh:1", "type": "mesh.glb", "path": "test.glb",
+             "sha256": sha1, "stage": "material_generation",
+             "attempt": 1, "derived_from": []},
+            {"id": "mesh:1", "type": "mesh.glb", "path": "valid.glb",
+             "sha256": sha2, "stage": "material_generation",
+             "attempt": 1, "derived_from": []}
+        ]
+        stage = {"name": "material_generation", "attempt": 1,
+                 "status": "succeeded", "inputs": [],
+                 "outputs": outputs, "settings": {}}
+        decision = stage_reuse_decision(self.root, stage, inputs=[], settings={})
+        self.assertFalse(decision["reusable"],
+                        f"expected rejected, got reasons: {decision['reasons']}")
+
+    # B. duplicate output ID even when one matches exactly -> reject ambiguity
+    def test_stage_reuse_duplicate_output_id_one_exact_rejects(self):
+        from slopforge.pipelines.reuse import stage_reuse_decision
+        sha = file_sha256(Path(self.root, "test.glb"))
+        outputs = [
+            {"id": "mesh:1", "type": "mesh.glb", "path": "test.glb",
+             "sha256": sha, "stage": "material_generation",
+             "attempt": 1, "derived_from": []},
+            {"id": "mesh:1", "type": "mesh.glb", "path": "test.glb",
+             "sha256": sha, "stage": "material_generation",
+             "attempt": 1, "derived_from": []}
+        ]
+        stage = {"name": "material_generation", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": outputs,
+                 "settings": {}}
+        decision = stage_reuse_decision(self.root, stage, inputs=[], settings={})
+        self.assertFalse(decision["reusable"],
+                        f"expected rejected, got reasons: {decision['reasons']}")
+
+    # C. unique valid outputs -> reuse still succeeds
+    def test_stage_reuse_unique_outputs_succeeds(self):
+        sha = file_sha256(Path(self.root, "test.glb"))
+        outputs = [
+            {"id": "mesh:1", "type": "mesh.glb", "path": "test.glb",
+             "sha256": sha, "stage": "material_generation",
+             "attempt": 1, "derived_from": []}
+        ]
+        stage = {"name": "material_generation", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": outputs,
+                 "settings": {}}
+        decision = stage_reuse_decision(self.root, stage, inputs=[], settings={})
+        self.assertTrue(decision["reusable"])
+
+
+class Finding4ProcessedMeshMalformedProvenanceTests(unittest.TestCase):
+    """Regression tests for Finding 4: malformed processed-mesh provenance
+    members must fail closed rather than raise AttributeError/TypeError."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "source.glb").write_bytes(b"source mesh")
+        (self.root / "processed.blend").write_bytes(b"processed mesh")
+
+    # A. malformed execution member (None)
+    def test_malformed_none_execution_member_does_not_raise(self):
+        """A None member in asset['executions'] must not raise."""
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb",
+                  "sha256": file_sha256(Path(self.root, "source.glb")),
+                  "stage": "material_assembly_export", "attempt": 1,
+                  "derived_from": []}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": file_sha256(Path(self.root, "source.glb"))},
+                 "executions": [None, None]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, source, {})
+        self.assertFalse(decision["reusable"])
+
+    # B. valid execution with malformed stage member (None)
+    def test_malformed_none_stage_member_does_not_raise(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        path = Path(self.root) / "source.glb"
+        sha = file_sha256(path)
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb", "sha256": sha,
+                  "stage": "material_assembly_export", "attempt": 1,
+                  "derived_from": []}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": sha},
+                 "executions": [{"stages": [None, {"name": "mesh_preparation", "attempt": 1}]}]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, source, {})
+        self.assertFalse(decision["reusable"])
+
+    # C. valid stage with malformed output member (None)
+    def test_malformed_none_output_member_does_not_raise(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb",
+                  "sha256": file_sha256(source_path),
+                  "stage": "material_assembly_export", "attempt": 1,
+                  "derived_from": []}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": file_sha256(source_path)},
+                 "executions": [{"stages": [{"name": "mesh_preparation", "attempt": 1,
+                                            "status": "succeeded",
+                                            "inputs": [source],
+                                            "outputs": [None],
+                                            "settings": {}}]}]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, source, {"face_budget": 1000, "material_scale": 3.0})
+        self.assertFalse(decision["reusable"])
+
+    # D. mixed valid + malformed sibling
+    def test_mixed_valid_plus_malformed_sibling_does_not_raise(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb",
+                  "sha256": file_sha256(source_path),
+                  "stage": "material_assembly_export", "attempt": 1,
+                  "derived_from": []}
+        prepared = {"id": "prepared:1", "type": "mesh.prepared",
+                    "path": "processed.blend",
+                    "sha256": file_sha256(processed_path),
+                    "stage": "mesh_preparation", "attempt": 1,
+                    "derived_from": [{"artifact_id": source["id"],
+                                      "sha256": source["sha256"]}]}
+        processed = {"id": "processed:1", "type": "mesh.processed",
+                     "path": "processed.blend",
+                     "sha256": file_sha256(processed_path),
+                     "stage": "material_assembly_export", "attempt": 1,
+                     "derived_from": [{"artifact_id": prepared["id"],
+                                       "sha256": prepared["sha256"]}]}
+        valid_stage = {"name": "material_assembly_export", "attempt": 1,
+                       "status": "succeeded", "inputs": [prepared],
+                       "settings": {"face_budget": 1000, "material_scale": 3.0},
+                       "outputs": [processed]}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": file_sha256(source_path)},
+                 "executions": [{"stages": [valid_stage, None]}]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
+        self.assertFalse(decision["reusable"])
+
+    # E. fully valid unambiguous provenance - reuse still succeeds
+    def test_fully_valid_unambiguous_provenance_succeeds(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb",
+                  "sha256": file_sha256(source_path),
+                  "stage": "material_assembly_export", "attempt": 1,
+                  "derived_from": []}
+        prepared = {"id": "prepared:1", "type": "mesh.prepared",
+                    "path": "processed.blend",
+                    "sha256": file_sha256(processed_path),
+                    "stage": "mesh_preparation", "attempt": 1,
+                    "derived_from": [{"artifact_id": source["id"],
+                                      "sha256": source["sha256"]}]}
+        processed = {"id": "processed:1", "type": "mesh.processed",
+                     "path": "processed.blend",
+                     "sha256": file_sha256(processed_path),
+                     "stage": "material_assembly_export", "attempt": 1,
+                     "derived_from": [{"artifact_id": prepared["id"],
+                                       "sha256": prepared["sha256"]}]}
+        valid_stage = {"name": "material_assembly_export", "attempt": 1,
+                       "status": "succeeded", "inputs": [prepared],
+                       "settings": {"face_budget": 1000, "material_scale": 3.0},
+                       "outputs": [processed]}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": file_sha256(source_path)},
+                 "executions": [{"stages": [valid_stage]}]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
+        self.assertTrue(decision["reusable"])
+
+
 class PropApprovalReuseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
