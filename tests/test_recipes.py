@@ -1144,5 +1144,54 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
             error,
             "expected error for empty publication inputs bypassing lineage")
 
+    # E. malformed parent execution stages=None must not raise TypeError
+    def test_parent_exec_stages_none_invalidates_readiness(self):
+        """A parent execution with stages=None must be rejected silently.
+
+        This is a concrete malformed-provenance shape that can reach this
+        function. The validator must not raise TypeError; it must return a
+        conservative rejection.
+
+        Test starts from an otherwise valid publication lineage fixture and
+        changes ONLY the parent execution's stages field to None."""
+        from slopforge.recipes import _published_output_provenance
+        asset, source_exec, pub_exec, published_ref, stage_input = \
+            self.make_fixture()
+
+        # Make parent execution stages = None (the malformed shape)
+        parent_id = pub_exec["parent_execution_id"]
+        parent_exe = [e for e in asset["executions"]
+                      if e["id"] == parent_id][0]
+        parent_exe["stages"] = None
+
+        # Must not raise and must reject
+        error = _published_output_provenance(published_ref, asset["executions"])
+        self.assertIsNotNone(
+            error,
+            "expected error for malformed parent stages=None")
+
+    # F. adjacent: p_stage outputs=None must not raise TypeError
+    def test_parent_stage_outputs_none_invalidates_readiness(self):
+        """A stage in the parent execution with outputs=None must be rejected.
+
+        Same class of bug as test_parent_exec_stages_none: the .get(key, [])
+        pattern returns None when the key exists with value None, and iterating
+        over None raises TypeError. Must fail closed."""
+        from slopforge.recipes import _published_output_provenance
+        asset, source_exec, pub_exec, published_ref, stage_input = \
+            self.make_fixture()
+
+        # Put a valid stage with outputs=None inside parent execution
+        parent_id = pub_exec["parent_execution_id"]
+        parent_exe = next(e for e in asset["executions"]
+                          if e["id"] == parent_id)
+        parent_exe["stages"] = [{"id": "orphan", "outputs": None}]
+
+        # Must not raise and must reject
+        error = _published_output_provenance(published_ref, asset["executions"])
+        self.assertIsNotNone(
+            error,
+            "expected error for malformed parent stage outputs=None")
+
 if __name__ == "__main__":
     unittest.main()

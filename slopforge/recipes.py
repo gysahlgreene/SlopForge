@@ -275,12 +275,18 @@ def _published_output_provenance(reference, executions):
     # artifacts that belong to a different execution than the declared
     # parent, that is an inconsistent lineage.
     if parent_exec_id and derived_ids:
+        parent_stages = parent_exec.get("stages")
+        if not isinstance(parent_stages, list):
+            return ("published output derivation does not trace to the "
+                    "parent execution")
         parent_artifacts = set()
-        for p_stage in parent_exec.get("stages", []):
-            for p_artifact in p_stage.get("outputs", []):
-                if isinstance(p_artifact, dict):
-                    parent_artifacts.add((
-                        p_artifact.get("id", ""), p_artifact.get("sha256", "")))
+        for p_stage in parent_stages:
+            p_stage_outputs = p_stage.get("outputs")
+            if isinstance(p_stage_outputs, list):
+                for p_artifact in p_stage_outputs:
+                    if isinstance(p_artifact, dict):
+                        parent_artifacts.add((
+                            p_artifact.get("id", ""), p_artifact.get("sha256", "")))
         if not parent_artifacts:
             return ("published output derivation does not trace to the "
                     "parent execution's outputs")
