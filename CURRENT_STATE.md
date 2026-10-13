@@ -14,10 +14,10 @@ Package 1 (execution lineage, stage state, and provenance foundation) is merged
 in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); its tracking issue
 [#30](https://github.com/gysahlgreene/SlopForge/issues/30) is closed. Package 2
 (safe resume, invalidation, and evidence-backed reuse) is implemented and verified.
-Its [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32) has passing CI
-checks but is still open because the repository ruleset requires a formal PR
-approval; [issue #27](https://github.com/gysahlgreene/SlopForge/issues/27) remains
-open until merge. GitHub PR state is the integration source of truth.
+The repository ruleset requires formal PR approval; its current integration state
+is recorded in [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32), and
+[issue #27](https://github.com/gysahlgreene/SlopForge/issues/27) tracks completion.
+GitHub PR state is the integration source of truth.
 
 Package 3 (failure classification and bounded retries) is planned and has not
 started. The old draft is reference material; Codex/Luna owns the final plan.
