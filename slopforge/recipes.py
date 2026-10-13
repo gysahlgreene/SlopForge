@@ -225,12 +225,67 @@ def _published_output_provenance(reference, executions):
     if len(output_matches) == 0:
         return "published reference output is missing in recorded stage outputs"
     output = output_matches[0]
-    if (not isinstance(output.get("type"), str) or output.get("type") != reference.get("type")
-            or output.get("path") != reference.get("path")
-            or output.get("sha256") != reference.get("sha256")
-            or output.get("stage") != reference.get("stage")
-            or type(output.get("attempt")) is not int or output.get("attempt") != reference.get("attempt")):
-        return "published reference output identity differs from recorded stage output"
+    # Validate that output's recorded attempt matches the containing stage
+    if type(output.get("attempt")) is not int or output.get("attempt") != publication.get("attempt"):
+        return "published output attempt disagrees with containing stage"
+    # Require the output's type to match the containing stage
+    if not isinstance(output.get("type"), str) or not output.get("type"):
+        return "published output type is invalid"
+    if output.get("type") != reference.get("type"):
+        return "published reference type differs from recorded stage output"
+    if output.get("path") != reference.get("path"):
+        return "published reference path differs from recorded stage output"
+    if output.get("sha256") != reference.get("sha256"):
+        return "published reference sha256 differs from recorded stage output"
+    if output.get("stage") != reference.get("stage"):
+        return "published reference stage differs from recorded stage output"
+
+    # Validate lineage: publication execution's parent must reference a
+    # valid execution, and the final_publication stage inputs must be
+    # consistent with the published output's derived_from.
+    parent_exec_id = execution.get("parent_execution_id")
+    if parent_exec_id is None:
+        return "published execution has no parent_execution_id; lineage is incomplete"
+    parent_matches = [
+        e for e in executions if isinstance(e, dict) and e.get("id") == parent_exec_id]
+    if len(parent_matches) == 0:
+        return f"published execution parent {parent_exec_id!r} is absent from executions"
+    if len(parent_matches) > 1:
+        return f"published execution parent {parent_exec_id!r} is ambiguous"
+    parent_exec = parent_matches[0]
+
+    # Validate that the stage's inputs are consistent with the output's derivation.
+    # The published output's derived_from must trace to the stage's recorded inputs.
+    stage_inputs = publication.get("inputs", [])
+    stage_input_ids = {(item.get("id"), item.get("sha256"))
+                       for item in stage_inputs if isinstance(item, dict)}
+    derived = output.get("derived_from", [])
+    if not isinstance(derived, list) or not derived:
+        return "published output has no recorded derivation source"
+    derived_ids = {
+        (item.get("artifact_id"), item.get("sha256"))
+        for item in derived if isinstance(item, dict)}
+    if stage_input_ids and not derived_ids.issubset(stage_input_ids):
+        return "published output derivation does not match recorded stage inputs"
+
+    # Validate that the parent execution contains the production source
+    # that the derived_from traces to. If derived_from IDs match candidate
+    # artifacts that belong to a different execution than the declared
+    # parent, that is an inconsistent lineage.
+    if parent_exec_id and derived_ids:
+        parent_artifacts = set()
+        for p_stage in parent_exec.get("stages", []):
+            for p_artifact in p_stage.get("outputs", []):
+                if isinstance(p_artifact, dict):
+                    parent_artifacts.add((
+                        p_artifact.get("id", ""), p_artifact.get("sha256", "")))
+        if not parent_artifacts:
+            return ("published output derivation does not trace to the "
+                    "parent execution's outputs")
+        if not derived_ids.issubset(parent_artifacts):
+            return ("published output derivation does not trace to the "
+                    "parent execution's outputs")
+
     return None
 
 
