@@ -257,6 +257,8 @@ def _published_output_provenance(reference, executions):
     # Validate that the stage's inputs are consistent with the output's derivation.
     # The published output's derived_from must trace to the stage's recorded inputs.
     stage_inputs = publication.get("inputs", [])
+    if not isinstance(stage_inputs, list) or len(stage_inputs) == 0:
+        return "final_publication stage has no recorded inputs; lineage is incomplete"
     stage_input_ids = {(item.get("id"), item.get("sha256"))
                        for item in stage_inputs if isinstance(item, dict)}
     derived = output.get("derived_from", [])
@@ -265,7 +267,7 @@ def _published_output_provenance(reference, executions):
     derived_ids = {
         (item.get("artifact_id"), item.get("sha256"))
         for item in derived if isinstance(item, dict)}
-    if stage_input_ids and not derived_ids.issubset(stage_input_ids):
+    if not derived_ids.issubset(stage_input_ids):
         return "published output derivation does not match recorded stage inputs"
 
     # Validate that the parent execution contains the production source

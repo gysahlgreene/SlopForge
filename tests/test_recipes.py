@@ -975,13 +975,13 @@ class Finding2PublicationLineageTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"approved output")
         real_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        
+
         stage_input = {
             "id": "candidate:1", "type": "surface.swatch",
             "path": "Assets/src.png", "sha256": "src_sha256",
             "stage": "concept_generation", "attempt": 1, "derived_from": []
         }
-        
+
         candidate_output = {
             "id": stage_input["id"], "type": stage_input["type"],
             "path": stage_input["path"],
@@ -994,7 +994,7 @@ class Finding2PublicationLineageTests(unittest.TestCase):
         source_exec = {"id": "source-exec:1", "status": "succeeded",
                        "parent_execution_id": None, "identity_inputs": {},
                        "stages": [candidate_stage]}
-        
+
         # pub-exec-1 is a clean ID (no :published: in it)
         pub_exec = {"id": "pub-exec-1", "status": "succeeded",
                     "parent_execution_id": parent_id or "source-exec:1",
@@ -1002,7 +1002,7 @@ class Finding2PublicationLineageTests(unittest.TestCase):
                     "stages": [{"name": "final_publication", "attempt": 1,
                                 "status": "succeeded", "inputs": [stage_input],
                                 "settings": {}, "outputs": []}]}
-        
+
         published_ref = {
             "id": "pub-exec-1:published:model",
             "type": "model.fbx",
@@ -1012,9 +1012,9 @@ class Finding2PublicationLineageTests(unittest.TestCase):
             "derived_from": [{"artifact_id": candidate_output["id"],
                               "sha256": candidate_output["sha256"]}]
         }
-        
+
         pub_exec["stages"][0]["outputs"] = [published_ref]
-        
+
         asset = {
             "status": "ready",
             "artifacts": {"output.model": {
@@ -1040,11 +1040,11 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, _, _ = self.make_fixture(
             parent_id="unrelated-exec:999")
-        
+
         # Also remove the real source so the parent is unresolvable
         asset["executions"] = [e for e in asset["executions"]
                                if e["id"] != "source-exec:1"]
-        
+
         error = _ready_output_error(self.root, asset)
         self.assertIsNotNone(error)
 
@@ -1056,11 +1056,11 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _published_output_provenance
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         # Break the lineage: derived_from no longer matches stage inputs
         published_ref["derived_from"] = [
             {"artifact_id": "ghost-input", "sha256": "fake_sha"}]
-        
+
         error = _published_output_provenance(published_ref, asset["executions"])
         self.assertIsNotNone(error)
 
@@ -1072,7 +1072,7 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _published_output_provenance, _ready_output_error
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         # Create a separate source and make everything point to different things
         other_exe = {"id": "other-source:1", "status": "succeeded",
                      "parent_execution_id": None, "identity_inputs": {},
@@ -1080,13 +1080,13 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         other_input = {"id": "other:cand:1", "type": "surface.swatch",
                        "path": "Assets/other.png", "sha256": "other_sha",
                        "stage": "concept_generation", "attempt": 1, "derived_from": []}
-        
+
         # Make parent point to another source
         pub_exec["parent_execution_id"] = other_exe["id"]
         # While stage inputs + derived_from point to source_exec
         # This is the inconsistency: parent and derivation disagree
         asset["executions"].append(other_exe)
-        
+
         error = _published_output_provenance(published_ref, asset["executions"])
         self.assertIsNotNone(error,
             "expected lineage inconsistency error")
@@ -1097,12 +1097,12 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         missing source execution, readiness must be rejected."""
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, _, _ = self.make_fixture()
-        
+
         # Remove source from executions and reference a non-existent parent
         pub_exec["parent_execution_id"] = "absent-exec"
         asset["executions"] = [e for e in asset["executions"]
                                if e["id"] != "source-exec:1"]
-        
+
         error = _ready_output_error(self.root, asset)
         self.assertIsNotNone(error)
 
@@ -1112,11 +1112,37 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
         from slopforge.recipes import _ready_output_error
         asset, source_exec, pub_exec, published_ref, stage_input = \
             self.make_fixture()
-        
+
         error = _ready_output_error(self.root, asset)
         # Valid lineage: error should be None and status stays "ready"
         self.assertIsNone(error)
         self.assertEqual(asset["status"], "ready")
+
+    # D. empty final_publication.inputs must not bypass lineage validation
+    def test_empty_publication_inputs_invalidates_readiness(self):
+        """An empty final_publication.inputs list must invalidate readiness.
+
+        The production code in approve_texture records candidate artifact
+        references as final_publication stage inputs. If those inputs are
+        removed (empty list), the lineage is broken even if outputs and
+        derived_from otherwise look valid.
+
+        This test starts from an otherwise valid publication fixture
+        and removes the stage inputs, keeping the publication output
+        and derived_from intact. It should reject because required
+        publication input lineage is missing."""
+        from slopforge.recipes import _published_output_provenance
+        asset, source_exec, pub_exec, published_ref, stage_input = \
+            self.make_fixture()
+
+        # Remove stage inputs — leave everything else identical
+        pub_stage = pub_exec["stages"][0]
+        pub_stage["inputs"] = []
+
+        error = _published_output_provenance(published_ref, asset["executions"])
+        self.assertIsNotNone(
+            error,
+            "expected error for empty publication inputs bypassing lineage")
 
 if __name__ == "__main__":
     unittest.main()

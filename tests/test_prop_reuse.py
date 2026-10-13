@@ -232,7 +232,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
 
     def make_valid_chain(self):
         """Create a valid processed-mesh provenance chain.
-        
+
         source (mesh.glb) -> prepared (mesh.prepared) -> processed (mesh.processed)
         """
         source_path = self.root / "source.glb"
@@ -269,7 +269,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
     # A. succeeded processed-mesh stage + failed duplicate with same name/attempt -\u003e reject reuse
     def test_succeeded_and_failed_duplicate_same_name_attempt_rejects_reuse(self):
         """A failed duplicate with same stage name and attempt should not create ambiguity.
-        
+
         The invariant: two stages with same name+attempt across executions means
         ambiguous provenance - we reject rather than guess."""
         from slopforge.pipelines.model import processed_mesh_reuse_decision
@@ -324,7 +324,7 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
     # D. output records stage/attempt values that disagree with containing stage -\u003e reject reuse
     def test_output_stage_attempt_disagree_with_containing_stage_rejects_reuse(self):
         """Output artifact whose stage or attempt does not match its containing stage is invalid.
-        
+
         The invariant: the output's recorded attempt must agree with the containing
         stage's attempt. An output claiming a different attempt is not reliably
         attributable to this stage."""
@@ -362,6 +362,38 @@ class Finding1ProcessedMeshProvenanceTests(unittest.TestCase):
         decision = processed_mesh_reuse_decision(
             self.root, asset, prepared, settings)
         self.assertReusable(decision)
+
+    # F. output recorded stage disagrees with containing stage -\u003e reject reuse
+    def test_output_stage_mismatch_with_containing_stage_rejects_reuse(self):
+        """Output artifact whose "stage" field disagrees with its containing
+        stage's name is not reliably attributable to this stage.
+
+        The invariant: after uniquely resolving the processed-mesh stage and
+        output, the output's recorded stage must equal containing_stage.name
+        and output.attempt must equal containing_stage.attempt.
+        Both are required; any mismatch rejects conservatively."""
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source, prepared, processed, _ = self.make_valid_chain()
+        settings = self._settings()
+        # The output claims the correct type/path/hash/attempt but wrong stage
+        bad_stage = "mesh_preparation"  # wrong: should be "material_assembly_export"
+        bad_output = {"id": "processed:1", "type": "mesh.processed",
+                      "path": "processed.blend",
+                      "sha256": file_sha256(self.root / "processed.blend"),
+                      "stage": bad_stage, "attempt": 1,
+                      "derived_from": [{"artifact_id": prepared["id"],
+                                        "sha256": prepared["sha256"]}]}
+        stage = {"name": "material_assembly_export", "attempt": 1,
+                 "status": "succeeded", "inputs": [prepared],
+                 "settings": settings, "outputs": [bad_output]}
+        asset = {"source": {"processed_mesh": "processed.blend"},
+                 "executions": [{"stages": [stage]}]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, prepared, settings)
+        self.assertNotReusable(decision)
+        self.assertTrue(
+            any("stage" in r.lower() for r in decision["reasons"]),
+            f"expected stage-related reason, got: {decision['reasons']}")
 
 
 class PropApprovalReuseTests(unittest.TestCase):

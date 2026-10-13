@@ -237,6 +237,13 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                 return {"reusable": False, 
                         "reasons": [f"output attempt {prepared.get('attempt')} does not match "
                                      f"stage attempt {stage.get('attempt')} at {processed_path}"]}
+            # Validate that the output's recorded stage matches the containing stage name.
+            # An output claiming a different stage is not reliably attributable to this stage.
+            if (not isinstance(prepared.get("stage"), str) or
+                    prepared.get("stage") != stage.get("name")):
+                return {"reusable": False,
+                        "reasons": [f"output stage {prepared.get('stage')!r} does not match "
+                                     f"containing stage {stage.get('name')!r}"]}
             derived = prepared.get("derived_from", [])
             input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs
                                 if isinstance(item, dict)}
