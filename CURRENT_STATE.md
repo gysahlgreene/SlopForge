@@ -129,25 +129,27 @@ appearance, qualification, readiness, or Unity runtime claim is established.
 
 ### Remaining Package 2 provenance review
 
-On 2026-10-13, focused regressions confirmed that malformed authoritative members
-invalidate publication readiness and processed-mesh reuse. The Package 2 focused
-suite passed: 155 tests and 11 subtests. `make verify PYTHON=.venv/bin/python` passed
-on an unrestricted rerun; the sandboxed run had unrelated Blender 5.1 subprocess
-segfaults and a loopback bind permission failure. Six opt-in checks remained skipped.
-This verifies offline structural decisions only; it does not establish inference
-quality, appearance, readiness qualification, or Unity runtime behavior.
+On 2026-10-13, the remaining Package 2 provenance findings were fixed. The prop child
+reuse decision validates every execution record's `id`, `status`, `identity_inputs`,
+and `stages` fields before candidate execution matching; valid unrelated records do
+not affect identity selection, and duplicate candidate IDs remain ambiguous. The
+swatch material producer now writes a basecolor artifact, and reuse requires the full
+producer map set: `texture.basecolor`, `texture.normal`, `texture.roughness`,
+`texture.metallic`, `texture.metallic_gloss`, and `texture.emission`.
 
-The earlier follow-up validated selected publication and processed-mesh provenance
-collections; it did not establish that every execution and stage sibling was valid.
-Reuse now validates all execution IDs before resolving candidate identity, rejects
-malformed execution stage collections, validates every stage record in the selected
-execution, and validates every stage record in an adoption collection before matching.
-Output contracts are explicit for reusable stages whose producers and consumers
-require them: conditioning preparation, mesh workflow execution, material
-generation, material map acquisition, and material assembly export. Material
-generation accepts its swatch plus metadata route or the base color, normal,
-roughness, and metallic outputs recorded by a textured mesh worker. Other recorded
-worker outputs remain optional where the producer/consumer path permits absence.
+Earlier Package 2 provenance regressions covered malformed publication and
+processed-mesh records, selected execution stage records, and adoption collection
+validation. These checks and their history remain part of the offline coverage.
+
+The Package 2 focused suite passed: 220 tests and 14 subtests across
+`test_prop_reuse.py`, `test_prop_lineage.py`, `test_mesh_pbr.py`, `test_recipes.py`,
+and `test_manifest.py`. Unrestricted `make verify PYTHON=.venv/bin/python` passed:
+435 tests, 61 subtests, 6 opt-in skips, and 3 existing Pillow deprecation warnings;
+compile, documentation, metadata, and whitespace checks passed. The restricted run
+hit Blender 5.1 subprocess SIGSEGVs and loopback bind permission denial; the
+unrestricted rerun passed. This verifies offline structural decisions only; it does
+not establish inference quality, appearance, readiness qualification, or Unity
+runtime behavior.
 
 Recipe artifact synchronization validates each artifact record before indexing;
 malformed records invalidate current readiness before synchronization. Resume removes

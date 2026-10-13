@@ -13,7 +13,7 @@ _REQUIRED_OUTPUT_TYPES = {
     "conditioning_preparation": {"image.cutout", "image.3d_input"},
     "mesh_workflow_execution": {"mesh.glb"},
     "material_map_acquisition": {
-        "texture.normal", "texture.roughness", "texture.metallic",
+        "texture.basecolor", "texture.normal", "texture.roughness", "texture.metallic",
         "texture.metallic_gloss", "texture.emission",
     },
     "material_assembly_export": {

@@ -757,6 +757,63 @@ class AssemblyStageOutputContractTests(unittest.TestCase):
         self.assertTrue(decision["reusable"], decision["reasons"])
 
 
+class MaterialMapStageOutputContractTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.input = {"id": "surface:1", "sha256": "a" * 64}
+        self.required_types = {
+            "texture.basecolor", "texture.normal", "texture.roughness",
+            "texture.metallic", "texture.metallic_gloss", "texture.emission",
+        }
+        self.outputs = []
+        for index, kind in enumerate(sorted(self.required_types)):
+            path = f"map-{index}.bin"
+            (self.root / path).write_bytes(kind.encode())
+            self.outputs.append({"id": f"map:{index}", "type": kind, "path": path,
+                                 "sha256": file_sha256(self.root / path),
+                                 "stage": "material_map_acquisition", "attempt": 1,
+                                 "derived_from": [{"artifact_id": "surface:1",
+                                                   "sha256": self.input["sha256"]}]})
+        self.stage = {"name": "material_map_acquisition", "attempt": 1, "status": "succeeded",
+                      "inputs": [self.input], "outputs": self.outputs, "settings": {}}
+
+    def test_material_map_stage_with_complete_producer_outputs_is_reusable(self):
+        decision = stage_reuse_decision(self.root, self.stage, inputs=[self.input], settings={})
+
+        self.assertTrue(decision["reusable"], decision["reasons"])
+
+    def test_material_map_stage_missing_only_basecolor_is_not_reusable(self):
+        outputs = [item for item in self.outputs if item["type"] != "texture.basecolor"]
+
+        decision = stage_reuse_decision(self.root, {**self.stage, "outputs": outputs},
+                                        inputs=[self.input], settings={})
+
+        self.assertFalse(decision["reusable"])
+        self.assertIn("texture.basecolor", " ".join(decision["reasons"]))
+
+    def test_material_map_stage_with_empty_outputs_is_not_reusable(self):
+        decision = stage_reuse_decision(self.root, {**self.stage, "outputs": []},
+                                        inputs=[self.input], settings={})
+
+        self.assertFalse(decision["reusable"])
+
+    def test_material_map_stage_keeps_artifact_integrity_and_lineage_validation(self):
+        output = self.outputs[0]
+        (self.root / output["path"]).write_bytes(b"changed")
+        invalid_hash = stage_reuse_decision(self.root, self.stage,
+                                            inputs=[self.input], settings={})
+        self.assertIn("hash mismatch", " ".join(invalid_hash["reasons"]))
+
+        (self.root / output["path"]).write_bytes(output["type"].encode())
+        bad_lineage = [dict(item) for item in self.outputs]
+        bad_lineage[0] = {**bad_lineage[0], "derived_from": []}
+        invalid_lineage = stage_reuse_decision(
+            self.root, {**self.stage, "outputs": bad_lineage}, inputs=[self.input], settings={})
+        self.assertIn("lineage mismatch", " ".join(invalid_lineage["reasons"]))
+
+
 class Finding3DuplicateOutputIDRejectTests(unittest.TestCase):
     """Regression tests for Finding 3: stage_reuse_decision must reject
     duplicate output IDs, not silently reuse."""
@@ -1146,6 +1203,29 @@ avoid: [environment]
             self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child, config)
         return candidate, execution, decide
 
+    def test_recipe_candidate_reuse_rejects_execution_sibling_missing_required_fields(self):
+        _, _, decide = self._recipe_candidate_reuse_case()
+        self.asset["executions"].append({"id": "broken", "stages": []})
+
+        self.assertFalse(decide()["reusable"])
+
+    def test_recipe_candidate_reuse_rejects_execution_sibling_with_bad_required_type(self):
+        _, _, decide = self._recipe_candidate_reuse_case()
+        self.asset["executions"].append({"id": "broken", "status": "failed",
+                                         "identity_inputs": [], "stages": []})
+
+        self.assertFalse(decide()["reusable"])
+
+    def test_recipe_candidate_reuse_ignores_valid_unrelated_execution_identity(self):
+        _, _, decide = self._recipe_candidate_reuse_case()
+        self.asset["executions"].append({"id": "other", "status": "failed",
+                                         "identity_inputs": {}, "stages": []})
+
+        self.assertTrue(decide()["reusable"])
+
+    def test_recipe_candidate_reuse_accepts_exact_candidate_with_valid_records(self):
+        self.assertTrue(self._recipe_candidate_reuse_case()[2]()["reusable"])
+
     def test_recipe_candidate_path_must_match_recorded_stage_output(self):
         candidate, _, decide = self._recipe_candidate_reuse_case()
         unrelated = self.root / "unrelated.png"
@@ -1299,6 +1379,16 @@ avoid: [environment]
         self._approve(resume=True)
         self.assertEqual(self.calls, before)
         self.assertTrue(self.asset["executions"][-1]["reuse_decisions"])
+
+    def test_material_map_acquisition_records_all_six_producer_outputs(self):
+        self._approve()
+        stage = next(stage for stage in self.asset["executions"][-1]["stages"]
+                     if stage["name"] == "material_map_acquisition")
+
+        self.assertEqual({item["type"] for item in stage["outputs"]}, {
+            "texture.basecolor", "texture.normal", "texture.roughness",
+            "texture.metallic", "texture.metallic_gloss", "texture.emission",
+        })
 
     def test_approve_cli_exposes_explicit_resume_flag(self):
         from slopforge.cli import parse_args
@@ -1577,8 +1667,8 @@ avoid: [environment]
                                              child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
         self.assertFalse(decision["reusable"])
 
-    def test_prop_child_reuse_checks_duplicate_identity_before_inspecting_execution(self):
-        """Malformed duplicate details cannot affect ambiguous identity rejection."""
+    def test_prop_child_reuse_rejects_malformed_record_before_duplicate_matching(self):
+        """All execution records must be valid before matching duplicate IDs."""
         from slopforge.pipelines.model import prop_child_reuse_decision
 
         path = self.root / "concept.png"
@@ -1617,7 +1707,7 @@ avoid: [environment]
 
         self.assertEqual(decisions[0], decisions[1])
         self.assertEqual(decisions[0], {
-            "reusable": False, "reasons": ["candidate execution identity is ambiguous"]})
+            "reusable": False, "reasons": ["prop child execution records are missing or malformed"]})
 
     def test_prop_child_reuse_rejects_two_seemingly_valid_executions_same_id(self):
         """Two valid executions with the same ID must be rejected."""

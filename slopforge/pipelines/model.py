@@ -116,7 +116,11 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     if not isinstance(candidates, list) or not all(isinstance(item, dict) for item in candidates):
         return {"reusable": False, "reasons": ["prop child candidate records are missing or malformed"]}
     if (not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions) or
-            any(not isinstance(item.get("id"), str) or not item["id"] for item in executions)):
+            any(not isinstance(item.get("id"), str) or not item["id"] or
+                not isinstance(item.get("status"), str) or
+                item["status"] not in {"running", "succeeded", "failed"} or
+                not isinstance(item.get("identity_inputs"), dict) or
+                not isinstance(item.get("stages"), list) for item in executions)):
         return {"reusable": False, "reasons": ["prop child execution records are missing or malformed"]}
     execution_ids = child_stage.get("candidate_execution_ids")
     if not isinstance(execution_ids, list) or not execution_ids:
@@ -132,11 +136,6 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     if not exec_matches:
         return {"reusable": False, "reasons": ["candidate execution is missing"]}
     execution = exec_matches[0]
-    if (any(not isinstance(item.get("stages"), list) for item in executions) or
-            not isinstance(execution.get("identity_inputs"), dict) or
-            not isinstance(execution.get("status"), str) or
-            execution["status"] not in {"running", "succeeded", "failed"}):
-        return {"reusable": False, "reasons": ["prop child execution identity or stages are malformed"]}
     candidate = selected_candidates[0]
     identity = (execution or {}).get("identity_inputs")
     if not isinstance(identity, dict):
@@ -674,6 +673,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                             "--prompt", prompt,
                             "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
                             "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
+            shutil.copy2(paths["surface"], paths["basecolor"])
             make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         if map_started:
             map_refs = _lineage_finish(lineage, "material_map_acquisition", number,
