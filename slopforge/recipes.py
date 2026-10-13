@@ -192,7 +192,11 @@ def _published_output_provenance(reference, executions):
     if delim not in ref_id:
         return "published reference identity is malformed"
     exec_id = prefix
-    matches = [e for e in executions if isinstance(e, dict) and e.get("id") == exec_id]
+    if not isinstance(executions, list):
+        return "published reference executions are missing"
+    if not all(isinstance(e, dict) for e in executions):
+        return "published reference execution list contains malformed members"
+    matches = [e for e in executions if e.get("id") == exec_id]
     if len(matches) == 0:
         return f"published reference execution {exec_id!r} is absent"
     if len(matches) > 1:
@@ -203,11 +207,10 @@ def _published_output_provenance(reference, executions):
     stages = execution.get("stages")
     if not isinstance(stages, list):
         return "published reference execution stages are missing"
-    matches = [
-        s for s in stages
-        if isinstance(s, dict) and s.get("name") == "final_publication"
-        and type(s.get("attempt")) is int and s.get("attempt") == 1
-    ]
+    if not all(isinstance(s, dict) for s in stages):
+        return "published reference execution stages contain malformed members"
+    matches = [s for s in stages if s.get("name") == "final_publication"
+               and type(s.get("attempt")) is int and s.get("attempt") == 1]
     if len(matches) != 1:
         return "published reference final_publication stage is missing or ambiguous"
     publication = matches[0]
@@ -216,10 +219,9 @@ def _published_output_provenance(reference, executions):
     stage_outputs = publication.get("outputs")
     if not isinstance(stage_outputs, list):
         return "published reference stage outputs are malformed"
-    output_matches = [
-        o for o in stage_outputs
-        if isinstance(o, dict) and o.get("id") == reference.get("id")
-    ]
+    if not all(isinstance(o, dict) for o in stage_outputs):
+        return "published reference stage outputs contain malformed members"
+    output_matches = [o for o in stage_outputs if o.get("id") == reference.get("id")]
     if len(output_matches) > 1:
         return "published reference output has duplicate artifact IDs in stage records"
     if len(output_matches) == 0:
