@@ -207,11 +207,12 @@ def _published_output_provenance(reference, executions):
         s for s in stages
         if isinstance(s, dict) and s.get("name") == "final_publication"
         and type(s.get("attempt")) is int and s.get("attempt") == 1
-        and s.get("status") == "succeeded"
     ]
     if len(matches) != 1:
         return "published reference final_publication stage is missing or ambiguous"
     publication = matches[0]
+    if publication.get("status") != "succeeded":
+        return "published reference final_publication stage is not succeeded"
     stage_outputs = publication.get("outputs")
     if not isinstance(stage_outputs, list):
         return "published reference stage outputs are malformed"

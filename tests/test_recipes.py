@@ -772,5 +772,112 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(stage["status"], "approved")
 
 
+
+    def test_duplicate_succeeded_and_failed_publication_stage_is_rejected(self):
+        """When final_publication attempt 1 exists as both succeeded and failed,
+        the duplicate must be rejected regardless of which record matches."""
+        children = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        self.definition["children"] = children
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/dup.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl_dup")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        published_ref = {"id": "dup-exec:published:model", "type": "model.fbx",
+                         "path": path, "sha256": file_sha256(published),
+                         "stage": "final_publication", "attempt": 1,
+                         "derived_from": []}
+        asset["published_artifacts"] = [published_ref]
+        # Duplicate stage records: one succeeded, one failed
+        asset["executions"] = [{"id": "dup-exec", "status": "succeeded",
+            "stages": [
+                {"name": "final_publication", "attempt": 1,
+                 "status": "succeeded",
+                 "outputs": [published_ref], "inputs": [], "settings": {}},
+                {"name": "final_publication", "attempt": 1,
+                 "status": "failed",
+                 "outputs": [], "inputs": [], "settings": {}},
+            ]}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}),                 patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl_dup")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_wrong_output_identity_in_recorded_stage_is_rejected(self):
+        """A reference with correct execution/stage but wrong artifact
+        output identity must reject with a reason distinct from 'execution/stage missing'."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/wrong.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl_wrong")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+        # Real succeeded final_publication record with a real publication output
+        stage_output = {"id": "execution:published:correct", "type": "model.fbx",
+                        "path": path, "sha256": file_sha256(published),
+                        "stage": "final_publication", "attempt": 1,
+                        "derived_from": []}
+        # Published reference points to the correct execution/stage but
+        # the artifact ID suffix is wrong — no matching output record
+        asset["published_artifacts"] = [{"id": "execution:published:model",
+            "type": "model.fbx", "path": path, "sha256": file_sha256(published),
+            "stage": "final_publication", "attempt": 1, "derived_from": []}]
+        asset["executions"] = [{"id": "execution", "status": "succeeded",
+            "stages": [{"name": "final_publication", "attempt": 1,
+                        "status": "succeeded",
+                        "outputs": [stage_output],
+                        "inputs": [], "settings": {}}]}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}),                 patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl_wrong")
+
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
 if __name__ == "__main__":
     unittest.main()
