@@ -55,8 +55,20 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
         reasons.append("semantic mismatch: settings changed")
     recorded_inputs = stage.get("inputs") if isinstance(stage.get("inputs"), list) else []
     outputs = stage.get("outputs")
-    if not outputs:
+    if not isinstance(outputs, list):
         reasons.append("missing output artifacts")
+        return {"reusable": not reasons, "reasons": reasons}
+    # Validate member shapes and check for duplicate output IDs
+    output_ids = set()
+    for output in outputs or []:
+        if not isinstance(output, dict):
+            reasons.append("missing output artifacts")
+            break
+        oid = output.get("id", "")
+        if oid in output_ids:
+            reasons.append("semantic mismatch: duplicate output identity")
+            break
+        output_ids.add(oid)
     for output in outputs or []:
         attempt = output.get("attempt") if isinstance(output, dict) else None
         if (not isinstance(output, dict) or not isinstance(output.get("id"), str) or not output["id"].strip()
