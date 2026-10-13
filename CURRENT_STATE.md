@@ -8,6 +8,25 @@ Follow the [product contract and document precedence](docs/PRODUCT_CONTRACT.md),
 M0 core reliability is active; props are the next category gate. Historical
 humanoid work is bounded evidence, not the next production milestone.
 
+## M0 package tracking
+
+Package 1 (execution lineage, stage state, and provenance foundation) is merged
+in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); its tracking issue
+[#30](https://github.com/gysahlgreene/SlopForge/issues/30) is closed. Package 2
+(safe resume, invalidation, and evidence-backed reuse) is implemented and verified.
+Its [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32) has passing CI
+checks but is still open because the repository ruleset requires a formal PR
+approval; [issue #27](https://github.com/gysahlgreene/SlopForge/issues/27) remains
+open until merge. GitHub PR state is the integration source of truth.
+
+Package 3 (failure classification and bounded retries) is planned and has not
+started. The old draft is reference material; Codex/Luna owns the final plan.
+The next implementation prerequisite is the Pi/Qwen provenance guardrail work
+tracked in [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29). The
+non-blocking malformed/ambiguous `earliest_stale_stage` follow-up is
+[issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); the helper has
+no production callers. M0 is not complete.
+
 Contracts describe intended behavior. The inventory below separates recorded
 historical evidence, current implementation inspection, and checks performed during
 this documentation task. Code existence does not establish production readiness.
