@@ -17,6 +17,24 @@ code inventories. This ordering replaces the earlier humanoid-preview-first sequ
 
 ## Active core exit evidence
 
+### M0 package sequence
+
+These implementation packages build the reliability evidence needed by M0; none
+by itself completes the milestone. Operational issue tracking is under the
+[M0 Core reliability epic](https://github.com/gysahlgreene/SlopForge/issues/26)
+and [M0 milestone](https://github.com/gysahlgreene/SlopForge/milestone/1).
+
+| Package | Objective and dependency | Status |
+| --- | --- | --- |
+| Package 1 — execution lineage, stage state, and provenance foundation | Persist prop execution identity, artifact lineage, and stage outcomes; prerequisite for Package 2 | Merged in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); [issue #30](https://github.com/gysahlgreene/SlopForge/issues/30) is closed |
+| Package 2 — safe resume, invalidation, and evidence-backed reuse | Reuse only valid lineage-backed artifacts and restart at the earliest stale stage; depends on Package 1 | Implemented and verified; [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32) is the integration record and [issue #27](https://github.com/gysahlgreene/SlopForge/issues/27) tracks completion |
+| Before Package 3 — Pi/Qwen provenance guardrails | Add adversarial provenance checks and implementation guidance before Package 3 starts | Planned prerequisite; [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29) |
+| Package 3 — failure classification and bounded retries | Classify stage failures and retry only explicitly stochastic candidate failures; depends on Packages 1–2 and the guardrail tooling | Planned, not started; its existing draft is reference material until Codex/Luna adopts a final plan; [issue #31](https://github.com/gysahlgreene/SlopForge/issues/31) |
+
+The known non-blocking `earliest_stale_stage` malformed/ambiguous-record follow-up
+is [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); that helper has
+no production callers. M0 remains active until all core exit evidence below is met.
+
 Before closing M0, retain a compact evidence record demonstrating:
 
 - A documented clean starting state: project configuration, dependencies, workflow

@@ -238,6 +238,20 @@ def finish_execution(execution, status):
     return execution
 
 
+def record_reuse_decision(execution, stage_name, stage_attempt, requested_identity_sha256, decision):
+    """Append reuse evidence without changing historical stage records."""
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "stage": stage_name,
+        "stage_attempt": stage_attempt,
+        "requested_identity_sha256": requested_identity_sha256,
+        "reusable": bool(decision.get("reusable")),
+        "reasons": copy.deepcopy(decision.get("reasons", [])),
+    }
+    execution.setdefault("reuse_decisions", []).append(record)
+    return record
+
+
 def register_artifact(manifest, asset_selector, artifact_id, artifact_type, path, *, status="ready",
                       derived_from=None, provenance=None, approval_status="pending", validation=None):
     """Record a typed project-relative output and maintain the legacy path map."""

@@ -233,6 +233,31 @@ avoid: [environment]
         self.assertNotEqual(candidate_surface["path"], final_surface["path"])
         self.assertEqual(candidate_surface["sha256"], final_surface["sha256"])
 
+    def test_reused_candidate_publication_uses_recorded_prior_candidate_paths(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        candidate = self.record["material_candidates"]["items"][0]
+        prior = self.root / "ai/assets/candidates/prop/relay/material_00"
+        prior.mkdir(parents=True)
+        for key, relative in list(candidate["outputs"].items()):
+            old_path = self.root / relative
+            new_path = prior / old_path.name
+            new_path.write_bytes(old_path.read_bytes())
+            old_path.unlink()
+            candidate["outputs"][key] = new_path.relative_to(self.root).as_posix()
+            for artifact in candidate.get("artifacts", []):
+                if artifact.get("path") == relative:
+                    artifact["path"] = candidate["outputs"][key]
+        from slopforge.pipelines.model import approve_texture, model_paths
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material",
+                      side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"material")):
+            approve_texture(self.root, self.config, self.manifest, "prop:relay", candidate["number"])
+        final = model_paths(self.root, self.config, "relay", "prop")
+        self.assertEqual(final["basecolor"].read_bytes(), b"bytes:basecolor")
+
     def test_retexture_records_child_execution_for_existing_mesh(self):
         self._concept_candidates()
         self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (

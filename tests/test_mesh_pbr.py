@@ -7,12 +7,64 @@ from unittest.mock import patch
 from PIL import Image
 from processing.comfy_generate_3d import copy_generated_maps, copy_conditioning_image
 from processing import comfy_generate_3d
-from slopforge.pipelines.model import _native_material_candidate, retexture
+from slopforge.pipelines.model import _generate_material_candidate, _native_material_candidate, retexture
 from slopforge.manifest import begin_stage, save_manifest, start_execution, start_stage
 from slopforge.unity_material import make_metallic_gloss
 
 
 class MeshPBRTests(unittest.TestCase):
+    def test_retexture_passes_processed_mesh_to_blender_only_with_reuse_proof(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "image.json").write_text("{}")
+            (root / "source.glb").write_bytes(b"source")
+            (root / "processed.blend").write_bytes(b"processed")
+            asset = {"name": "relay", "description": "Brass relay",
+                     "source": {"glb": "source.glb", "processed_mesh": "processed.blend"}}
+            config = {"asset_pipeline": {"candidate_root": "candidates", "workflows": {"image": "image.json"},
+                                         "model_budgets": {"prop_faces": 1000}, "material_scale": 3.0,
+                                         "tools": {}}}
+            asset_type = {"name": "prop", "face_budget": "prop_faces"}
+
+            for proven in (False, True):
+                with self.subTest(proven=proven):
+                    reuse = []
+
+                    def process(_root, _config, _source, fbx, blend, _textures, _budget, **kwargs):
+                        reuse.append(kwargs["reuse_stage_mesh"])
+                        for path in (fbx, blend, kwargs["stage_mesh"]):
+                            path.write_bytes(b"result")
+                        kwargs["preview_dir"].mkdir(parents=True, exist_ok=True)
+                        for view in ("front", "side", "rear", "three_quarter"):
+                            Image.new("RGB", (8, 8), "gray").save(kwargs["preview_dir"] / f"relay_{view}.png")
+
+                    def generate_image(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
+                        Image.new("RGB", (8, 8), "blue").save(destination)
+                        metadata.write_text(json.dumps({"workflow": "image.json", "seed": seed}))
+
+                    def commands(command, check):
+                        for key in ("normal", "roughness", "metallic", "emission"):
+                            Image.new("RGB", (8, 8), "white").save(command[command.index("--" + key) + 1])
+
+                    with patch("slopforge.pipelines.model.resolve_workflow", return_value=root / "image.json"), \
+                            patch("slopforge.pipelines.model.generate_image", side_effect=generate_image), \
+                            patch("slopforge.pipelines.model.subprocess.run", side_effect=commands), \
+                            patch("slopforge.pipelines.model.make_metallic_gloss",
+                                  side_effect=lambda _metal, _rough, output: Path(output).write_bytes(b"packed")), \
+                            patch("slopforge.pipelines.model.process_model", side_effect=process), \
+                            patch("slopforge.pipelines.model.inspect_model", return_value={}), \
+                            patch("slopforge.pipelines.model.validate_model_outputs",
+                                  return_value={"status": "passed", "errors": [], "warnings": [], "measured": {}}), \
+                            patch("slopforge.pipelines.model._lineage_start"), \
+                            patch("slopforge.pipelines.model._lineage_finish", return_value=[]), \
+                            patch("slopforge.pipelines.model._lineage_provenance"):
+                        candidate = _generate_material_candidate(root, config, asset_type, asset, int(proven) + 1,
+                            "matte brass", root / "processed.blend",
+                            lineage={"processed_mesh_reusable": proven}, seed=int(proven) + 1)
+                        self.assertNotIn("error", candidate, candidate.get("error"))
+
+                    self.assertEqual(reuse, [proven])
+
     def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -2,7 +2,7 @@
 import copy
 import math
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -10,6 +10,9 @@ from .manifest import add_dependency, asset_key, new_record, register_artifact, 
 from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
+from .pipelines.reuse import artifact_integrity
+from .conditioning import resolve_conditioning
+from .style import build_prompt, style_identity
 from .taxonomy import canonical_type, validate_asset_name
 
 
@@ -146,7 +149,8 @@ def _model(root, config, style, asset_type, child, manifest, key):
     references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
-                          generation_prompt=child.get("generation_prompt"), reference_entries=references)
+                          generation_prompt=child.get("generation_prompt"), reference_entries=references,
+                          variations=child.get("variations"))
 
 
 PIPELINE_HANDLERS = {"image": _image, "model": _model}
@@ -165,28 +169,360 @@ def _asset_artifact_type(asset, output_id, path):
             "blend": "model.blend", "mat": "unity.material", "json": "data.json"}.get(suffix, f"file.{suffix}")
 
 
+def _published_output_ref(asset, output_id, path):
+    references = asset.get("published_artifacts")
+    if not isinstance(references, list) or not all(
+            isinstance(item, dict) and all(isinstance(item.get(field), str) and item[field]
+                                          for field in ("id", "type", "path", "sha256", "stage")) and
+            type(item.get("attempt")) is int and item["attempt"] > 0 and
+            isinstance(item.get("derived_from"), list) and
+            item["derived_from"] and
+            all(isinstance(parent, dict) and isinstance(parent.get("artifact_id"), str)
+                and parent["artifact_id"] and isinstance(parent.get("sha256"), str)
+                and parent["sha256"] for parent in item["derived_from"])
+            for item in references):
+        return None
+    ids = [item["id"] for item in references]
+    if len(ids) != len(set(ids)):
+        return None
+    suffix = f":published:{output_id}"
+    matches = [item for item in references
+               if item["id"].endswith(suffix) and item.get("path") == path]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _published_output_provenance(reference, executions):
+    """Validate that a published-artifact reference points to a real succeeded
+    final_publication stage with a matching output identity. Returns None on
+    success or an error string describing the provenance failure."""
+    if not isinstance(reference, dict):
+        return "published reference is malformed"
+    if not isinstance(executions, list):
+        return "published reference executions are missing"
+    if not all(isinstance(item, dict) for item in executions):
+        return "published reference execution list contains malformed members"
+    stage_lists = [item.get("stages") for item in executions]
+    if not all(isinstance(stages, list) for stages in stage_lists):
+        return "published reference execution stages are missing"
+    stages = [stage for records in stage_lists for stage in records]
+    if not all(isinstance(stage, dict) for stage in stages):
+        return "published reference execution stages contain malformed members"
+    artifact_lists = [(stage, field, stage.get(field)) for stage in stages
+                      for field in ("inputs", "outputs")]
+    if not all(isinstance(records, list) for _, _, records in artifact_lists):
+        return "published reference stage inputs or outputs are malformed"
+    artifacts = [(field, record) for _, field, records in artifact_lists for record in records]
+    if not all(isinstance(record, dict) for _, record in artifacts):
+        return "published reference stage inputs or outputs contain malformed members"
+    parent_lists = [(record, record.get("derived_from", []))
+                    for field, record in artifacts if field == "outputs"]
+    if not all(isinstance(parents, list) for _, parents in parent_lists):
+        return "published reference output derivation is malformed"
+    parents = [parent for _, records in parent_lists for parent in records]
+    if not all(isinstance(parent, dict) for parent in parents):
+        return "published reference output derivation contains malformed members"
+    if (any("id" not in item for item in executions)
+            or any("name" not in stage or "attempt" not in stage for stage in stages)
+            or any("id" not in record or "sha256" not in record for _, record in artifacts)
+            or any(field == "outputs" and any(key not in record for key in
+                                                  ("type", "path", "stage", "attempt"))
+                   for field, record in artifacts)
+            or any("artifact_id" not in parent or "sha256" not in parent for parent in parents)):
+        return "published reference provenance identity fields are incomplete"
+    if (any(not isinstance(item["id"], str) or not item["id"] for item in executions)
+            or any(not isinstance(stage["name"], str) or type(stage["attempt"]) is not int
+                   or stage["attempt"] < 1 for stage in stages)
+            or any(not isinstance(record["id"], str) or not record["id"]
+                   or not isinstance(record["sha256"], str) or len(record["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in record["sha256"])
+                   for _, record in artifacts)
+            or any(field == "outputs" and (
+                       not isinstance(record["type"], str) or not record["type"]
+                       or not isinstance(record["path"], str) or not record["path"]
+                       or not isinstance(record["stage"], str)
+                       or type(record["attempt"]) is not int or record["attempt"] < 1)
+                   for field, record in artifacts)
+            or any(not isinstance(parent["artifact_id"], str) or not parent["artifact_id"]
+                   or not isinstance(parent["sha256"], str) or len(parent["sha256"]) != 64
+                   or any(c not in "0123456789abcdef" for c in parent["sha256"])
+                   for parent in parents)):
+        return "published reference provenance identities are malformed"
+    execution_ids = [item["id"] for item in executions]
+    if len(set(execution_ids)) != len(execution_ids):
+        return "published reference execution identity is ambiguous"
+    ref_id = reference.get("id", "")
+    if not isinstance(ref_id, str):
+        return "published reference identity is not a string"
+    if (not ref_id or not isinstance(reference.get("type"), str) or not reference["type"]
+            or not isinstance(reference.get("path"), str) or not reference["path"]
+            or not isinstance(reference.get("sha256"), str) or len(reference["sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in reference["sha256"])
+            or not isinstance(reference.get("stage"), str)
+            or type(reference.get("attempt")) is not int or reference["attempt"] < 1):
+        return "published reference identity is malformed"
+    delim = ":published:"
+    prefix = ref_id[:ref_id.find(delim)]
+    if delim not in ref_id:
+        return "published reference identity is malformed"
+    exec_id = prefix
+    matches = [e for e in executions if e.get("id") == exec_id]
+    if len(matches) == 0:
+        return f"published reference execution {exec_id!r} is absent"
+    if len(matches) > 1:
+        return f"published reference execution {exec_id!r} is ambiguous"
+    execution = matches[0]
+    stages = execution.get("stages")
+    if not isinstance(stages, list):
+        return "published reference execution stages are missing"
+    if not all(isinstance(s, dict) for s in stages):
+        return "published reference execution stages contain malformed members"
+    publication_stages = [s for s in stages if s.get("name") == "final_publication"]
+    stage_ids = [(stage["name"], stage["attempt"]) for stage in publication_stages]
+    if len(set(stage_ids)) != len(stage_ids):
+        return "published reference final_publication stage identity is ambiguous"
+    matches = [stage for stage in publication_stages if stage.get("attempt") == 1]
+    if len(matches) != 1:
+        return "published reference final_publication stage is missing or ambiguous"
+    publication = matches[0]
+    stage_outputs = publication.get("outputs")
+    if not isinstance(stage_outputs, list):
+        return "published reference stage outputs are malformed"
+    if not all(isinstance(o, dict) for o in stage_outputs):
+        return "published reference stage outputs contain malformed members"
+    output_ids = [item["id"] for item in stage_outputs]
+    if len(set(output_ids)) != len(output_ids):
+        return "published reference output has duplicate artifact IDs in stage records"
+    stage_inputs = publication.get("inputs", [])
+    if not isinstance(stage_inputs, list):
+        return "final_publication stage inputs are malformed"
+    if not all(isinstance(item, dict) for item in stage_inputs):
+        return "final_publication stage inputs contain malformed members"
+    for item in stage_outputs:
+        derived = item.get("derived_from", [])
+        if not isinstance(derived, list):
+            return "published stage output derivation is malformed"
+        if not all(isinstance(parent, dict) for parent in derived):
+            return "published stage output derivation contains malformed members"
+    output_matches = [o for o in stage_outputs if o.get("id") == reference.get("id")]
+    if len(output_matches) > 1:
+        return "published reference output has duplicate artifact IDs in stage records"
+    if len(output_matches) == 0:
+        return "published reference output is missing in recorded stage outputs"
+    output = output_matches[0]
+    if execution.get("status") != "succeeded":
+        return f"published reference execution {exec_id!r} is not succeeded"
+    if publication.get("status") != "succeeded":
+        return "published reference final_publication stage is not succeeded"
+    # Validate that output's recorded attempt matches the containing stage
+    if type(output.get("attempt")) is not int or output.get("attempt") != publication.get("attempt"):
+        return "published output attempt disagrees with containing stage"
+    # Require the output's type to match the containing stage
+    if not isinstance(output.get("type"), str) or not output.get("type"):
+        return "published output type is invalid"
+    if output.get("type") != reference.get("type"):
+        return "published reference type differs from recorded stage output"
+    if output.get("path") != reference.get("path"):
+        return "published reference path differs from recorded stage output"
+    if output.get("sha256") != reference.get("sha256"):
+        return "published reference sha256 differs from recorded stage output"
+    if output.get("stage") != reference.get("stage"):
+        return "published reference stage differs from recorded stage output"
+
+    # Validate lineage: publication execution's parent must reference a
+    # valid execution, and the final_publication stage inputs must be
+    # consistent with the published output's derived_from.
+    parent_exec_id = execution.get("parent_execution_id")
+    if parent_exec_id is None:
+        return "published execution has no parent_execution_id; lineage is incomplete"
+    if not isinstance(parent_exec_id, str) or not parent_exec_id:
+        return "published execution parent identity is malformed"
+    parent_matches = [e for e in executions if e.get("id") == parent_exec_id]
+    if len(parent_matches) == 0:
+        return f"published execution parent {parent_exec_id!r} is absent from executions"
+    if len(parent_matches) > 1:
+        return f"published execution parent {parent_exec_id!r} is ambiguous"
+    parent_exec = parent_matches[0]
+
+    # Validate that the stage's inputs are consistent with the output's derivation.
+    # The published output's derived_from must trace to the stage's recorded inputs.
+    if len(stage_inputs) == 0:
+        return "final_publication stage has no recorded inputs; lineage is incomplete"
+    stage_input_ids = {(item.get("id"), item.get("sha256")) for item in stage_inputs}
+    derived = output.get("derived_from", [])
+    if not isinstance(derived, list) or not derived:
+        return "published output has no recorded derivation source"
+    if not all(isinstance(item, dict) for item in derived):
+        return "published output derivation contains malformed members"
+    derived_ids = {(item.get("artifact_id"), item.get("sha256")) for item in derived}
+    if not derived_ids.issubset(stage_input_ids):
+        return "published output derivation does not match recorded stage inputs"
+
+    # Validate that the parent execution contains the production source
+    # that the derived_from traces to. If derived_from IDs match candidate
+    # artifacts that belong to a different execution than the declared
+    # parent, that is an inconsistent lineage.
+    if parent_exec_id and derived_ids:
+        parent_stages = parent_exec.get("stages")
+        if not isinstance(parent_stages, list):
+            return ("published output derivation does not trace to the "
+                    "parent execution")
+        if not all(isinstance(p_stage, dict) for p_stage in parent_stages):
+            return ("published output derivation does not trace to the "
+                    "parent execution")
+        for p_stage in parent_stages:
+            p_stage_outputs = p_stage.get("outputs")
+            if not isinstance(p_stage_outputs, list):
+                return ("published output derivation does not trace to the "
+                        "parent execution")
+            if not all(isinstance(p_artifact, dict) for p_artifact in p_stage_outputs):
+                return ("published output derivation does not trace to the "
+                        "parent execution")
+        parent_artifacts = set()
+        for p_stage in parent_stages:
+            p_stage_outputs = p_stage.get("outputs")
+            for p_artifact in p_stage_outputs:
+                parent_artifacts.add((
+                    p_artifact.get("id", ""), p_artifact.get("sha256", "")))
+        if not parent_artifacts:
+            return ("published output derivation does not trace to the "
+                    "parent execution's outputs")
+        if not derived_ids.issubset(parent_artifacts):
+            return ("published output derivation does not trace to the "
+                    "parent execution's outputs")
+
+    return None
+
+
+def _ready_output_error(root, asset):
+    outputs = asset.get("outputs")
+    if not isinstance(outputs, dict):
+        return "published output path map is missing or invalid"
+    required = [(output_id, path) for output_id, path in outputs.items()
+                if not (isinstance(output_id, str) and output_id.startswith("candidate."))]
+    if not required:
+        return "published output path map is empty"
+    for output_id, path in required:
+        if not isinstance(output_id, str) or not isinstance(path, str) or not path:
+            return f"published output {output_id!r} has an invalid path"
+        reference = _published_output_ref(asset, output_id, path)
+        if (not reference or reference.get("stage") != "final_publication" or
+                type(reference.get("attempt")) is not int or reference["attempt"] != 1 or
+                not reference.get("sha256")):
+            return f"published output {output_id} has missing or ambiguous integrity evidence"
+        intact, reason = artifact_integrity(root, reference)
+        if not intact:
+            return f"published output {output_id}: {reason}"
+        provenance_reason = _published_output_provenance(reference, asset.get("executions") or [])
+        if provenance_reason:
+            return f"published output {output_id} has unproven reference: {provenance_reason}"
+        artifacts = asset.get("artifacts")
+        artifact = artifacts.get(f"output.{output_id}") if isinstance(artifacts, dict) else None
+        approval = artifact.get("approval") if isinstance(artifact, dict) else None
+        expected_type = reference.get("type")
+        if (not isinstance(artifact, dict) or artifact.get("status") != "ready" or
+                not isinstance(expected_type, str) or not expected_type or
+                artifact.get("type") != expected_type or
+                artifact.get("id") != f"output.{output_id}" or artifact.get("path") != path or
+                not isinstance(approval, dict) or approval.get("status") != "approved" or
+                (artifact.get("sha256") and artifact["sha256"] != reference["sha256"])):
+            return f"published output {output_id} has no current typed artifact record"
+        if not artifact.get("sha256"):
+            artifact["sha256"] = reference["sha256"]
+    return None
+
+
+def _sync_artifact_valid(artifact_id, artifact):
+    if not isinstance(artifact, dict):
+        return False
+    path = artifact.get("path")
+    relative = PurePosixPath(path) if isinstance(path, str) and path else None
+    digest = artifact.get("sha256")
+    return (isinstance(artifact_id, str) and bool(artifact_id) and artifact_id == artifact_id.strip() and
+            all(isinstance(artifact.get(field), str) and artifact[field]
+                for field in ("id", "type", "path", "status")) and
+            artifact["id"] == artifact_id and artifact["id"] == artifact["id"].strip() and
+            artifact["type"] == artifact["type"].strip() and
+            relative is not None and not relative.is_absolute() and relative.parts and
+            ".." not in relative.parts and not relative.parts[0].endswith(":") and "\\" not in path and
+            artifact["status"] in {"planned", "candidate", "ready", "failed", "superseded"} and
+            ("approval" not in artifact or
+             (isinstance(artifact["approval"], dict) and
+              isinstance(artifact["approval"].get("status"), str) and
+              artifact["approval"]["status"] in
+              {"pending", "approved", "rejected", "not_required"})) and
+            ("derived_from" not in artifact or isinstance(artifact["derived_from"], list)) and
+            ("provenance" not in artifact or isinstance(artifact["provenance"], dict)) and
+            ("validation" not in artifact or isinstance(artifact["validation"], dict)) and
+            ("sha256" not in artifact or
+             (isinstance(digest, str) and len(digest) == 64 and
+              all(c in "0123456789abcdef" for c in digest))))
+
+
 def _sync_child_artifacts(root, asset, key):
-    for candidate in asset.get("candidates", {}).get("items", []):
-        if not candidate.get("path") or candidate.get("status") not in {"candidate", "failed"}:
+    candidates = asset.get("candidates")
+    items = candidates.get("items") if isinstance(candidates, dict) else None
+    artifacts = asset.get("artifacts", {})
+    invalid_artifacts = ([artifact_id for artifact_id, item in artifacts.items()
+                          if not _sync_artifact_valid(artifact_id, item)]
+                         if isinstance(artifacts, dict) else [])
+    malformed = (not isinstance(items, list) or not all(isinstance(item, dict) for item in items)
+                 or not isinstance(artifacts, dict)
+                 or bool(invalid_artifacts))
+    if not malformed:
+        numbers = [item.get("number") for item in items]
+        malformed = (any(isinstance(number, bool) or not isinstance(number, int) or number < 1
+                         for number in numbers) or len(numbers) != len(set(numbers)) or
+                     any(not isinstance(item.get("path"), str) or not item["path"] or
+                         not isinstance(item.get("status"), str) or
+                         item["status"] not in {"candidate", "failed", "rejected"}
+                         for item in items))
+    if malformed:
+        asset["status"] = "stale"
+        if isinstance(candidates, dict):
+            candidates["selected"] = None
+        for artifact_id in invalid_artifacts:
+            del artifacts[artifact_id]
+        return False
+    for candidate in items:
+        if candidate.get("status") == "rejected":
             continue
         candidate_id = f"candidate.{candidate['number']}"
+        status = "candidate" if candidate["status"] == "candidate" else "failed"
+        approval_status = "approved" if candidate.get("approval") == "approved" else "pending"
+        existing = artifacts.get(candidate_id, {})
+        if (existing.get("status") == status and existing.get("path") == candidate["path"] and
+                existing.get("approval", {}).get("status") == approval_status):
+            continue
         register_artifact({"assets": {key: asset}}, key, candidate_id,
                           f"{asset['type']}.candidate", candidate["path"],
-                          status="candidate" if candidate["status"] == "candidate" else "failed",
+                          status=status,
                           provenance=candidate.get("generator") or {"seed": candidate.get("seed")},
-                          approval_status="approved" if candidate.get("approval") == "approved" else "pending",
+                          approval_status=approval_status,
                           validation=candidate.get("validation"))
     if asset.get("status") != "ready":
-        return
-    for output_id, path in list(asset.get("outputs", {}).items()):
-        if output_id.startswith("candidate.") or not isinstance(path, str) or not (Path(root) / path).is_file():
+        return True
+    outputs = asset.get("outputs")
+    if not isinstance(outputs, dict):
+        return True
+    for output_id, path in list(outputs.items()):
+        if (not isinstance(output_id, str) or output_id.startswith("candidate.") or
+                not isinstance(path, str) or not (Path(root) / path).is_file()):
             continue
         validation = asset.get("validation", {})
         existing = asset.get("artifacts", {}).get(f"output.{output_id}", {})
-        register_artifact({"assets": {key: asset}}, key, f"output.{output_id}",
-                          _asset_artifact_type(asset, output_id, path), path, status="ready",
-                          provenance=asset.get("generator") or {}, approval_status="approved",
-                          validation=validation or existing.get("validation"))
+        if existing.get("status") == "ready" and existing.get("path") == path:
+            reference = _published_output_ref(asset, output_id, path)
+            if reference and reference.get("sha256") and not existing.get("sha256"):
+                existing["sha256"] = reference["sha256"]
+            continue
+        registered = register_artifact({"assets": {key: asset}}, key, f"output.{output_id}",
+                                        _asset_artifact_type(asset, output_id, path), path, status="ready",
+                                        provenance=asset.get("generator") or {}, approval_status="approved",
+                                        validation=validation or existing.get("validation"))
+        reference = _published_output_ref(asset, output_id, path)
+        if reference and reference.get("sha256"):
+            registered["sha256"] = reference["sha256"]
+    return True
 
 
 def _sync_recipe_artifacts(recipe_asset, stages, manifest):
@@ -194,21 +530,38 @@ def _sync_recipe_artifacts(recipe_asset, stages, manifest):
         child = manifest["assets"].get(stage["asset_key"])
         if child is None:
             continue
-        for artifact_id, artifact in child.get("artifacts", {}).items():
+        artifacts = child.get("artifacts", {})
+        recipe_artifacts = recipe_asset.get("artifacts", {})
+        if (not isinstance(artifacts, dict) or
+                not isinstance(recipe_artifacts, dict) or
+                not all(_sync_artifact_valid(artifact_id, artifact)
+                        for artifact_id, artifact in artifacts.items()) or
+                not all(_sync_artifact_valid(artifact_id, artifact)
+                        for artifact_id, artifact in recipe_artifacts.items())):
+            stage["status"] = "stale"
+            continue
+        for artifact_id, artifact in artifacts.items():
             aggregate_id = f"{child_id}.{artifact_id}"
-            register_artifact(manifest, f"recipe:{recipe_asset['name']}", aggregate_id,
-                              artifact["type"], artifact["path"], status=artifact["status"],
-                              derived_from=[{"asset_id": child["id"], "output_id": artifact_id}],
-                              provenance=artifact.get("provenance"),
-                              approval_status=artifact.get("approval", {}).get("status", "pending"),
-                              validation=artifact.get("validation"))
+            old_aggregate = recipe_artifacts.get(aggregate_id, {})
+            approval = copy.deepcopy(old_aggregate.get("approval"))
+            approval_status = artifact.get("approval", {}).get("status", "pending")
+            aggregate = register_artifact(
+                manifest, f"recipe:{recipe_asset['name']}", aggregate_id, artifact["type"], artifact["path"],
+                status=artifact["status"],
+                derived_from=[{"asset_id": child["id"], "output_id": artifact_id}],
+                provenance=artifact.get("provenance"), approval_status=approval_status,
+                validation=artifact.get("validation"))
+            if approval and approval.get("status") == approval_status:
+                aggregate["approval"] = approval
+            if artifact.get("sha256"):
+                aggregate["sha256"] = artifact["sha256"]
 
 
 def _recipe_status(stages):
     states = [stage["status"] for stage in stages.values()]
     if states and all(state == "approved" for state in states):
         return "ready"
-    if any(state in {"failed", "blocked"} for state in states):
+    if any(state in {"failed", "blocked", "stale"} for state in states):
         return "partial"
     if any(state == "running" for state in states):
         return "running"
@@ -322,9 +675,12 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             stage["status"] = "approved"
         elif stage["status"] == "running":
             before = stage.get("candidate_count_before", 0)
-            count = len(asset.get("candidates", {}).get("items", []))
+            candidate_state = asset.get("candidates")
+            candidate_items = candidate_state.get("items") if isinstance(candidate_state, dict) else None
+            count = len(candidate_items) if isinstance(candidate_items, list) else 0
             stage["status"] = "completed" if count > before else "pending"
-        _sync_child_artifacts(root, asset, stage["asset_key"])
+        if not _sync_child_artifacts(root, asset, stage["asset_key"]) and stage["status"] in {"approved", "completed"}:
+            stage["status"] = "stale"
     _sync_recipe_artifacts(recipe_asset, stages, manifest)
     _save(save, manifest)
 
@@ -335,8 +691,59 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         stage = stages[child["id"]]
         asset = manifest["assets"][stage["asset_key"]]
         original = {key: copy.deepcopy(asset.get(key)) for key in ("status", "generator", "outputs", "candidates")}
+        asset_type = asset_types[child["type"]]
+        if (not regenerate and stage["status"] in {"completed", "approved"} and
+                asset_type.get("pipeline") == "model"):
+            tier = child.get("quality_tier", instance.get("quality_tier", "normal"))
+            child_config = select_quality_tier(config, tier)
+            requested_child = dict(child)
+            requested_child["requested_style_identity"] = style_identity(style)
+            requested_prompt = child.get("generation_prompt")
+            if not requested_prompt and all(key in style for key in
+                                            ("identity", "palette", "materials", "shape_language",
+                                             "surface_language", "lighting", "asset_rules")):
+                requested_prompt = build_prompt(style, asset_types[child["type"]], child["description"])
+            requested_child["requested_generation_prompt"] = requested_prompt
+            reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
+                                 if child.get("reference_library") else None)
+            conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)
+            requested_child["requested_conditioning"] = {
+                "strategy": conditioning["strategy"],
+                "references": [{"sha256": item.get("sha256"), "strength": item.get("strength")}
+                               for item in conditioning.get("references", [])]}
+            decision = model.prop_child_reuse_decision(root, asset, stage, requested_child, child_config)
+            stage.setdefault("reuse_decisions", []).append(decision)
+            if not decision["reusable"]:
+                stage["status"] = "stale"
+            elif asset.get("status") == "ready":
+                integrity_error = _ready_output_error(root, asset)
+                if integrity_error:
+                    stage["status"] = "stale"
+                    stage.setdefault("reuse_decisions", []).append(
+                        {"reusable": False, "reasons": [integrity_error]})
+        stale_replacement = stage["status"] == "stale"
         if not regenerate and stage["status"] in {"completed", "approved"}:
             continue
+        if stale_replacement:
+            asset["status"] = "stale"
+            if isinstance(asset.get("candidates"), dict):
+                asset["candidates"]["selected"] = None
+            asset.pop("generator", None)
+            outputs = asset.get("outputs", {})
+            output_paths = ({path for path in outputs.values() if isinstance(path, str)}
+                            if isinstance(outputs, dict) else set())
+            output_artifact_ids = ({f"output.{output_id}" for output_id in outputs
+                                    if isinstance(output_id, str) and not output_id.startswith("candidate.")}
+                                   if isinstance(outputs, dict) else set())
+            artifacts = asset.get("artifacts")
+            if isinstance(artifacts, dict):
+                for artifact_id, artifact in artifacts.items():
+                    if (isinstance(artifact, dict) and artifact.get("status") == "ready" and
+                            (artifact_id in output_artifact_ids or artifact.get("path") in output_paths)):
+                        artifact["status"] = "superseded"
+                        aggregate = recipe_asset.get("artifacts", {}).get(f"{child['id']}.{artifact_id}")
+                        if aggregate and aggregate.get("status") == "ready":
+                            aggregate["status"] = "superseded"
         if any(stages[dependency]["status"] not in {"completed", "approved"}
                for dependency in child["depends_on"]):
             stage["status"] = "blocked"
@@ -346,7 +753,9 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             _save(save, manifest)
             continue
 
-        stage["candidate_count_before"] = len(asset.get("candidates", {}).get("items", []))
+        candidate_state = asset.get("candidates")
+        candidate_items = candidate_state.get("items") if isinstance(candidate_state, dict) else None
+        stage["candidate_count_before"] = len(candidate_items) if isinstance(candidate_items, list) else 0
         stage["status"] = "running"
         stage["quality_tier"] = child.get("quality_tier", instance.get("quality_tier", "normal"))
         stage["attempts"] += 1
@@ -354,7 +763,6 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
         recipe_asset["status"] = "running"
         _save(save, manifest)
         try:
-            asset_type = asset_types[child["type"]]
             pipeline = asset_type["pipeline"]
             handler = PIPELINE_HANDLERS.get(pipeline)
             if handler is None:
@@ -362,22 +770,48 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             tier = stage["quality_tier"]
             child_config = select_quality_tier(config, tier)
             result = handler(root, child_config, style, asset_type, child, manifest, stage["asset_key"])
-            generated = [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
+            if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
+                raise RuntimeError("Recipe pipeline returned malformed candidate records")
+            generated = result
+            if asset_type.get("pipeline") == "model":
+                stage["candidate_execution_ids"] = list(dict.fromkeys(
+                    item.get("execution_id") for item in generated if item.get("execution_id")))
             _sync_child_artifacts(root, asset, stage["asset_key"])
             successful = any(item.get("status") == "candidate" for item in generated)
             if not successful:
                 raise RuntimeError(f"No valid candidates generated for recipe child {child['id']!r}")
-            if original.get("status") == "ready":
+            if original.get("status") == "ready" and not stale_replacement:
                 asset["status"] = original["status"]
                 asset["generator"] = original.get("generator")
                 asset["outputs"] = original.get("outputs", {})
                 asset["candidates"]["selected"] = original.get("candidates", {}).get("selected")
-            stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
-            stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
+                stage["status"] = "approved"
+            elif stale_replacement:
+                # Clear stale ready-state provenance BEFORE regeneration
+                # Capture fresh provenance from pipeline output (already set by handler)
+                fresh_provenance = copy.deepcopy(asset.get("generator", {}))
+                # Clear stale state
+                asset.pop("generator", None)
+                asset["candidates"]["selected"] = None
+                # Copy fresh provenance directly to stage.provenance
+                stage["provenance"] = fresh_provenance
+                # Set stage status (asset.status is not ready after stale replacement)
+                stage["status"] = "completed"
+            else:
+                stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
+                stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
         except Exception as exc:
             if original.get("status") == "ready":
-                asset.update({key: value for key, value in original.items() if value is not None})
-                stage["status"] = "approved"
+                # For stale replacement, do NOT restore stale state
+                if stale_replacement:
+                    asset["status"] = "stale"
+                    stage["status"] = "stale"
+                    # Clear stale state that was already cleared before regeneration
+                    asset.pop("generator", None)
+                    asset["candidates"]["selected"] = None
+                else:
+                    asset.update({key: value for key, value in original.items() if value is not None})
+                    stage["status"] = "approved"
             else:
                 stage["status"] = "failed"
             stage["errors"] = [str(exc)]
