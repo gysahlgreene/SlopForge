@@ -1193,5 +1193,73 @@ class Finding2LineageValidationTests(Finding2PublicationLineageTests):
             error,
             "expected error for malformed parent stage outputs=None")
 
+    # G. valid matching stage + malformed sibling stage must reject provenance
+    def test_malformed_sibling_stage_malformed_outputs_none(self):
+        """A parent execution containing one valid stage with required outputs
+        and one sibling stage whose outputs = None must reject provenance.
+
+        The validator currently skips the malformed stage and can still accept
+        the publication provenance using the valid stage. This must fail
+closed."""
+        from slopforge.recipes import _published_output_provenance
+        asset, source_exec, pub_exec, published_ref, stage_input = \
+            self.make_fixture()
+
+        # Build parent with TWO stages:
+        # Stage A: valid, contains the parent artifact
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [], "settings": {},
+            "outputs": [{
+                "id": "candidate:1", "type": "surface.swatch",
+                "path": "Assets/src.png",
+                "sha256": "src_sha256", "stage": "concept_generation",
+                "attempt": 1, "derived_from": []
+            }]
+        }
+        # Stage B: structurally parseable but outputs = None (malformed)
+        malformed_stage = {
+            "id": "orphan_stage", "name": "orphan",
+            "status": "succeeded", "inputs": [], "settings": {},
+            "outputs": None
+        }
+        parent_exe = next(e for e in asset["executions"]
+                          if e["id"] == source_exec["id"])
+        parent_exe["stages"] = [valid_stage, malformed_stage]
+
+        # Must reject: malformed sibling provenance
+        error = _published_output_provenance(published_ref, asset["executions"])
+        self.assertIsNotNone(
+            error,
+            "expected rejection for valid stage + malformed sibling outputs=None")
+
+    # H. malformed stage entry (non-dict) in parent stages must reject
+    def test_malformed_sibling_stage_non_dict_entry(self):
+        """A parent execution containing one valid dict stage and one
+        non-dict malformed stage entry must reject provenance."""
+        from slopforge.recipes import _published_output_provenance
+        asset, source_exec, pub_exec, published_ref, stage_input = \
+            self.make_fixture()
+
+        # Build parent with a valid stage and a non-dict malformed entry
+        valid_stage = {
+            "name": "concept_generation", "attempt": 1,
+            "status": "succeeded", "inputs": [], "settings": {},
+            "outputs": [{
+                "id": "candidate:1", "type": "surface.swatch",
+                "path": "Assets/src.png",
+                "sha256": "src_sha256", "stage": "concept_generation",
+                "attempt": 1, "derived_from": []
+            }]
+        }
+        parent_exe = next(e for e in asset["executions"]
+                          if e["id"] == source_exec["id"])
+        parent_exe["stages"] = [valid_stage, "corrupted_entry"]
+
+        error = _published_output_provenance(published_ref, asset["executions"])
+        self.assertIsNotNone(
+            error,
+            "expected rejection for valid dict stage + non-dict malformed entry")
+
 if __name__ == "__main__":
     unittest.main()

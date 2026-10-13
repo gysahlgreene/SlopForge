@@ -281,11 +281,16 @@ def _published_output_provenance(reference, executions):
                     "parent execution")
         parent_artifacts = set()
         for p_stage in parent_stages:
+            if not isinstance(p_stage, dict):
+                return ("published output derivation does not trace to the "
+                        "parent execution")
             p_stage_outputs = p_stage.get("outputs")
-            if isinstance(p_stage_outputs, list):
-                for p_artifact in p_stage_outputs:
-                    if isinstance(p_artifact, dict):
-                        parent_artifacts.add((
+            if not isinstance(p_stage_outputs, list):
+                return ("published output derivation does not trace to the "
+                        "parent execution")
+            for p_artifact in p_stage_outputs:
+                if isinstance(p_artifact, dict):
+                    parent_artifacts.add((
                             p_artifact.get("id", ""), p_artifact.get("sha256", "")))
         if not parent_artifacts:
             return ("published output derivation does not trace to the "
