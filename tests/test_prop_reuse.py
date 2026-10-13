@@ -741,6 +741,48 @@ class Finding4ProcessedMeshMalformedProvenanceTests(unittest.TestCase):
             self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
         self.assertFalse(decision["reusable"])
 
+    # D. malformed output as the only output member (Step 2 anti-pattern)
+    def test_malformed_output_in_step2_does_not_raise(self):
+        """A stage whose outputs list contains a valid output alongside
+        a None sibling in Step 2 output scanning must reject provenance,
+        not silently ignore the None."""
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+        source_path = self.root / "source.glb"
+        processed_path = self.root / "processed.blend"
+        source = {"id": "mesh:1", "type": "mesh.glb",
+                  "path": "source.glb",
+                  "sha256": file_sha256(source_path),
+                  "stage": "mesh_preparation", "attempt": 1,
+                  "derived_from": []}
+        prepared = {"id": "prepared:1", "type": "mesh.prepared",
+                    "path": "processed.blend",
+                    "sha256": file_sha256(processed_path),
+                    "stage": "mesh_preparation", "attempt": 1,
+                    "derived_from": [{"artifact_id": source["id"],
+                                      "sha256": source["sha256"]}]}
+        processed = {"id": "processed:1", "type": "mesh.processed",
+                     "path": "processed.blend",
+                     "sha256": file_sha256(processed_path),
+                     "stage": "material_assembly_export", "attempt": 1,
+                     "derived_from": [{"artifact_id": prepared["id"],
+                                       "sha256": prepared["sha256"]}]}
+        # Stage with outputs containing valid output + None sibling
+        bad_outputs_stage = {"name": "material_assembly_export", "attempt": 1,
+                             "status": "succeeded", "inputs": [prepared],
+                             "settings": {"face_budget": 1000, "material_scale": 3.0},
+                             "outputs": [processed, None]}
+        asset = {"source": {"processed_mesh": "processed.blend",
+                             "source_mesh_id": "mesh:1",
+                             "source_mesh_path": "source.glb",
+                             "source_mesh_sha256": file_sha256(source_path)},
+                 "executions": [{"stages": [bad_outputs_stage]}]}
+        # Must NOT raise and must reject (None sibling is malformed)
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
+        self.assertFalse(
+            decision["reusable"],
+            f"expected rejection for malformed output member, got: {decision['reasons']}")
+
     # E. fully valid unambiguous provenance - reuse still succeeds
     def test_fully_valid_unambiguous_provenance_succeeds(self):
         from slopforge.pipelines.model import processed_mesh_reuse_decision

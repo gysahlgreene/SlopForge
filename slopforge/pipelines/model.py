@@ -222,7 +222,8 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(asset.get("executions", [])):
         if not isinstance(execution, dict):
-            continue
+            return {"reusable": False, 
+                    "reasons": ["malformed processed-mesh provenance: execution member is malformed"]}
         exec_stages = execution.get("stages", [])
         if not isinstance(exec_stages, list):
             continue
@@ -241,13 +242,21 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                        for item in stage_inputs if isinstance(item, dict)):
                 continue
             expected_type = "mesh.prepared" if stage.get("name") == "mesh_preparation" else "mesh.processed"
-            prepared = next((item for item in stage.get("outputs", [])
+            # Require exactly one matching output identity to reject duplicates.
+            stage_outs = stage.get("outputs")
+            if not isinstance(stage_outs, list):
+                return {"reusable": False, 
+                        "reasons": ["malformed processed-mesh provenance: stage outputs malformed"]}
+            for item in stage_outs:
+                if not isinstance(item, dict):
+                    return {"reusable": False, 
+                            "reasons": ["malformed processed-mesh provenance: output member is malformed"]}
+            prepared = next((item for item in stage_outs
                              if item.get("type") == expected_type and item.get("path") == processed_path), None)
             if not prepared:
                 continue
             # Require exactly one matching output identity to reject duplicates.
-            output_matches = [o for o in stage.get("outputs", [])
-                              if isinstance(o, dict) and o.get("id") == prepared.get("id")]
+            output_matches = [o for o in stage_outs if o.get("id") == prepared.get("id")]
             if len(output_matches) != 1:
                 return {"reusable": False, 
                         "reasons": ["ambiguous processed-mesh output: duplicate artifact ID "
