@@ -877,7 +877,6 @@ class Finding4ProcessedMeshMalformedProvenanceTests(unittest.TestCase):
             self.root, asset, prepared, {"face_budget": 1000, "material_scale": 3.0})
         self.assertTrue(decision["reusable"])
 
-
 class PropApprovalReuseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -1540,6 +1539,50 @@ class RemainingProcessedMeshMalformedProvenanceTests(unittest.TestCase):
         decision = self._decision([{"id": "execution:1", "status": "succeeded",
                                     "stages": [self.valid_stage]}])
         self.assertEqual(decision, {"reusable": True, "reasons": []})
+
+    def test_processed_mesh_rejects_correct_derivation_with_unrelated_parent(self):
+        self.processed["derived_from"].append({
+            "artifact_id": "unrelated", "sha256": "f" * 64})
+
+        decision = self._decision([{"id": "execution:1", "status": "succeeded",
+                                    "stages": [self.valid_stage]}])
+
+        self.assertFalse(decision["reusable"])
+
+    def test_processed_mesh_rejects_missing_recorded_stage_parent(self):
+        extra_input = {"id": "extra", "sha256": "e" * 64}
+        self.valid_stage["inputs"].append(extra_input)
+
+        decision = self._decision([{"id": "execution:1", "status": "succeeded",
+                                    "stages": [self.valid_stage]}])
+
+        self.assertFalse(decision["reusable"])
+
+    def test_processed_mesh_reuses_exact_recorded_parent_relation(self):
+        decision = self._decision([{"id": "execution:1", "status": "succeeded",
+                                    "stages": [self.valid_stage]}])
+
+        self.assertTrue(decision["reusable"], decision["reasons"])
+
+    def test_malformed_source_record_fails_closed_without_raising(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        asset = {"source": None, "executions": [
+            {"id": "execution:1", "status": "succeeded", "stages": [self.valid_stage]},
+        ]}
+        decision = processed_mesh_reuse_decision(self.root, asset, self.source, self.settings)
+
+        self.assertFalse(decision["reusable"])
+        self.assertIn("malformed", " ".join(decision["reasons"]))
+
+    def test_processed_mesh_rejects_distinct_outputs_for_same_required_path(self):
+        duplicate = {**self.processed, "id": "processed:duplicate"}
+        self.valid_stage["outputs"].append(duplicate)
+
+        decision = self._decision([{"id": "execution:1", "status": "succeeded",
+                                    "stages": [self.valid_stage]}])
+
+        self.assertFalse(decision["reusable"])
 
     def test_stage_identity_ambiguity_precedes_cached_path_checks(self):
         from slopforge.pipelines.model import processed_mesh_reuse_decision

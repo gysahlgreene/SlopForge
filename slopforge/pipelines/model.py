@@ -270,7 +270,10 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                 return {"reusable": False,
                         "reasons": ["ambiguous processed-mesh provenance: duplicate output identity"]}
 
-    processed_path = asset.get("source", {}).get("processed_mesh")
+    source_record = asset.get("source", {})
+    if not isinstance(source_record, dict):
+        return malformed
+    processed_path = source_record.get("processed_mesh")
     if not processed_path:
         return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
     source_ok, source_reason = artifact_integrity(project_root, source_mesh)
@@ -292,14 +295,16 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                            for parent in item.get("derived_from", []) if isinstance(parent, dict))
                        for item in stage_inputs if isinstance(item, dict)):
                 continue
+            stage_outs = stage.get("outputs", [])
             expected_type = "mesh.prepared" if stage.get("name") == "mesh_preparation" else "mesh.processed"
-            # Require exactly one matching output identity to reject duplicates.
-            stage_outs = stage.get("outputs")
-            prepared = next((item for item in stage_outs
-                             if item.get("type") == expected_type and item.get("path") == processed_path), None)
-            if not prepared:
+            prepared_matches = [item for item in stage_outs
+                                if item.get("type") == expected_type and item.get("path") == processed_path]
+            if len(prepared_matches) > 1:
+                return {"reusable": False,
+                        "reasons": ["ambiguous processed-mesh output: multiple artifacts match the required path"]}
+            if not prepared_matches:
                 continue
-            # Require exactly one matching output identity to reject duplicates.
+            prepared = prepared_matches[0]
             output_matches = [o for o in stage_outs if o.get("id") == prepared.get("id")]
             if len(output_matches) != 1:
                 return {"reusable": False, 
@@ -320,9 +325,15 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                                      f"containing stage {stage.get('name')!r}"]}
             derived = prepared.get("derived_from", [])
             input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs}
-            if not any((item.get("artifact_id"), item.get("sha256")) in input_identities
-                       for item in derived):
-                continue
+            derived_identities = {(item.get("artifact_id"), item.get("sha256")) for item in derived}
+            if (not input_identities or len(input_identities) != len(stage_inputs) or
+                    any(not isinstance(item_id, str) or not item_id or
+                        not isinstance(digest, str) or not digest
+                        for item_id, digest in input_identities) or
+                    len(derived_identities) != len(derived) or
+                    derived_identities != input_identities):
+                return {"reusable": False,
+                        "reasons": ["processed-mesh lineage does not exactly match recorded stage inputs"]}
             intact, reason = artifact_integrity(project_root, prepared)
             if intact:
                 return {"reusable": True, "reasons": []}
