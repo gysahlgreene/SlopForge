@@ -219,14 +219,18 @@ def _published_output_provenance(reference, executions):
     output_matches = [
         o for o in stage_outputs
         if isinstance(o, dict) and o.get("id") == reference.get("id")
-        and o.get("type") == reference.get("type")
-        and o.get("path") == reference.get("path")
-        and o.get("sha256") == reference.get("sha256")
-        and type(o.get("attempt")) is int and o.get("attempt") == reference.get("attempt")
-        and o.get("stage") == reference.get("stage")
     ]
-    if len(output_matches) != 1:
-        return "published reference output is missing or ambiguous in recorded stage outputs"
+    if len(output_matches) > 1:
+        return "published reference output has duplicate artifact IDs in stage records"
+    if len(output_matches) == 0:
+        return "published reference output is missing in recorded stage outputs"
+    output = output_matches[0]
+    if (not isinstance(output.get("type"), str) or output.get("type") != reference.get("type")
+            or output.get("path") != reference.get("path")
+            or output.get("sha256") != reference.get("sha256")
+            or output.get("stage") != reference.get("stage")
+            or type(output.get("attempt")) is not int or output.get("attempt") != reference.get("attempt")):
+        return "published reference output identity differs from recorded stage output"
     return None
 
 
