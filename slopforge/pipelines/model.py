@@ -267,8 +267,18 @@ def _adopt_stage(context, name, attempt, inputs, settings):
     prior = (context or {}).get("reuse_execution")
     if not prior:
         return None
-    old = next((stage for stage in reversed(prior.get("stages", []))
-                if stage["name"] == name and stage["attempt"] == attempt), None)
+    # Collect ALL matching stages first, require exactly one
+    stages = prior.get("stages", [])
+    if isinstance(stages, list):
+        matching = [s for s in stages
+                    if (isinstance(s, dict) and s.get("name") == name
+                        and type(s.get("attempt")) is int
+                        and s.get("attempt") == attempt)]
+        if len(matching) != 1:
+            return None  # 0 or >1 matches → ambiguous or missing
+        old = matching[0]
+    else:
+        old = None
     decision = (stage_reuse_decision(context["root"], old, inputs=inputs, settings=settings)
                 if old else {"reusable": False, "reasons": [f"missing {name} stage"]})
     if name == "mesh_workflow_execution" and decision["reusable"]:
