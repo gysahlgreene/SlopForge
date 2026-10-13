@@ -198,7 +198,15 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     target_names = {"mesh_preparation", "material_assembly_export"}
     by_name_attempt = {}
     for execution in asset.get("executions", []):
-        for stage in execution.get("stages", []):
+        if not isinstance(execution, dict):
+            continue
+        exec_stages = execution.get("stages", [])
+        if not isinstance(exec_stages, list):
+            continue
+        for stage in exec_stages:
+            if not isinstance(stage, dict):
+                return {"reusable": False, 
+                        "reasons": ["malformed processed-mesh provenance: stage record is malformed"]}
             if stage.get("name") not in target_names:
                 continue
             key = (stage.get("name"), stage.get("attempt"))
@@ -213,7 +221,14 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     
     # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(asset.get("executions", [])):
-        for stage in reversed(execution.get("stages", [])):
+        if not isinstance(execution, dict):
+            continue
+        exec_stages = execution.get("stages", [])
+        if not isinstance(exec_stages, list):
+            continue
+        for stage in exec_stages:
+            if not isinstance(stage, dict):
+                continue
             if stage.get("name") not in target_names:
                 continue
             if stage.get("status") != "succeeded" or stage.get("settings") != processing_settings:
