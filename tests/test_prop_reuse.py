@@ -1376,5 +1376,78 @@ avoid: [environment]
                                              {"candidate_execution_ids": ["single-id"]},
                                              child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
         self.assertTrue(decision["reusable"])
+class RemainingProcessedMeshMalformedProvenanceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "source.glb").write_bytes(b"source")
+        (self.root / "processed.blend").write_bytes(b"processed")
+        self.settings = {"face_budget": 1000, "material_scale": 3.0}
+        self.source = self._artifact("source", "mesh.glb", "source.glb", "mesh_workflow_execution", [])
+        self.processed = self._artifact(
+            "processed", "mesh.processed", "processed.blend", "material_assembly_export",
+            [{"artifact_id": "source", "sha256": self.source["sha256"]}],
+        )
+        self.valid_stage = {
+            "name": "material_assembly_export", "attempt": 1, "status": "succeeded",
+            "inputs": [self.source], "settings": self.settings, "outputs": [self.processed],
+        }
+
+    def _artifact(self, artifact_id, artifact_type, path, stage, derived_from):
+        return {
+            "id": artifact_id, "type": artifact_type, "path": path,
+            "sha256": file_sha256(self.root / path), "stage": stage,
+            "attempt": 1, "derived_from": derived_from,
+        }
+
+    def _decision(self, executions):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        asset = {"source": {"processed_mesh": "processed.blend"}, "executions": executions}
+        return processed_mesh_reuse_decision(self.root, asset, self.source, self.settings)
+
+    def test_valid_execution_with_none_execution_sibling_is_rejected(self):
+        decision = self._decision([
+            {"id": "execution:1", "status": "succeeded", "stages": [self.valid_stage]}, None,
+        ])
+        self.assertFalse(decision["reusable"])
+        self.assertIn("malformed", " ".join(decision["reasons"]))
+
+    def test_valid_stage_with_none_stage_sibling_is_rejected(self):
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "stages": [self.valid_stage, None]}
+        decision = self._decision([execution])
+        self.assertFalse(decision["reusable"])
+        self.assertIn("malformed", " ".join(decision["reasons"]))
+
+    def test_valid_output_with_none_output_sibling_is_rejected_before_status_filtering(self):
+        malformed_sibling = {
+            "name": "material_assembly_export", "attempt": 2, "status": "failed",
+            "inputs": [], "settings": {"different": True},
+            "outputs": [self.processed, None],
+        }
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "stages": [malformed_sibling, self.valid_stage]}
+        decision = self._decision([execution])
+        self.assertFalse(decision["reusable"])
+        self.assertIn("malformed", " ".join(decision["reasons"]))
+
+    def test_malformed_output_as_only_output_is_rejected(self):
+        malformed_stage = {
+            "name": "material_assembly_export", "attempt": 2, "status": "failed",
+            "inputs": [], "settings": {"different": True}, "outputs": [None],
+        }
+        decision = self._decision([{"id": "execution:1", "status": "failed",
+                                   "stages": [malformed_stage]}])
+        self.assertFalse(decision["reusable"])
+        self.assertIn("malformed", " ".join(decision["reasons"]))
+
+    def test_valid_provenance_remains_reusable(self):
+        decision = self._decision([{"id": "execution:1", "status": "succeeded",
+                                    "stages": [self.valid_stage]}])
+        self.assertEqual(decision, {"reusable": True, "reasons": []})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -186,6 +186,24 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
 
 
 def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_settings):
+    executions = asset.get("executions", [])
+    malformed = {"reusable": False,
+                 "reasons": ["malformed processed-mesh provenance: authoritative records are malformed"]}
+    if not isinstance(executions, list) or not all(isinstance(e, dict) for e in executions):
+        return malformed
+    for execution in executions:
+        stages = execution.get("stages", [])
+        if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
+            return malformed
+        for stage in stages:
+            for field in ("inputs", "outputs"):
+                records = stage.get(field, [])
+                if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+                    return malformed
+                for item in records:
+                    derived = item.get("derived_from", [])
+                    if not isinstance(derived, list) or not all(isinstance(parent, dict) for parent in derived):
+                        return malformed
     processed_path = asset.get("source", {}).get("processed_mesh")
     if not processed_path:
         return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
@@ -197,16 +215,9 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     # to verify unique and unambiguous provenance.
     target_names = {"mesh_preparation", "material_assembly_export"}
     by_name_attempt = {}
-    for execution in asset.get("executions", []):
-        if not isinstance(execution, dict):
-            continue
+    for execution in executions:
         exec_stages = execution.get("stages", [])
-        if not isinstance(exec_stages, list):
-            continue
         for stage in exec_stages:
-            if not isinstance(stage, dict):
-                return {"reusable": False, 
-                        "reasons": ["malformed processed-mesh provenance: stage record is malformed"]}
             if stage.get("name") not in target_names:
                 continue
             key = (stage.get("name"), stage.get("attempt"))
@@ -218,18 +229,21 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
         return {"reusable": False, 
                 "reasons": ["ambiguous processed-mesh provenance: duplicate stage identity "
                              + ", ".join(f"{s[0]}:{s[1]}" for s in ambiguous_keys)]}
+
+    for execution in executions:
+        for stage in execution.get("stages", []):
+            if stage.get("name") not in target_names:
+                continue
+            output_ids = [item["id"] for item in stage.get("outputs", []) if "id" in item]
+            if any(output_ids[i] == output_ids[j]
+                   for i in range(len(output_ids)) for j in range(i + 1, len(output_ids))):
+                return {"reusable": False,
+                        "reasons": ["ambiguous processed-mesh provenance: duplicate output identity"]}
     
     # Step 2: Find the unique matching stage that is succeeded.
-    for execution in reversed(asset.get("executions", [])):
-        if not isinstance(execution, dict):
-            return {"reusable": False, 
-                    "reasons": ["malformed processed-mesh provenance: execution member is malformed"]}
+    for execution in reversed(executions):
         exec_stages = execution.get("stages", [])
-        if not isinstance(exec_stages, list):
-            continue
         for stage in exec_stages:
-            if not isinstance(stage, dict):
-                continue
             if stage.get("name") not in target_names:
                 continue
             if stage.get("status") != "succeeded" or stage.get("settings") != processing_settings:
@@ -244,13 +258,6 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
             expected_type = "mesh.prepared" if stage.get("name") == "mesh_preparation" else "mesh.processed"
             # Require exactly one matching output identity to reject duplicates.
             stage_outs = stage.get("outputs")
-            if not isinstance(stage_outs, list):
-                return {"reusable": False, 
-                        "reasons": ["malformed processed-mesh provenance: stage outputs malformed"]}
-            for item in stage_outs:
-                if not isinstance(item, dict):
-                    return {"reusable": False, 
-                            "reasons": ["malformed processed-mesh provenance: output member is malformed"]}
             prepared = next((item for item in stage_outs
                              if item.get("type") == expected_type and item.get("path") == processed_path), None)
             if not prepared:
@@ -275,10 +282,9 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                         "reasons": [f"output stage {prepared.get('stage')!r} does not match "
                                      f"containing stage {stage.get('name')!r}"]}
             derived = prepared.get("derived_from", [])
-            input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs
-                                if isinstance(item, dict)}
+            input_identities = {(item.get("id"), item.get("sha256")) for item in stage_inputs}
             if not any((item.get("artifact_id"), item.get("sha256")) in input_identities
-                       for item in derived if isinstance(item, dict)):
+                       for item in derived):
                 continue
             intact, reason = artifact_integrity(project_root, prepared)
             if intact:

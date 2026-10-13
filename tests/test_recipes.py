@@ -1377,5 +1377,55 @@ class Finding1PublicationMalformedMemberTests(unittest.TestCase):
             "expected rejection for non-dict parent stage entry")
 
 
+class RemainingPublicationMalformedParentOutputTest(unittest.TestCase):
+    def test_malformed_parent_output_invalidates_ready_approval(self):
+        from slopforge.recipes import _ready_output_error
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            published_path = root / "approved.fbx"
+            published_path.write_bytes(b"approved")
+            published_sha = hashlib.sha256(published_path.read_bytes()).hexdigest()
+            source_sha = "b" * 64
+            source_artifact = {
+                "id": "mesh:1", "type": "mesh.prepared", "path": "source.blend",
+                "sha256": source_sha, "stage": "mesh_preparation", "attempt": 1,
+                "derived_from": [],
+            }
+            reference = {
+                "id": "publication:1:published:model", "type": "model.fbx",
+                "path": "approved.fbx", "sha256": published_sha,
+                "stage": "final_publication", "attempt": 1,
+                "derived_from": [{"artifact_id": "mesh:1", "sha256": source_sha}],
+            }
+            publication_stage = {
+                "name": "final_publication", "attempt": 1, "status": "succeeded",
+                "inputs": [{"id": "mesh:1", "sha256": source_sha}], "settings": {},
+                "outputs": [reference],
+            }
+            publication = {
+                "id": "publication:1", "status": "succeeded",
+                "parent_execution_id": "source:1", "stages": [publication_stage],
+            }
+            source = {
+                "id": "source:1", "status": "succeeded", "stages": [{
+                    "name": "mesh_preparation", "attempt": 1, "status": "succeeded",
+                    "outputs": [source_artifact, None],
+                }],
+            }
+            asset = {
+                "outputs": {"model": "approved.fbx"},
+                "published_artifacts": [reference],
+                "executions": [publication, source],
+                "artifacts": {"output.model": {
+                    "id": "output.model", "status": "ready", "path": "approved.fbx",
+                    "sha256": published_sha,
+                    "approval": {"status": "approved"},
+                }},
+            }
+
+            self.assertIsNotNone(_ready_output_error(root, asset))
+
+
 if __name__ == "__main__":
     unittest.main()

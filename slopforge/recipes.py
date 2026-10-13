@@ -184,6 +184,10 @@ def _published_output_provenance(reference, executions):
     """Validate that a published-artifact reference points to a real succeeded
     final_publication stage with a matching output identity. Returns None on
     success or an error string describing the provenance failure."""
+    if not isinstance(executions, list):
+        return "published reference executions are missing"
+    if not all(isinstance(e, dict) for e in executions):
+        return "published reference execution list contains malformed members"
     ref_id = reference.get("id", "")
     if not isinstance(ref_id, str):
         return "published reference identity is not a string"
@@ -192,18 +196,12 @@ def _published_output_provenance(reference, executions):
     if delim not in ref_id:
         return "published reference identity is malformed"
     exec_id = prefix
-    if not isinstance(executions, list):
-        return "published reference executions are missing"
-    if not all(isinstance(e, dict) for e in executions):
-        return "published reference execution list contains malformed members"
     matches = [e for e in executions if e.get("id") == exec_id]
     if len(matches) == 0:
         return f"published reference execution {exec_id!r} is absent"
     if len(matches) > 1:
         return f"published reference execution {exec_id!r} is ambiguous"
     execution = matches[0]
-    if execution.get("status") != "succeeded":
-        return f"published reference execution {exec_id!r} is not succeeded"
     stages = execution.get("stages")
     if not isinstance(stages, list):
         return "published reference execution stages are missing"
@@ -214,19 +212,32 @@ def _published_output_provenance(reference, executions):
     if len(matches) != 1:
         return "published reference final_publication stage is missing or ambiguous"
     publication = matches[0]
-    if publication.get("status") != "succeeded":
-        return "published reference final_publication stage is not succeeded"
     stage_outputs = publication.get("outputs")
     if not isinstance(stage_outputs, list):
         return "published reference stage outputs are malformed"
     if not all(isinstance(o, dict) for o in stage_outputs):
         return "published reference stage outputs contain malformed members"
+    stage_inputs = publication.get("inputs", [])
+    if not isinstance(stage_inputs, list):
+        return "final_publication stage inputs are malformed"
+    if not all(isinstance(item, dict) for item in stage_inputs):
+        return "final_publication stage inputs contain malformed members"
+    for item in stage_outputs:
+        derived = item.get("derived_from", [])
+        if not isinstance(derived, list):
+            return "published stage output derivation is malformed"
+        if not all(isinstance(parent, dict) for parent in derived):
+            return "published stage output derivation contains malformed members"
     output_matches = [o for o in stage_outputs if o.get("id") == reference.get("id")]
     if len(output_matches) > 1:
         return "published reference output has duplicate artifact IDs in stage records"
     if len(output_matches) == 0:
         return "published reference output is missing in recorded stage outputs"
     output = output_matches[0]
+    if execution.get("status") != "succeeded":
+        return f"published reference execution {exec_id!r} is not succeeded"
+    if publication.get("status") != "succeeded":
+        return "published reference final_publication stage is not succeeded"
     # Validate that output's recorded attempt matches the containing stage
     if type(output.get("attempt")) is not int or output.get("attempt") != publication.get("attempt"):
         return "published output attempt disagrees with containing stage"
@@ -248,8 +259,7 @@ def _published_output_provenance(reference, executions):
     parent_exec_id = execution.get("parent_execution_id")
     if parent_exec_id is None:
         return "published execution has no parent_execution_id; lineage is incomplete"
-    parent_matches = [
-        e for e in executions if isinstance(e, dict) and e.get("id") == parent_exec_id]
+    parent_matches = [e for e in executions if e.get("id") == parent_exec_id]
     if len(parent_matches) == 0:
         return f"published execution parent {parent_exec_id!r} is absent from executions"
     if len(parent_matches) > 1:
@@ -258,17 +268,15 @@ def _published_output_provenance(reference, executions):
 
     # Validate that the stage's inputs are consistent with the output's derivation.
     # The published output's derived_from must trace to the stage's recorded inputs.
-    stage_inputs = publication.get("inputs", [])
-    if not isinstance(stage_inputs, list) or len(stage_inputs) == 0:
+    if len(stage_inputs) == 0:
         return "final_publication stage has no recorded inputs; lineage is incomplete"
-    stage_input_ids = {(item.get("id"), item.get("sha256"))
-                       for item in stage_inputs if isinstance(item, dict)}
+    stage_input_ids = {(item.get("id"), item.get("sha256")) for item in stage_inputs}
     derived = output.get("derived_from", [])
     if not isinstance(derived, list) or not derived:
         return "published output has no recorded derivation source"
-    derived_ids = {
-        (item.get("artifact_id"), item.get("sha256"))
-        for item in derived if isinstance(item, dict)}
+    if not all(isinstance(item, dict) for item in derived):
+        return "published output derivation contains malformed members"
+    derived_ids = {(item.get("artifact_id"), item.get("sha256")) for item in derived}
     if not derived_ids.issubset(stage_input_ids):
         return "published output derivation does not match recorded stage inputs"
 
@@ -281,19 +289,23 @@ def _published_output_provenance(reference, executions):
         if not isinstance(parent_stages, list):
             return ("published output derivation does not trace to the "
                     "parent execution")
-        parent_artifacts = set()
+        if not all(isinstance(p_stage, dict) for p_stage in parent_stages):
+            return ("published output derivation does not trace to the "
+                    "parent execution")
         for p_stage in parent_stages:
-            if not isinstance(p_stage, dict):
-                return ("published output derivation does not trace to the "
-                        "parent execution")
             p_stage_outputs = p_stage.get("outputs")
             if not isinstance(p_stage_outputs, list):
                 return ("published output derivation does not trace to the "
                         "parent execution")
+            if not all(isinstance(p_artifact, dict) for p_artifact in p_stage_outputs):
+                return ("published output derivation does not trace to the "
+                        "parent execution")
+        parent_artifacts = set()
+        for p_stage in parent_stages:
+            p_stage_outputs = p_stage.get("outputs")
             for p_artifact in p_stage_outputs:
-                if isinstance(p_artifact, dict):
-                    parent_artifacts.add((
-                            p_artifact.get("id", ""), p_artifact.get("sha256", "")))
+                parent_artifacts.add((
+                    p_artifact.get("id", ""), p_artifact.get("sha256", "")))
         if not parent_artifacts:
             return ("published output derivation does not trace to the "
                     "parent execution's outputs")
