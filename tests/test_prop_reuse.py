@@ -1448,6 +1448,18 @@ class RemainingProcessedMeshMalformedProvenanceTests(unittest.TestCase):
                                     "stages": [self.valid_stage]}])
         self.assertEqual(decision, {"reusable": True, "reasons": []})
 
+    def test_stage_identity_ambiguity_precedes_cached_path_checks(self):
+        from slopforge.pipelines.model import processed_mesh_reuse_decision
+
+        duplicate = {"name": "mesh_preparation", "attempt": 1,
+                     "inputs": [], "outputs": []}
+        asset = {"source": {}, "executions": [
+            {"stages": [duplicate]}, {"stages": [dict(duplicate)]},
+        ]}
+        decision = processed_mesh_reuse_decision(
+            self.root, asset, self.source, self.settings)
+        self.assertIn("duplicate stage identity", " ".join(decision["reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()

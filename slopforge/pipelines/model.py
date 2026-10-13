@@ -204,13 +204,6 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                     derived = item.get("derived_from", [])
                     if not isinstance(derived, list) or not all(isinstance(parent, dict) for parent in derived):
                         return malformed
-    processed_path = asset.get("source", {}).get("processed_mesh")
-    if not processed_path:
-        return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
-    source_ok, source_reason = artifact_integrity(project_root, source_mesh)
-    if not source_ok:
-        return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
-    
     # Step 1: Collect ALL stages with matching name and attempt across executions
     # to verify unique and unambiguous provenance.
     target_names = {"mesh_preparation", "material_assembly_export"}
@@ -239,6 +232,13 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                    for i in range(len(output_ids)) for j in range(i + 1, len(output_ids))):
                 return {"reusable": False,
                         "reasons": ["ambiguous processed-mesh provenance: duplicate output identity"]}
+
+    processed_path = asset.get("source", {}).get("processed_mesh")
+    if not processed_path:
+        return {"reusable": False, "reasons": ["processed mesh path is unknown"]}
+    source_ok, source_reason = artifact_integrity(project_root, source_mesh)
+    if not source_ok:
+        return {"reusable": False, "reasons": [f"source mesh {source_reason}"]}
     
     # Step 2: Find the unique matching stage that is succeeded.
     for execution in reversed(executions):

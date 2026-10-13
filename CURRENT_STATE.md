@@ -131,7 +131,7 @@ appearance, qualification, readiness, or Unity runtime claim is established.
 
 On 2026-10-13, focused regressions confirmed that malformed authoritative members
 invalidate publication readiness and processed-mesh reuse. The Package 2 focused
-suite passed: 154 tests and 11 subtests. `make verify PYTHON=.venv/bin/python` passed
+suite passed: 155 tests and 11 subtests. `make verify PYTHON=.venv/bin/python` passed
 on an unrestricted rerun; the sandboxed run had unrelated Blender 5.1 subprocess
 segfaults and a loopback bind permission failure. Six opt-in checks remained skipped.
 This verifies offline structural decisions only; it does not establish inference
