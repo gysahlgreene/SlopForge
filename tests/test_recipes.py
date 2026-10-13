@@ -879,5 +879,69 @@ class RecipeTests(unittest.TestCase):
 
         self.assertNotEqual(asset["status"], "ready")
         self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
+
+    def test_duplicate_output_id_in_same_publication_stage_is_rejected(self):
+        """Two stage outputs with the same artifact ID but conflicting
+        path/SHA-256 must be rejected as ambiguous provenance — the
+        current code hides the conflicting duplicate because it also
+        filters on type, path, sha256 before checking uniqueness."""
+        self.definition["children"] = [{"id": "terminal", "type": "prop",
+                                         "description": "Brass relay"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(
+            yaml.safe_dump(self.definition))
+        asset_types = {"concept": {"name": "concept", "pipeline": "image"},
+                       "prop": {"name": "prop", "pipeline": "model"}}
+        path = "Assets/Published/dupid.fbx"
+        published = self.root / path
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(b"approved output")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipe = recipes.run_recipe(self.root, self.config, self.style,
+                                        asset_types, self.manifest,
+                                        "sample_pack", instance_name="intl_dupid")
+        stage = recipe["recipe_instance"]["stages"]["terminal"]
+        asset = self.manifest["assets"][stage["asset_key"]]
+
+        asset["status"] = "ready"
+        asset["generator"] = {"workflow": "old.json", "seed": 1}
+        asset["candidates"]["selected"] = 1
+        asset["outputs"] = {"model": path}
+        asset["artifacts"] = {"output.model": {
+            "id": "output.model", "type": "model.fbx", "status": "ready",
+            "path": path, "sha256": file_sha256(published),
+            "approval": {"status": "approved", "approved_at": "historical"},
+        }}
+
+        # Two stage outputs with the SAME artifact ID
+        matching_output = {"id": "dup-exec:published:model",
+                           "type": "model.fbx",
+                           "path": path,
+                           "sha256": file_sha256(published),
+                           "stage": "final_publication", "attempt": 1,
+                           "derived_from": []}
+        dup_output = {"id": "dup-exec:published:model",
+                      "type": "model.fbx",
+                      "path": "conflicting.glb",   # wrong path
+                      "sha256": "0" * 64,           # wrong hash
+                      "stage": "final_publication", "attempt": 1,
+                      "derived_from": []}
+        asset["published_artifacts"] = [matching_output]
+        asset["executions"] = [{"id": "dup-exec", "status": "succeeded",
+            "stages": [{"name": "final_publication", "attempt": 1,
+                        "status": "succeeded",
+                        "outputs": [matching_output, dup_output],
+                        "inputs": [], "settings": {}}]}]
+        stage["status"] = "approved"
+
+        with patch("slopforge.recipes.model.prop_child_reuse_decision",
+                   return_value={"reusable": True, "reasons": []}), \
+                patch.dict(recipes.PIPELINE_HANDLERS, {"model": self.fake_pipeline}):
+            recipes.resume_recipe(self.root, self.config, self.style,
+                                  asset_types, self.manifest, "intl_dupid")
+
+        # Must be rejected: duplicate output IDs create ambiguity
+        self.assertNotEqual(asset["status"], "ready")
+        self.assertEqual(asset["artifacts"]["output.model"]["status"], "superseded")
 if __name__ == "__main__":
     unittest.main()
