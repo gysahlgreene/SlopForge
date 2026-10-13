@@ -38,6 +38,8 @@ def _identity(refs):
 
 def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict], settings: dict) -> dict:
     reasons = []
+    if not isinstance(stage, dict):
+        return {"reusable": False, "reasons": ["malformed stage record"]}
     if stage.get("name") not in _STAGE_ORDER:
         reasons.append("semantic mismatch: stage name is not in the fixed prop route")
     stage_attempt = stage.get("attempt")
@@ -58,6 +60,10 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
     if not isinstance(outputs, list):
         reasons.append("missing output artifacts")
         return {"reusable": not reasons, "reasons": reasons}
+    required_types = {"mesh_workflow_execution": {"mesh.glb"}}
+    required = required_types.get(stage.get("name"), set())
+    if required and not any(isinstance(output, dict) and output.get("type") in required for output in outputs):
+        reasons.append("missing required output artifact type: " + ", ".join(sorted(required)))
     # Validate member shapes and check for duplicate output IDs
     output_ids = set()
     for output in outputs or []:

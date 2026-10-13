@@ -48,7 +48,7 @@ class PropReuseTests(unittest.TestCase):
         conditioning = {"id": "conditioning:1", "sha256": "2" * 64}
         package_shape = {**self.stage, "name": "mesh_workflow_execution",
                          "inputs": [concept, conditioning],
-                         "outputs": [{**self.output, "stage": "mesh_workflow_execution",
+                         "outputs": [{**self.output, "type": "mesh.glb", "stage": "mesh_workflow_execution",
                              "derived_from": [{"artifact_id": conditioning["id"],
                                                "sha256": conditioning["sha256"]}]}]}
         self.assertTrue(stage_reuse_decision(self.root, package_shape,
@@ -93,6 +93,35 @@ class PropReuseTests(unittest.TestCase):
         decision = stage_reuse_decision(self.root, {**self.stage, "status": "running"},
             inputs=[self.input], settings={"seed": 1})
         self.assertFalse(decision["reusable"])
+
+    def test_malformed_stage_record_is_not_reusable_without_raising(self):
+        decision = stage_reuse_decision(self.root, None, inputs=[self.input], settings={})
+
+        self.assertFalse(decision["reusable"])
+
+    def test_mesh_workflow_stage_without_required_output_is_not_reusable(self):
+        stage = {**self.stage, "name": "mesh_workflow_execution", "outputs": []}
+
+        decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={"seed": 1})
+
+        self.assertFalse(decision["reusable"])
+
+    def test_mesh_workflow_stage_without_required_mesh_type_is_not_reusable(self):
+        output = {**self.output, "type": "generation.metadata",
+                  "stage": "mesh_workflow_execution"}
+        stage = {**self.stage, "name": "mesh_workflow_execution", "outputs": [output]}
+
+        decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={"seed": 1})
+
+        self.assertFalse(decision["reusable"])
+
+    def test_mesh_workflow_stage_with_exact_required_mesh_output_is_reusable(self):
+        output = {**self.output, "type": "mesh.glb", "stage": "mesh_workflow_execution"}
+        stage = {**self.stage, "name": "mesh_workflow_execution", "outputs": [output]}
+
+        decision = stage_reuse_decision(self.root, stage, inputs=[self.input], settings={"seed": 1})
+
+        self.assertTrue(decision["reusable"], decision["reasons"])
 
     def test_earliest_stale_stage_uses_fixed_stage_order(self):
         self.assertEqual(earliest_stale_stage(self.root, [self.stage], {
@@ -413,7 +442,7 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
         valid_stage = {
             "name": "concept_generation", "attempt": 1,
             "status": "succeeded", "inputs": [],
-            "settings": {"prompt": "brass relay", "seed": 7},
+            "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
             "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
                          "path": "candidate.png", "sha256": sha,
                          "stage": "concept_generation", "attempt": 1,
@@ -426,7 +455,7 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
                                  "style": "default",
                                  "conditioning": {"strategy": "text_only"},
                                  "quality": {"tier": "normal", "settings": {}},
-                                 "candidate_attempts": [{"variation": None}]},
+                                 "candidate_attempts": [{"seed": 7, "variation": None}]},
             "stages": stages
         }
         artifact = {"id": "concept-candidate:1", "type": "image.concept",
@@ -457,7 +486,7 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
         valid_stage = {
             "name": "concept_generation", "attempt": 1,
             "status": "succeeded", "inputs": [],
-            "settings": {"prompt": "brass relay", "seed": 7},
+            "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
             "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
                          "path": "candidate.png", "sha256": "s", "stage": "concept_generation",
                          "attempt": 1, "derived_from": []}]
@@ -477,7 +506,7 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
         valid_stage = {
             "name": "concept_generation", "attempt": 1,
             "status": "succeeded", "inputs": [],
-            "settings": {"prompt": "brass relay", "seed": 7},
+            "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
             "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
                          "path": "candidate.png", "sha256": "s", "stage": "concept_generation",
                          "attempt": 1, "derived_from": []}]
@@ -500,7 +529,7 @@ class Finding1MalformedSiblingRejectionTests(unittest.TestCase):
         valid_stage = {
             "name": "concept_generation", "attempt": 1,
             "status": "succeeded", "inputs": [],
-            "settings": {"prompt": "brass relay", "seed": 7},
+            "settings": {"prompt": "brass relay", "variation": None, "seed": 7},
             "outputs": [{"id": "concept-candidate:1", "type": "image.concept",
                          "path": "candidate.png", "sha256": sha,
                          "stage": "concept_generation", "attempt": 1,
@@ -550,6 +579,36 @@ class Finding2AdoptStageDuplicateRejectTests(unittest.TestCase):
         s2 = {"name": "material_assembly_export", "attempt": 1,
               "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
         ctx = self.make_context([s1, s2])
+        self.assertIsNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
+
+    def test_adopt_stage_rejects_malformed_same_name_attempt_sibling(self):
+        from slopforge.pipelines.model import _adopt_stage
+        valid = {"name": "material_assembly_export", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        malformed = {"name": "material_assembly_export", "attempt": "1",
+                     "status": "failed", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([valid, malformed])
+
+        self.assertIsNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
+
+    def test_adopt_stage_ignores_valid_unrelated_stage_identity(self):
+        from slopforge.pipelines.model import _adopt_stage
+        valid = {"name": "material_assembly_export", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        unrelated = {"name": "concept_generation", "attempt": "1",
+                     "status": "failed", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([valid, unrelated])
+
+        self.assertIsNotNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
+
+    def test_adopt_stage_rejects_ambiguous_current_execution_identity(self):
+        from slopforge.pipelines.model import _adopt_stage
+        valid = {"name": "material_assembly_export", "attempt": 1,
+                 "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        ctx = self.make_context([valid])
+        current = ctx["manifest"]["assets"]["test-key"]["executions"][0]
+        ctx["manifest"]["assets"]["test-key"]["executions"].append(dict(current))
+
         self.assertIsNone(_adopt_stage(ctx, "material_assembly_export", 1, [], {}))
 
     # C. _adopt_stage: exactly one valid -> adoption still succeeds
@@ -882,7 +941,9 @@ avoid: [environment]
                                           "quality": {"tier": "normal", "settings": {}},
                                           "candidate_attempts": [{"seed": 1, "variation": None}]},
                      "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
-                                 "inputs": [], "settings": {}, "outputs": [dict(candidate["artifact"])]}]}
+                                 "inputs": [], "settings": {"prompt": "Copper relay",
+                                     "variation": None, "seed": 1},
+                                 "outputs": [dict(candidate["artifact"])]}]}
         candidate["execution_id"] = execution["id"]
         self.asset["executions"] = [execution]
         self.asset["candidates"]["items"] = [candidate]
@@ -936,6 +997,33 @@ avoid: [environment]
         _, _, decide = self._recipe_candidate_reuse_case()
 
         self.assertTrue(decide()["reusable"])
+
+    def test_recipe_candidate_rejects_stage_seed_conflicting_with_execution_identity(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        execution["stages"][0]["settings"] = {
+            "prompt": "Copper relay", "variation": None, "seed": 2}
+
+        self.assertFalse(decide()["reusable"])
+
+    def test_recipe_candidate_rejects_stage_variation_conflicting_with_execution_identity(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        execution["stages"][0]["settings"] = {
+            "prompt": "Copper relay", "variation": {"finish": "red"}, "seed": 1}
+
+        self.assertFalse(decide()["reusable"])
+
+    def test_recipe_candidate_rejects_stage_prompt_conflicting_with_request(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        execution["stages"][0]["settings"] = {
+            "prompt": "Silver relay", "variation": None, "seed": 1}
+
+        self.assertFalse(decide()["reusable"])
+
+    def test_recipe_candidate_rejects_malformed_same_name_stage_attempt(self):
+        _, execution, decide = self._recipe_candidate_reuse_case()
+        execution["stages"].append({**execution["stages"][0], "attempt": "1"})
+
+        self.assertFalse(decide()["reusable"])
 
     def test_recipe_child_reuse_rejects_missing_quality_identity(self):
         _, execution, decide = self._recipe_candidate_reuse_case()
@@ -1199,7 +1287,9 @@ avoid: [environment]
                                           "quality": {"tier": "normal", "settings": {}},
                                           "candidate_attempts": [{"seed": 1, "variation": None}]},
                      "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
-                                 "inputs": [], "settings": {}, "outputs": [candidate["artifact"]]}]}
+                                 "inputs": [], "settings": {"prompt": "Copper relay",
+                                     "variation": None, "seed": 1},
+                                 "outputs": [candidate["artifact"]]}]}
         candidate["execution_id"] = execution["id"]
         self.asset["executions"] = [execution]
         self.asset["candidates"]["items"] = [candidate]
@@ -1267,7 +1357,8 @@ avoid: [environment]
                     "sha256": file_sha256(path), "stage": "concept_generation",
                     "attempt": 1, "derived_from": []}
         stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
-                 "inputs": [], "settings": {}, "outputs": [artifact]}
+                 "inputs": [], "settings": {"prompt": "b", "variation": None, "seed": 1},
+                 "outputs": [artifact]}
         good_exec = {"id": "dup-id", "status": "succeeded",
                      "identity_inputs": {"asset_type": "prop", "brief": "b",
                                           "generation_prompt": "b",
@@ -1305,7 +1396,8 @@ avoid: [environment]
                     "sha256": file_sha256(path), "stage": "concept_generation",
                     "attempt": 1, "derived_from": []}
         stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
-                 "inputs": [], "settings": {}, "outputs": [artifact]}
+                 "inputs": [], "settings": {"prompt": "b", "variation": None, "seed": 1},
+                 "outputs": [artifact]}
         exec_a = {"id": "dup-id", "status": "succeeded",
                   "identity_inputs": {"asset_type": "prop", "brief": "b",
                                       "generation_prompt": "b",
@@ -1351,7 +1443,8 @@ avoid: [environment]
                     "sha256": file_sha256(path), "stage": "concept_generation",
                     "attempt": 1, "derived_from": []}
         stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
-                 "inputs": [], "settings": {}, "outputs": [artifact]}
+                 "inputs": [], "settings": {"prompt": "b", "variation": None, "seed": 1},
+                 "outputs": [artifact]}
         execution = {"id": "single-id", "status": "succeeded",
                      "identity_inputs": {"asset_type": "prop", "brief": "b",
                                           "generation_prompt": "b",

@@ -12,7 +12,7 @@ from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
 from .pipelines.reuse import artifact_integrity
 from .conditioning import resolve_conditioning
-from .style import style_identity
+from .style import build_prompt, style_identity
 from .taxonomy import canonical_type, validate_asset_name
 
 
@@ -600,6 +600,12 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             child_config = select_quality_tier(config, tier)
             requested_child = dict(child)
             requested_child["requested_style_identity"] = style_identity(style)
+            requested_prompt = child.get("generation_prompt")
+            if not requested_prompt and all(key in style for key in
+                                            ("identity", "palette", "materials", "shape_language",
+                                             "surface_language", "lighting", "asset_rules")):
+                requested_prompt = build_prompt(style, asset_types[child["type"]], child["description"])
+            requested_child["requested_generation_prompt"] = requested_prompt
             reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
                                  if child.get("reference_library") else None)
             conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)

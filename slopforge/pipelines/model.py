@@ -75,8 +75,14 @@ def _execution_stage(asset, execution_id, name, attempt):
 
 
 def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
-    candidates = asset.get("candidates", {}).get("items", [])
     reasons = []
+    candidate_records = asset.get("candidates")
+    candidates = candidate_records.get("items") if isinstance(candidate_records, dict) else None
+    executions = asset.get("executions")
+    if not isinstance(candidates, list) or not all(isinstance(item, dict) for item in candidates):
+        return {"reusable": False, "reasons": ["prop child candidate records are missing or malformed"]}
+    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
+        return {"reusable": False, "reasons": ["prop child execution records are missing or malformed"]}
     execution_ids = child_stage.get("candidate_execution_ids")
     if not isinstance(execution_ids, list) or not execution_ids:
         return {"reusable": False, "reasons": ["prop child candidate execution identity is unknown"]}
@@ -84,26 +90,34 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     if not selected_candidates or any(item.get("status") != "candidate" or not item.get("artifact")
                                        for item in selected_candidates):
         return {"reusable": False, "reasons": ["prop child candidate set is incomplete"]}
-    execution = next((item for item in asset.get("executions", [])
+    execution = next((item for item in executions
                       if item.get("id") == execution_ids[0]), None)
-    exec_matches = [e for e in asset.get("executions", [])
+    exec_matches = [e for e in executions
                     if isinstance(e, dict) and e.get("id") == execution_ids[0]]
     if len(exec_matches) > 1:
         reasons.append("candidate execution identity is ambiguous")
     elif len(exec_matches) == 0:
         reasons.append("candidate execution is missing")
     candidate = selected_candidates[0]
-    attempts = (execution or {}).get("identity_inputs", {}).get("candidate_attempts", [])
+    identity = (execution or {}).get("identity_inputs")
+    if not isinstance(identity, dict):
+        reasons.append("prop child execution identity is missing or malformed")
+        identity = {}
+    attempts = identity.get("candidate_attempts") if isinstance(identity, dict) else None
+    if not isinstance(attempts, list) or not all(isinstance(item, dict) for item in attempts):
+        reasons.append("prop child candidate attempt identities are missing or malformed")
+        attempts = []
     if len(execution_ids) != 1 or len(selected_candidates) != len(attempts):
         reasons.append("prop child candidate set changed or is incomplete")
     if not execution or execution.get("status") != "succeeded":
         reasons.append("candidate execution is missing or incomplete")
     expected_description = child.get("description", asset.get("description"))
-    expected_prompt = child.get("generation_prompt")
-    identity = (execution or {}).get("identity_inputs", {})
+    expected_prompt = child.get("requested_generation_prompt", child.get("generation_prompt"))
+    if not isinstance(expected_prompt, str) or not expected_prompt:
+        reasons.append("prop child requested prompt is unknown")
     if identity.get("brief") != expected_description:
         reasons.append("prop child brief changed")
-    if expected_prompt is not None and identity.get("generation_prompt") != expected_prompt:
+    if identity.get("generation_prompt") != expected_prompt:
         reasons.append("prop child prompt changed")
     if (not identity.get("style") or not child.get("requested_style_identity") or
             identity.get("style") != child.get("requested_style_identity")):
@@ -114,6 +128,7 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     expected_count = child.get("count", config.get("asset_pipeline", {}).get("defaults", {}).get("image_candidates"))
     variations = child.get("variations", [None] * expected_count) if expected_count is not None else None
     if (not isinstance(attempts, list) or expected_count is None or len(attempts) != expected_count or
+            len(attempts) != len(selected_candidates) or
             [item.get("variation") for item in attempts] != variations):
         reasons.append("prop child candidate count or variations changed")
     pipeline = config.get("asset_pipeline", {})
@@ -132,7 +147,7 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
                             "settings": pipeline.get("quality_settings", {})}
         if identity["quality"] != expected_quality:
             reasons.append("prop child quality settings changed")
-    for candidate in selected_candidates:
+    for index, candidate in enumerate(selected_candidates):
         artifact = candidate.get("artifact")
         if candidate.get("execution_id") != (execution or {}).get("id") or not isinstance(artifact, dict):
             reasons.append("candidate provenance is unknown or belongs to another execution")
@@ -155,13 +170,35 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
         if not all(isinstance(s, dict) for s in execution_stages):
             reasons.append("candidate execution stages are missing or malformed")
             continue
-        matches = [item for item in execution_stages
-                   if item.get("name") == artifact.get("stage") and
-                   type(item.get("attempt")) is int and item.get("attempt") == attempt]
+        target_stages = [item for item in execution_stages
+                         if item.get("name") == artifact.get("stage")]
+        if any(type(item.get("attempt")) is not int or item["attempt"] < 1
+               for item in target_stages):
+            reasons.append("candidate stage identity is malformed")
+            continue
+        matches = [item for item in target_stages if item.get("attempt") == attempt]
         if len(matches) != 1:
             reasons.append("candidate stage is missing or ambiguous")
             continue
         stage = matches[0]
+        attempt_identity = attempts[index] if index < len(attempts) else {}
+        settings = stage.get("settings")
+        if not isinstance(settings, dict):
+            reasons.append("candidate stage settings are missing or malformed")
+            continue
+        variation = attempt_identity.get("variation")
+        if variation is not None and not isinstance(variation, dict):
+            reasons.append("candidate variation identity is malformed")
+            continue
+        expected_stage_prompt = expected_prompt
+        if variation:
+            expected_stage_prompt += "\nDESIGN VARIATION:\n" + "\n".join(
+                f"- {key}: {value}" for key, value in variation.items())
+        if (type(attempt_identity.get("seed")) is not int or
+                attempt_identity.get("seed") != settings.get("seed") or
+                variation != settings.get("variation") or
+                settings.get("prompt") != expected_stage_prompt):
+            reasons.append("candidate stage settings differ from execution identity or current request")
         stage_outputs = stage.get("outputs")
         if not isinstance(stage_outputs, list):
             reasons.append("candidate stage outputs are missing or malformed")
@@ -299,16 +336,17 @@ def _adopt_stage(context, name, attempt, inputs, settings):
         return None
     # Collect ALL matching stages first, require exactly one
     stages = prior.get("stages", [])
-    if isinstance(stages, list):
-        matching = [s for s in stages
-                    if (isinstance(s, dict) and s.get("name") == name
-                        and type(s.get("attempt")) is int
-                        and s.get("attempt") == attempt)]
-        if len(matching) != 1:
-            return None  # 0 or >1 matches → ambiguous or missing
-        old = matching[0]
-    else:
-        old = None
+    if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
+        return None
+    targets = [stage for stage in stages if stage.get("name") == name]
+    if any(isinstance(stage.get("attempt"), bool) or
+           not isinstance(stage.get("attempt"), int) or stage["attempt"] < 1
+           for stage in targets):
+        return None
+    matching = [stage for stage in targets if stage.get("attempt") == attempt]
+    if len(matching) != 1:
+        return None  # 0 or >1 matches → ambiguous or missing
+    old = matching[0]
     decision = (stage_reuse_decision(context["root"], old, inputs=inputs, settings=settings)
                 if old else {"reusable": False, "reasons": [f"missing {name} stage"]})
     if name == "mesh_workflow_execution" and decision["reusable"]:
@@ -337,8 +375,13 @@ def _adopt_stage(context, name, attempt, inputs, settings):
                 if not intact:
                     decision["reusable"] = False
                     decision["reasons"].append(reason)
-    execution = next(item for item in context["manifest"]["assets"][context["key"]]["executions"]
-                     if item["id"] == context["execution_id"])
+    executions = context["manifest"]["assets"][context["key"]].get("executions")
+    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
+        return None
+    current = [item for item in executions if item.get("id") == context["execution_id"]]
+    if len(current) != 1:
+        return None
+    execution = current[0]
     record = record_reuse_decision(execution, name, old["attempt"] if old else None,
                                    execution_identity({"inputs": inputs, "settings": settings}), decision)
     record["source_execution_id"] = prior["id"]
