@@ -90,14 +90,13 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
     if not selected_candidates or any(item.get("status") != "candidate" or not item.get("artifact")
                                        for item in selected_candidates):
         return {"reusable": False, "reasons": ["prop child candidate set is incomplete"]}
-    execution = next((item for item in executions
-                      if item.get("id") == execution_ids[0]), None)
     exec_matches = [e for e in executions
                     if isinstance(e, dict) and e.get("id") == execution_ids[0]]
     if len(exec_matches) > 1:
-        reasons.append("candidate execution identity is ambiguous")
-    elif len(exec_matches) == 0:
-        reasons.append("candidate execution is missing")
+        return {"reusable": False, "reasons": ["candidate execution identity is ambiguous"]}
+    if not exec_matches:
+        return {"reusable": False, "reasons": ["candidate execution is missing"]}
+    execution = exec_matches[0]
     candidate = selected_candidates[0]
     identity = (execution or {}).get("identity_inputs")
     if not isinstance(identity, dict):

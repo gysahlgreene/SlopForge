@@ -1385,6 +1385,48 @@ avoid: [environment]
                                              child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
         self.assertFalse(decision["reusable"])
 
+    def test_prop_child_reuse_checks_duplicate_identity_before_inspecting_execution(self):
+        """Malformed duplicate details cannot affect ambiguous identity rejection."""
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "concept.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "c:1", "type": "image.concept", "path": "concept.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation",
+                    "attempt": 1, "derived_from": []}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                 "inputs": [], "settings": {"prompt": "b", "variation": None, "seed": 1},
+                 "outputs": [artifact]}
+        valid_exec = {"id": "dup-id", "status": "succeeded",
+                      "identity_inputs": {"brief": "b", "generation_prompt": "b",
+                                          "candidate_attempts": [{"seed": 1, "variation": None}],
+                                          "style": {"name": "default", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "workflow": {"identifier": "i.json", "sha256": None,
+                                                       "configured_inputs": {}}},
+                      "stages": [stage]}
+        malformed_duplicate = {"id": "dup-id", "status": "failed",
+                                "identity_inputs": "contradictory", "stages": "malformed"}
+        asset = {"type": "prop", "description": "b",
+                 "candidates": {"items": [{"number": 1, "status": "candidate",
+                                            "path": "concept.png", "execution_id": "dup-id",
+                                            "artifact": artifact}]}}
+        child = {"description": "b", "generation_prompt": "b",
+                 "requested_style_identity": {"name": "default", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+        config = {"asset_pipeline": {"defaults": {"image_candidates": 1}}}
+
+        decisions = [prop_child_reuse_decision(
+            self.root, {**asset, "executions": executions},
+            {"candidate_execution_ids": ["dup-id"]}, child, config)
+            for executions in ([valid_exec, malformed_duplicate],
+                               [malformed_duplicate, valid_exec])]
+
+        self.assertEqual(decisions[0], decisions[1])
+        self.assertEqual(decisions[0], {
+            "reusable": False, "reasons": ["candidate execution identity is ambiguous"]})
+
     def test_prop_child_reuse_rejects_two_seemingly_valid_executions_same_id(self):
         """Two valid executions with the same ID must be rejected."""
         from slopforge.pipelines.model import prop_child_reuse_decision
