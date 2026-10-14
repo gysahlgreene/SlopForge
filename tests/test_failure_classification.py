@@ -716,6 +716,34 @@ class TestCompleteInspectionRejections(unittest.TestCase):
         r["measured"]["missing_textures"] = ["missing.png"]
         self.assertFalse(candidate_quality_rejection(r))
 
+    def test_vertex_count_below_three_rejects(self):
+        """Validator: vertex_count must be >= 3."""
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["vertex_count"] = 1
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_dimensions_below_one_e_minus_five_rejects(self):
+        """Validator: dimensions[i] must be > 1e-5 (non-degenerate bounds)."""
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["dimensions"] = [1e-6, 1, 1]
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_negative_image_texture_count_rejects(self):
+        """Validator: image_texture_count must be non-negative."""
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["image_texture_count"] = -1
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_string_image_texture_count_rejects(self):
+        """Validator: image_texture_count must be numeric."""
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["image_texture_count"] = "bad"
+        self.assertFalse(candidate_quality_rejection(r))
+
 
 # ── Blocker 2 regressions: overflow-safe numeric comparisons ─
 
@@ -767,6 +795,17 @@ class TestMalformedPresentFieldsBlockRetry(unittest.TestCase):
                           evidence={"validation": r}),
                              stage="mesh", stage_id="id", attempt=1, operation="inspect")
         rec["retryable"] = "yes"
+        self.assertFalse(should_retry(rec, used=1, limit=3))
+
+    def test_negative_attempt_blocks_retry(self):
+        """Negative attempt is malformed; candidate-quality retries require
+        a positive attempt number."""
+        r = dict(_quality_report(60, 50))
+        rec = failure_record(StageFailure("candidate_quality", "bad",
+                          operation="inspect", remedy="next",
+                          evidence={"validation": r}),
+                             stage="mesh", stage_id="id", attempt=1, operation="inspect")
+        rec["attempt"] = -1
         self.assertFalse(should_retry(rec, used=1, limit=3))
 
 

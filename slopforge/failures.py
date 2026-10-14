@@ -192,7 +192,9 @@ def should_retry(failure: dict, *, used: int, limit: int) -> bool:
     if not isinstance(operation, str) or not operation:
         return False
     attempt = failure.get("attempt")
-    if not isinstance(attempt, int) or isinstance(attempt, bool):
+    if isinstance(attempt, bool) or not isinstance(attempt, int):
+        return False
+    if attempt < 1:
         return False
     exception_type = failure.get("exception_type")
     if not isinstance(exception_type, str) or not exception_type:
@@ -308,8 +310,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
     # ── Value validity: geometry, bounds, texture completeness ────────
 
     # All count/gauge metrics must be > 0 (positive geometry exists)
-    for m in ("mesh_objects", "vertex_count", "face_count", "uv_layers",
-              "material_count"):
+    for m in ("mesh_objects", "face_count", "uv_layers", "material_count"):
         v = measured[m]
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return False
@@ -318,6 +319,16 @@ def candidate_quality_rejection(validation: dict) -> bool:
                 return False
         except OverflowError:
             return False
+
+    # vertex_count must be >= 3 (minimum triangle geometry)
+    vc = measured["vertex_count"]
+    if isinstance(vc, bool) or not isinstance(vc, (int, float)):
+        return False
+    try:
+        if not math.isfinite(vc) or vc < 3:
+            return False
+    except OverflowError:
+        return False
 
     # component_count / nonmanifold must be >= 0 (zero is valid)
     for m in ("component_count", "nonmanifold_edge_count"):
@@ -330,7 +341,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         except OverflowError:
             return False
 
-    # dimensions: all three entries must be > 0
+    # dimensions: all three entries must be > 1e-5 (non-degenerate bounds)
     dims = measured["dimensions"]
     if len(dims) != 3:
         return False
@@ -338,7 +349,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         if isinstance(d, bool) or not isinstance(d, (int, float)):
             return False
         try:
-            if not math.isfinite(d) or d <= 0:
+            if not math.isfinite(d) or d <= 1e-5:
                 return False
         except OverflowError:
             return False
@@ -348,7 +359,15 @@ def candidate_quality_rejection(validation: dict) -> bool:
     if not isinstance(mt, list) or mt:
         return False
 
-    # image_texture_count must be finite (structural already checked above)
+    # image_texture_count must be a finite non-negative numeric
+    itc = measured["image_texture_count"]
+    if isinstance(itc, bool) or not isinstance(itc, (int, float)):
+        return False
+    try:
+        if not math.isfinite(itc) or itc < 0:
+            return False
+    except OverflowError:
+        return False
 
     limits = validation.get("limits")
     if not isinstance(limits, dict):
