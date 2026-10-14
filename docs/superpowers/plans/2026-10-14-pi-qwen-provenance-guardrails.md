@@ -1,6 +1,6 @@
 # Pi/Qwen Provenance Guardrails Implementation Plan
 
-> **For agentic workers:** Use the native inline execution method task-by-task. The user prohibited subagents and wants local Pi/Qwen to do most implementation writing, with Codex planning and independently reviewing. Use the skill and task template created in this plan for any Qwen-written code; Codex owns the final review and verification.
+> **For agentic workers:** Use local Pi/Qwen for most implementation writing, with Codex planning, reviewing, and verifying each bounded task. The user prohibited subagents. Confirm the available `pi` CLI is using local Qwen before writing; do not silently switch to another model. Use the skill and task template created here for Qwen-written code.
 
 **Goal:** Add repeatable provenance mutation checks and narrow anti-pattern detection, plus concise Pi/Qwen guidance that prevents known provenance mistakes and unproductive retry loops.
 
