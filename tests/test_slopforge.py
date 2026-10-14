@@ -834,6 +834,25 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["measured"]["dimensions"], [8, 6])
 
+    def test_failure_vocabulary_baseline(self):
+        """Representative test for Task 1: passes only after failures.py."""
+        from slopforge.failures import (
+            StageFailure,
+            candidate_quality_rejection,
+            failure_record,
+            should_retry,
+        )
+        failure = failure_record(RuntimeError("unclassified worker exit"),
+                                 stage="mesh_workflow_execution", attempt=1,
+                                 operation="worker")
+        self.assertEqual(failure["category"], "unknown")
+        self.assertFalse(should_retry(failure, used=1, limit=3))
+        self.assertFalse(candidate_quality_rejection({
+            "status": "failed",
+            "errors": ["broken"],
+            "failure_codes": ["component_budget", "missing_output"],
+        }))
+
 
 if __name__ == "__main__":
     unittest.main()

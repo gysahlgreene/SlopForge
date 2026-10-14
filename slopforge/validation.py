@@ -35,83 +35,108 @@ def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=5
     return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "checks": checks, "errors": errors, "warnings": warnings, "measured": measured}
 
 
-def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None, max_components=None,
-                           max_nonmanifold_edges=None, max_boundary_edges=None):
-    errors, warnings = [], []
+def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None,
+                           max_components=None, max_nonmanifold_edges=None,
+                           max_boundary_edges=None):
+    errors, warnings, failure_codes = [], [], []
     root = Path(project_root).resolve() if project_root else None
-    measured = {key: (Path(path).resolve().relative_to(root).as_posix() if root and Path(path).resolve().is_relative_to(root) else str(path)) for key, path in paths.items()}
+    measured = {key: (Path(path).resolve().relative_to(root).as_posix()
+                       if root and Path(path).resolve().is_relative_to(root)
+                       else str(path))
+                for key, path in paths.items()}
+
+    def _add_err(code, msg):
+        errors.append(msg)
+        failure_codes.append(code)
+
     for key, path in paths.items():
         path = Path(path)
         if not path.is_file() or path.stat().st_size == 0:
-            errors.append(f"{key} is missing or empty: {path}")
+            _add_err("missing_artifact", f"{key} is missing or empty: {path}")
     if not isinstance(inspection, dict):
-        errors.append("Blender mesh inspection did not run")
+        _add_err("inspection_invalid", "Blender mesh inspection did not run")
     else:
         if inspection.get("status") not in {"passed", "passed_with_warnings"}:
-            errors.append("Blender mesh inspection did not pass")
+            _add_err("inspection_invalid", "Blender mesh inspection did not pass")
         report = inspection.get("measured")
         if not isinstance(report, dict):
-            errors.append("Blender inspection report has no measured metrics")
+            _add_err("inspection_invalid", "Blender inspection report has no measured metrics")
             report = {}
         measured.update(report)
         errors.extend(inspection.get("errors", []))
+        failure_codes.extend(["inspection_invalid"] * len(inspection.get("errors", [])))
         warnings.extend(inspection.get("warnings", []))
-        required = ("mesh_objects", "vertex_count", "face_count", "dimensions", "uv_layers",
-                    "material_count", "image_texture_count", "component_count", "nonmanifold_edge_count", "transforms_applied",
-                    "missing_textures")
+        required = ("mesh_objects", "vertex_count", "face_count", "dimensions",
+                    "uv_layers", "material_count", "image_texture_count",
+                    "component_count", "nonmanifold_edge_count",
+                    "transforms_applied", "missing_textures")
         for key in required:
             if key not in report:
-                errors.append(f"inspection did not measure {key}")
+                _add_err("inspection_invalid", f"inspection did not measure {key}")
         metrics = dict(report)
-        for key in ("mesh_objects", "vertex_count", "face_count", "uv_layers", "material_count", "image_texture_count",
-                    "component_count", "nonmanifold_edge_count"):
+        for key in ("mesh_objects", "vertex_count", "face_count", "uv_layers",
+                     "material_count", "image_texture_count",
+                     "component_count", "nonmanifold_edge_count"):
             value = metrics.get(key)
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
-                errors.append(f"inspection reported invalid {key}")
+                _add_err("metric_invalid", f"inspection reported invalid {key}")
                 metrics[key] = 0
-        if metrics.get("mesh_objects", 0) < 1 or metrics.get("vertex_count", 0) < 3 or metrics.get("face_count", 0) < 1:
-            errors.append("mesh has no usable surface geometry")
+        if (metrics.get("mesh_objects", 0) < 1 or
+                metrics.get("vertex_count", 0) < 3 or
+                metrics.get("face_count", 0) < 1):
+            _add_err("surface_invalid", "mesh has no usable surface geometry")
         if not isinstance(metrics.get("dimensions"), (list, tuple)) or len(metrics["dimensions"]) != 3:
-            errors.append("mesh bounds were not measured")
-        elif any(not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 1e-5
-                 for value in metrics["dimensions"]):
-            errors.append("mesh bounds are degenerate or non-finite")
+            _add_err("bounds_invalid", "mesh bounds were not measured")
+        elif any(not isinstance(value, (int, float)) or not math.isfinite(value)
+                 or value <= 1e-5 for value in metrics["dimensions"]):
+            _add_err("bounds_invalid", "mesh bounds are degenerate or non-finite")
         if metrics.get("uv_layers", 0) < 1:
-            errors.append("mesh has no UV map")
+            _add_err("uv_missing", "mesh has no UV map")
         if metrics.get("material_count", 0) < 1:
-            errors.append("mesh has no material")
+            _add_err("material_missing", "mesh has no material")
         if metrics.get("transforms_applied") is not True:
-            errors.append("mesh rotation or scale is not applied")
+            _add_err("transform_invalid", "mesh rotation or scale is not applied")
         if metrics.get("missing_textures"):
-            errors.append("one or more referenced texture files are missing")
+            _add_err("texture_missing", "one or more referenced texture files are missing")
         face_count = metrics.get("face_count")
         if face_budget and isinstance(face_count, (int, float)) and face_count > face_budget:
-            errors.append(f"face count exceeds budget {face_budget}")
+            _add_err("face_budget", f"face count exceeds budget {face_budget}")
         component_count = report.get("component_count")
         if max_components is not None:
             if component_count is None:
-                errors.append("component count was not measured")
+                _add_err("metric_invalid", "component count was not measured")
             elif not isinstance(component_count, (int, float)):
-                errors.append("inspection reported invalid component count")
+                _add_err("metric_invalid", "inspection reported invalid component count")
             elif component_count > max_components:
-                errors.append(f"component count {component_count} exceeds budget {max_components}")
+                _add_err("component_budget", f"component count {component_count} exceeds budget {max_components}")
         nonmanifold_edge_count = report.get("nonmanifold_edge_count")
         if max_nonmanifold_edges is not None:
             if nonmanifold_edge_count is None:
-                errors.append("non-manifold edge count was not measured")
+                _add_err("metric_invalid", "non-manifold edge count was not measured")
             elif not isinstance(nonmanifold_edge_count, (int, float)):
-                errors.append("inspection reported invalid non-manifold edge count")
+                _add_err("metric_invalid", "inspection reported invalid non-manifold edge count")
             elif nonmanifold_edge_count > max_nonmanifold_edges:
-                errors.append(f"non-manifold edge count {nonmanifold_edge_count} exceeds budget {max_nonmanifold_edges}")
+                _add_err("nonmanifold_budget",
+                         f"non-manifold edge count {nonmanifold_edge_count} exceeds budget {max_nonmanifold_edges}")
         boundary_edge_count = report.get("boundary_edge_count")
         if max_boundary_edges is not None:
             if boundary_edge_count is None:
-                errors.append("boundary edge count was not measured")
+                _add_err("metric_invalid", "boundary edge count was not measured")
             elif not isinstance(boundary_edge_count, (int, float)):
-                errors.append("inspection reported invalid boundary edge count")
+                _add_err("metric_invalid", "inspection reported invalid boundary edge count")
             elif boundary_edge_count > max_boundary_edges:
-                errors.append(f"boundary edge count {boundary_edge_count} exceeds budget {max_boundary_edges}")
-    return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "errors": errors, "warnings": warnings, "measured": measured}
+                _add_err("boundary_budget",
+                         f"boundary edge count {boundary_edge_count} exceeds budget {max_boundary_edges}")
+    return {
+        "status": "failed" if errors else "passed_with_warnings" if warnings else "passed",
+        "errors": errors, "failure_codes": failure_codes,
+        "warnings": warnings, "measured": measured,
+        "limits": {
+            "max_components": max_components,
+            "max_nonmanifold_edges": max_nonmanifold_edges,
+            "max_boundary_edges": max_boundary_edges,
+        },
+    }
 
 
 def summarize_validation(result):

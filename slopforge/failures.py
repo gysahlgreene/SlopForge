@@ -1,0 +1,329 @@
+"""Shared failure vocabulary for SlopForge orchestration and workers.
+
+Workers and backends import this module only (never orchestration).
+Orchestration callers import from backends' StageFailure.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Dict
+import math
+
+# ── Allowlisted candidate-quality codes (only these retry) ──────────────
+_CANDIDATE_QUALITY_CODES = frozenset({
+    "component_budget",
+    "nonmanifold_budget",
+    "boundary_budget",
+})
+
+# ── Retryable categories (subset of all categories) ───────────────────
+_RETRYABLE_CATEGORIES = frozenset({"candidate_quality"})
+
+
+class StageFailure(RuntimeError):
+    """Typed failure describing a prop-stage stop or retry boundary.
+
+    str(output) includes stage (when known), category, message, and remedy
+    so existing CLI error paths remain readable.
+    """
+
+    def __init__(
+        self,
+        category: str,
+        message: str,
+        *,
+        operation: str,
+        remedy: str,
+        stage: str | None = None,
+        stage_id: str | None = None,
+        evidence: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.message = message
+        self.operation = operation
+        self.remedy = remedy
+        self.stage = stage
+        self.stage_id = stage_id
+        self.evidence = evidence or {}
+
+    def __str__(self) -> str:
+        parts: list[str] = []
+        if self.stage is not None:
+            parts.append(self.stage)
+        parts.append(f"({self.category})")
+        parts.append(self.message)
+        parts.append(f"remedy: {self.remedy}")
+        return " — ".join(parts)
+
+
+# ── Required fields for a complete failure_record ──────────────────────
+_REQUIRED_RECORD_FIELDS = frozenset({
+    "category", "stage", "stage_id", "attempt",
+    "operation", "message", "remedy", "retryable",
+    "exception_type", "evidence",
+})
+
+
+def _is_valid_report_metric(value, name: str) -> bool:
+    """Return True for finite, non-negative numeric metrics excluding bools."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(value):
+        return False
+    if value < 0:
+        return False
+    return True
+
+
+def failure_record(
+    error: Exception | KeyboardInterrupt,
+    *,
+    stage: str,
+    attempt: int | None,
+    operation: str,
+    stage_id: str | None = None,
+) -> dict:
+    """Return a JSON-safe failure record from any exception.
+
+    An explicitly reported StageFailure takes precedence over the fallback.
+    Untyped exceptions default to category "unknown".
+
+    The ``stage`` field always stores the caller-supplied stage name.
+    When an untyped exception is passed the caller's ``stage`` is used
+    verbatim rather than falling through to the optional ``stage_id``.
+    """
+    # ── Default: classify as unknown for any unhandled exception ────────
+    if not isinstance(error, StageFailure):
+        # KeyboardInterrupt → interruption; untyped exceptions → unknown.
+        if isinstance(error, KeyboardInterrupt):
+            category = "interruption"
+            remedy = "inspect retained state and explicitly resume; do not assume remote inference stopped"
+        else:
+            category = "unknown"
+            remedy = "inspect the stage boundary and retry after a confirmed fix"
+        msg = str(error)
+        if not msg:
+            msg = f"{category}: no message"
+        return {
+            "category": category,
+            "stage": stage,                # ← always use caller's name
+            "stage_id": stage_id,
+            "attempt": attempt,
+            "operation": operation,
+            "message": msg,
+            "remedy": remedy,
+            "retryable": False,
+            "exception_type": type(error).__name__,
+            "evidence": {},
+        }
+
+    # ── StageFailure path ───────────────────────────────────────────────
+    # Validate evidence: use strict JSON serialization.  Unsupported objects
+    # reset evidence to safe-fallback so quality-retry never trusts bad data.
+    safe_evidence: dict = {}
+    if (isinstance(error.evidence, dict)):
+        try:
+            json.dumps(error.evidence, allow_nan=False)
+            safe_evidence = dict(error.evidence)
+        except (TypeError, ValueError):
+            safe_evidence = {"_safe_evidence_fallback": True}
+
+    # Derive retryable from validated quality evidence only.
+    is_quality = (error.category == "candidate_quality")
+    validated_evidence = safe_evidence.get("validation") if is_quality else None
+    retryable = (False
+                 if not is_quality or not isinstance(validated_evidence, dict)
+                 else candidate_quality_rejection(validated_evidence))
+
+    return {
+        "category": error.category,
+        "stage": error.stage if error.stage is not None else stage,
+        "stage_id": error.stage_id if error.stage_id is not None else stage_id,
+        "attempt": attempt,
+        "operation": error.operation if error.operation else operation,
+        "message": str(error) or f"{error.category}: no message",
+        "remedy": error.remedy,
+        "retryable": retryable,
+        "exception_type": type(error).__name__,
+        "evidence": safe_evidence,
+    }
+
+
+def should_retry(failure: dict, *, used: int, limit: int) -> bool:
+    """Decide whether the failure record qualifies for automatic retry.
+
+    * ``used`` and ``limit`` must be positive integers (not bools); retry only
+      when ``used < limit``.
+    * Only ``candidate_quality`` category records qualify within budget.
+    * A ``candidate_quality`` record must carry a validated
+      ``evidence["validation"]`` report; missing/incomplete/tampered evidence
+      prevents retry (never trusts the boolean flag alone).
+    * Invalid records (bad containers, negative counters, etc.) fail closed.
+    * The record must contain all required failure_record fields.
+    """
+    # Validate container shapes early (fail closed).
+    if not isinstance(failure, dict):
+        return False
+
+    # Validate required fields (Blocker 2).
+    for field in _REQUIRED_RECORD_FIELDS:
+        if field not in failure:
+            return False
+
+    category = failure.get("category")
+    if not isinstance(category, str) or not category:
+        return False
+
+    # used/limit must be plain ints, not booleans (isinstance(True, int)!).
+    if isinstance(used, bool) or isinstance(limit, bool):
+        return False
+    if not isinstance(used, int) or not isinstance(limit, int):
+        return False
+    if used <= 0 or limit <= 0:
+        return False
+    if category not in _RETRYABLE_CATEGORIES:
+        return False
+
+    # candidate_quality requires validated evidence; never trust retryable
+    # from the record alone.  Tampered or absent evidence blocks retry.
+    evidence = failure.get("evidence")
+    if not isinstance(evidence, dict):
+        return False
+    validation = evidence.get("validation")
+    if not isinstance(validation, dict):
+        return False
+    if not candidate_quality_rejection(validation):
+        return False
+
+    return used < limit
+
+
+def candidate_quality_rejection(validation: dict) -> bool:
+    """Return True only when a complete valid inspection rejects on
+    allowlisted topology thresholds.
+
+    Requirements for a True result:
+    * ``status == "failed"`` and ``errors`` is a non-empty list of strings.
+    * ``failure_codes`` is present and non-empty; every code is in the
+      allowlist; there are no missing or legacy codes.
+    * ``failure_codes`` is aligned with ``errors`` (same length).
+    * For each rejection code the inspection has a finite non-negative
+      numeric metric that meets or exceeds its declared non-negative
+      threshold in the inspection's measured data.
+    * Booleans are not treated as numeric metrics or thresholds.
+    * A complete valid inspection is required (all mandatory metrics present
+      and valid -- mirroring validate_model_outputs requirements).
+    * All members of the validation dict must be validated before selecting
+      any single threshold failure. One legitimate exceeded component limit
+      cannot conceal invalid face or geometry data.
+
+    Any violation returns False without raising. Handles overlarge integers
+    without leaking numeric overflow.
+    """
+    # Fail closed on malformed containers.
+    if not isinstance(validation, dict):
+        return False
+
+    status = validation.get("status")
+    if status != "failed":
+        return False
+
+    errors = validation.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return False
+
+    codes = validation.get("failure_codes")
+    if not isinstance(codes, list) or not codes:
+        return False
+
+    # Code list length must match errors (one-to-one alignment).
+    if len(codes) != len(errors):
+        return False
+
+    # Every code must be in the allowlist (no missing/legacy codes).
+    for code in codes:
+        if not isinstance(code, str) or code not in _CANDIDATE_QUALITY_CODES:
+            return False
+
+    # Every error member must be a string.
+    for error_member in errors:
+        if not isinstance(error_member, str):
+            return False
+
+    # ── Complete-inspection check mirroring validate_model_outputs ──────
+    measured = validation.get("measured")
+    if not isinstance(measured, dict):
+        return False
+
+    # Validate all required metric fields from the actual validator.
+    _required_metrics = {
+        "mesh_objects": ("isfinite", True),
+        "vertex_count": ("isfinite", True),
+        "face_count": ("isfinite", True),
+        "dimensions": ("list_tuple", True),
+        "uv_layers": ("isfinite", True),
+        "material_count": ("isfinite", True),
+        "image_texture_count": ("isfinite", True),
+        "component_count": ("isfinite", True),
+        "nonmanifold_edge_count": ("isfinite", True),
+        "transforms_applied": ("bool_true", True),
+        "missing_textures": ("list_or_false", True),
+    }
+
+    for metric_name, check_type in _required_metrics.items():
+        value = measured.get(metric_name)
+        valid = False
+        if check_type == ("isfinite", True):
+            valid = _is_valid_report_metric(value, metric_name)
+        elif check_type == ("list_tuple", True):
+            valid = (isinstance(value, (list, tuple)) and len(value) == 3)
+        elif check_type == ("bool_true", True):
+            valid = (value is True)
+        elif check_type == ("list_or_false", True):
+            valid = (isinstance(value, list) or value is False
+                     or value is None)
+        if not valid:
+            return False
+
+    limits = validation.get("limits")
+    if not isinstance(limits, dict):
+        return False
+
+    # ── Check each rejection code exceeds its limit ─────────────────────
+    _CODE_LIMIT: Dict[str, tuple[str, str]] = {
+        "component_budget": ("component_count", "max_components"),
+        "nonmanifold_budget": ("nonmanifold_edge_count", "max_nonmanifold_edges"),
+        "boundary_budget": ("boundary_edge_count", "max_boundary_edges"),
+    }
+
+    for code in codes:
+        metric_key, limit_key = _CODE_LIMIT.get(code, (None, None))
+        if metric_key is None:
+            return False
+        threshold = limits.get(limit_key)
+        # Unspecified (null) limit means unbounded; missing limit here means
+        # the validator did not emit the code and the report is inconsistent.
+        if threshold is None:
+            return False
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            return False
+        if not math.isfinite(threshold) or threshold < 0:
+            return False
+        metric_value = measured.get(metric_key)
+        # Booleans are not numeric metrics.
+        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
+            return False
+        if not math.isfinite(metric_value):
+            return False
+        if metric_value <= threshold:
+            return False
+
+    return True
+
+
+def _is_retryable(category: str) -> bool:
+    return category in _RETRYABLE_CATEGORIES
