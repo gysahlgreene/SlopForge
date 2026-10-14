@@ -13,11 +13,9 @@ humanoid work is bounded evidence, not the next production milestone.
 Package 1 (execution lineage, stage state, and provenance foundation) is merged
 in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); its tracking issue
 [#30](https://github.com/gysahlgreene/SlopForge/issues/30) is closed. Package 2
-(safe resume, invalidation, and evidence-backed reuse) is implemented and verified.
-The repository ruleset requires formal PR approval; its current integration state
-is recorded in [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32), and
-[issue #27](https://github.com/gysahlgreene/SlopForge/issues/27) tracks completion.
-GitHub PR state is the integration source of truth.
+(safe resume, invalidation, and evidence-backed reuse) is merged in [PR #32](https://github.com/gysahlgreene/SlopForge/pull/32),
+merge commit `405cc38`; tracking issue [#27](https://github.com/gysahlgreene/SlopForge/issues/27)
+is closed. Its deterministic offline verification passed as recorded below.
 
 Package 3 (failure classification and bounded retries) is planned and has not
 started. The old draft is reference material; Codex/Luna owns the final plan.
