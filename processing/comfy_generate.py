@@ -169,16 +169,14 @@ def main():
         prompt_id = client.queue_workflow(workflow)
         history = client.wait_for_completion(prompt_id, timeout=600)
     except ComfyUIError as exc:
-        # At known client boundaries (HTTP/upload/download): tag with
-        # ``environment``; at structured workflow-rejection: tag with
-        # ``configuration``.  Never infer retryability from text.
-        if exc.operation == "upload":
-            exc.category = "environment"
-        elif exc.operation == "validate_workflow" or exc.operation == "queue_workflow":
-            exc.category = "configuration"
+        # Tag errors at the client/boundary that knows their category.
+        # Never infer retryability from message text.
+        if not exc.category:
+            exc.category = "unknown"
         if args.failure_report:
             _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI generation failed: {exc}", file=sys.stderr)
+        # Preserve subprocess return behavior: exit non-zero.
         sys.exit(1)
 
     extensions = (".png", ".jpg", ".jpeg", ".webp")

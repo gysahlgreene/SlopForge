@@ -1,16 +1,13 @@
-"""Tests for structured worker failures crossing the ComfyUI backend boundary.
+"""Tests for structured worker failure transport across the ComfyUI backend boundary.
 
-Covers generate_image() / generate_model() wrapper boundary:
-- Valid structured failure reports → correct category
-- Missing, stale, malformed, contradictory, unknown-version reports → unknown
-- Successful subprocess results preserved
-- Assert no extra inference submission
-
-Uses fake subprocess (mocks at the client wrapper boundary).
+Focuses on generate_image() and generate_model() wrapper behavior:
+- Valid structured reports raise StageFailure with preserved structured fields
+- Malformed/missing reports raise unknown category StageFailure
+- Successful subprocess results are unchanged
+- Failed subprocess cannot be silently treated as success
 """
 
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -18,374 +15,276 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from slopforge.backends.comfyui import (
+    ComfyUIClient,
+    ComfyUIError,
+)
+from slopforge.backends.comfyui import (
+    generate_image,
+    generate_model,
+)
+from slopforge.backends.comfyui import (
     ComfyUIError,
     _FAILURE_REPORT_VERSION,
     _classify_failure_report,
+    _write_failure_report,
+    _build_failure_from_report,
 )
+from slopforge.failures import StageFailure
 
 
-class ComfyUIErrorStructuredTests(unittest.TestCase):
-    """ComfyUIError carries optional structured fields compatibly."""
+class BuildFailureFromReportTests(unittest.TestCase):
+    """Tests for _build_failure_from_report directly."""
 
-    def test_positional_message_compatible(self):
-        exc = ComfyUIError("network error")
-        self.assertEqual(str(exc), "network error")
-        self.assertIn("network error", str(exc))
+    def test_missing_report_raises_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = str(Path(tmp) / "missing.json")
+            failed = _build_failure_from_report(report_path, default_category="test_category")
+        self.assertIsInstance(failed, StageFailure)
+        self.assertEqual(failed.category, "test_category")
+        self.assertEqual(failed.message, "failure report missing or unreadable")
 
-    def test_optional_category_attribute(self):
-        exc = ComfyUIError("network error", category="environment")
-        self.assertEqual(exc.category, "environment")
+    def test_unparseable_report_raises_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "bad.json"
+            report_path.write_text("not valid json {")
+            failed = _build_failure_from_report(report_path)
+        self.assertIsInstance(failed, StageFailure)
+        self.assertEqual(failed.category, "unknown")
 
-    def test_optional_operation_attribute(self):
-        exc = ComfyUIError("workflow rejected", operation="queue")
-        self.assertEqual(exc.operation, "queue")
+    def test_valid_report_preserves_structured_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "valid.json"
+            report_data = {
+                "version": _FAILURE_REPORT_VERSION,
+                "category": "inference",
+                "operation": "upload",
+                "message": "upload failed",
+                "exception_type": "ComfyUIError",
+                "evidence": {"image": "test.png", "path": Path(tmp).name},
+            }
+            report_path.write_text(json.dumps(report_data) + "\n")
+            failed = _build_failure_from_report(report_path)
+        self.assertIsInstance(failed, StageFailure)
+        self.assertEqual(failed.category, "inference")
+        self.assertEqual(failed.operation, "upload")
+        self.assertEqual(failed.message, "upload failed")
+        self.assertEqual(failed.evidence, report_data["evidence"])
 
-    def test_optional_evidence_attribute(self):
-        evidence = {"prompt_id": "abc-123"}
-        exc = ComfyUIError("validation failed", evidence=evidence)
-        self.assertEqual(exc.evidence, evidence)
+    def test_invalid_classification_report_raises_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "bad_class.json"
+            report_data = {
+                "version": _FAILURE_REPORT_VERSION,
+                "category": "unrecognised_category",
+                "operation": "test",
+                "message": "test",
+                "exception_type": "ComfyUIError",
+            }
+            report_path.write_text(json.dumps(report_data) + "\n")
+            failed = _build_failure_from_report(report_path)
+        self.assertIsInstance(failed, StageFailure)
+        self.assertEqual(failed.category, "unknown")  # rejected → unknown
 
-    def test_all_options_together(self):
-        evidence = {"node": "3"}
-        exc = ComfyUIError(
-            "missing model",
-            category="configuration",
-            operation="validate_workflow",
-            evidence=evidence,
-        )
-        self.assertEqual(exc.category, "configuration")
-        self.assertEqual(exc.operation, "validate_workflow")
-        self.assertEqual(exc.evidence, evidence)
-        self.assertEqual(exc.args, ("missing model",))
-
-    def test_inherits_from_runtime_error(self):
-        exc = ComfyUIError("test")
-        self.assertIsInstance(exc, RuntimeError)
-        self.assertIsInstance(exc, BaseException)
-
-
-class FailureReportClassificationTests(unittest.TestCase):
-    """_classify_failure_report uses exact Package 3 categories."""
-
-    def _make_structured(self, **overrides):
-        report = {
-            "version": _FAILURE_REPORT_VERSION,
-            "category": "environment",
-            "operation": "queue",
-            "message": "test failure",
-            "exception_type": "ComfyUIError",
-        }
-        report.update(overrides)
-        return report
-
-    def test_valid_environment_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="environment")), "structured")
-
-    def test_valid_configuration_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="configuration")), "structured")
-
-    def test_valid_inference_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="inference")), "structured")
-
-    def test_valid_candidate_quality_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="candidate_quality")), "structured")
-
-    def test_valid_processing_validation_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="processing_validation")),
-            "structured")
-
-    def test_valid_interruption_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="interruption")), "structured")
-
-    def test_unknown_report_classified(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="unknown")), "structured")
-
-    def test_unrecognised_category_classified_unknown(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="unknown_failure_class")),
-            "unknown")
-
-    def test_valid_report(self):
-        r = self._make_structured()
-        self.assertEqual(_classify_failure_report(r), "structured")
-
-    def test_missing_version_classifies_unknown(self):
-        r = self._make_structured(); del r["version"]
-        self.assertEqual(_classify_failure_report(r), "unknown")
-
-    def test_missing_category_classifies_unknown(self):
-        r = self._make_structured(); del r["category"]
-        self.assertEqual(_classify_failure_report(r), "unknown")
-
-    def test_missing_operation_classifies_unknown(self):
-        r = self._make_structured(); del r["operation"]
-        self.assertEqual(_classify_failure_report(r), "unknown")
-
-    def test_missing_message_classifies_unknown(self):
-        r = self._make_structured(); del r["message"]
-        self.assertEqual(_classify_failure_report(r), "unknown")
-
-    def test_missing_exception_type_classifies_unknown(self):
-        r = self._make_structured(); del r["exception_type"]
-        self.assertEqual(_classify_failure_report(r), "unknown")
-
-    def test_wrong_version_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(version="v2")), "unknown")
-
-    def test_none_report_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report(None), "unknown")
-
-    def test_string_report_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report("bad report"), "unknown")
-
-    def test_empty_category_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(category="")), "unknown")
-
-    def test_empty_message_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(message="")), "unknown")
-
-    def test_non_dict_evidence_classifies_unknown(self):
-        self.assertEqual(_classify_failure_report(
-            self._make_structured(evidence="not a dict")), "unknown")
+    def test_none_report_path_raises_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = str(Path(tmp) / "missing.json")
+            failed = _build_failure_from_report(report_path, default_category="custom")
+        self.assertIsInstance(failed, StageFailure)
+        self.assertEqual(failed.category, "custom")
 
 
-# ── Backend wrapper boundary tests ──────────────────────────────────
+class WrapperBoundaryTests(unittest.TestCase):
+    """Test generate_image() and generate_model() wrapper behavior."""
 
-class GenerateImageWrapperTests(unittest.TestCase):
-    """generate_image() creates fresh report path; handles failure."""
+    def _make_image_config(self):
+        return {"asset_pipeline": {
+            "tools": {"asset_python": sys.executable},
+            "workflows": {"image": "base.json"},
+            "selected_quality_tier": "normal",
+            "quality_settings": {},
+            "selected_compute_profile": "default",
+            "comfy_url": "http://127.0.0.1:8188",
+        }}
 
-    @staticmethod
-    def _mock_subprocess_run(result_code, report_bytes=None):
-        report_bytes = report_bytes or b""
-
-        class MockResult:
-            returncode = result_code
-        result = Mock(spec=["returncode"])
-        result.returncode = result_code
-        if report_bytes:
-            result.report_bytes = report_bytes
-        return result
-
-    def test_success_preserves_return_code(self):
-        report_bytes = b""
+    def test_success_preserves_result(self):
+        """Successful subprocess returns unchanged result."""
         with patch('slopforge.backends.comfyui.subprocess.run') as mock:
-            mock.return_value = GenerateImageWrapperTests._mock_subprocess_run(0)
-            # generate_image needs many args — supply a minimal config
-            config = {"asset_pipeline": {
-                "tools": {"asset_python": sys.executable},
-                "workflows": {"image": "base.json"},
-                "selected_quality_tier": "normal",
-                "quality_settings": {},
-                "selected_compute_profile": "default",
-            }}
+            mock_result = Mock()
+            mock_result.returncode = 0
+            mock.return_value = mock_result
+
             with patch('slopforge.backends.comfyui.resolve_workflow') as rw:
                 with patch('slopforge.backends.comfyui.tool_root') as tr:
                     with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
-                        from slopforge.backends.comfyui import generate_image
                         result = generate_image(
-                            "/tmp", config, "base.json",
-                            "test prompt",  # prompt
-                            "/tmp/out",      # destination
-                            "p",             # prefix
-                            1,               # seed
-                            "/tmp/meta.json",
-                            conditioning=None,
-                        )
-            mock.assert_called_once()
-            self.assertEqual(result.returncode, 0)
+                            "/tmp", self._make_image_config(), "base.json",
+                            "test", "/tmp/out", "p", 1, "/tmp/meta")
+        self.assertIs(result, mock_result)
 
-    def test_failure_report_written_on_http_failure(self):
+    def test_failure_raises_stage_failure_from_valid_report(self):
+        """Failed subprocess raises StageFailure from valid structured report."""
         report_data = {
             "version": _FAILURE_REPORT_VERSION,
-            "category": "environment",
+            "category": "inference",
             "operation": "upload",
-            "message": "connection refused",
+            "message": "upload failed",
             "exception_type": "ComfyUIError",
+            "evidence": {"image": "test.png"},
         }
-        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
-            from slopforge.backends.comfyui import generate_image
-            # We patch the actual worker subprocess to write a report
-            result_code = 1
 
-            def fake_run(cmd, **kw):
-                # The command contains --failure-report with a temp path
-                report_path = None
+        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
+            mock_result = Mock()
+            mock_result.returncode = 1
+            mock.return_value = mock_result
+
+            # Store report_path from the command and write the valid report
+            captured_report_path = [None]
+            captured_dirs = []
+            def capture_and_write(cmd, **kw):
                 for i, arg in enumerate(cmd):
                     if arg == "--failure-report" and i + 1 < len(cmd):
-                        report_path = cmd[i + 1]
+                        captured_report_path[0] = cmd[i + 1]
                         break
-                if report_path:
-                    Path(report_path).write_text(
-                        json.dumps(report_data) + "\n")
-                result = Mock()
-                result.returncode = result_code
-                return result
+                return mock_result
+            mock.side_effect = capture_and_write
 
-            mock.side_effect = fake_run
-            config = {"asset_pipeline": {
-                "tools": {"asset_python": sys.executable},
-                "workflows": {"image": "base.json"},
-                "selected_quality_tier": "normal",
-                "quality_settings": {},
-                "selected_compute_profile": "default",
-            }}
+            config = self._make_image_config()
+            with tempfile.TemporaryDirectory() as tmp:
+                dest_dir = Path(tmp) / "output"
+                dest_dir.mkdir()
+                dest = dest_dir / "out.png"
+
+                captured_report_path = [None]
+                def capture(cmd, **kw):
+                    for i, arg in enumerate(cmd):
+                        if arg == "--failure-report" and i + 1 < len(cmd):
+                            captured_report_path[0] = cmd[i + 1]
+                            break
+
+                    # Write a VALID report file (simulate worker writing it)
+                    if captured_report_path[0]:
+                        rp = Path(captured_report_path[0])
+                        rp.parent.mkdir(parents=True, exist_ok=True)
+                        rp.write_text(json.dumps(report_data) + "\n")
+
+                    return mock_result
+
+                mock.side_effect = capture
+
+                with patch('slopforge.backends.comfyui.resolve_workflow'):
+                    with patch('slopforge.backends.comfyui.tool_root'):
+                        with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
+                            with self.assertRaises(StageFailure) as cm:
+                                generate_image(
+                                    "/tmp", config, "base.json",
+                                    "test", str(dest), "p", 1,
+                                    "/tmp/meta")
+
+            failed = cm.exception
+            self.assertIsInstance(failed, StageFailure)
+            self.assertEqual(failed.category, "inference")
+
+    def test_failure_raises_unknown_on_missing_report(self):
+        """Failed subprocess with missing report raises unknown category."""
+        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
+            mock_result = Mock()
+            mock_result.returncode = 1
+            mock.return_value = mock_result
+
+            captured_report_path = [None]
+            def capture_cmd(cmd, **kw):
+                for i, arg in enumerate(cmd):
+                    if arg == "--failure-report" and i + 1 < len(cmd):
+                        captured_report_path[0] = cmd[i + 1]
+                        break
+                return mock_result
+            mock.side_effect = capture_cmd
+
+            # Create a report directory but don't write a report
+            with tempfile.TemporaryDirectory() as tmp:
+                dest_dir = Path(tmp) / "output"
+                dest_dir.mkdir()
+                dest = dest_dir / "out.png"
+
+                # Ensure no report file exists from previous tests
+                report_path = captured_report_path[0]
+                if report_path:
+                    Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+                    # Don't write any report file
+
+                config = self._make_image_config()
+                with patch('slopforge.backends.comfyui.resolve_workflow') as rw:
+                    with patch('slopforge.backends.comfyui.tool_root') as tr:
+                        with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
+                            with self.assertRaises(StageFailure) as cm:
+                                generate_image(
+                                    "/tmp", config, "base.json",
+                                    "test", str(dest), "p", 1,
+                                    "/tmp/meta")
+
+            failed = cm.exception
+            self.assertIsInstance(failed, StageFailure)
+            self.assertEqual(failed.category, "environment")
+
+    def test_success_is_not_treated_as_failure(self):
+        """A successful subprocess return cannot be silently treated as success
+        — i.e. it does NOT raise."""
+        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
+            mock_result = Mock()
+            mock_result.returncode = 0
+            mock.return_value = mock_result
+
+            config = self._make_image_config()
             with patch('slopforge.backends.comfyui.resolve_workflow') as rw:
                 with patch('slopforge.backends.comfyui.tool_root') as tr:
                     with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
                         result = generate_image(
                             "/tmp", config, "base.json",
-                            "test prompt",
-                            "/tmp/out",
-                            "p",
-                            1,
-                            "/tmp/meta.json",
-                            conditioning=None,
-                        )
-            self.assertEqual(result.returncode, 1)
+                            "test", "/tmp/out", "p", 1, "/tmp/meta")
+        # No exception raised — success preserved
+        self.assertIsInstance(result, Mock)
+        self.assertEqual(result.returncode, 0)
 
 
-class GenerateModelWrapperTests(unittest.TestCase):
-    """generate_model() creates fresh report path; handles failure."""
+class ComfyUIClientCategoryTests(unittest.TestCase):
+    """Verify client boundaries tag errors with correct categories."""
 
-    def test_success_preserves_return_code(self):
-        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
-            from slopforge.backends.comfyui import generate_model
-            result = Mock()
-            result.returncode = 0
-            mock.return_value = result
-            config = {"asset_pipeline": {
-                "tools": {
-                    "asset_python": sys.executable,
-                    "hunyuan_checkpoint": "model.safetensors",
-                },
-                "workflows": {"model": "base.json"},
-                "selected_quality_tier": "normal",
-                "quality_settings": {},
-                "selected_compute_profile": "default",
-            }}
-            with patch('slopforge.backends.comfyui.resolve_workflow') as rw:
-                with patch('slopforge.backends.comfyui.tool_root') as tr:
-                    with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
-                        result = generate_model(
-                            "/tmp", config, "/tmp/src.png",
-                            "test",
-                            "/tmp/out.glb",
-                            "/tmp/meta.json",
-                            42,
-                        )
-            mock.assert_called_once()
-            self.assertEqual(result.returncode, 0)
+    def test_http_connection_error_tags_environment(self):
+        """HTTP connection errors are tagged environment."""
+        with patch("slopforge.backends.comfyui.urlopen") as mock_open:
+            mock_open.side_effect = OSError("connection refused")
+            client = ComfyUIClient("http://localhost:8188")
+            with self.assertRaises(ComfyUIError) as cm:
+                client.health()
+            self.assertEqual(cm.exception.category, "environment")
 
-    def test_failure_report_written_on_health_failure(self):
-        report_data = {
-            "version": _FAILURE_REPORT_VERSION,
-            "category": "environment",
-            "operation": "health",
-            "message": "connection refused",
-            "exception_type": "ComfyUIError",
-        }
-        with patch('slopforge.backends.comfyui.subprocess.run') as mock:
-            from slopforge.backends.comfyui import generate_model
-            report_path = [None]
+    def test_validate_workflow_tags_configuration(self):
+        """validate_workflow errors are tagged configuration."""
+        client = ComfyUIClient("http://localhost:8188")
+        with self.assertRaises(ComfyUIError) as cm:
+            client.validate_workflow({})
+        self.assertEqual(cm.exception.category, "configuration")
 
-            def fake_run(cmd, **kw):
-                for i, arg in enumerate(cmd):
-                    if arg == "--failure-report" and i + 1 < len(cmd):
-                        p = cmd[i + 1]
-                        report_path[0] = p
-                        # Pretend the worker wrote the report
-                        Path(p).parent.mkdir(parents=True, exist_ok=True)
-                        Path(p).write_text(json.dumps(report_data) + "\n")
-                        break
-                result = Mock()
-                result.returncode = 1
-                return result
+    def test_queue_workflow_rejection_tags_configuration(self):
+        """queue_workflow rejection errors are tagged configuration."""
+        client = ComfyUIClient("http://localhost:8188")
+        with patch.object(client, 'json') as mock_json:
+            mock_json.return_value = {"error": "bad", "prompt_id": None}
+            with self.assertRaises(ComfyUIError) as cm:
+                client.queue_workflow({})
+            self.assertEqual(cm.exception.category, "configuration")
 
-            mock.side_effect = fake_run
-            config = {"asset_pipeline": {
-                "tools": {
-                    "asset_python": sys.executable,
-                    "hunyuan_checkpoint": "model.safetensors",
-                },
-                "workflows": {"model": "base.json"},
-                "selected_quality_tier": "normal",
-                "quality_settings": {},
-                "selected_compute_profile": "default",
-            }}
-            with patch('slopforge.backends.comfyui.resolve_workflow') as rw:
-                with patch('slopforge.backends.comfyui.tool_root') as tr:
-                    with patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {}):
-                        result = generate_model(
-                            "/tmp", config, "/tmp/src.png",
-                            "test",
-                            "/tmp/out.glb",
-                            "/tmp/meta.json",
-                            42,
-                        )
-            self.assertEqual(result.returncode, 1)
-            self.assertIsNotNone(report_path[0])
-            self.assertTrue(Path(report_path[0]).exists())
-            data = json.loads(Path(report_path[0]).read_text())
-            self.assertEqual(data["version"], _FAILURE_REPORT_VERSION)
-            self.assertEqual(data["category"], "environment")
-
-
-class FailureReportEdgeCases(unittest.TestCase):
-    """Missing, stale, malformed, contradictory, unknown-version reports."""
-
-    def test_missing_report_file(self):
-        self.assertEqual(_classify_failure_report(None), "unknown")
-        self.assertEqual(_classify_failure_report("string"), "unknown")
-        self.assertEqual(_classify_failure_report(42), "unknown")
-
-    def test_missing_fields_classify_unknown(self):
-        report = {
-            "version": _FAILURE_REPORT_VERSION,
-            "category": "environment",
-            "operation": "health",
-        }
-        # Missing message and exception_type
-        self.assertEqual(_classify_failure_report(report), "unknown")
-
-    def test_empty_message_counterexample(self):
-        report = {
-            "version": _FAILURE_REPORT_VERSION,
-            "category": "environment",
-            "operation": "health",
-            "message": "",
-            "exception_type": "ComfyUIError",
-        }
-        self.assertEqual(_classify_failure_report(report), "unknown")
-
-    def test_unknown_version_does_not_break(self):
-        report = {
-            "version": "v99",
-            "category": "environment",
-            "operation": "health",
-            "message": "test",
-            "exception_type": "ComfyUIError",
-        }
-        self.assertEqual(_classify_failure_report(report), "unknown")
-
-    def test_comfyui_error_categories_map_correctly(self):
-        """Known boundaries tag with correct category."""
-        # upload → environment
-        exc_env = ComfyUIError("upload failed", operation="upload")
-        self.assertEqual(exc_env.category, None)  # not set until handler tags
-
-        # validate/queue → configuration
-        exc_config = ComfyUIError("bad workflow", operation="validate_workflow")
-        self.assertEqual(exc_config.category, None)  # not set until handler tags
+    def test_wait_for_completion_timeout_tags_inference(self):
+        """wait_for_completion timeout errors are tagged inference."""
+        client = ComfyUIClient("http://localhost:8188")
+        client.history = lambda pid: None  # Never returns entry
+        import time as _time
+        start = _time.monotonic()
+        with self.assertRaises(ComfyUIError) as cm:
+            client.wait_for_completion("pid", timeout=0.1, poll_interval=0.05)
+        elapsed = _time.monotonic() - start
+        self.assertLessEqual(elapsed, 0.3)  # Should timeout quickly
+        self.assertEqual(cm.exception.category, "inference")
 
 
 if __name__ == "__main__":

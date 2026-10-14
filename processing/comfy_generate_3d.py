@@ -339,8 +339,9 @@ def main():
     try:
         health = client.health()
     except ComfyUIError as exc:
-        # Known boundary: health check → environment.
-        exc.category = "environment"
+        # Tag at known boundary (health → environment).
+        if not exc.category:
+            exc.category = "environment"
         if args.failure_report:
             _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI is not reachable at {COMFY_URL}: {exc}", file=sys.stderr)

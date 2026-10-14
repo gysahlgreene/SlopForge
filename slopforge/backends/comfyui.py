@@ -13,6 +13,7 @@ from pathlib import Path
 from ..provenance import provenance_fact
 
 from ..paths import blender_executable, comfy_backend, comfy_url, resolve_workflow, tool_root
+from ..failures import StageFailure
 from ..config import workflow_node_inputs
 
 
@@ -175,7 +176,12 @@ class ComfyUIClient:
             detail = exc.read().decode("utf-8", "replace")[:500]
             raise ComfyUIError(f"ComfyUI {method} {path} returned HTTP {exc.code}: {detail}") from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ComfyUIError(f"ComfyUI {method} {path} failed at {self.base_url}: {exc}") from exc
+            raise ComfyUIError(
+                f"ComfyUI {method} {path} failed at {self.base_url}: {exc}",
+                category="environment",
+                operation=f"http_{method.lower()}",
+                evidence={"endpoint": path, "method": method},
+            ) from exc
 
     def json(self, method, path, payload=None):
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -218,11 +224,32 @@ class ComfyUIClient:
     def validate_workflow(self, workflow, node_info=None):
         problems = workflow_mask_errors(workflow)
         if problems:
-            raise ComfyUIError("Invalid workflow mask wiring: " + "; ".join(problems))
-        node_info = node_info or self.node_types()
+            raise ComfyUIError(
+                "Invalid workflow mask wiring: " + "; ".join(problems),
+                category="configuration",
+                operation="validate_workflow",
+                evidence={"problems": problems},
+            )
+        # Re-tag HTTP errors from node_info fetch as configuration.
+        try:
+            node_info = node_info or self.node_types()
+        except ComfyUIError as exc:
+            if exc.category == "environment":
+                raise ComfyUIError(
+                    str(exc),
+                    category="configuration",
+                    operation="validate_workflow",
+                    evidence={"node_info_fetch_error": str(exc)},
+                ) from exc
+            raise
         missing = sorted({node.get("class_type") for node in workflow.values() if node.get("class_type")} - node_info.keys())
         if missing:
-            raise ComfyUIError("ComfyUI is missing workflow node classes: " + ", ".join(missing))
+            raise ComfyUIError(
+                "ComfyUI is missing workflow node classes: " + ", ".join(missing),
+                category="configuration",
+                operation="validate_workflow",
+                evidence={"missing": missing},
+            )
         unavailable_models = []
         for node in workflow.values():
             info = node_info.get(node.get("class_type"), {})
@@ -233,7 +260,12 @@ class ComfyUIClient:
                     if value not in options[0]:
                         unavailable_models.append(f"{node.get('class_type')}.{key}: {value}")
         if unavailable_models:
-            raise ComfyUIError("ComfyUI does not expose these workflow model choices: " + "; ".join(unavailable_models))
+            raise ComfyUIError(
+                "ComfyUI does not expose these workflow model choices: " + "; ".join(unavailable_models),
+                category="configuration",
+                operation="validate_workflow",
+                evidence={"unavailable_models": unavailable_models},
+            )
         return node_info
 
     def queue_workflow(self, workflow, client_id=None):
@@ -241,9 +273,19 @@ class ComfyUIClient:
         result = self.json("POST", "/prompt", {"prompt": workflow, "client_id": client_id or str(uuid.uuid4())})
         if result.get("node_errors"):
             details = json.dumps(result["node_errors"], sort_keys=True)
-            raise ComfyUIError(f"ComfyUI rejected workflow (missing node, model, or invalid input): {details}")
+            raise ComfyUIError(
+                f"ComfyUI rejected workflow (missing node, model, or invalid input): {details}",
+                category="configuration",
+                operation="queue_workflow",
+                evidence={"node_errors": result["node_errors"]},
+            )
         if not result.get("prompt_id"):
-            raise ComfyUIError(f"ComfyUI rejected workflow without a prompt id: {result}")
+            raise ComfyUIError(
+                f"ComfyUI rejected workflow without a prompt id: {result}",
+                category="configuration",
+                operation="queue_workflow",
+                evidence={"result": result},
+            )
         return result["prompt_id"]
 
     def history(self, prompt_id):
@@ -261,7 +303,12 @@ class ComfyUIClient:
                 if status.get("completed") and entry.get("outputs"):
                     return entry
             time.sleep(poll_interval)
-        raise ComfyUIError(f"Timed out waiting for ComfyUI history for prompt {prompt_id}")
+        raise ComfyUIError(
+            f"Timed out waiting for ComfyUI history for prompt {prompt_id}",
+            category="inference",
+            operation="wait_for_completion",
+            evidence={"prompt_id": prompt_id, "timeout": timeout},
+        )
 
     def list_outputs(self, history):
         found = []
@@ -376,7 +423,7 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     resolved = resolve_workflow(root, workflow)
     script = tool_root() / "processing/comfy_generate.py"
     # Create fresh report path for this invocation.
-    report_path = str(Path(tempfile.gettempdir()) / f".comfy_failure_{uuid.uuid4().hex}.json")
+    report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
     command = [python_executable(root, config), str(script), "--workflow", str(resolved),
                "--prompt", prompt, "--dest", str(destination), "--prefix", prefix,
                "--seed", str(seed), "--metadata", str(metadata),
@@ -396,38 +443,60 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     result = subprocess.run(command, check=False, env=comfy_environment(config, root))
     if result.returncode == 0:
         return result
-    # Subprocess failed — validate the invocation's report if present.
-    _convert_failure_report(result, report_path)
-    return result
+    # Subprocess failed — validate the invocation's report and raise.
+    failed = _build_failure_from_report(report_path, default_category="environment")
+    raise failed
 
 
-def _convert_failure_report(subprocess_result, report_path):
-    """Read and validate the invocation's failure report.
+def _build_failure_from_report(report_path, default_category="unknown"):
+    """Read and validate an invocation failure report, returning StageFailure.
 
-    On valid structural report produces a StageFailure on stdout/stderr;
-    missing, stale, malformed, contradictory, or unknown-version reports
-    become "unknown" category.  The subprocess result is returned unchanged
-    so the caller sees the same non-zero return code.
+    Returns a ``StageFailure`` with category, operation, message, remedy,
+    and safe evidence when the report is valid structured data.
+    Missing, stale, malformed, or contradictory reports return a
+    StageFailure with category ``default_category`` (default "unknown").
     """
     report_path_obj = Path(report_path)
     if not report_path_obj.exists():
-        return
+        return StageFailure(
+            default_category,
+            "failure report missing or unreadable",
+            operation="read_failure_report",
+            remedy="inspect the stage boundary and retry after a confirmed fix",
+            evidence={"report_path": str(report_path)},
+        )
     try:
         data = json.loads(report_path_obj.read_text())
     except (json.JSONDecodeError, OSError):
-        return
+        return StageFailure(
+            default_category,
+            "failure report could not be parsed",
+            operation="read_failure_report",
+            remedy="inspect the stage boundary and retry after a confirmed fix",
+            evidence={"report_path": str(report_path)},
+        )
     if _classify_failure_report(data) != "structured":
-        return
-    category = data["category"]
-    message = f"[{category}] {data['message']}"
-    print(message, file=sys.stderr)
+        return StageFailure(
+            default_category,
+            f"failure report rejected classification: {data!r}",
+            operation="read_failure_report",
+            remedy="inspect the stage boundary and retry after a confirmed fix",
+            evidence={"report_path": str(report_path), "report": data},
+        )
+    return StageFailure(
+        data["category"],
+        data["message"],
+        operation=data["operation"],
+        remedy="inspect the stage boundary and retry after a confirmed fix",
+        evidence=data.get("evidence", {}),
+    )
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
                   voxel_resolution=None, journal_context=None):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
-    report_path = str(Path(tempfile.gettempdir()) / f".comfy_failure_{uuid.uuid4().hex}.json")
+    report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
     command = [python_executable(root, config), str(script), "--image", str(image),
                "--name", name, "--dest", str(destination),
                "--checkpoint", config["asset_pipeline"]["tools"]["hunyuan_checkpoint"],
@@ -452,6 +521,6 @@ def generate_model(project_root, config, image, name, destination, metadata, see
     result = subprocess.run(command, check=False, env=comfy_environment(config, root))
     if result.returncode == 0:
         return result
-    # Subprocess failed — validate the invocation's report if present.
-    _convert_failure_report(result, report_path)
-    return result
+    # Subprocess failed — validate the invocation's report and raise.
+    failed = _build_failure_from_report(report_path, default_category="inference")
+    raise failed

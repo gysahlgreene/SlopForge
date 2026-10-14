@@ -5,7 +5,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from PIL import Image, ImageStat
 
@@ -760,6 +760,10 @@ class SlopForgeTests(unittest.TestCase):
         config = load_project(self.root)
         with patch.dict(os.environ, {"COMFYUI_URL": "http://localhost:9000/"}):
             with patch("slopforge.backends.comfyui.subprocess.run") as run:
+                # Mock successful subprocess return
+                mock_result = Mock()
+                mock_result.returncode = 0
+                run.return_value = mock_result
                 generate_image(self.root, config, "image_text2img_api.json", "prompt", self.root / "out.png",
                                "test/concept", 42, self.root / "out.json")
         command = run.call_args.args[0]
