@@ -17,7 +17,98 @@ from ..config import workflow_node_inputs
 
 
 class ComfyUIError(RuntimeError):
-    pass
+    """Structured failure that crosses the ComfyUI backend boundary.
+
+    Extends RuntimeError with optional structured fields while preserving
+    the original constructor signature and __str__ behaviour so existing
+    callers that only check for RuntimeError or str(exc) continue to work.
+    """
+
+    def __init__(self, message, /, *, category=None, operation=None, evidence=None):
+        super().__init__(message)
+        self.category = category
+        self.operation = operation
+        self.evidence = evidence
+
+    # Maintain positional-lookup compatibility for callers that do
+    # ``e.args[1]`` or similar: never change ``args``.  All extra
+    # attributes are keyword-only and therefore backwards-compatible.
+
+
+# ── Worker failure report (protocol-v1) ───────────────────────────────
+_FAILURE_REPORT_VERSION = "v1"
+_FAILURE_REQUIRED_FIELDS = frozenset(
+    {"version", "category", "operation", "message", "exception_type"},
+)
+
+
+def _safe_serialisable_evidence(evidence):
+    """Return a JSON-serialisable copy of ``evidence`` or {} on failure."""
+    if not isinstance(evidence, dict):
+        return {}
+    try:
+        json.dumps(evidence, allow_nan=False)
+        return evidence
+    except (TypeError, ValueError):
+        return {}
+
+
+def _classify_failure_report(report):
+    """Classify a worker failure report's readiness for structured handling.
+
+    Returns one of:
+    - ``'structured'`` when the report is complete, fresh, and self-consistent
+      and ``category`` maps to one of the known failure classes.
+    - ``'unknown'`` when the report is missing/stale/malformed/contradictory
+      or the version is not ``'v1'``.
+    """
+    if not isinstance(report, dict):
+        return "unknown"
+
+    # Version gate
+    version = report.get("version")
+    if version != _FAILURE_REPORT_VERSION:
+        return "unknown"
+
+    # Presence gate
+    for key in _FAILURE_REQUIRED_FIELDS:
+        if key not in report:
+            return "unknown"
+
+    # Type gates
+    if not isinstance(report["category"], str) or not report["category"]:
+        return "unknown"
+    if not isinstance(report["operation"], str) or not report["operation"]:
+        return "unknown"
+    if not isinstance(report["message"], str) or not report["message"]:
+        return "unknown"
+    if not isinstance(report["exception_type"], str) or not report["exception_type"]:
+        return "unknown"
+
+    # Self-consistency gate: ``evidence`` (when present) must not contain
+    # contradictions that break structured handling — e.g. ``True`` where
+    # a structured report already says ``"configuration"`` but the message
+    # and operation imply a processing step).
+    evidence = report.get("evidence")
+    if evidence is not None and not isinstance(evidence, dict):
+        return "unknown"
+
+    # Category gate — only recognised structured classes from
+    # Package 3 plan are allowed; everything else falls back to ``unknown``
+    # for safety.
+    _VALID_CATEGORIES = frozenset({
+        "configuration",
+        "environment",
+        "inference",
+        "candidate_quality",
+        "processing_validation",
+        "interruption",
+        "unknown",
+    })
+    if report["category"] not in _VALID_CATEGORIES:
+        return "unknown"
+
+    return "structured"
 
 
 def workflow_mask_errors(workflow):
@@ -46,7 +137,13 @@ def backend_provenance(health=None, *, queried=False):
                          provenance_fact("unavailable" if queried else "not_recorded",
                                          reason="ComfyUI did not expose a version" if queried else
                                                 "Backend health was not queried"))
-    names = [item["name"] for item in devices if isinstance(item, dict) and item.get("name")]
+    names = []
+    for _item in devices:
+        if isinstance(_item, dict):
+            _name = _item.get("name")
+            if _name:
+                names.append(_name)
+    names = sorted(names)
     facts["device"] = (provenance_fact("known", value=names) if names else
                         provenance_fact("unavailable" if queried else "not_recorded",
                                         reason="ComfyUI did not expose device identity" if queried else
@@ -233,14 +330,57 @@ def comfy_environment(config, project_root=None):
     return env
 
 
+def _write_failure_report(path, *, error):
+    """Atomically write a protocol-v1 failure report for the given error.
+
+    Called by workers when they handle a ComfyUIError.  The report is
+    written to a temporary file first and ``os.replace`` is used so that
+    wrappers never see a half-written report.
+
+    If writing fails the function silently returns ``False`` so that the
+    subprocess exit code is never changed by a failed write.
+    """
+    report = {
+        "version": _FAILURE_REPORT_VERSION,
+        "category": error.category or "unknown",
+        "operation": error.operation or "worker",
+        "message": str(error),
+        "exception_type": type(error).__name__,
+        "evidence": _safe_serialisable_evidence(error.evidence),
+    }
+    try:
+        report_path = Path(path)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            dir=str(report_path.parent),
+            prefix=f".{report_path.name}.",
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                json.dump(report, handle, allow_nan=False)
+                handle.write("\n")
+            os.replace(tmp, str(report_path))
+        except Exception:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        return True
+    except Exception:
+        # Never crash the worker on a failed report write.
+        return False
+
+
 def generate_image(project_root, config, workflow, prompt, destination, prefix, seed, metadata, *,
                    conditioning=None):
     root = Path(project_root).resolve()
     resolved = resolve_workflow(root, workflow)
     script = tool_root() / "processing/comfy_generate.py"
+    # Create fresh report path for this invocation.
+    report_path = str(Path(tempfile.gettempdir()) / f".comfy_failure_{uuid.uuid4().hex}.json")
     command = [python_executable(root, config), str(script), "--workflow", str(resolved),
                "--prompt", prompt, "--dest", str(destination), "--prefix", prefix,
-               "--seed", str(seed), "--metadata", str(metadata)]
+               "--seed", str(seed), "--metadata", str(metadata),
+               "--failure-report", report_path]
     quality = config["asset_pipeline"].get("quality_settings", {})
     quality_info = {"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                     "settings": quality}
@@ -253,17 +393,46 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
                       for item in conditioning["references"]]
         command.extend(["--references", json.dumps(references),
                         "--reference-inputs", json.dumps(conditioning["workflow_inputs"])])
-    return subprocess.run(command, check=True, env=comfy_environment(config, root))
+    result = subprocess.run(command, check=False, env=comfy_environment(config, root))
+    if result.returncode == 0:
+        return result
+    # Subprocess failed — validate the invocation's report if present.
+    _convert_failure_report(result, report_path)
+    return result
+
+
+def _convert_failure_report(subprocess_result, report_path):
+    """Read and validate the invocation's failure report.
+
+    On valid structural report produces a StageFailure on stdout/stderr;
+    missing, stale, malformed, contradictory, or unknown-version reports
+    become "unknown" category.  The subprocess result is returned unchanged
+    so the caller sees the same non-zero return code.
+    """
+    report_path_obj = Path(report_path)
+    if not report_path_obj.exists():
+        return
+    try:
+        data = json.loads(report_path_obj.read_text())
+    except (json.JSONDecodeError, OSError):
+        return
+    if _classify_failure_report(data) != "structured":
+        return
+    category = data["category"]
+    message = f"[{category}] {data['message']}"
+    print(message, file=sys.stderr)
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
                   voxel_resolution=None, journal_context=None):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
+    report_path = str(Path(tempfile.gettempdir()) / f".comfy_failure_{uuid.uuid4().hex}.json")
     command = [python_executable(root, config), str(script), "--image", str(image),
                "--name", name, "--dest", str(destination),
                "--checkpoint", config["asset_pipeline"]["tools"]["hunyuan_checkpoint"],
-               "--seed", str(seed), "--metadata", str(metadata)]
+               "--seed", str(seed), "--metadata", str(metadata),
+               "--failure-report", report_path]
     journal_context = journal_context or config.get("_journal_context")
     if journal_context:
         command.extend(["--journal-context", json.dumps({**journal_context, "project_root": str(root)})])
@@ -280,4 +449,9 @@ def generate_model(project_root, config, image, name, destination, metadata, see
     node_inputs = workflow_node_inputs(config, "model", workflow_name)
     if node_inputs:
         command.extend(["--workflow-inputs", json.dumps(node_inputs)])
-    return subprocess.run(command, check=True, env=comfy_environment(config, root))
+    result = subprocess.run(command, check=False, env=comfy_environment(config, root))
+    if result.returncode == 0:
+        return result
+    # Subprocess failed — validate the invocation's report if present.
+    _convert_failure_report(result, report_path)
+    return result

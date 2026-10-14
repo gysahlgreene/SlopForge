@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from slopforge.backends.comfyui import ComfyUIClient, comfy_environment, backend_provenance
+from slopforge.backends.comfyui import _write_failure_report, _classify_failure_report, ComfyUIError
 from slopforge.config import load_project
 from slopforge.paths import comfy_backend, comfy_home
 

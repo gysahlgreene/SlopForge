@@ -2,12 +2,21 @@
 import argparse
 import json
 import os
-import tempfile
 import sys
+import time
+import tempfile
 from pathlib import Path
-from slopforge.backends.comfyui import ComfyUIClient
-from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
-from slopforge.backends.comfyui import backend_provenance
+
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError
+from slopforge.backends.comfyui import (
+    backend_provenance,
+    _write_failure_report,
+)
+from slopforge.provenance import (
+    canonical_workflow_identity,
+    file_sha256,
+    workflow_sha256,
+)
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 
@@ -84,6 +93,7 @@ def main():
     p.add_argument("--prefix", default="generated/asset")
     p.add_argument("--seed", type=int)
     p.add_argument("--metadata", type=Path)
+    p.add_argument("--failure-report", help="Path to write atomic failure report on handled error")
     p.add_argument("--references", help="JSON array of approved reference paths and strengths")
     p.add_argument("--reference-inputs", help="JSON array mapping reference slots to workflow node inputs")
     p.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
@@ -158,7 +168,16 @@ def main():
                 raise ValueError("A selected reference is missing local content and cannot be fingerprinted")
         prompt_id = client.queue_workflow(workflow)
         history = client.wait_for_completion(prompt_id, timeout=600)
-    except Exception as exc:
+    except ComfyUIError as exc:
+        # At known client boundaries (HTTP/upload/download): tag with
+        # ``environment``; at structured workflow-rejection: tag with
+        # ``configuration``.  Never infer retryability from text.
+        if exc.operation == "upload":
+            exc.category = "environment"
+        elif exc.operation == "validate_workflow" or exc.operation == "queue_workflow":
+            exc.category = "configuration"
+        if args.failure_report:
+            _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI generation failed: {exc}", file=sys.stderr)
         sys.exit(1)
 

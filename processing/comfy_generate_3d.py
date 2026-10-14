@@ -8,14 +8,15 @@ import subprocess
 import sys
 import os
 import struct
+import tempfile
 import time
 import zlib
 from contextlib import contextmanager
 from pathlib import Path
-from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError
 from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
-from slopforge.backends.comfyui import backend_provenance
+from slopforge.backends.comfyui import backend_provenance, _write_failure_report
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 from slopforge.validation import validate_image
@@ -279,10 +280,17 @@ def write_flat_normal(normal):
     normal.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixel) + chunk(b"IEND", b""))
 
 
-def run_model_workflow(workflow, client):
+def run_model_workflow(workflow, client, *args):
     prompt_id = client.queue_workflow(workflow)
     print(f"Queued 3D generation: {prompt_id}", flush=True)
-    return client.wait_for_completion(prompt_id), prompt_id
+    try:
+        return client.wait_for_completion(prompt_id), prompt_id
+    except ComfyUIError as exc:
+        # Tag at known boundary (execution → inference); never infer
+        # retryability from message text.
+        exc.category = "inference"
+        exc.evidence = {**exc.evidence, "prompt_id": prompt_id}
+        raise
 
 
 def main():
@@ -301,6 +309,7 @@ def main():
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
+    parser.add_argument("--failure-report", help="Path to write atomic failure report on handled error")
     args = parser.parse_args()
     if args.face_budget <= 0:
         parser.error("--face-budget must be positive")
@@ -329,7 +338,11 @@ def main():
     client = ComfyUIClient(COMFY_URL)
     try:
         health = client.health()
-    except Exception as exc:
+    except ComfyUIError as exc:
+        # Known boundary: health check → environment.
+        exc.category = "environment"
+        if args.failure_report:
+            _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI is not reachable at {COMFY_URL}: {exc}", file=sys.stderr)
         sys.exit(1)
 
