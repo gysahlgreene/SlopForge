@@ -1,12 +1,16 @@
 PYTHON ?= python3
 
-.PHONY: verify verify-live
+.PHONY: verify verify-provenance verify-live
 
-verify:
+verify: verify-provenance
 	$(PYTHON) -m compileall -q slopforge processing blender scripts
 	$(PYTHON) -m pytest -q -rs
 	$(PYTHON) scripts/check-docs.py
 	git diff --check
+
+verify-provenance:
+	$(PYTHON) -m pytest -q tests/test_provenance_guardrails.py
+	$(PYTHON) scripts/check_provenance_antipatterns.py
 
 # Explicitly opt in: these checks perform inference on the configured service.
 verify-live:

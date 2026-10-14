@@ -76,3 +76,7 @@ Improve verification when it misses a discovered failure. For substantial
 completion reports, state goal, root cause, changes, regression protection,
 verification evidence, and remaining uncertainty. Preserve architectural boundaries
 from the architecture guide and keep personal diagnostics outside public Git.
+
+For provenance, lineage, stage reuse, resume, or invalidation changes, follow
+[the SlopForge provenance skill](.agents/skills/slopforge-provenance/SKILL.md)
+and run `make verify-provenance`.
