@@ -106,6 +106,11 @@ class WrapperBoundaryTests(unittest.TestCase):
             "comfy_url": "http://127.0.0.1:8188",
         }}
 
+    def _make_model_config(self):
+        cfg = self._make_image_config()
+        cfg["asset_pipeline"]["tools"]["hunyuan_checkpoint"] = "model.safetensors"
+        return cfg
+
     def test_success_preserves_result(self):
         """Successful subprocess returns unchanged result."""
         with patch('slopforge.backends.comfyui.subprocess.run') as mock:
@@ -244,6 +249,54 @@ class WrapperBoundaryTests(unittest.TestCase):
         # No exception raised — success preserved
         self.assertIsInstance(result, Mock)
         self.assertEqual(result.returncode, 0)
+
+    def test_generate_model_failure_raises_stage_failure_from_valid_report(self):
+        """generate_model with a valid structured report must raise StageFailure
+        preserving category, operation, and evidence fields."""
+        report_data = {
+            "version": _FAILURE_REPORT_VERSION,
+            "category": "inference",
+            "operation": "submit",
+            "message": "model generation timed out",
+            "exception_type": "TimeoutError",
+            "evidence": {"node_id": "4", "prompt_id": "abc-123"},
+        }
+        mock_result = Mock()
+        mock_result.returncode = 1
+
+        def write_report(cmd, **kw):
+            captured_path = [None]
+            for i, arg in enumerate(cmd):
+                if arg == "--failure-report" and i + 1 < len(cmd):
+                    captured_path[0] = cmd[i + 1]
+                    break
+            rp = Path(captured_path[0])
+            rp.parent.mkdir(parents=True, exist_ok=True)
+            rp.write_text(json.dumps(report_data) + "\n")
+            return mock_result
+
+        with (patch('slopforge.backends.comfyui.subprocess.run', side_effect=write_report),
+              patch('slopforge.backends.comfyui.tool_root'),
+              patch('slopforge.backends.comfyui.python_executable'),
+              patch('slopforge.backends.comfyui.comfy_environment'),
+              patch('slopforge.backends.comfyui.resolve_workflow'),
+              patch('slopforge.backends.comfyui.workflow_node_inputs', lambda *a: {})):
+            with tempfile.TemporaryDirectory() as tmp:
+                dest_dir = Path(tmp) / "output"
+                dest_dir.mkdir()
+                dest = dest_dir / "model.glb"
+
+                with self.assertRaises(StageFailure) as cm:
+                    generate_model(
+                        "/tmp", self._make_model_config(), "/tmp/img.png", "prop",
+                        str(dest), "/tmp/meta", 42, 30000)
+
+            sf = cm.exception
+            self.assertIsInstance(sf, StageFailure)
+            self.assertEqual(sf.category, "inference")
+            self.assertEqual(sf.operation, "submit")
+            self.assertEqual(sf.message, "model generation timed out")
+            self.assertEqual(sf.evidence, report_data["evidence"])
 
 
 class ComfyUIClientCategoryTests(unittest.TestCase):

@@ -230,18 +230,16 @@ class ComfyUIClient:
                 operation="validate_workflow",
                 evidence={"problems": problems},
             )
-        # Re-tag HTTP errors from node_info fetch as configuration.
+        # Re-tag ComfyUIErrors from node_info fetch as configuration.
         try:
             node_info = node_info or self.node_types()
         except ComfyUIError as exc:
-            if exc.category == "environment":
-                raise ComfyUIError(
-                    str(exc),
-                    category="configuration",
-                    operation="validate_workflow",
-                    evidence={"node_info_fetch_error": str(exc)},
-                ) from exc
-            raise
+            raise ComfyUIError(
+                str(exc),
+                category="configuration",
+                operation="validate_workflow",
+                evidence={"node_info_fetch_error": str(exc)},
+            ) from exc
         missing = sorted({node.get("class_type") for node in workflow.values() if node.get("class_type")} - node_info.keys())
         if missing:
             raise ComfyUIError(

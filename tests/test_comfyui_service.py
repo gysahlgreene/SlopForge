@@ -177,6 +177,28 @@ class ComfyUIServiceTests(unittest.TestCase):
         info = {node["class_type"]: {} for node in workflow.values()}
         self.assertEqual(ComfyUIClient("http://remote:8188").validate_workflow(workflow, info), info)
 
+    def test_validate_workflow_http_error_becomes_configuration(self):
+        """When node_types fetch raises HTTPError (category unset), validate_workflow
+        must re-tag the resulting ComfyUIError as configuration."""
+        from urllib.error import HTTPError
+        from io import BytesIO
+
+        client = ComfyUIClient("http://localhost:8188")
+
+        # Build an HTTPError that _request would see when node_types() hits /object_info
+        http_exc = HTTPError(
+            "http://localhost:8188/object_info", 404, "Not Found", {},
+            BytesIO(b'{}'),
+        )
+
+        def open_request(request, timeout):
+            raise http_exc
+
+        with patch("slopforge.backends.comfyui.urlopen", open_request):
+            with self.assertRaises(ComfyUIError) as cm:
+                client.validate_workflow({"node": {"class_type": "SomeNode", "inputs": {}}})
+            self.assertEqual(cm.exception.category, "configuration")
+
     def test_workflow_validation_checks_background_removal_model_choices(self):
         body = json.dumps({"LoadBackgroundRemovalModel": {"input": {"required": {
             "bg_removal_name": [["birefnet.safetensors"], {}]}}}}).encode()
