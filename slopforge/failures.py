@@ -178,6 +178,29 @@ def should_retry(failure: dict, *, used: int, limit: int) -> bool:
     if not isinstance(category, str) or not category:
         return False
 
+    # Validate field value types (not just presence).
+    stage = failure.get("stage")
+    if not isinstance(stage, str) or not stage:
+        return False
+    message = failure.get("message")
+    if not isinstance(message, str) or not message:
+        return False
+    remedy = failure.get("remedy")
+    if not isinstance(remedy, str) or not remedy:
+        return False
+    operation = failure.get("operation")
+    if not isinstance(operation, str) or not operation:
+        return False
+    attempt = failure.get("attempt")
+    if not isinstance(attempt, int) or isinstance(attempt, bool):
+        return False
+    exception_type = failure.get("exception_type")
+    if not isinstance(exception_type, str) or not exception_type:
+        return False
+    retryable = failure.get("retryable")
+    if not isinstance(retryable, bool):
+        return False
+
     # used/limit must be plain ints, not booleans (isinstance(True, int)!).
     if isinstance(used, bool) or isinstance(limit, bool):
         return False
@@ -259,35 +282,73 @@ def candidate_quality_rejection(validation: dict) -> bool:
     if not isinstance(measured, dict):
         return False
 
-    # Validate all required metric fields from the actual validator.
-    _required_metrics = {
-        "mesh_objects": ("isfinite", True),
-        "vertex_count": ("isfinite", True),
-        "face_count": ("isfinite", True),
-        "dimensions": ("list_tuple", True),
-        "uv_layers": ("isfinite", True),
-        "material_count": ("isfinite", True),
-        "image_texture_count": ("isfinite", True),
-        "component_count": ("isfinite", True),
-        "nonmanifold_edge_count": ("isfinite", True),
-        "transforms_applied": ("bool_true", True),
-        "missing_textures": ("list_or_false", True),
-    }
+    # ── Complete-inspection check mirroring validate_model_outputs ──────
+    # These checks are structural (presence/value-type). Additional
+    # validity checks (non-zero geometry, positive bounds, empty texture
+    # list, etc.) are done below.
 
-    for metric_name, check_type in _required_metrics.items():
-        value = measured.get(metric_name)
-        valid = False
-        if check_type == ("isfinite", True):
-            valid = _is_valid_report_metric(value, metric_name)
-        elif check_type == ("list_tuple", True):
-            valid = (isinstance(value, (list, tuple)) and len(value) == 3)
-        elif check_type == ("bool_true", True):
-            valid = (value is True)
-        elif check_type == ("list_or_false", True):
-            valid = (isinstance(value, list) or value is False
-                     or value is None)
-        if not valid:
+    _STRUCT_METRICS = (
+        "mesh_objects", "vertex_count", "face_count",
+        "uv_layers", "material_count", "image_texture_count",
+        "component_count", "nonmanifold_edge_count",
+    )
+
+    for m in _STRUCT_METRICS:
+        if m not in measured:
             return False
+
+    if "dimensions" not in measured or not isinstance(
+            measured["dimensions"], (list, tuple)):
+        return False
+    if "transforms_applied" not in measured or measured["transforms_applied"] is not True:
+        return False
+    if "missing_textures" not in measured:
+        return False
+
+    # ── Value validity: geometry, bounds, texture completeness ────────
+
+    # All count/gauge metrics must be > 0 (positive geometry exists)
+    for m in ("mesh_objects", "vertex_count", "face_count", "uv_layers",
+              "material_count"):
+        v = measured[m]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return False
+        try:
+            if not math.isfinite(v) or v <= 0:
+                return False
+        except OverflowError:
+            return False
+
+    # component_count / nonmanifold must be >= 0 (zero is valid)
+    for m in ("component_count", "nonmanifold_edge_count"):
+        v = measured[m]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return False
+        try:
+            if not math.isfinite(v) or v < 0:
+                return False
+        except OverflowError:
+            return False
+
+    # dimensions: all three entries must be > 0
+    dims = measured["dimensions"]
+    if len(dims) != 3:
+        return False
+    for d in dims:
+        if isinstance(d, bool) or not isinstance(d, (int, float)):
+            return False
+        try:
+            if not math.isfinite(d) or d <= 0:
+                return False
+        except OverflowError:
+            return False
+
+    # missing_textures must be an empty list (no missing textures)
+    mt = measured["missing_textures"]
+    if not isinstance(mt, list) or mt:
+        return False
+
+    # image_texture_count must be finite (structural already checked above)
 
     limits = validation.get("limits")
     if not isinstance(limits, dict):
@@ -311,15 +372,21 @@ def candidate_quality_rejection(validation: dict) -> bool:
             return False
         if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
             return False
-        if not math.isfinite(threshold) or threshold < 0:
+        try:
+            if not math.isfinite(threshold) or threshold < 0:
+                return False
+        except OverflowError:
             return False
         metric_value = measured.get(metric_key)
         # Booleans are not numeric metrics.
         if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
             return False
-        if not math.isfinite(metric_value):
-            return False
-        if metric_value <= threshold:
+        try:
+            if not math.isfinite(metric_value):
+                return False
+            if metric_value <= threshold:
+                return False
+        except OverflowError:
             return False
 
     return True

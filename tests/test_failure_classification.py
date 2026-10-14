@@ -419,7 +419,6 @@ class TestCandidateQualityRejection(unittest.TestCase):
         # Note: boundary_edge_count triggers boundary_budget error
         self.assertTrue(candidate_quality_rejection(report))
 
-    @unittest.skip("end-to-end: _quality_report includes all required metrics")
     def test_metric_exceeding_limit_is_rejected(self):
         """This is validated by _quality_report-based tests. Full chain."""
         report = _quality_report(60, 50)
@@ -662,3 +661,128 @@ class TestFinding6KeyboardInterrupt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Blocker 1 regressions: complete inspection rejects broken geometry ─
+
+class TestCompleteInspectionRejections(unittest.TestCase):
+    """Blocker 1: invalid geometry/UV/bounds/texture must prevent retry."""
+
+    def test_zero_face_count_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["face_count"] = 0
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_zero_vertex_count_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["vertex_count"] = 0
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_zero_mesh_objects_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["mesh_objects"] = 0
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_zero_uv_layers_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["uv_layers"] = 0
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_zero_material_count_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["material_count"] = 0
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_negative_dimensions_reject(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["dimensions"] = [-1, 1, 1]
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_nan_dimensions_reject(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["dimensions"] = [float("nan"), 1, 1]
+        self.assertFalse(candidate_quality_rejection(r))
+
+    def test_missing_textures_rejects(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["missing_textures"] = ["missing.png"]
+        self.assertFalse(candidate_quality_rejection(r))
+
+
+# ── Blocker 2 regressions: overflow-safe numeric comparisons ─
+
+class TestOverflowSafeComparisons(unittest.TestCase):
+    """Blocker 2: huge integers must not OverflowError."""
+
+    def test_huge_measured_component_count_no_crash(self):
+        r = dict(_quality_report(60, 50))
+        r["measured"] = dict(r["measured"])
+        r["measured"]["component_count"] = 10 ** 1000
+        result = candidate_quality_rejection(r)
+        self.assertTrue(type(result) is bool)
+
+    def test_huge_limit_max_components_no_crash(self):
+        r = dict(_quality_report(60, 50))
+        r["limits"] = dict(r["limits"])
+        r["limits"]["max_components"] = 10 ** 1000
+        result = candidate_quality_rejection(r)
+        self.assertTrue(type(result) is bool)
+
+
+# ── Blocker 3 regressions: malformed present fields block retry ─
+
+class TestMalformedPresentFieldsBlockRetry(unittest.TestCase):
+    """Blocker 3: malformed field values must not authorize retry."""
+
+    def test_list_stage_blocks_retry(self):
+        r = dict(_quality_report(60, 50))
+        rec = failure_record(StageFailure("candidate_quality", "bad",
+                          operation="inspect", remedy="next",
+                          evidence={"validation": r}),
+                             stage="mesh", stage_id="id", attempt=1, operation="inspect")
+        rec["stage"] = ["material_assembly_export"]
+        self.assertFalse(should_retry(rec, used=1, limit=3))
+
+    def test_none_message_blocks_retry(self):
+        r = dict(_quality_report(60, 50))
+        rec = failure_record(StageFailure("candidate_quality", "bad",
+                          operation="inspect", remedy="next",
+                          evidence={"validation": r}),
+                             stage="mesh", stage_id="id", attempt=1, operation="inspect")
+        rec["message"] = None
+        self.assertFalse(should_retry(rec, used=1, limit=3))
+
+    def test_string_retryable_blocks_retry(self):
+        r = dict(_quality_report(60, 50))
+        rec = failure_record(StageFailure("candidate_quality", "bad",
+                          operation="inspect", remedy="next",
+                          evidence={"validation": r}),
+                             stage="mesh", stage_id="id", attempt=1, operation="inspect")
+        rec["retryable"] = "yes"
+        self.assertFalse(should_retry(rec, used=1, limit=3))
+
+
+# ── Deep evidence test (from external acceptance) ─
+
+class TestDeepEvidence(unittest.TestCase):
+    def test_deep_evidence_does_not_hide_original_failure(self):
+        value = None
+        for _ in range(1500):
+            value = [value]
+        failure = failure_record(
+            StageFailure("unknown", "original worker error",
+                         operation="worker", remedy="inspect",
+                         evidence={"deep": value}),
+            stage="mesh_workflow_execution", attempt=1, operation="worker",
+        )
+        self.assertFalse(failure["retryable"])
+        self.assertIn("original worker error", failure["message"])
+        json.dumps(failure, allow_nan=False)
