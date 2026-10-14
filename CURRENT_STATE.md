@@ -17,10 +17,14 @@ in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); its tracking iss
 merge commit `405cc38`; tracking issue [#27](https://github.com/gysahlgreene/SlopForge/issues/27)
 is closed. Its deterministic offline verification passed as recorded below.
 
-Package 3 (failure classification and bounded retries) is planned and has not
-started. The old draft is reference material; Codex/Luna owns the final plan.
-The next implementation prerequisite is the Pi/Qwen provenance guardrail work
-tracked in [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29). The
+Package 3 (failure classification and bounded retries) implementation has not
+started. The [Codex/Luna plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md)
+is ready for review and supersedes the October 11 reference draft.
+The Pi/Qwen provenance guardrails merged in
+[PR #34](https://github.com/gysahlgreene/SlopForge/pull/34), commit `5e3b544`;
+[issue #29](https://github.com/gysahlgreene/SlopForge/issues/29) is closed.
+That prerequisite is satisfied; local Pi/Qwen is the implementation engine after
+plan review, with Codex/Luna retaining the independent quality gate. The
 non-blocking malformed/ambiguous `earliest_stale_stage` follow-up is
 [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); the helper has
 no production callers. M0 is not complete.
