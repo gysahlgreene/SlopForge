@@ -825,3 +825,40 @@ class TestDeepEvidence(unittest.TestCase):
         self.assertFalse(failure["retryable"])
         self.assertIn("original worker error", failure["message"])
         json.dumps(failure, allow_nan=False)
+
+
+class TestValidatorMalformedTopologyMetrics(unittest.TestCase):
+    def _report(self, **overrides):
+        measured = {
+            "mesh_objects": 1, "vertex_count": 24, "face_count": 8,
+            "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
+            "image_texture_count": 4, "component_count": 1,
+            "nonmanifold_edge_count": 0, "boundary_edge_count": 0,
+            "transforms_applied": True, "missing_textures": [],
+        }
+        measured.update(overrides)
+        return validate_model_outputs(
+            {}, inspection={"status": "passed", "errors": [], "warnings": [],
+                           "measured": measured},
+            max_components=50, max_nonmanifold_edges=10, max_boundary_edges=10,
+        )
+
+    def test_nan_boundary_count_is_invalid_instead_of_passing(self):
+        report = self._report(boundary_edge_count=float("nan"))
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("metric_invalid", report["failure_codes"])
+
+    def test_negative_boundary_count_is_invalid_instead_of_passing(self):
+        report = self._report(boundary_edge_count=-1)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("metric_invalid", report["failure_codes"])
+
+    def test_boolean_count_is_invalid(self):
+        report = self._report(component_count=True)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("metric_invalid", report["failure_codes"])
+
+    def test_oversized_integer_metric_fails_closed_without_raising(self):
+        report = self._report(component_count=10 ** 1000)
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("metric_invalid", report["failure_codes"])

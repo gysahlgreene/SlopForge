@@ -49,6 +49,14 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         errors.append(msg)
         failure_codes.append(code)
 
+    def _finite_nonnegative_number(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value) and value >= 0
+        except OverflowError:
+            return False
+
     for key, path in paths.items():
         path = Path(path)
         if not path.is_file() or path.stat().st_size == 0:
@@ -78,7 +86,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
                      "material_count", "image_texture_count",
                      "component_count", "nonmanifold_edge_count"):
             value = metrics.get(key)
-            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            if not _finite_nonnegative_number(value):
                 _add_err("metric_invalid", f"inspection reported invalid {key}")
                 metrics[key] = 0
         if (metrics.get("mesh_objects", 0) < 1 or
@@ -87,7 +95,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
             _add_err("surface_invalid", "mesh has no usable surface geometry")
         if not isinstance(metrics.get("dimensions"), (list, tuple)) or len(metrics["dimensions"]) != 3:
             _add_err("bounds_invalid", "mesh bounds were not measured")
-        elif any(not isinstance(value, (int, float)) or not math.isfinite(value)
+        elif any(not _finite_nonnegative_number(value)
                  or value <= 1e-5 for value in metrics["dimensions"]):
             _add_err("bounds_invalid", "mesh bounds are degenerate or non-finite")
         if metrics.get("uv_layers", 0) < 1:
@@ -122,7 +130,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
         if max_boundary_edges is not None:
             if boundary_edge_count is None:
                 _add_err("metric_invalid", "boundary edge count was not measured")
-            elif not isinstance(boundary_edge_count, (int, float)):
+            elif not _finite_nonnegative_number(boundary_edge_count):
                 _add_err("metric_invalid", "inspection reported invalid boundary edge count")
             elif boundary_edge_count > max_boundary_edges:
                 _add_err("boundary_budget",
