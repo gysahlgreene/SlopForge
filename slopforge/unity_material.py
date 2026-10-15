@@ -5,15 +5,18 @@ import uuid
 from pathlib import Path
 
 from PIL import Image, ImageChops
+from .failures import StageFailure
 
 
 def unity_cli(project_root):
     root = Path(project_root).resolve()
     if not (root / "ProjectSettings/ProjectVersion.txt").is_file():
-        raise ValueError(f"Not a Unity project: {root}")
+        raise StageFailure("configuration", f"Not a Unity project: {root}", operation="unity_preflight",
+                           remedy="select a Unity project with ProjectSettings/ProjectVersion.txt")
     cli = shutil.which("unity")
     if not cli:
-        raise ValueError("Unity CLI is required to create and assign the generated PBR material")
+        raise StageFailure("environment", "Unity CLI is required to create and assign the generated PBR material",
+                           operation="unity_preflight", remedy="install Unity or configure its CLI")
     return cli
 
 

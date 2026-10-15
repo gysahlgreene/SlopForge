@@ -1,6 +1,9 @@
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
+from urllib.error import URLError
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -25,6 +28,16 @@ class Response:
 
 
 class ComfyUIServiceTests(unittest.TestCase):
+    def test_connection_failure_does_not_retain_private_endpoint(self):
+        client = ComfyUIClient("https://private-comfy.example.invalid:8123")
+        with patch("slopforge.backends.comfyui.urlopen", side_effect=URLError("connection refused")):
+            with self.assertRaises(ComfyUIError) as raised:
+                client._request("GET", "/system_stats")
+
+        self.assertEqual(raised.exception.category, "environment")
+        self.assertNotIn("private-comfy.example.invalid", str(raised.exception))
+        self.assertNotIn("private-comfy.example.invalid", json.dumps(raised.exception.evidence))
+
     def test_backend_provenance_uses_exposed_facts_or_unavailable(self):
         facts = backend_provenance({"system": {"comfyui_version": "0.3.1"},
                                     "devices": [{"name": "NVIDIA GPU"}]}, queried=True)
@@ -134,8 +147,71 @@ class ComfyUIServiceTests(unittest.TestCase):
             return Response(b'{"node_errors":{"4":{"errors":[{"message":"missing custom node"}]}}}')
 
         with patch("slopforge.backends.comfyui.urlopen", open_request):
-            with self.assertRaisesRegex(RuntimeError, "missing custom node"):
+            with self.assertRaisesRegex(ComfyUIError, "missing custom node") as raised:
                 ComfyUIClient("http://localhost:8188").queue_workflow({})
+        self.assertEqual(raised.exception.category, "configuration")
+        self.assertFalse(raised.exception.evidence.get("outcome_unknown", False))
+
+    def test_queue_response_without_prompt_id_marks_outcome_unknown(self):
+        client = ComfyUIClient("http://localhost:8188")
+        with (patch.object(client, "validate_workflow"),
+              patch.object(client, "json", return_value={"error": "lost response context"})):
+            with self.assertRaises(ComfyUIError) as raised:
+                client.queue_workflow({})
+
+        self.assertTrue(raised.exception.evidence["outcome_unknown"])
+
+    def test_malformed_queue_response_marks_outcome_unknown(self):
+        client = ComfyUIClient("http://localhost:8188")
+        for response in (None, [], "accepted", 1):
+            with self.subTest(response=response):
+                with (patch.object(client, "validate_workflow"),
+                      patch.object(client, "json", return_value=response)):
+                    with self.assertRaises(ComfyUIError) as raised:
+                        client.queue_workflow({})
+                self.assertTrue(raised.exception.evidence["outcome_unknown"])
+
+    def test_queue_transport_failure_marks_outcome_unknown(self):
+        client = ComfyUIClient("http://localhost:8188")
+        transport_failure = ComfyUIError(
+            "ComfyUI POST /prompt failed", category="environment",
+            operation="http_post", evidence={"endpoint": "/prompt", "method": "POST"})
+        with (patch.object(client, "validate_workflow"),
+              patch.object(client, "json", side_effect=transport_failure)):
+            with self.assertRaises(ComfyUIError) as raised:
+                client.queue_workflow({})
+
+        self.assertEqual(raised.exception.category, "environment")
+        self.assertTrue(raised.exception.evidence["outcome_unknown"])
+
+    def test_queue_explicit_client_rejection_remains_known(self):
+        client = ComfyUIClient("http://localhost:8188")
+        rejection = ComfyUIError("invalid prompt", category="configuration",
+                                  operation="http_post", evidence={"endpoint": "/prompt", "status": 400})
+        with (patch.object(client, "validate_workflow"),
+              patch.object(client, "json", side_effect=rejection)):
+            with self.assertRaises(ComfyUIError) as raised:
+                client.queue_workflow({})
+
+        self.assertEqual(raised.exception.category, "configuration")
+        self.assertFalse(raised.exception.evidence.get("outcome_unknown", False))
+
+    def test_queue_interruption_records_unknown_remote_outcome(self):
+        script = """from unittest.mock import patch
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError
+client = ComfyUIClient('http://localhost:8188')
+with patch.object(client, 'validate_workflow'), patch.object(client, 'json', side_effect=KeyboardInterrupt):
+    try:
+        client.queue_workflow({})
+    except ComfyUIError as exc:
+        assert exc.category == 'interruption'
+        assert exc.evidence['outcome_unknown'] is True
+    else:
+        raise AssertionError('queue interruption was not reported')
+"""
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_workflow_validation_reports_missing_node_before_queueing(self):
         calls = []
@@ -177,9 +253,7 @@ class ComfyUIServiceTests(unittest.TestCase):
         info = {node["class_type"]: {} for node in workflow.values()}
         self.assertEqual(ComfyUIClient("http://remote:8188").validate_workflow(workflow, info), info)
 
-    def test_validate_workflow_http_error_becomes_configuration(self):
-        """When node_types fetch raises HTTPError (category unset), validate_workflow
-        must re-tag the resulting ComfyUIError as configuration."""
+    def test_validate_workflow_preserves_environment_error_from_node_type_fetch(self):
         from urllib.error import HTTPError
         from io import BytesIO
 
@@ -197,7 +271,7 @@ class ComfyUIServiceTests(unittest.TestCase):
         with patch("slopforge.backends.comfyui.urlopen", open_request):
             with self.assertRaises(ComfyUIError) as cm:
                 client.validate_workflow({"node": {"class_type": "SomeNode", "inputs": {}}})
-            self.assertEqual(cm.exception.category, "configuration")
+            self.assertEqual(cm.exception.category, "environment")
 
     def test_workflow_validation_checks_background_removal_model_choices(self):
         body = json.dumps({"LoadBackgroundRemovalModel": {"input": {"required": {
@@ -219,6 +293,52 @@ class ComfyUIServiceTests(unittest.TestCase):
             result = client.wait_for_completion("prompt", timeout=2)
         self.assertIn("final", result["outputs"])
         self.assertEqual(client.history.call_count, 2)
+
+    def test_terminal_remote_failure_is_not_marked_unknown(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(return_value={"status": {"status_str": "error",
+                                                         "messages": "node failed"}})
+        with self.assertRaises(ComfyUIError) as raised:
+            client.wait_for_completion("prompt-42", timeout=2)
+        self.assertEqual(raised.exception.category, "inference")
+        self.assertEqual(raised.exception.evidence["prompt_id"], "prompt-42")
+        self.assertTrue(raised.exception.evidence["remote_terminal"])
+        self.assertFalse(raised.exception.evidence.get("outcome_unknown", False))
+
+    def test_history_timeout_records_unknown_remote_outcome(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(return_value=None)
+        with self.assertRaises(ComfyUIError) as raised:
+            client.wait_for_completion("prompt-42", timeout=0)
+        self.assertEqual(raised.exception.category, "inference")
+        self.assertTrue(raised.exception.evidence["outcome_unknown"])
+        self.assertEqual(raised.exception.evidence["prompt_id"], "prompt-42")
+
+    def test_history_transport_failure_retains_unknown_prompt_outcome(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(side_effect=ComfyUIError(
+            "service unavailable", category="environment", operation="http_get",
+            evidence={"endpoint": "/history/prompt-42"}))
+        with self.assertRaises(ComfyUIError) as raised:
+            client.wait_for_completion("prompt-42", timeout=2)
+        self.assertEqual(raised.exception.category, "environment")
+        self.assertTrue(raised.exception.evidence["outcome_unknown"])
+        self.assertEqual(raised.exception.evidence["prompt_id"], "prompt-42")
+
+    def test_history_wait_interrupt_retains_unknown_prompt_outcome(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(side_effect=KeyboardInterrupt)
+        try:
+            client.wait_for_completion("prompt-42", timeout=2)
+        except ComfyUIError as exc:
+            raised = exc
+        except KeyboardInterrupt:
+            self.fail("history wait interruption escaped without remote-outcome evidence")
+        else:
+            self.fail("history wait interruption did not stop the worker")
+        self.assertEqual(raised.category, "interruption")
+        self.assertTrue(raised.evidence["outcome_unknown"])
+        self.assertEqual(raised.evidence["prompt_id"], "prompt-42")
 
 
 if __name__ == "__main__":

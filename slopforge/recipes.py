@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 
 from .manifest import add_dependency, asset_key, new_record, register_artifact, set_parent
+from .failures import failure_record
 from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
@@ -744,10 +745,11 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                         aggregate = recipe_asset.get("artifacts", {}).get(f"{child['id']}.{artifact_id}")
                         if aggregate and aggregate.get("status") == "ready":
                             aggregate["status"] = "superseded"
-        if any(stages[dependency]["status"] not in {"completed", "approved"}
-               for dependency in child["depends_on"]):
+        blocked_dependencies = [dependency for dependency in child["depends_on"]
+                                if stages[dependency]["status"] not in {"completed", "approved"}]
+        if blocked_dependencies:
             stage["status"] = "blocked"
-            stage["errors"] = ["Dependencies are not complete"]
+            stage["errors"] = ["Dependencies are not complete: " + ", ".join(blocked_dependencies)]
             recipe_asset["status"] = _recipe_status(stages)
             _sync_recipe_artifacts(recipe_asset, stages, manifest)
             _save(save, manifest)
@@ -800,7 +802,8 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             else:
                 stage["status"] = "approved" if asset.get("status") == "ready" else "completed"
                 stage["provenance"] = copy.deepcopy(asset.get("generator", {}))
-        except Exception as exc:
+            stage.pop("failure", None)
+        except (Exception, KeyboardInterrupt) as exc:
             if original.get("status") == "ready":
                 # For stale replacement, do NOT restore stale state
                 if stale_replacement:
@@ -815,6 +818,16 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             else:
                 stage["status"] = "failed"
             stage["errors"] = [str(exc)]
+            failure = failure_record(exc, stage=f"recipe_child:{child['id']}",
+                                     attempt=stage["attempts"], operation="recipe_child_execution")
+            stage.setdefault("failures", []).append(failure)
+            stage["failure"] = failure
+            if isinstance(exc, KeyboardInterrupt):
+                recipe_asset["status"] = _recipe_status(stages)
+                _sync_child_artifacts(root, asset, stage["asset_key"])
+                _sync_recipe_artifacts(recipe_asset, stages, manifest)
+                _save(save, manifest)
+                raise
         recipe_asset["status"] = _recipe_status(stages)
         _sync_child_artifacts(root, asset, stage["asset_key"])
         _sync_recipe_artifacts(recipe_asset, stages, manifest)

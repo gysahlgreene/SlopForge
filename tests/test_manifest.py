@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from slopforge.failures import StageFailure, failure_record
 
 from slopforge import manifest as manifest_module
 from slopforge.manifest import (
@@ -110,6 +111,38 @@ class ManifestTests(unittest.TestCase):
             loaded = _migrate(json.loads(path.read_text()))
 
         self.assertEqual(loaded["assets"]["prop:coin"]["executions"], [execution])
+
+    def test_stage_failure_round_trips_with_unique_id_and_terminal_execution_failure(self):
+        asset = self.make_asset("coin")
+        execution = manifest_module.start_execution(asset, {"brief": "A brass coin"})
+        stage = manifest_module.start_stage(execution, "mesh_preparation", 1, [], {}, {})
+        self.assertTrue(stage["id"])
+        manifest_module.begin_stage(stage)
+        failure = failure_record(StageFailure("processing_validation", "invalid mesh",
+            operation="inspect_mesh", remedy="repair mesh input", stage=stage["name"],
+            stage_id=stage["id"]), stage=stage["name"], stage_id=stage["id"], attempt=1,
+            operation="inspect_mesh")
+        manifest_module.finish_stage(stage, "failed", error=failure["message"], failure=failure)
+        manifest_module.finish_execution(execution, "failed", failure=failure)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            save_manifest(path, {"schema_version": 4, "assets": {"prop:coin": asset}})
+            loaded = _migrate(json.loads(path.read_text()))
+
+        loaded_stage = loaded["assets"]["prop:coin"]["executions"][0]["stages"][0]
+        self.assertEqual(loaded_stage["id"], stage["id"])
+        self.assertEqual(loaded_stage["failure"], failure)
+        self.assertEqual(loaded["assets"]["prop:coin"]["executions"][0]["failure"], failure)
+
+    def test_manifest_rejects_failure_metadata_on_successful_stage(self):
+        execution = manifest_module.start_execution(self.make_asset("coin"), {"brief": "coin"})
+        stage = manifest_module.start_stage(execution, "concept_generation", 1, [], {}, {})
+        manifest_module.begin_stage(stage)
+        failure = failure_record(RuntimeError("unclassified"), stage=stage["name"],
+                                 stage_id=stage["id"], attempt=1, operation="generate")
+        with self.assertRaisesRegex(ValueError, "Succeeded"):
+            manifest_module.finish_stage(stage, "succeeded", failure=failure)
 
     def test_stage_attempt_rejects_invalid_state_or_external_path(self):
         self.assertTrue(callable(getattr(manifest_module, "start_execution", None)))

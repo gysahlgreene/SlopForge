@@ -13,6 +13,19 @@ from .provenance import generator_provenance, file_sha256
 from .style import style_identity
 from .taxonomy import output_path
 from .validation import validate_image
+from .failures import StageFailure, failure_record
+
+
+def _record_prop_downstream_not_run(execution, failure):
+    names = ("conditioning_preparation", "mesh_workflow_execution", "material_generation",
+             "material_map_acquisition", "material_assembly_export", "final_publication")
+    execution["blocked_stages"] = [
+        {"name": name, "attempt": None, "outcome": "not_run",
+         "caused_by": {"stage": failure["stage"], "stage_id": failure.get("stage_id"),
+                       "attempt": failure.get("attempt"), "category": failure["category"]},
+         "reason": f"Not run because {failure['stage']} failed."}
+        for name in names
+    ]
 
 
 def reject_candidate(manifest, asset_selector, number, reason=None):
@@ -65,6 +78,8 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         record["description"] = description if semantic_description is None else semantic_description
         record["style"] = style_identity(style)
         stage = None
+        failure = None
+        interrupted = None
         if execution:
             stage = start_stage(execution, "concept_generation", number, [],
                                 {"prompt": prompt, "variation": variation, "seed": seed}, {})
@@ -76,6 +91,14 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             backend_generate(prompt, candidate_path, seed, metadata_path)
             record["validation"] = validate_image(candidate_path, expected_format=asset_type.get("format", "PNG"), require_alpha=bool(asset_type.get("alpha_required", False)), report_path=candidate_path.relative_to(root))
             record["status"] = "candidate" if record["validation"]["status"] != "failed" else "failed"
+            if record["status"] == "failed":
+                failure = failure_record(StageFailure(
+                    "processing_validation", "Concept image failed validation",
+                    operation="validate_image", remedy="inspect the image validation report and correct the input",
+                    stage="concept_generation", stage_id=stage.get("id") if stage else None,
+                    evidence={"validation": record["validation"]}),
+                    stage="concept_generation", stage_id=stage.get("id") if stage else None,
+                    attempt=number, operation="validate_image")
             if metadata_path.is_file():
                 metadata = json.loads(metadata_path.read_text())
                 record["generator"] = generator_provenance(metadata.get("workflow"), metadata)
@@ -86,29 +109,67 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                             "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),
                             "stage": "concept_generation", "attempt": number, "derived_from": []}
                 record.update({"execution_id": execution["id"], "stage_attempt": number, "artifact": artifact})
-                finish_stage(stage, "succeeded", [artifact])
-            elif stage:
-                finish_stage(stage, "failed", error=record.get("error", "Concept image generation failed"))
-        except Exception as exc:
+                if failure:
+                    finish_stage(stage, "failed", [artifact], error="Concept image failed validation",
+                                 failure=failure)
+                else:
+                    finish_stage(stage, "succeeded", [artifact])
+            elif stage and stage["status"] == "running":
+                finish_stage(stage, "failed", error=record.get("error", "Concept image generation failed"),
+                             outputs=([{"id": f"concept-candidate:{number}", "type": "image.concept",
+                                "path": candidate_path.relative_to(root).as_posix(),
+                                "sha256": file_sha256(candidate_path), "stage": "concept_generation",
+                                "attempt": number, "derived_from": []}] if candidate_path.is_file() else []),
+                             failure=failure)
+        except (Exception, KeyboardInterrupt) as exc:
             record["error"] = str(exc)
             record["validation"]["errors"].append(str(exc))
+            failure = failure_record(exc, stage="concept_generation",
+                stage_id=stage.get("id") if stage else None, attempt=number,
+                operation=exc.operation if isinstance(exc, StageFailure) else "concept_generation")
+            record["failure"] = failure
+            if isinstance(exc, KeyboardInterrupt):
+                interrupted = exc
             if stage and stage["status"] == "running":
-                finish_stage(stage, "failed", error=record["error"])
+                outputs = ([{"id": f"concept-candidate:{number}", "type": "image.concept",
+                    "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),
+                    "stage": "concept_generation", "attempt": number, "derived_from": []}]
+                    if candidate_path.is_file() else [])
+                finish_stage(stage, "failed", outputs, error=record["error"] or type(exc).__name__,
+                             failure=failure)
+        if failure:
+            record["failure"] = failure
         add_candidate(manifest, key, record)
         results.append(record)
         if execution:
             save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        if interrupted:
+            if execution:
+                if asset_type.get("name") == "prop":
+                    _record_prop_downstream_not_run(execution, failure)
+                finish_execution(execution, "failed", failure=failure)
+                save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+            raise interrupted
+        if failure:
+            break
     asset = manifest["assets"][key]
     if final_path is not None:
         asset.setdefault("outputs", {})["final_path"] = final_path.relative_to(root).as_posix()
     if not any(item["status"] == "candidate" for item in results):
         asset["status"] = "failed"
         if execution:
-            finish_execution(execution, "failed")
+            failure = next((item.get("failure") for item in results if item.get("failure")),
+                           failure_record(RuntimeError("No valid candidates were generated"),
+                                          stage="concept_generation", attempt=1,
+                                          operation="candidate_generation"))
+            if asset_type.get("name") == "prop":
+                _record_prop_downstream_not_run(execution, failure)
+            finish_execution(execution, "failed", failure=failure)
             save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         raise RuntimeError(f"No valid candidates generated for {name}; see manifest candidate errors")
     if execution:
         finish_execution(execution, "succeeded")
+        asset.pop("last_failure", None)
         save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     return results
 

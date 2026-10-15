@@ -29,7 +29,7 @@ slopforge --project ~/UnityProjects/MyGame approve scout_character 1
 slopforge --project ~/UnityProjects/MyGame recipe resume scout
 ```
 
-The instance name namespaces child asset names (`<instance>_<child-id>`). Children are ordinary tracked assets with recipe parent/dependency links. Stage state, attempts, errors, and provenance are saved around each pipeline call. Resume retries failed or interrupted stages, skips completed stages, and waits for human approval. A failed child is reported as partial; dependent children remain blocked while independent stages may continue.
+The instance name namespaces child asset names (`<instance>_<child-id>`). Children are ordinary tracked assets with recipe parent/dependency links. Stage state, attempts, errors, and provenance are saved around each pipeline call. Resume skips completed stages and explicitly resumes incomplete work; only the atomic prop pipeline may automatically advance to another mesh candidate, and only for validated topology-budget rejection within its configured budget. Recipes do not multiply that budget with their own retry loop. A failed child is reported as partial; dependent children remain blocked while independent stages may continue. Structured child failures retain their stage, category, remedy, and attempt in the manifest. If remote inference may still be running, resume stops for service-state inspection before another submission.
 
 Dependencies order and record generation; they do not automatically turn one child's output into another child's visual reference. Configure reference libraries and workflow inputs separately. Local and remote ComfyUI use the same HTTP backend contract.
 

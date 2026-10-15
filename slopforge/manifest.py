@@ -188,7 +188,15 @@ def start_stage(execution, name, attempt, inputs, settings, provenance):
         raise ValueError("Stage attempt must be a positive integer")
     if not isinstance(inputs, list) or not isinstance(settings, dict) or not isinstance(provenance, dict):
         raise ValueError("Stage inputs must be a list and settings/provenance must be objects")
+    stages = execution.setdefault("stages", [])
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Execution stages must be a list of objects")
+    stage_ids = [item["id"] for item in stages if "id" in item]
+    if (not all(isinstance(item, str) and item for item in stage_ids) or
+            len(stage_ids) != len(set(stage_ids))):
+        raise ValueError("Existing stage IDs are malformed or ambiguous")
     stage = {
+        "id": str(uuid.uuid4()),
         "name": name,
         "attempt": attempt,
         "status": "pending",
@@ -200,7 +208,7 @@ def start_stage(execution, name, attempt, inputs, settings, provenance):
         "provenance": copy.deepcopy(provenance),
         "error": None,
     }
-    execution.setdefault("stages", []).append(stage)
+    stages.append(stage)
     return stage
 
 
@@ -212,7 +220,26 @@ def begin_stage(stage):
     return stage
 
 
-def finish_stage(stage, status, outputs=(), error=None):
+def _validate_failure_record(failure, *, stage=None):
+    fields = ("category", "stage", "stage_id", "attempt", "operation", "message", "remedy",
+              "retryable", "exception_type", "evidence")
+    if not isinstance(failure, dict) or any(field not in failure for field in fields):
+        raise ValueError("Failure metadata must be a complete failure record")
+    if (not all(isinstance(failure[field], str) and failure[field]
+                for field in ("category", "stage", "operation", "message", "remedy", "exception_type")) or
+            not isinstance(failure["retryable"], bool) or not isinstance(failure["evidence"], dict) or
+            (failure["stage_id"] is not None and
+             (not isinstance(failure["stage_id"], str) or not failure["stage_id"]))):
+        raise ValueError("Failure metadata contains invalid fields")
+    if failure["attempt"] is not None and (type(failure["attempt"]) is not int or failure["attempt"] < 1):
+        raise ValueError("Failure metadata contains an invalid stage attempt")
+    try:
+        json.dumps(failure, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Failure metadata must be finite JSON data") from exc
+
+
+def finish_stage(stage, status, outputs=(), error=None, *, failure=None):
     if status not in {"succeeded", "failed"}:
         raise ValueError(f"Unknown stage status {status!r}")
     if stage.get("status") != "running":
@@ -221,19 +248,35 @@ def finish_stage(stage, status, outputs=(), error=None):
         raise ValueError("Failed stages require an error message")
     if status == "succeeded" and error is not None:
         raise ValueError("Succeeded stages cannot have an error message")
+    if status == "succeeded" and failure is not None:
+        raise ValueError("Succeeded stages cannot have failure metadata")
+    if failure is not None:
+        _validate_failure_record(failure, stage=stage)
     stage["outputs"] = [_validate_artifact_ref(item) for item in outputs]
     stage["status"] = status
     stage["finished_at"] = datetime.now(timezone.utc).isoformat()
     stage["error"] = error
+    if failure is not None:
+        stage["failure"] = copy.deepcopy(failure)
+    else:
+        stage.pop("failure", None)
     return stage
 
 
-def finish_execution(execution, status):
+def finish_execution(execution, status, *, failure=None):
     if status not in {"succeeded", "failed"}:
         raise ValueError(f"Unknown execution status {status!r}")
     if execution.get("status") != "running":
         raise ValueError("Only running executions can finish")
+    if status == "succeeded" and failure is not None:
+        raise ValueError("Succeeded executions cannot have failure metadata")
+    if failure is not None:
+        _validate_failure_record(failure)
     execution["status"] = status
+    if failure is not None:
+        execution["failure"] = copy.deepcopy(failure)
+    else:
+        execution.pop("failure", None)
     execution["finished_at"] = datetime.now(timezone.utc).isoformat()
     return execution
 

@@ -217,5 +217,26 @@ def main():
 
     print(dest)
 
+def _write_invocation_failure(error):
+    try:
+        report_index = sys.argv.index("--failure-report")
+        report_path = sys.argv[report_index + 1]
+    except (ValueError, IndexError):
+        return
+    if isinstance(error, ComfyUIError) and error.category:
+        reported = error
+    elif isinstance(error, KeyboardInterrupt):
+        reported = ComfyUIError("Worker interrupted", category="interruption",
+                                operation="worker", evidence={})
+    else:
+        reported = ComfyUIError(str(error) or type(error).__name__, category="unknown",
+                                operation="worker", evidence={})
+    _write_failure_report(report_path, error=reported)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (Exception, KeyboardInterrupt) as exc:
+        _write_invocation_failure(exc)
+        raise

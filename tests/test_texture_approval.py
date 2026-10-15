@@ -1,4 +1,5 @@
 import os
+import shutil
 from itertools import product
 import tempfile
 import unittest
@@ -6,13 +7,34 @@ from pathlib import Path
 from unittest.mock import patch
 
 from slopforge.config import load_project
+from slopforge.failures import StageFailure
 from slopforge.initializer import init_project
 from slopforge.pipelines import model
 
 
 class TextureApprovalRollbackTests(unittest.TestCase):
+    def test_publication_preflight_failure_is_persisted_without_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            config = load_project(root)
+            asset = {"name": "relic", "status": "awaiting_texture_approval",
+                     "material_candidates": {"items": [{"number": 1, "status": "candidate"}]}}
+            manifest = {"assets": {"prop:relic": asset}}
+            failure = StageFailure("environment", "Unity CLI unavailable", operation="unity_preflight",
+                                   remedy="install Unity or configure its CLI")
+
+            with patch("slopforge.pipelines.model.unity_cli", side_effect=failure):
+                with self.assertRaises(StageFailure):
+                    model.approve_texture(root, config, manifest, "prop:relic", 1)
+
+            self.assertEqual(asset["last_failure"]["category"], "environment")
+            self.assertEqual(asset["last_failure"]["stage"], "preflight")
+            self.assertEqual(asset.get("executions", []), [])
+
     def test_failed_publication_preserves_previous_outputs_and_source(self):
-        for previously_approved, failure_stage in product((False, True), ("copy", "material")):
+        for previously_approved, failure_stage in product((False, True), ("copy", "material", "interrupt", "backup")):
             with self.subTest(previously_approved=previously_approved, failure_stage=failure_stage), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 (root / 'Assets').mkdir()
@@ -44,6 +66,9 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                     for path in destinations + metadata:
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(('old ' + path.name).encode())
+                elif failure_stage == "backup":
+                    final['surface'].parent.mkdir(parents=True, exist_ok=True)
+                    final['surface'].write_bytes(b'orphan prior output')
                 originals = {path: path.read_bytes() for path in destinations + metadata if path.exists()}
 
                 def fail_material(*args):
@@ -59,20 +84,33 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                     nonlocal replacements
                     if Path(destination).resolve() != (root / config['asset_pipeline']['manifest']).resolve():
                         replacements += 1
+                    if failure_stage == 'interrupt' and replacements == 2:
+                        raise KeyboardInterrupt('cancelled')
                     if failure_stage == 'copy' and Path(destination).resolve() != (root / config['asset_pipeline']['manifest']).resolve() and replacements == 2:
                         raise RuntimeError('Unity failed publication')
                     return replace(source_path, destination)
 
+                copy2 = shutil.copy2
+                def fail_backup(source_path, destination, *args, **kwargs):
+                    if failure_stage == "backup" and Path(destination).parent.name.startswith("slopforge-texture-backup-"):
+                        raise RuntimeError("publication backup failed")
+                    return copy2(source_path, destination, *args, **kwargs)
+
                 with patch('slopforge.pipelines.model.os.replace', side_effect=fail_copy), \
+                        patch('slopforge.pipelines.model.shutil.copy2', side_effect=fail_backup), \
                         patch('slopforge.pipelines.model.unity_cli', return_value='unity'), \
                         patch('slopforge.pipelines.model.build_unity_material', side_effect=fail_material):
-                    with self.assertRaisesRegex(RuntimeError, 'Unity failed'):
+                    with self.assertRaises((RuntimeError, KeyboardInterrupt)):
                         model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
                 self.assertEqual(asset["status"], before_status)
                 self.assertEqual(asset["material_candidates"]["selected"], before_selected)
                 publication = asset["executions"][-1]
                 self.assertEqual(publication["status"], "failed")
                 self.assertEqual(publication["stages"][-1]["status"], "failed")
+                self.assertEqual(publication["stages"][-1]["failure"]["stage"], "final_publication")
+                self.assertEqual(publication["stages"][-1]["failure"]["category"],
+                                 "interruption" if failure_stage == "interrupt" else "unknown")
+                self.assertEqual(publication["failure"]["stage_id"], publication["stages"][-1]["id"])
                 self.assertEqual(source.read_bytes(), b'original source')
                 for path in destinations + metadata:
                     if path in originals:

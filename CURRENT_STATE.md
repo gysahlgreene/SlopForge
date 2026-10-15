@@ -17,13 +17,18 @@ in [PR #25](https://github.com/gysahlgreene/SlopForge/pull/25); its tracking iss
 merge commit `405cc38`; tracking issue [#27](https://github.com/gysahlgreene/SlopForge/issues/27)
 is closed. Its deterministic offline verification passed as recorded below.
 
-Package 3 (failure classification and bounded retries) is planned and has not
-started. The old draft is reference material; Codex/Luna owns the final plan.
-The next implementation prerequisite is the Pi/Qwen provenance guardrail work
-tracked in [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29). The
-non-blocking malformed/ambiguous `earliest_stale_stage` follow-up is
+The Pi/Qwen provenance guardrails were merged in
+[PR #34](https://github.com/gysahlgreene/SlopForge/pull/34), completing the
+prerequisite tracked in [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29).
+Package 3 (failure classification and bounded retries) is in progress on
+`m0/failure-classification-retries` and is not merged. Its adopted scope is in
+the [Package 3 implementation plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md);
+the earlier local draft is superseded. Issue #31 remains open. Plan PR #35 is
+open with CI passing and its required review pending; the implementation has not
+yet been published as a PR. M0 is not complete.
+The non-blocking malformed/ambiguous `earliest_stale_stage` follow-up is
 [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); the helper has
-no production callers. M0 is not complete.
+no production callers.
 
 Contracts describe intended behavior. The inventory below separates recorded
 historical evidence, current implementation inspection, and checks performed during
@@ -36,6 +41,7 @@ No broad category/workflow/profile is claimed Qualified here.
 | --- | --- | --- |
 | Prop execution lineage and safe reuse | Implemented; deterministic offline Package 2 verification passed | v4 manifest records content-addressed prop stage outputs. Approval resume, recipe prop-child reuse, and `retexture` processed-mesh reuse check stage inputs/settings, artifact lineage, and hashes; stale decisions preserve prior stage history. Exact backend weight/node revisions may remain unknown, and publication outputs are not a resume cache. No live inference or visual qualification claim |
 | Offline verification baseline | Verified working for tested coverage | Canonical checks and this task's results below; opt-in/live gates remain separate |
+| Package 3 failure handling | In progress; offline verification passed on local branch | Structured failure records, bounded topology-budget mesh retries, resume accounting, and unknown remote-outcome stop are implemented on `m0/failure-classification-retries`; not merged. See the [Package 3 plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md) and verification record below. No live inference, visual, Unity runtime, or qualification claim |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
 | Unity prop delivery | Partially working; asset-specific historical example | [Public example](README.md) and [commands](docs/EXAMPLES.md) show prop mesh/material import; visible reconstruction defects remain; no representative prop qualification record |
@@ -81,8 +87,8 @@ These gaps remain outside Package 1 or require separate evidence.
   lineage-backed work and restarts at the earliest stale prop boundary. Recipe
   resume applies this check only to prop/model children; other recipe handlers keep
   their existing behavior. Missing/unknown provenance remains conservative, and
-  relocation is unsupported. Broad failure classification and retry policy remain
-  Package 3 work; this implementation does not provide a generic workflow scheduler.
+  relocation is unsupported. Package 3 failure classification is in progress on
+  the branch above and remains unmerged; it does not provide a generic workflow scheduler.
 - **Evidence terminology in operational guides:** [workflow levels](docs/WORKFLOWS.md)
   use provider capability labels such as `visually_qualified` and `production_default`;
   [agent integration](docs/AGENT-INTEGRATION.md) calls repair resolution 120 qualified.
@@ -181,3 +187,17 @@ compile, documentation metadata/link, and whitespace checks passed. The restrict
 run had 9 failures caused by Blender 5.1 subprocess SIGSEGVs and loopback bind
 permission denial; the unrestricted rerun passed. No live inference, visual review,
 readiness qualification, deformation review, or Unity runtime checks were performed.
+
+## Package 3 verification (in-progress branch)
+
+On 2026-10-15, the focused cross-execution duplicate-stage-ID regression passed.
+Independent review found that retry accounting accepted a reused stage ID across
+a parent/child execution chain; resume now fails closed on that ambiguity.
+`make verify PYTHON=.venv/bin/python` passed in the unrestricted environment:
+581 tests, 6 opt-in skips, 74 subtests, and 3 existing Pillow deprecation warnings.
+The sandbox-restricted run produced 9 environment failures (Blender 5.1 subprocess
+SIGSEGVs and loopback bind denial); the unrestricted rerun passed.
+
+These results verify offline behavior only. Live ComfyUI inference, Unity runtime,
+visual/material review, and asset or pipeline qualification were not performed.
+Package 3 remains unmerged and M0 remains incomplete.

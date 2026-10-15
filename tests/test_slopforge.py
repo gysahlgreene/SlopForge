@@ -153,6 +153,27 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("Cancelled", error.getvalue())
         self.assertNotIn("Traceback", error.getvalue())
 
+    def test_cli_reports_structured_stage_failure_and_returns_nonzero(self):
+        from slopforge.failures import StageFailure
+        from slopforge.style import load_style
+        style = load_style(self.root)
+        record = new_record("prop", "terminal", "A brass terminal", style,
+                            {"strategy": "text_only"})
+        save_manifest(self.root / "ai/assets/manifest.json",
+                      {"schema_version": 4, "assets": {"prop:terminal": record}})
+        error = StringIO()
+        failure = StageFailure("inference", "history timed out", stage="mesh_workflow_execution",
+                               operation="wait_for_completion", remedy="inspect prompt evidence")
+
+        with patch("slopforge.cli.model.approve", side_effect=failure), redirect_stderr(error):
+            result = cli_main(["--project", str(self.root), "approve", "terminal", "1"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("mesh_workflow_execution", error.getvalue())
+        self.assertIn("inference", error.getvalue())
+        self.assertIn("history timed out", error.getvalue())
+        self.assertIn("remedy: inspect prompt evidence", error.getvalue())
+
     def test_project_root_discovery_walks_up_for_project_config(self):
         nested = self.root / "Assets/Scenes/Levels"
         nested.mkdir(parents=True)
@@ -436,22 +457,27 @@ class SlopForgeTests(unittest.TestCase):
             for name in ("front", "side", "rear", "three_quarter"):
                 Image.new("RGB", (16, 16), "gray").save(Path(options["preview_dir"]) / f"relic_{name}.png")
 
+        recipe["max_components"] = 50
+        rejected_inspection = {"status": "passed", "errors": [], "warnings": [], "measured": {
+            "mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1],
+            "uv_layers": 1, "material_count": 1, "image_texture_count": 4, "component_count": 60,
+            "nonmanifold_edge_count": 0, "transforms_applied": True, "missing_textures": []}}
+        passed_inspection = {"status": "passed", "errors": [], "warnings": [], "measured": {
+            "mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1],
+            "uv_layers": 1, "material_count": 1, "image_texture_count": 4, "component_count": 1,
+            "nonmanifold_edge_count": 0, "transforms_applied": True, "missing_textures": []}}
+
         with patch("slopforge.pipelines.model.generate_image", side_effect=write_generated_image), \
                 patch("slopforge.pipelines.model.generate_model", side_effect=generate_mesh), \
                 patch("slopforge.pipelines.model.process_model", side_effect=process_mesh) as process, \
                 patch("slopforge.pipelines.model.inspect_model", side_effect=[
-                    {"status": "passed", "errors": [], "warnings": [], "measured": {"mesh_objects": 1}},
-                    {"status": "passed", "errors": [], "warnings": [], "measured": {"mesh_objects": 1}},
-                    {"status": "passed", "errors": [], "warnings": [], "measured": {
-                        "mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1],
-                        "uv_layers": 1, "material_count": 1, "image_texture_count": 4, "component_count": 1,
-                        "nonmanifold_edge_count": 0, "transforms_applied": True, "missing_textures": []}}]), \
+                    rejected_inspection, passed_inspection]), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=run_script) as run_scripts:
             result = approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1,
                                   material_prompt=authored_material_prompt)
 
         self.assertEqual(result["status"], "awaiting_texture_approval")
-        self.assertEqual(len(record["material_candidates"]["items"]), 4)
+        self.assertEqual(len(record["material_candidates"]["items"]), 3)
         self.assertEqual([item["status"] for item in record["model_attempts"]], ["rejected", "qualified"])
         self.assertTrue((self.root / record["material_candidates"]["items"][-1]["mesh_source"]).is_file())
         self.assertEqual(len(record["model_attempts"][-1]["source_sha256"]), 64)
@@ -474,9 +500,14 @@ class SlopForgeTests(unittest.TestCase):
         with patch("slopforge.pipelines.model.generate_model", side_effect=generate_mesh), \
                 patch("slopforge.pipelines.model._generate_material_candidate", return_value=rejected), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=run_script):
-            with self.assertRaisesRegex(ValueError, "No qualified model after 1 attempts"):
+            with self.assertRaisesRegex(ValueError, "No qualified model after 1 attempts") as failure:
                 approve_model(self.root, config, recipe, style, manifest, "prop:relic", 1,
                               force=True, material_prompt=authored_material_prompt, material_count=1)
+        self.assertIn("processing_validation", str(failure.exception))
+        self.assertIn("stage=material_assembly_export", str(failure.exception))
+        self.assertIn("message=material_assembly_export", str(failure.exception))
+        self.assertIn("Candidate failed configured structural validation", str(failure.exception))
+        self.assertIn("remedy:", str(failure.exception))
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["validation"]["status"], "failed")
         self.assertTrue(any("Pipeline stopped: No qualified model after 1 attempts" in error

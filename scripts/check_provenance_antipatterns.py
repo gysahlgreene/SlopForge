@@ -2,6 +2,7 @@
 """Check changed provenance decisions for two known unsafe patterns."""
 
 import ast
+from collections import Counter
 import re
 import subprocess
 import sys
@@ -173,6 +174,40 @@ def _comprehension_uses_identity(comp: ast.ListComp | ast.GeneratorExp) -> bool:
     )
 
 
+def new_findings(source: str, baseline: str) -> list[tuple[str, int, str]]:
+    """Return only findings added relative to the same file's baseline.
+
+    A changed module can contain older audited patterns in untouched code.
+    Compare finding counts per function and rule so unrelated edits do not
+    make those existing patterns fail the gate again.
+    """
+    def records(text: str) -> list[tuple[str, int, str]]:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return []
+        result = []
+        for finding in inspect_source(text):
+            line = int(finding.rsplit(":", 2)[-2])
+            rule = finding.rsplit(":", 1)[-1]
+            owners = [node for node in ast.walk(tree)
+                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                      and node.lineno <= line <= getattr(node, "end_lineno", node.lineno)]
+            owner = min(owners, key=lambda node: node.end_lineno - node.lineno).name if owners else "<module>"
+            result.append((owner, line, rule))
+        return result
+
+    baseline_counts = Counter((name, rule) for name, _, rule in records(baseline))
+    added = []
+    for name, line, rule in records(source):
+        key = (name, rule)
+        if baseline_counts[key]:
+            baseline_counts[key] -= 1
+        else:
+            added.append((name, line, rule))
+    return added
+
+
 def _git(*args: str, root: Path) -> str | None:
     try:
         result = subprocess.run(
@@ -183,17 +218,20 @@ def _git(*args: str, root: Path) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _changed_py_files(root: Path | None = None) -> list[Path]:
-    root = root or Path(__file__).resolve().parent.parent
+def _base_ref(root: Path) -> str:
     branch = _git("rev-parse", "--abbrev-ref", "HEAD", root=root)
     if branch in {"main", "master", "HEAD"}:
-        base = "HEAD^"
-    elif _git("show-ref", "--verify", "--quiet", "refs/heads/main", root=root) is not None:
-        base = "main"
-    elif _git("show-ref", "--verify", "--quiet", "refs/heads/master", root=root) is not None:
-        base = "master"
-    else:
-        base = "HEAD^"
+        return "HEAD^"
+    if _git("show-ref", "--verify", "--quiet", "refs/heads/main", root=root) is not None:
+        return "main"
+    if _git("show-ref", "--verify", "--quiet", "refs/heads/master", root=root) is not None:
+        return "master"
+    return "HEAD^"
+
+
+def _changed_py_files(root: Path | None = None) -> list[Path]:
+    root = root or Path(__file__).resolve().parent.parent
+    base = _base_ref(root)
 
     output = _git("diff", "--name-only", base, "--", "slopforge", root=root)
     untracked = _git("ls-files", "--others", "--exclude-standard", "--", "slopforge", root=root)
@@ -208,24 +246,17 @@ def _changed_py_files(root: Path | None = None) -> list[Path]:
 def _main() -> int:
     root = Path(__file__).resolve().parent.parent
     findings: list[str] = []
+    base = _base_ref(root)
     for path in _changed_py_files(root):
         try:
             source = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        for finding in inspect_source(source, str(path.relative_to(root))):
-            line = int(finding.split(":", 2)[1])
-            function = next(
-                (
-                    node.name for node in ast.walk(ast.parse(source))
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and _DECISION_NAME.search(node.name)
-                    and node.lineno <= line <= getattr(node, "end_lineno", node.lineno)
-                ),
-                None,
-            )
-            if function:
-                findings.append(f"{path.relative_to(root)}:{function}:{line}:{finding.rsplit(':', 1)[-1]}")
+        relative = path.relative_to(root).as_posix()
+        baseline = _git("show", f"{base}:{relative}", root=root) or ""
+        for function, line, rule in new_findings(source, baseline):
+            if _DECISION_NAME.search(function):
+                findings.append(f"{relative}:{function}:{line}:{rule}")
 
     for finding in findings:
         print(finding)

@@ -15,9 +15,10 @@ from ..backends.comfyui import generate_image, generate_model, python_executable
 from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
+from ..failures import StageFailure, candidate_quality_rejection, failure_record, should_retry
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
-from ..paths import resolve_workflow, tool_root
+from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
 from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
@@ -68,10 +69,307 @@ def _reload_manifest(root, pipeline, manifest):
     return manifest
 
 
-def _execution_stage(asset, execution_id, name, attempt):
-    execution = next(item for item in asset["executions"] if item["id"] == execution_id)
-    return execution, next(item for item in reversed(execution["stages"])
-                           if item["name"] == name and item["attempt"] == attempt)
+def _execution_stage(asset, execution_id, name=None, attempt=None, *, stage_id=None):
+    executions = asset.get("executions")
+    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
+        raise ValueError("Execution history is malformed; stage attribution is ambiguous")
+    matches = [item for item in executions if item.get("id") == execution_id]
+    if len(matches) != 1:
+        raise ValueError("Execution identity is missing or ambiguous; stage attribution stopped")
+    execution = matches[0]
+    stages = execution.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Execution stages are malformed; stage attribution is ambiguous")
+    ids = []
+    for item in stages:
+        if (not isinstance(item.get("name"), str) or not item["name"] or
+                type(item.get("attempt")) is not int or item["attempt"] < 1):
+            raise ValueError("Execution stage identity is malformed; stage attribution is ambiguous")
+        if "id" in item:
+            if not isinstance(item["id"], str) or not item["id"]:
+                raise ValueError("Execution stage ID is malformed; stage attribution is ambiguous")
+            ids.append(item["id"])
+    if len(ids) != len(set(ids)):
+        raise ValueError("Execution stage IDs are duplicated; stage attribution is ambiguous")
+    if stage_id is not None:
+        candidates = [item for item in stages if item.get("id") == stage_id]
+        if (len(candidates) != 1 or (name is not None and candidates[0]["name"] != name) or
+                (attempt is not None and candidates[0]["attempt"] != attempt)):
+            raise ValueError("Stage ID is missing, mismatched, or ambiguous")
+        return execution, candidates[0]
+    if name is None or type(attempt) is not int:
+        raise ValueError("Stage lookup requires an exact ID or a name and attempt")
+    candidates = [item for item in stages if item["name"] == name and item["attempt"] == attempt]
+    if len(candidates) != 1:
+        raise ValueError("Legacy stage name/attempt lookup is missing or ambiguous")
+    return execution, candidates[0]
+
+
+def _execution_chain(asset, execution_id):
+    executions = asset.get("executions")
+    if not isinstance(executions, list) or not all(isinstance(item, dict) for item in executions):
+        raise ValueError("Execution history is malformed; resume accounting is ambiguous")
+    ids = [item.get("id") for item in executions]
+    if not all(isinstance(item, str) and item for item in ids) or len(ids) != len(set(ids)):
+        raise ValueError("Execution IDs are malformed or duplicated; resume accounting is ambiguous")
+    by_id = dict(zip(ids, executions))
+    chain, seen = [], set()
+    current_id = execution_id
+    while current_id is not None:
+        if current_id in seen or current_id not in by_id:
+            raise ValueError("Execution parent chain is missing or cyclic; resume accounting stopped")
+        seen.add(current_id)
+        current = by_id[current_id]
+        stages = current.get("stages")
+        if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+            raise ValueError("Execution stages are malformed; resume accounting stopped")
+        stage_ids = [item["id"] for item in stages if "id" in item]
+        if (not all(isinstance(item, str) and item for item in stage_ids) or
+                len(stage_ids) != len(set(stage_ids))):
+            raise ValueError("Execution stage IDs are malformed or duplicated; resume accounting stopped")
+        chain.append(current)
+        current_id = current.get("parent_execution_id")
+    return list(reversed(chain))
+
+
+def _unknown_outcome_prompts(execution):
+    stages = execution.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Cannot resume: failure history is malformed")
+    prompts = []
+    for stage in stages:
+        failure = stage.get("failure")
+        if failure is None:
+            continue
+        if (not isinstance(failure, dict) or "evidence" not in failure or
+                not isinstance(failure["evidence"], dict)):
+            raise ValueError("Cannot resume: failure evidence is malformed")
+        evidence = failure["evidence"]
+        if "outcome_unknown" in evidence and not isinstance(evidence["outcome_unknown"], bool):
+            raise ValueError("Cannot resume: remote outcome evidence is malformed")
+        if evidence.get("outcome_unknown") is True:
+            prompt_id = evidence.get("prompt_id")
+            if isinstance(prompt_id, str) and prompt_id:
+                prompts.append(prompt_id)
+            else:
+                prompts.append("unknown prompt ID")
+    return prompts
+
+
+def _resolve_interrupted_prior(asset, execution, root, pipeline, manifest):
+    """Mark unresolved running work on *execution* as terminal interruption before reuse.
+
+    *execution* is a prior that survived from the previous run and still has
+    ``status == 'running'`` because the process died before it could finish.
+    ``status = 'running'`` is an incomplete terminal state – the manifest cannot
+    be trusted to reflect the real outcome.
+
+    For every stage that is still ``status == 'running'``:
+
+    * Terminate the stage with ``category == 'interruption'`` and record the exact
+      ``stage_id`` of that stage.
+    * Record evidence that completion was *not* persisted, together with the
+      recovery detection timestamp and the unknown original termination time /
+      cause.
+    * Any *previously* succeeded stages and their artifacts are preserved
+      untouched.
+
+    After all stages are classified, mark the *execution* itself as ``failed``
+    with a matching ``interruption`` failure.
+
+    Returns ``None`` on success.  Returns the ``{execution_id, unresolved_stage_name}``
+    dict when the unresolved stage is mesh-related and carries evidence that a
+    remote prompt may have been accepted (``outcome_unknown``) – the caller must
+    stop resume and surface an actionable service-inspection message before any
+    new inference submission.
+    """
+    from slopforge.manifest import finish_stage, finish_execution
+    unresolved = [
+        stage for stage in execution.get("stages", [])
+        if isinstance(stage, dict) and stage.get("status") == "running"
+    ]
+    if not unresolved:
+        return None
+
+    mesh_stages = {"mesh_workflow_execution"}
+    mesh_worker_stages = {
+        "mesh_raw_acquisition", "mesh_preparation", "material_generation",
+        "mesh_output_acquisition",
+    }
+    pending_remote = next(
+        (stage for stage in unresolved
+         if (stage.get("name") in mesh_stages or stage.get("name") in mesh_worker_stages)
+         and stage.get("started_at") is not None),
+        None)
+
+    now = datetime.now(timezone.utc).isoformat()
+    for stage in unresolved:
+        execution_failure = failure_record(
+            RuntimeError("Process terminated while stage was running; completion not persisted"),
+            stage=stage["name"],
+            stage_id=stage.get("id"),
+            attempt=stage.get("attempt"),
+            operation=(stage.get("operation", stage["name"])),
+        )
+        execution_failure["category"] = "interruption"
+        execution_failure["evidence"] = {
+            "completion_not_persisted": True,
+            "recovery_detected_at": now,
+            "unknown_original_termination_time": True,
+            "unknown_original_termination_cause": True,
+        }
+        prior_evidence = (stage.get("failure") or {}).get("evidence", {})
+        execution_failure["evidence"]["outcome_unknown"] = (
+            stage is pending_remote or prior_evidence.get("outcome_unknown") is True
+        )
+        prompt_id = prior_evidence.get("prompt_id")
+        if isinstance(prompt_id, str) and prompt_id:
+            execution_failure["evidence"]["prompt_id"] = prompt_id
+        execution_failure["message"] = (
+            f"Stage '{stage['name']}' (id={stage.get('id')}) was still running when the prior "
+            "process died; inference completion cannot be trusted."
+        )
+        execution_failure["remedy"] = (
+            "inspect the service state after restart and verify inference outcomes "
+            "before submitting new work."
+        )
+        finish_stage(stage, "failed",
+                     error="Process terminated while stage was running; completion not persisted",
+                     failure=execution_failure)
+
+    failed_on = "unknown"
+    for stage in unresolved:
+        if stage.get("name") in mesh_stages or stage.get("name") in mesh_worker_stages:
+            failed_on = stage["name"]
+            break
+
+    exec_failure = failure_record(
+        RuntimeError("Prior execution terminated without completion; stages marked as interruption"),
+        stage=failed_on, attempt=None, operation="model_approval",
+    )
+    exec_failure["category"] = "interruption"
+    exec_failure["evidence"] = {
+        "completion_not_persisted": True,
+        "recovery_detected_at": now,
+        "unknown_original_termination_time": True,
+        "unknown_original_termination_cause": True,
+    }
+    exec_failure["message"] = (
+        f"Prior execution had unresolved stage(s) on restart; inferred interruption."
+    )
+    exec_failure["remedy"] = (
+        "inspect the service state after restart and verify inference outcomes "
+        "before submitting new work."
+    )
+    finish_execution(execution, "failed", failure=exec_failure)
+    root = Path(root)  # normalize to Path
+    _persist_reload(root, pipeline, manifest)
+    if pending_remote:
+        return {"execution_id": execution["id"], "unresolved_stage_name": pending_remote["name"]}
+    return None
+
+
+def _partial_worker_output(execution):
+    stages = execution.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Cannot resume: worker stage history is malformed")
+    ids = [item["id"] for item in stages if "id" in item]
+    if (not all(isinstance(item, str) and item for item in ids) or len(ids) != len(set(ids)) or
+            any(not isinstance(item.get("name"), str) or type(item.get("attempt")) is not int or
+                item["attempt"] < 1 for item in stages)):
+        raise ValueError("Cannot resume: worker stage identity is malformed or ambiguous")
+    failed_mesh_attempts = {item["attempt"] for item in stages
+                            if item["name"] == "mesh_workflow_execution" and item.get("status") == "failed"}
+    worker_stages = {"mesh_raw_acquisition", "mesh_preparation", "material_generation",
+                     "mesh_output_acquisition"}
+    return next((item for item in stages if item["name"] in worker_stages and
+                 item["attempt"] in failed_mesh_attempts and item.get("status") == "succeeded"), None)
+
+
+def _record_blocked_stages(execution, pipeline, failure):
+    if pipeline["workflows"].get("model"):
+        order = ["mesh_raw_acquisition", "mesh_preparation", "material_generation",
+                 "mesh_output_acquisition", "material_map_acquisition",
+                 "material_assembly_export", "final_publication"]
+    else:
+        order = ["material_generation", "material_map_acquisition",
+                 "material_assembly_export", "final_publication"]
+    failed = failure.get("stage")
+    if failed in order:
+        order = order[order.index(failed) + 1:]
+    elif failed not in {"model_approval", "conditioning_preparation", "mesh_workflow_execution"}:
+        return
+    completed = {stage.get("name") for stage in execution.get("stages", [])
+                 if isinstance(stage, dict) and stage.get("status") == "succeeded"}
+    execution["blocked_stages"] = [
+        {"name": name, "attempt": None, "outcome": "not_run",
+         "caused_by": {"stage": failed, "stage_id": failure.get("stage_id"),
+                       "attempt": failure.get("attempt"), "category": failure.get("category")},
+         "reason": f"Not run because {failed} failed."}
+        for name in order if name not in completed
+    ]
+
+
+def _mesh_slot_history(asset, execution_id, scope_sha256, budget):
+    slots, slot_executions, rejected = {}, {}, set()
+    stages_by_id = {}
+    for execution in _execution_chain(asset, execution_id):
+        for stage in execution["stages"]:
+            sid = stage.get("id")
+            if sid:
+                if sid in stages_by_id:
+                    raise ValueError(
+                        "Stage ID is duplicated across execution chain; retry accounting ambiguity")
+                stages_by_id[sid] = stage
+            slot = stage.get("attempt_slot")
+            if slot is None:
+                if stage.get("name") == "mesh_workflow_execution" and stage.get("status") != "succeeded":
+                    raise ValueError(
+                        "Cannot resume: legacy mesh attempt has no retry-slot accounting; "
+                        "start a fresh execution to avoid exceeding the candidate budget")
+                continue
+            if (not isinstance(slot, dict) or not isinstance(slot.get("scope_sha256"), str) or
+                    len(slot["scope_sha256"]) != 64 or
+                    type(slot.get("seed_index")) is not int or slot["seed_index"] < 0 or
+                    not isinstance(slot.get("origin_execution_id"), str) or
+                    not slot["origin_execution_id"]):
+                raise ValueError("Mesh attempt slot is malformed; resume accounting stopped")
+            if slot["scope_sha256"] != scope_sha256:
+                continue
+            index = slot["seed_index"]
+            if index >= budget:
+                raise ValueError("Mesh attempt slot exceeds its configured budget")
+            previous = slots.get(index)
+            if previous and previous.get("id") != stage.get("id"):
+                adopted = stage.get("adopted_from")
+                resumed = (execution.get("parent_execution_id") == slot_executions[index]["id"] and
+                           slot.get("origin_execution_id") == slot_executions[index]["id"])
+                if not ((isinstance(adopted, dict) and adopted.get("stage_id") == previous.get("id") and
+                         slot == previous.get("attempt_slot")) or resumed):
+                    raise ValueError("Mesh attempt slot accounting is duplicated or ambiguous")
+            slots[index] = stage
+            slot_executions[index] = execution
+    for execution in _execution_chain(asset, execution_id):
+        decisions = execution.get("retry_decisions", [])
+        if not isinstance(decisions, list) or not all(isinstance(item, dict) for item in decisions):
+            raise ValueError("Retry decisions are malformed; resume accounting stopped")
+        for decision in decisions:
+            if (not isinstance(decision.get("scope_sha256"), str) or
+                    not isinstance(decision.get("stage_id"), str) or
+                    decision.get("action") not in {"next_candidate", "stop", "exhausted"}):
+                raise ValueError("Retry decision identity is malformed; resume accounting stopped")
+            if decision["scope_sha256"] != scope_sha256:
+                continue
+            stage = stages_by_id.get(decision["stage_id"])
+            if stage is None:
+                raise ValueError("Retry decision refers to a missing stage; resume accounting stopped")
+            slot = stage.get("attempt_slot")
+            if not isinstance(slot, dict) or slot.get("scope_sha256") != scope_sha256:
+                raise ValueError("Retry decision does not match its mesh slot")
+            if decision.get("category") == "candidate_quality" and decision["action"] in {
+                    "next_candidate", "exhausted"}:
+                rejected.add(slot["seed_index"])
+    return slots, rejected
 
 
 def _stage_record_shape(stage):
@@ -479,6 +777,9 @@ def _adopt_stage(context, name, attempt, inputs, settings):
         _persist_reload(context["root"], context["pipeline"], context["manifest"])
         return None
     stage = start_stage(execution, name, attempt, inputs, settings, copy.deepcopy(old.get("provenance", {})))
+    if old.get("attempt_slot"):
+        stage["attempt_slot"] = copy.deepcopy(old["attempt_slot"])
+    stage["adopted_from"] = {"execution_id": prior["id"], "stage_id": old.get("id")}
     begin_stage(stage)
     finish_stage(stage, "succeeded", copy.deepcopy(old["outputs"]))
     _persist_reload(context["root"], context["pipeline"], context["manifest"])
@@ -495,35 +796,79 @@ def _lineage_start(context, name, attempt, inputs, settings, *, parents=None):
     begin_stage(stage)
     _persist_reload(context["root"], context["pipeline"], context["manifest"])
     asset = context["manifest"]["assets"][context["key"]]
-    return _execution_stage(asset, context["execution_id"], name, attempt)[1]
+    context.setdefault("_stage_handles", {})[(name, attempt)] = stage["id"]
+    return _execution_stage(asset, context["execution_id"], name, attempt,
+                            stage_id=stage["id"])[1]
 
 
-def _lineage_finish(context, name, attempt, outputs, *, error=None):
+def _lineage_finish(context, name, attempt, outputs, *, error=None, failure=None, stage_id=None):
     if not context:
         return []
     asset = context["manifest"]["assets"][context["key"]]
-    execution, stage = _execution_stage(asset, context["execution_id"], name, attempt)
+    handles = context.get("_stage_handles", {})
+    stage_id = stage_id or handles.get((name, attempt))
+    execution, stage = _execution_stage(asset, context["execution_id"], name, attempt,
+                                        stage_id=stage_id)
     refs = []
-    if error is None:
-        root = context["root"]
-        parents = stage.get("inputs", [])
-        for index, (path, kind) in enumerate(outputs):
-            path = Path(path)
-            if path.is_file():
-                refs.append(_artifact_ref(root, path, f"{execution['id']}:{name}:{attempt}:{index}",
-                                          kind, name, attempt, parents))
-        finish_stage(stage, "succeeded", refs)
-    else:
-        finish_stage(stage, "failed", error=str(error) or type(error).__name__)
+    root = context["root"]
+    parents = stage.get("inputs", [])
+    for index, (path, kind) in enumerate(outputs):
+        path = Path(path)
+        if path.is_file():
+            refs.append(_artifact_ref(root, path, f"{execution['id']}:{name}:{attempt}:{index}",
+                                      kind, name, attempt, parents))
+    failure = failure or (failure_record(
+        error, stage=name, stage_id=stage["id"], attempt=attempt,
+        operation=error.operation if isinstance(error, StageFailure) else name)
+        if error is not None else None)
+    if failure is not None and failure.get("stage_id") is None:
+        failure = {**failure, "stage_id": stage["id"]}
+    finish_stage(stage, "failed" if error is not None else "succeeded", refs,
+                 error=(str(error) or type(error).__name__) if error is not None else None,
+                 failure=failure)
+    handles.pop((name, attempt), None)
     _persist_reload(context["root"], context["pipeline"], context["manifest"])
     return refs
+
+
+def _validation_failure(validation, *, stage, attempt):
+    if not isinstance(validation, dict) or validation.get("status") != "failed":
+        return None
+    retryable = candidate_quality_rejection(validation)
+    failure = StageFailure(
+        "candidate_quality" if retryable else "processing_validation",
+        "Candidate failed configured structural validation",
+        operation="validate_model_outputs",
+        remedy=("generate another mesh candidate within the configured budget" if retryable else
+                "inspect the validation report and correct the deterministic failure"),
+        stage=stage,
+        evidence={"validation": validation},
+    )
+    return failure_record(failure, stage=stage, attempt=attempt,
+                          operation="validate_model_outputs")
+
+
+def _candidate_failure(candidate, *, attempt):
+    failure = candidate.get("failure") if isinstance(candidate, dict) else None
+    if isinstance(failure, dict):
+        return failure
+    validation = candidate.get("validation") if isinstance(candidate, dict) else None
+    failure = _validation_failure(validation, stage="material_assembly_export", attempt=attempt)
+    if failure is not None:
+        return failure
+    message = candidate.get("error") if isinstance(candidate, dict) else None
+    return failure_record(RuntimeError(message or "Candidate failed without a validation report"),
+                          stage="material_assembly_export", attempt=attempt,
+                          operation="candidate_validation")
 
 
 def _lineage_provenance(context, name, attempt, facts):
     if not context:
         return
     asset = context["manifest"]["assets"][context["key"]]
-    _, stage = _execution_stage(asset, context["execution_id"], name, attempt)
+    stage_id = context.get("_stage_handles", {}).get((name, attempt))
+    _, stage = _execution_stage(asset, context["execution_id"], name, attempt,
+                                stage_id=stage_id)
     stage["provenance"].update(facts)
 
 
@@ -727,6 +1072,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             max_boundary_edges=asset_type.get("max_boundary_edges"))
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
+        candidate["failure"] = _validation_failure(candidate["validation"],
+                                                    stage="material_assembly_export", attempt=number)
         candidate["outputs"] = _relative_outputs(root, paths, check_paths)
         candidate["generator"].update({"workflow": info.get("workflow") or candidate["generator"].get("workflow") or workflow,
                                         "seed": candidate["seed"]})
@@ -737,27 +1084,39 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             if mesh_path.is_file():
                 assembly_outputs.append((mesh_path, "mesh.processed"))
             candidate["artifacts"].extend(_lineage_finish(lineage, "material_assembly_export", number,
-                assembly_outputs))
+                assembly_outputs,
+                error=candidate["failure"]["message"] if candidate["failure"] else None,
+                failure=candidate["failure"]))
             assembly_started = False
             candidate["stage_attempts"]["material_assembly_export"] = number
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt) as exc:
+        failure_stage = ("material_assembly_export" if assembly_started else
+                         "material_map_acquisition" if map_started else "material_generation")
+        candidate["failure"] = failure_record(
+            exc, stage=failure_stage, attempt=number,
+            operation=exc.operation if isinstance(exc, StageFailure) else failure_stage)
         if material_started:
-            _lineage_finish(lineage, "material_generation", number, [], error=exc)
+            _lineage_finish(lineage, "material_generation", number, [], error=exc,
+                            failure=candidate["failure"])
         if map_started:
-            _lineage_finish(lineage, "material_map_acquisition", number, [], error=exc)
+            _lineage_finish(lineage, "material_map_acquisition", number, [], error=exc,
+                            failure=candidate["failure"])
         if assembly_started:
-            _lineage_finish(lineage, "material_assembly_export", number, [], error=exc)
+            _lineage_finish(lineage, "material_assembly_export", number, [], error=exc,
+                            failure=candidate["failure"])
         candidate["error"] = str(exc)
         candidate["validation"]["errors"].append(str(exc))
+        if isinstance(exc, KeyboardInterrupt):
+            raise
     return candidate
 
 
-def _native_material_candidate(root, config, asset_type, asset, number, mesh_info, lineage=None):
+def _native_material_candidate(root, config, context, asset_type, asset, number, mesh_info, lineage=None):
     paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
     mesh_path = root / asset["source"]["glb"]
     artifacts = []
-    _lineage_start(lineage, "material_generation", number, (),
+    _lineage_start(context, "material_generation", number, (),
                    {"workflow": "mesh_pbr", "seed": mesh_info.get("seed")},
                    parents=(lineage or {}).get("material_inputs", (lineage or {}).get("upstream", [])))
     if mesh_info.get("conditioning_image"):
@@ -791,16 +1150,20 @@ def _native_material_candidate(root, config, asset_type, asset, number, mesh_inf
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+    failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
                         ("fbx", "blend", "preview_front", "preview_side", "preview_rear",
                          "preview_three_quarter", "validation")]
-    artifacts.extend(_lineage_finish(lineage, "material_assembly_export", number, assembly_outputs))
+    artifacts.extend(_lineage_finish(
+        lineage, "material_assembly_export", number, assembly_outputs,
+        error=failure["message"] if failure else None, failure=failure))
     return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
             "status": "candidate" if validation["status"] != "failed" else "failed",
             "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
-            "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts}
+            "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,
+            "failure": failure}
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
@@ -898,26 +1261,50 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
                "execution_id": execution["id"], "upstream": upstream,
                "processed_mesh_reusable": processed_reuse["reusable"]}
     results = []
-    for index, number in enumerate(range(start, start + count)):
-        candidate = _generate_material_candidate(root, config, asset_type, asset, number, prompt,
-            paths["processed_mesh"], lineage=lineage, seed=seeds[index])
-        asset = manifest["assets"][key]
-        existing = asset.setdefault("material_candidates", {"items": [], "selected": None})["items"]
+    try:
+        for index, number in enumerate(range(start, start + count)):
+            candidate = _generate_material_candidate(root, config, asset_type, asset, number, prompt,
+                paths["processed_mesh"], lineage=lineage, seed=seeds[index])
+            asset = manifest["assets"][key]
+            existing = asset.setdefault("material_candidates", {"items": [], "selected": None})["items"]
+            execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+            if not candidate.get("artifacts"):
+                candidate["artifacts"] = _material_artifact_refs(root,
+                    material_candidate_paths(root, config, asset["name"], number, asset_type),
+                    execution["id"], number, upstream)
+            candidate.update({"execution_id": execution["id"], "stage_attempt": number,
+                              "mesh_source": paths["glb"].relative_to(root).as_posix(),
+                              "mesh_attempt": mesh_ref.get("attempt") if mesh_ref else None,
+                              "upstream_artifacts": upstream})
+            existing.append(candidate)
+            results.append(candidate)
+        if any(item["status"] == "candidate" for item in results):
+            finish_execution(execution, "succeeded")
+        else:
+            failure = _candidate_failure(results[-1], attempt=results[-1].get("stage_attempt", start))
+            _record_blocked_stages(execution, pipeline, failure)
+            finish_execution(execution, "failed", failure=failure)
+        from .. import SCHEMA_VERSION
+        manifest.setdefault("schema_version", SCHEMA_VERSION)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+    except (Exception, KeyboardInterrupt) as exc:
         execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
-        if not candidate.get("artifacts"):
-            candidate["artifacts"] = _material_artifact_refs(root,
-                material_candidate_paths(root, config, asset["name"], number, asset_type),
-                execution["id"], number, upstream)
-        candidate.update({"execution_id": execution["id"], "stage_attempt": number,
-                          "mesh_source": paths["glb"].relative_to(root).as_posix(),
-                          "mesh_attempt": mesh_ref.get("attempt") if mesh_ref else None,
-                          "upstream_artifacts": upstream})
-        existing.append(candidate)
-        results.append(candidate)
-    finish_execution(execution, "succeeded" if any(item["status"] == "candidate" for item in results) else "failed")
-    from .. import SCHEMA_VERSION
-    manifest.setdefault("schema_version", SCHEMA_VERSION)
-    save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        failure = next((stage.get("failure") for stage in execution.get("stages", [])
+                        if stage.get("status") == "failed" and stage.get("failure")), None)
+        for stage in execution.get("stages", []):
+            if stage.get("status") == "running":
+                failure = failure or failure_record(exc, stage=stage["name"], stage_id=stage.get("id"),
+                    attempt=stage["attempt"], operation=(exc.operation if isinstance(exc, StageFailure)
+                                                         else stage["name"]))
+                finish_stage(stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
+        failure = failure or execution.get("failure") or failure_record(
+            exc, stage="material_generation", attempt=None,
+            operation=exc.operation if isinstance(exc, StageFailure) else "retexture")
+        if execution.get("status") == "running":
+            _record_blocked_stages(execution, pipeline, failure)
+            finish_execution(execution, "failed", failure=failure)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        raise
     return results
 
 
@@ -928,7 +1315,13 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                       if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Material candidate {number} is not valid for {asset['name']}")
-    unity_cli(root)
+    try:
+        unity_cli(root)
+    except StageFailure as exc:
+        asset["last_failure"] = failure_record(exc, stage="preflight", attempt=None,
+                                               operation=exc.operation)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        raise
     paths = model_paths(root, config, asset["name"], asset_type)
     candidate_paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     candidate.setdefault("outputs", {})
@@ -969,12 +1362,14 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
     with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
         backups = {}
-        for index, destination in enumerate(publication_paths):
-            if destination.is_file():
-                backup = Path(backup_dir) / str(index)
-                shutil.copy2(destination, backup)
-                backups[destination] = backup
+        backups_complete = False
         try:
+            for index, destination in enumerate(publication_paths):
+                if destination.is_file():
+                    backup = Path(backup_dir) / str(index)
+                    shutil.copy2(destination, backup)
+                    backups[destination] = backup
+            backups_complete = True
             for name in final_keys:
                 destination = paths[name]
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -996,14 +1391,18 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
-        except Exception as exc:
-            for destination in publication_paths:
-                if destination in backups:
-                    shutil.copy2(backups[destination], destination)
-                else:
-                    destination.unlink(missing_ok=True)
-            finish_stage(publication_stage, "failed", error=str(exc) or type(exc).__name__)
-            finish_execution(execution, "failed")
+        except (Exception, KeyboardInterrupt) as exc:
+            if backups_complete:
+                for destination in publication_paths:
+                    if destination in backups:
+                        shutil.copy2(backups[destination], destination)
+                    else:
+                        destination.unlink(missing_ok=True)
+            failure = failure_record(
+                exc, stage="final_publication", stage_id=publication_stage["id"], attempt=1,
+                operation=exc.operation if isinstance(exc, StageFailure) else "final_publication")
+            finish_stage(publication_stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
+            finish_execution(execution, "failed", failure=failure)
             save_manifest(root / pipeline["manifest"], manifest)
             raise
     candidate["approval"] = "approved"
@@ -1104,6 +1503,30 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         selected = prior["identity_inputs"].get("selected_concept", {})
         if selected.get("id") not in (None, candidate_artifact["id"]) or selected.get("number") not in (None, number):
             raise ValueError("Cannot resume: selected concept candidate identity changed")
+        unknown_prompts = _unknown_outcome_prompts(prior)
+        if unknown_prompts:
+            raise ValueError("Cannot resume: remote inference outcome is unknown for " +
+                             ", ".join(dict.fromkeys(unknown_prompts)) +
+                             "; inspect the service state before submitting another generation")
+        partial_worker = _partial_worker_output(prior)
+        if partial_worker:
+            raise ValueError(
+                f"Cannot resume: partial worker output from {partial_worker['name']} is retained, "
+                "but internal worker resume is unsupported; inspect it before resubmitting inference")
+        resolved = _resolve_interrupted_prior(asset, prior, root, pipeline, manifest)
+        if resolved is not None:
+            stage_name = resolved["unresolved_stage_name"]
+            stage_failure = next(
+                (s.get("failure") for s in prior.get("stages", [])
+                 if isinstance(s, dict) and s.get("name") == stage_name), None)
+            evidence = (stage_failure or {}).get("evidence", {}) if isinstance(stage_failure, dict) else {}
+            if evidence.get("outcome_unknown") is True:
+                raise ValueError(
+                    f"Cannot resume: remote inference outcome is unknown for {stage_name}; "
+                    "inspect the service state before submitting another generation")
+            raise ValueError(
+                f"Cannot resume: unresolved {stage_name} may have accepted a remote prompt; "
+                "inspect the service state before resubmitting inference")
         old_seeds = prior["identity_inputs"].get("mesh", {}).get("seeds")
         if not isinstance(old_seeds, list) or len(old_seeds) != attempts:
             raise ValueError("Cannot resume: mesh attempt seeds are missing or the attempt budget changed")
@@ -1117,6 +1540,21 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         if old_attempts:
             next_attempt = min(old_attempts)
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
+    try:
+        python = python_executable(root, config)
+        if workflow:
+            blender_executable(config, root)
+    except (Exception, KeyboardInterrupt) as exc:
+        asset["last_failure"] = failure_record(
+            exc, stage="preflight", attempt=None,
+            operation=exc.operation if isinstance(exc, StageFailure) else "model_preflight")
+        save_manifest(root / pipeline["manifest"], manifest)
+        if isinstance(exc, KeyboardInterrupt):
+            raise
+        failure = asset["last_failure"]
+        raise StageFailure(failure["category"], failure["message"], operation=failure["operation"],
+                           remedy=failure["remedy"], stage=failure["stage"],
+                           stage_id=failure["stage_id"], evidence=failure["evidence"]) from exc
     execution = start_execution(asset, {
         "asset_type": asset_type.get("name"), "brief": candidate.get("description", asset.get("description")),
         "selected_concept": {"number": number, "id": candidate_artifact["id"], "sha256": candidate_artifact["sha256"]},
@@ -1138,33 +1576,48 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         "material_seeds": material_seeds,
         "material_scale": pipeline.get("material_scale", 3.0),
     }, parent_execution_id=prior["id"] if prior else candidate.get("execution_id"))
-    paths["concept"].parent.mkdir(parents=True, exist_ok=True)
-    paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
-    old_selected = asset.get("source", {}).get("concept_artifact") if prior else None
-    old_parent = (old_selected or {}).get("derived_from", [])
-    selected_intact = artifact_integrity(root, old_selected)[0] if old_selected else False
-    if (selected_intact and old_parent == [{"artifact_id": candidate_artifact["id"],
-                                            "sha256": candidate_artifact["sha256"]}]):
-        selected_artifact = old_selected
-    else:
-        shutil.copy2(concept_path, paths["concept"])
-        selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
-                                          "image.concept.approved", "conditioning_preparation", 1,
-                                          [candidate_artifact])
-    candidate["approval"] = "approved"
-    asset["candidates"]["selected"] = number
-    asset["status"] = "processing"
-    asset["description"] = candidate.get("description", asset["description"])
-    asset["style"], asset["style_version"] = style["name"], style["version"]
-    asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix(),
-                       "concept_artifact": selected_artifact,
-                       "concept_lineage": {"status": "known" if candidate.get("execution_id") else "unknown",
-                           "reason": None if candidate.get("execution_id") else "legacy concept candidate has no execution record"}}
     pipeline = config["asset_pipeline"]
     _persist_reload(root, pipeline, manifest)
     asset = manifest["assets"][key]
     execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
-    python = python_executable(root, config)
+    try:
+        paths["concept"].parent.mkdir(parents=True, exist_ok=True)
+        paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
+        old_selected = asset.get("source", {}).get("concept_artifact") if prior else None
+        old_parent = (old_selected or {}).get("derived_from", [])
+        selected_intact = artifact_integrity(root, old_selected)[0] if old_selected else False
+        if (selected_intact and old_parent == [{"artifact_id": candidate_artifact["id"],
+                                                "sha256": candidate_artifact["sha256"]}]):
+            selected_artifact = old_selected
+        else:
+            shutil.copy2(concept_path, paths["concept"])
+            selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
+                                              "image.concept.approved", "conditioning_preparation", 1,
+                                              [candidate_artifact])
+        candidate["approval"] = "approved"
+        asset["candidates"]["selected"] = number
+        asset["status"] = "processing"
+        asset["description"] = candidate.get("description", asset["description"])
+        asset["style"], asset["style_version"] = style["name"], style["version"]
+        asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix(),
+                           "concept_artifact": selected_artifact,
+                           "concept_lineage": {"status": "known" if candidate.get("execution_id") else "unknown",
+                               "reason": None if candidate.get("execution_id") else "legacy concept candidate has no execution record"}}
+        _persist_reload(root, pipeline, manifest)
+        asset = manifest["assets"][key]
+        execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+    except (Exception, KeyboardInterrupt) as exc:
+        _reload_manifest(root, pipeline, manifest)
+        asset = manifest["assets"][key]
+        execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+        failure = failure_record(exc, stage="model_approval", attempt=None,
+            operation=exc.operation if isinstance(exc, StageFailure) else "selected_concept_setup")
+        asset["last_failure"] = failure
+        _record_blocked_stages(execution, pipeline, failure)
+        finish_execution(execution, "failed", failure=failure)
+        save_manifest(root / pipeline["manifest"], manifest)
+        raise
+    last_failure = None
     try:
         context = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                    "execution_id": execution["id"], "reuse_execution": prior}
@@ -1197,20 +1650,25 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                              "image.cutout", "conditioning_preparation", 1, [selected_artifact]),
                                  _artifact_ref(root, paths["input_3d"], f"3d-input:{execution['id']}",
                                              "image.3d_input", "conditioning_preparation", 1, [selected_artifact])]
-            _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
+            _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1,
+                                                      stage_id=stage["id"])
             finish_stage(conditioning_stage, "succeeded", conditioning_refs)
             _persist_reload(root, pipeline, manifest)
         else:
             paths["cutout"] = root / next(item["path"] for item in conditioning_refs if item["type"] == "image.cutout")
             paths["input_3d"] = root / next(item["path"] for item in conditioning_refs if item["type"] == "image.3d_input")
         asset = manifest["assets"][key]
-        execution, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1)
+        conditioning_id = next((item.get("id") for item in execution["stages"]
+                                if item["name"] == "conditioning_preparation" and item["attempt"] == 1), None)
+        execution, conditioning_stage = _execution_stage(
+            asset, execution["id"], "conditioning_preparation", 1, stage_id=conditioning_id)
 
         workflow = pipeline["workflows"].get("model")
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
         material_candidates = []
         viable = []
         attempt_errors = []
+        failed_fast = False
         attempt_reports = asset.setdefault("model_attempts", [])
         next_attempt = (min(stage["attempt"] for stage in prior["stages"]
                             if stage["name"] == "mesh_workflow_execution")
@@ -1238,12 +1696,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         else:
             attempt_plan = [(next_attempt + offset, offset) for offset in range(attempts)]
         fresh_attempt_offset = 0
+        budget_used = 0
+        accounting_execution_id = prior["id"] if prior else execution["id"]
         for planned_attempt, offset in attempt_plan:
             attempt_number = planned_attempt if planned_attempt is not None else fresh_mesh_attempt + fresh_attempt_offset
-            attempt_dir = root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"mesh_{attempt_number:02d}"
-            attempt_dir.mkdir(parents=True, exist_ok=True)
-            source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
-            stage_mesh = attempt_dir / "processed_mesh.blend"
             mesh_seed = mesh_seeds[offset]
             conditioning_refs = conditioning_stage["outputs"]
             mesh_inputs = [candidate_artifact, *conditioning_refs]
@@ -1257,6 +1713,30 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "face_budget": pipeline["model_budgets"].get(asset_type.get("face_budget")),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            scope_sha256 = execution_identity({
+                "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
+                "settings": {key: value for key, value in mesh_settings.items() if key != "seed"},
+                "seeds": mesh_seeds, "budget": attempts,
+            })
+            slots, quality_rejections = _mesh_slot_history(
+                manifest["assets"][key], accounting_execution_id, scope_sha256, attempts)
+            if offset in quality_rejections:
+                rejected_stage = slots[offset]
+                chain_ids = {item["id"] for item in _execution_chain(
+                    manifest["assets"][key], accounting_execution_id)}
+                last_failure = rejected_stage.get("failure") or next((item.get("failure")
+                    for item in reversed(manifest["assets"][key].get("model_attempts", []))
+                    if item.get("execution_id") in chain_ids and
+                    item.get("stage_attempt") == rejected_stage.get("attempt") and item.get("failure")),
+                    last_failure)
+                budget_used = max(budget_used, len(slots))
+                continue
+            used_attempts = len(slots) + (0 if offset in slots else 1)
+            budget_used = max(budget_used, used_attempts)
+            attempt_dir = root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"mesh_{attempt_number:02d}"
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            source_mesh, model_metadata = attempt_dir / f"{asset['name']}.glb", attempt_dir / "generation.json"
+            stage_mesh = attempt_dir / "processed_mesh.blend"
             mesh_outputs = _adopt_stage(context, "mesh_workflow_execution", attempt_number,
                                         mesh_inputs, mesh_settings)
             if mesh_outputs is None:
@@ -1273,17 +1753,24 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 mesh_stage = start_stage(execution, "mesh_workflow_execution", attempt_number,
                                          mesh_inputs, mesh_settings,
                                          {"concept_lineage": asset["source"]["concept_lineage"]})
+                mesh_stage["attempt_slot"] = {"scope_sha256": scope_sha256, "seed_index": offset,
+                                               "origin_execution_id": prior["id"] if prior else execution["id"]}
                 save_manifest(root / pipeline["manifest"], manifest)
                 begin_stage(mesh_stage)
             else:
+                _, mesh_stage = _execution_stage(manifest["assets"][key], execution["id"],
+                    "mesh_workflow_execution", attempt_number)
                 source_mesh = root / next(item["path"] for item in mesh_outputs if item["type"] == "mesh.glb")
                 model_metadata = root / next(item["path"] for item in mesh_outputs if item["type"] == "generation.metadata")
             _persist_reload(root, pipeline, manifest)
             asset = manifest["assets"][key]
-            execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
+            execution, mesh_stage = _execution_stage(asset, execution["id"],
+                "mesh_workflow_execution", attempt_number)
+            mesh_stage_id = mesh_stage["id"]
             attempt_reports = asset.setdefault("model_attempts", [])
             journal_context = {"manifest_path": str(root / pipeline["manifest"]), "asset_selector": key,
                                "execution_id": execution["id"], "attempt": attempt_number,
+                               "stage_id": mesh_stage_id,
                                "upstream_artifacts": [candidate_artifact, *conditioning_refs]}
             try:
                 if mesh_outputs is None:
@@ -1297,7 +1784,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]
-                execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
+                execution, mesh_stage = _execution_stage(asset, execution["id"],
+                    "mesh_workflow_execution", attempt_number, stage_id=mesh_stage_id)
                 attempt_reports = asset.setdefault("model_attempts", [])
                 mesh_info = json.loads(model_metadata.read_text())
                 missing = lambda reason: {"status": "not_recorded", "reason": reason}
@@ -1317,29 +1805,77 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         missing("Worker did not record the effective workflow hash")),
                     "effective_bindings": mesh_info.get("effective_bindings", missing("Worker did not record effective bindings")),
                     })
+            except KeyboardInterrupt as exc:
+                config.pop("_journal_context", None)
+                _reload_manifest(root, pipeline, manifest)
+                asset = manifest["assets"][key]
+                execution, mesh_stage = _execution_stage(asset, execution["id"],
+                    "mesh_workflow_execution", attempt_number, stage_id=mesh_stage_id)
+                failure = failure_record(exc, stage="mesh_workflow_execution", stage_id=mesh_stage_id,
+                                         attempt=attempt_number,
+                                         operation="mesh_workflow_execution")
+                partial = []
+                if source_mesh.is_file():
+                    partial.append(_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
+                        "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs))
+                if mesh_stage["status"] == "running":
+                    finish_stage(mesh_stage, "failed", partial, error=str(exc) or "Interrupted",
+                                 failure=failure)
+                elif "failure" not in mesh_stage:
+                    mesh_stage["failure"] = failure
+                attempt_reports.append({"number": attempt_number, "seed": mesh_seed,
+                    "source": source_mesh.relative_to(root).as_posix() if source_mesh.is_file() else None,
+                    "generation": model_metadata.relative_to(root).as_posix() if model_metadata.is_file() else None,
+                    "failure": failure, "status": "interrupted",
+                    "execution_id": execution["id"], "stage_attempt": attempt_number})
+                finish_execution(execution, "failed", failure=failure)
+                asset["status"] = "failed"
+                _persist_reload(root, pipeline, manifest)
+                raise
             except Exception as exc:
                 config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]
-                execution, mesh_stage = _execution_stage(asset, execution["id"], "mesh_workflow_execution", attempt_number)
+                execution, mesh_stage = _execution_stage(asset, execution["id"],
+                    "mesh_workflow_execution", attempt_number, stage_id=mesh_stage_id)
                 reason = f"mesh generation failed: {exc}"
+                failure = failure_record(exc, stage="mesh_workflow_execution", stage_id=mesh_stage_id,
+                                         attempt=attempt_number,
+                                         operation=(exc.operation if isinstance(exc, StageFailure)
+                                                    else "mesh_workflow_execution"))
+                last_failure = failure
                 attempt_errors.append(reason)
                 if mesh_stage["status"] == "running":
                     partial = []
                     if source_mesh.is_file():
                         partial.append(_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
                             "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs))
-                    finish_stage(mesh_stage, "failed", partial, error=reason)
+                    finish_stage(mesh_stage, "failed", partial, error=reason, failure=failure)
+                elif "failure" not in mesh_stage:
+                    mesh_stage["failure"] = failure
                 attempt_reports.append({"number": attempt_number,
                                         "seed": mesh_seed,
                                         "source": source_mesh.relative_to(root).as_posix() if source_mesh.is_file() else None,
-                                        "generation": model_metadata.relative_to(root).as_posix(),
-                                        "status": "rejected", "error": reason,
+                                        "generation": model_metadata.relative_to(root).as_posix() if model_metadata.is_file() else None,
+                                        "failure": failure, "status": "rejected", "error": reason,
                                         "execution_id": execution["id"], "stage_attempt": attempt_number})
+                can_retry = should_retry(failure, used=used_attempts, limit=attempts)
+                execution.setdefault("retry_decisions", []).append({
+                    "scope": "mesh", "scope_sha256": scope_sha256,
+                    "stage": "mesh_workflow_execution", "stage_id": mesh_stage_id,
+                    "attempt": attempt_number, "category": failure["category"],
+                    "used": used_attempts, "limit": attempts,
+                    "action": "next_candidate" if can_retry else
+                              "exhausted" if failure["category"] == "candidate_quality" else "stop",
+                    "next_seed_index": offset + 1 if can_retry and offset + 1 < len(mesh_seeds) else None,
+                })
                 _persist_reload(root, pipeline, manifest)
                 asset = manifest["assets"][key]
                 execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
-                continue
+                if can_retry:
+                    continue
+                failed_fast = failure["category"] != "candidate_quality"
+                break
             if mesh_outputs is None:
                 mesh_outputs = [_artifact_ref(root, source_mesh, f"mesh:{execution['id']}:{attempt_number}",
                     "mesh.glb", "mesh_workflow_execution", attempt_number, conditioning_refs)]
@@ -1378,15 +1914,50 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                    item.get("mesh_attempt") == attempt_number] if prior else [])
             if mesh_info.get("textured"):
                 start = next_material
-                generated = [_native_material_candidate(root, config, asset_type, asset, start, mesh_info,
-                                                        lineage=lineage)]
+                try:
+                    generated = [_native_material_candidate(root, config, context, asset_type, asset, start, mesh_info,
+                                                            lineage=lineage)]
+                except Exception as exc:
+                    reason = f"native material processing failed: {exc}"
+                    asset = manifest["assets"][key]
+                    execution, _ = _execution_stage(asset, context["execution_id"],
+                        "mesh_workflow_execution", attempt_number, stage_id=mesh_stage_id)
+                    local_stage_ids = set(context.get("_stage_handles", {}).values())
+                    running = [stage for stage in execution.get("stages", [])
+                               if stage.get("status") == "running" and stage.get("id") in local_stage_ids]
+                    if running:
+                        stage = running[-1]
+                        failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=stage["attempt"],
+                                                 operation=(exc.operation if isinstance(exc, StageFailure)
+                                                            else stage["name"]))
+                        finish_stage(stage, "failed", error=reason, failure=failure)
+                    else:
+                        failure = failure_record(exc, stage="material_generation", attempt=start,
+                                                 operation=(exc.operation if isinstance(exc, StageFailure)
+                                                            else "material_generation"))
+                    last_failure = failure
+                    attempt_errors.append(reason)
+                    asset.setdefault("model_attempts", []).append({"number": attempt_number,
+                        "seed": mesh_seed, "source": source_mesh.relative_to(root).as_posix(),
+                        "generation": model_metadata.relative_to(root).as_posix(),
+                        "failure": failure, "status": "rejected", "error": reason,
+                        "execution_id": execution["id"], "stage_attempt": attempt_number})
+                    _persist_reload(root, pipeline, manifest)
+                    failed_fast = True
+                    break
             else:
-                generated = [_generate_material_candidate(root, config, asset_type, asset, number,
-                                material_prompt, stage_mesh,
-                                lineage={**lineage, "prior_candidate": previous_materials[index]
-                                         if index < len(previous_materials) else None},
-                            seed=material_seeds[offset * material_count + index])
-                             for index, number in enumerate(range(next_material, next_material + material_count))]
+                generated = []
+                for index, number in enumerate(range(next_material, next_material + material_count)):
+                    item = _generate_material_candidate(
+                        root, config, asset_type, asset, number, material_prompt, stage_mesh,
+                        lineage={**lineage, "prior_candidate": previous_materials[index]
+                                 if index < len(previous_materials) else None},
+                        seed=material_seeds[offset * material_count + index])
+                    generated.append(item)
+                    if item.get("status") != "candidate":
+                        item["failure"] = _candidate_failure(
+                            item, attempt=item.get("stage_attempt", item.get("number", attempt_number)))
+                        break
             asset = manifest["assets"][key]
             execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
             attempt_reports = asset.setdefault("model_attempts", [])
@@ -1403,27 +1974,65 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                                                   item["number"], lineage["upstream"])
             material_candidates.extend(generated)
             viable = [item for item in generated if item["status"] == "candidate"]
+            failure = None
+            if not viable:
+                failures = [_candidate_failure(item, attempt=item.get("stage_attempt", item.get("number", attempt_number)))
+                            for item in generated]
+                if failures:
+                    failure = failures[0]
+                    last_failure = failure
+                    for item, candidate_failure in zip(generated, failures):
+                        item["failure"] = candidate_failure
+                can_retry = bool(failures) and all(
+                    should_retry(item, used=used_attempts, limit=attempts) for item in failures)
+                if can_retry:
+                    failed_fast = False
+                else:
+                    failed_fast = True
             attempt_reports.append({"number": attempt_number, "source": source_mesh.relative_to(root).as_posix(),
                                     "seed": mesh_seed,
                                     "generation": model_metadata.relative_to(root).as_posix(),
                                     "source_sha256": _sha256(source_mesh),
                                     "input_sha256": _sha256(paths["cutout"] if workflow else paths["input_3d"]),
-                                        "status": "qualified" if viable else "rejected",
-                                        "execution_id": execution["id"], "stage_attempt": attempt_number,
+                                    "status": "qualified" if viable else "rejected",
+                                    "failure": failure,
+                                    "execution_id": execution["id"], "stage_attempt": attempt_number,
                                     "materials": [{"number": item["number"], "status": item["status"],
                                                    "validation": item.get("validation")} for item in generated]})
+            if failure:
+                execution.setdefault("retry_decisions", []).append({
+                    "scope": "mesh", "scope_sha256": scope_sha256,
+                    "stage": "mesh_workflow_execution", "stage_id": mesh_stage_id,
+                    "attempt": attempt_number, "category": failure["category"],
+                    "used": used_attempts, "limit": attempts,
+                    "action": "next_candidate" if can_retry else
+                              "exhausted" if failure["category"] == "candidate_quality" else "stop",
+                    "next_seed_index": offset + 1 if can_retry and offset + 1 < len(mesh_seeds) else None,
+                })
             _persist_reload(root, pipeline, manifest)
             asset = manifest["assets"][key]
             execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
             attempt_reports = asset.setdefault("model_attempts", [])
             if viable:
                 break
+            if failed_fast:
+                break
         previous = asset.get("material_candidates", {}).get("items", [])
         asset["material_candidates"] = {"items": previous + material_candidates, "selected": None}
         if not viable:
             failures = [error for item in material_candidates for error in item.get("validation", {}).get("errors", [])]
-            raise ValueError(f"No qualified model after {attempts} attempts: " +
-                             ("; ".join(attempt_errors + failures) or "candidate processing failed"))
+            attempted = max(budget_used, sum(item.get("execution_id") == execution["id"]
+                                             for item in attempt_reports))
+            last_failure = last_failure or failure_record(
+                RuntimeError("Candidate processing failed without a structured report"),
+                stage="material_generation", attempt=max(attempted, 1), operation="model_approval")
+            retry_state = "yes" if last_failure["retryable"] else "no"
+            details = "; ".join(attempt_errors + failures) or last_failure["message"]
+            raise ValueError(
+                f"No qualified model after {attempted} attempts "
+                f"(stage={last_failure['stage']}, category={last_failure['category']}, "
+                f"retryable={retry_state}, retry_budget={attempts}): "
+                f"message={last_failure['message']}; {details}; remedy: {last_failure['remedy']}")
         first = viable[0]
         asset["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
         asset["generator"] = {"workflow": {"concept": concept_workflow, "mesh": mesh_info.get("workflow"),
@@ -1444,15 +2053,28 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         for item in material_candidates:
             print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item['path'])} ({item['status']})")
         return {"status": asset["status"], "material_candidates": material_candidates}
-    except Exception as exc:
+    except (Exception, KeyboardInterrupt) as exc:
         _reload_manifest(root, pipeline, manifest)
         asset = manifest["assets"][key]
         execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
         for stage in execution.get("stages", []):
             if stage["status"] == "running":
-                finish_stage(stage, "failed", error=str(exc) or type(exc).__name__)
-        if execution.get("status") == "running":
-            finish_execution(execution, "failed")
+                failure = last_failure or failure_record(
+                    exc, stage=stage["name"], stage_id=stage.get("id"),
+                    attempt=stage["attempt"],
+                    operation=exc.operation if isinstance(exc, StageFailure) else stage["name"])
+                finish_stage(stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
+                last_failure = last_failure or failure
+        execution_failure = execution.get("failure") or next(
+            (stage.get("failure") for stage in execution.get("stages", [])
+             if stage.get("status") == "failed" and stage.get("failure")), last_failure)
+        if execution.get("status") in {"running", "failed"}:
+            execution_failure = execution_failure or failure_record(
+                exc, stage="model_approval", attempt=None,
+                operation=exc.operation if isinstance(exc, StageFailure) else "model_approval")
+            _record_blocked_stages(execution, pipeline, execution_failure)
+            if execution.get("status") == "running":
+                finish_execution(execution, "failed", failure=execution_failure)
         asset["status"] = "failed"
         validation = asset.setdefault("validation", {})
         validation["status"] = "failed"
