@@ -31,9 +31,10 @@ and [M0 milestone](https://github.com/gysahlgreene/SlopForge/milestone/1).
 | Before Package 3 — Pi/Qwen provenance guardrails | Add adversarial provenance checks and implementation guidance before Package 3 starts | Merged in [PR #34](https://github.com/gysahlgreene/SlopForge/pull/34) (`5e3b544`); [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29) closed |
 | Package 3 — failure classification and bounded retries | Classify stage failures and retry only explicitly stochastic candidate failures; depends on Packages 1–2 and the guardrail tooling | Merged in [PR #36](https://github.com/gysahlgreene/SlopForge/pull/36) (`1886bc3`); plan merged in [PR #35](https://github.com/gysahlgreene/SlopForge/pull/35); [issue #31](https://github.com/gysahlgreene/SlopForge/issues/31) closed |
 
-The known non-blocking `earliest_stale_stage` malformed/ambiguous-record follow-up
-is [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); that helper has
-no production callers. M0 remains active until all core exit evidence below is met.
+Malformed/ambiguous `earliest_stale_stage` records now fail closed in
+[PR #38](https://github.com/gysahlgreene/SlopForge/pull/38) (`f63239a`), closing
+[issue #28](https://github.com/gysahlgreene/SlopForge/issues/28). The helper still
+has no production callers. M0 remains active until all core exit evidence below is met.
 
 Before closing M0, retain a compact evidence record demonstrating:
 

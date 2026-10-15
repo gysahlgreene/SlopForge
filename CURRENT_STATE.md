@@ -25,10 +25,10 @@ Codex/Luna retaining the independent quality gate. Package 3 (failure
 classification and bounded retries) merged in
 [PR #36](https://github.com/gysahlgreene/SlopForge/pull/36) (`1886bc3`); its plan
 merged in [PR #35](https://github.com/gysahlgreene/SlopForge/pull/35) (`460dc2f`),
-and issue #31 is closed. M0 is not complete. The non-blocking malformed/ambiguous
-`earliest_stale_stage` follow-up is
-[issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); the helper has
-no production callers.
+and issue #31 is closed. The malformed/ambiguous `earliest_stale_stage` helper
+was hardened in [PR #38](https://github.com/gysahlgreene/SlopForge/pull/38)
+(`f63239a`); [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28) is
+closed. The helper still has no production callers. M0 is not complete.
 
 Contracts describe intended behavior. The inventory below separates recorded
 historical evidence, current implementation inspection, and checks performed during
