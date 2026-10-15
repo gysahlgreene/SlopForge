@@ -16,6 +16,8 @@ make verify
 
 Normal tests use local fixtures and mocks. Blender tests run when a supported Blender installation is available. GPU, Unity, and external rigging integrations are opt-in; their environment switches are documented in the test modules. Passing offline tests does not qualify generated artwork or replace human review.
 
+`make verify` also launches Blender subprocesses and a localhost HTTP fixture. A process- or network-restricted runner can make Blender crash or reject loopback binds even when SlopForge is correct. If that happens, rerun `make verify` in an environment that permits child processes and localhost sockets; report the restricted-run failures separately and do not count them as a passing verification.
+
 Read the [product contract](docs/PRODUCT_CONTRACT.md), [pipeline contract](docs/PIPELINE_CONTRACT.md), [quality contract](docs/QUALITY_CONTRACT.md), [roadmap](ROADMAP.md), and [current state](CURRENT_STATE.md) before substantial work. Complete implementation changes only after `make verify` passes; report skipped coverage. Set `PYTHON` when using a specific interpreter, for example `make verify PYTHON=.venv/bin/python`.
 
 `COMFYUI_URL=<service-url> make verify-live` explicitly runs service preflight and real 2D/3D inference, followed by local Blender preparation. It needs the configured models and Blender (`BLENDER_BIN` can select the executable), consumes inference resources, and does not verify Unity playback. Run the native crop regression with ComfyUI's Python: `python scripts/check_comfy_mask_polarity.py <ComfyUI-directory>`.
