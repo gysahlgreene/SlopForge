@@ -23,6 +23,11 @@ _REQUIRED_OUTPUT_TYPES = {
 }
 
 
+def _valid_sha256(value):
+    return (isinstance(value, str) and len(value) == 64
+            and all(char in "0123456789abcdef" for char in value))
+
+
 def artifact_integrity(project_root: Path, reference: dict) -> tuple[bool, str | None]:
     if not isinstance(reference, dict):
         return False, "missing artifact reference"
@@ -81,18 +86,15 @@ def stage_reuse_decision(project_root: Path, stage: dict, *, inputs: list[dict],
         return {"reusable": False, "reasons": ["lineage mismatch: output derivation links are incomplete"]}
     refs = recorded_inputs + inputs
     if (any(not isinstance(ref["id"], str) or not ref["id"]
-            or not isinstance(ref["sha256"], str) or len(ref["sha256"]) != 64
-            or any(c not in "0123456789abcdef" for c in ref["sha256"]) for ref in refs)
+            or not _valid_sha256(ref["sha256"]) for ref in refs)
             or any(not isinstance(output["id"], str) or not output["id"].strip()
                    or not isinstance(output["type"], str) or not output["type"]
                    or not isinstance(output["path"], str) or not output["path"]
-                   or not isinstance(output["sha256"], str) or len(output["sha256"]) != 64
-                   or any(c not in "0123456789abcdef" for c in output["sha256"])
+                   or not _valid_sha256(output["sha256"])
                    or not isinstance(output["stage"], str) or type(output["attempt"]) is not int
                    for output in outputs)
             or any(not isinstance(parent["artifact_id"], str) or not parent["artifact_id"]
-                   or not isinstance(parent["sha256"], str) or len(parent["sha256"]) != 64
-                   or any(c not in "0123456789abcdef" for c in parent["sha256"])
+                   or not _valid_sha256(parent["sha256"])
                    for parent in parents)):
         return {"reusable": False, "reasons": ["semantic mismatch: artifact identity is malformed"]}
     # Identity types are checked above before uniqueness keys are constructed.
@@ -143,17 +145,108 @@ def earliest_stale_stage(project_root: Path, stages: list[dict], requested: dict
     unknown = [name for name in requested if name not in _STAGE_ORDER]
     if unknown:
         raise ValueError(f"unsupported prop stage(s): {', '.join(unknown)}")
-    by_name = {}
-    for stage in stages:
-        by_name.setdefault(stage.get("name"), []).append(stage)
     ordered = [name for name in _STAGE_ORDER if name in requested]
+    if not ordered:
+        return None
+
+    def stale(name=None):
+        return name if name in requested else ordered[0]
+
+    if not isinstance(stages, list):
+        return stale()
+    by_name = {}
+    stage_ids = set()
+    stage_attempts = set()
+    malformed_names = set()
+    for stage in stages:
+        if not isinstance(stage, dict):
+            return stale()
+        name = stage.get("name")
+        if not isinstance(name, str) or name not in _STAGE_ORDER:
+            return stale()
+        if "id" in stage:
+            stage_id = stage["id"]
+            if not isinstance(stage_id, str) or not stage_id:
+                if name in requested:
+                    malformed_names.add(name)
+                    continue
+                return stale()
+            if stage_id in stage_ids:
+                return stale()
+            stage_ids.add(stage_id)
+        attempt = stage.get("attempt")
+        if type(attempt) is not int or attempt < 1:
+            if name in requested:
+                malformed_names.add(name)
+                continue
+            return stale()
+        if (not all(key in stage for key in ("status", "inputs", "outputs", "settings"))
+                or not isinstance(stage["status"], str)
+                or stage["status"] not in {"pending", "running", "succeeded", "failed"}
+                or not isinstance(stage["inputs"], list)
+                or not isinstance(stage["outputs"], list)
+                or not isinstance(stage["settings"], dict)):
+            if name in requested:
+                malformed_names.add(name)
+                continue
+            return stale()
+        identity = (name, attempt)
+        if identity in stage_attempts:
+            if name in requested:
+                malformed_names.add(name)
+                continue
+            return stale()
+        stage_attempts.add(identity)
+        malformed = False
+        for ref in stage["inputs"]:
+            if (not isinstance(ref, dict) or not isinstance(ref.get("id"), str) or not ref["id"]
+                    or not _valid_sha256(ref.get("sha256"))):
+                malformed = True
+                break
+        output_ids = set()
+        if not malformed:
+            for output in stage["outputs"]:
+                if (not isinstance(output, dict)
+                        or not all(key in output for key in
+                                   ("id", "type", "path", "sha256", "stage", "attempt", "derived_from"))
+                        or not isinstance(output["id"], str) or not output["id"]
+                        or not isinstance(output["type"], str) or not output["type"]
+                        or not isinstance(output["path"], str) or not output["path"]
+                        or not _valid_sha256(output["sha256"])
+                        or output["stage"] != name or type(output["attempt"]) is not int
+                        or output["attempt"] != attempt
+                        or not isinstance(output["derived_from"], list)):
+                    malformed = True
+                    break
+                if output["id"] in output_ids:
+                    malformed = True
+                    break
+                output_ids.add(output["id"])
+                if any(not isinstance(parent, dict)
+                       or not isinstance(parent.get("artifact_id"), str) or not parent["artifact_id"]
+                       or not _valid_sha256(parent.get("sha256"))
+                       for parent in output["derived_from"]):
+                    malformed = True
+                    break
+        if malformed:
+            if name in requested:
+                malformed_names.add(name)
+                continue
+            return stale()
+        by_name.setdefault(name, []).append(stage)
     # The fixed route selects one material branch: native mesh PBR or swatch maps.
     for name in ordered:
+        if name in malformed_names:
+            return name
         candidates = by_name.get(name, [])
         if not candidates:
             return name
         inputs, settings = requested[name]
-        if not any(stage_reuse_decision(project_root, stage, inputs=inputs, settings=settings)["reusable"]
-                   for stage in candidates):
+        try:
+            decisions = [stage_reuse_decision(project_root, stage, inputs=inputs, settings=settings)
+                         for stage in candidates]
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return name
+        if not any(decision["reusable"] for decision in decisions):
             return name
     return None

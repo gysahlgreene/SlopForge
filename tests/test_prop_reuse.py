@@ -129,6 +129,40 @@ class PropReuseTests(unittest.TestCase):
             "concept_generation": ([], {}), "material_generation": ([self.input], {"seed": 1})
         }), "concept_generation")
 
+    def test_earliest_stale_stage_fails_closed_on_malformed_or_ambiguous_records(self):
+        concept = {"id": "concept-stage", "name": "concept_generation", "attempt": 1,
+                   "status": "succeeded", "inputs": [], "outputs": [], "settings": {}}
+        requested = {"concept_generation": ([], {}),
+                     "material_generation": ([self.input], {"seed": 1})}
+        self.assertIsNone(earliest_stale_stage(self.root, [concept, self.stage], requested))
+
+        malformed_material = {**self.stage, "attempt": True}
+        incomplete_material = {"name": "material_generation", "attempt": 2,
+                               "status": "succeeded", "inputs": [self.input],
+                               "settings": {"seed": 1}}
+        duplicate_material_attempt = {**self.stage, "id": "second-material"}
+        same_id_material = {**self.stage, "id": "concept-stage"}
+        cases = (
+            (None, "concept_generation"),
+            ([concept, None, self.stage], "concept_generation"),
+            ([concept, {**self.stage, "name": []}], "concept_generation"),
+            ([concept, malformed_material, self.stage], "material_generation"),
+            ([malformed_material], "concept_generation"),
+            ([concept, self.stage, incomplete_material], "material_generation"),
+            ([concept, same_id_material], "concept_generation"),
+            ([concept, self.stage, duplicate_material_attempt], "material_generation"),
+        )
+        for stages, expected in cases:
+            with self.subTest(stages=stages):
+                self.assertEqual(earliest_stale_stage(self.root, stages, requested), expected)
+
+    def test_earliest_stale_stage_allows_distinct_valid_attempts(self):
+        second = {**self.stage, "id": "material-stage-2", "attempt": 2,
+                  "outputs": [{**output, "attempt": 2} for output in self.stage["outputs"]]}
+        self.assertIsNone(earliest_stale_stage(self.root, [self.stage, second], {
+            "material_generation": ([self.input], {"seed": 1})
+        }))
+
     def test_earliest_stale_stage_rejects_unknown_requested_stage(self):
         with self.assertRaisesRegex(ValueError, "unsupported prop stage"):
             earliest_stale_stage(self.root, [], {"mesh_preperation": ([], {})})
