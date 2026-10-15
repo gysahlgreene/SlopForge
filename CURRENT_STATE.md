@@ -20,12 +20,13 @@ is closed. Its deterministic offline verification passed as recorded below.
 The Pi/Qwen provenance guardrails were merged in
 [PR #34](https://github.com/gysahlgreene/SlopForge/pull/34), completing the
 prerequisite tracked in [issue #29](https://github.com/gysahlgreene/SlopForge/issues/29).
-Package 3 (failure classification and bounded retries) is in progress on
-`m0/failure-classification-retries` and is not merged. Its adopted scope is in
-the [Package 3 implementation plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md);
-the earlier local draft is superseded. Issue #31 remains open. Plan PR #35 is
-open with CI passing and its required review pending; the implementation has not
-yet been published as a PR. M0 is not complete.
+Package 3 (failure classification and bounded retries) is implemented on
+`m0/failure-classification-retries` and remains unmerged. Its scope is in the
+[Package 3 implementation plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md);
+the earlier local draft is superseded. Plan PR #35 is open with CI passing and its
+required review pending. Implementation PR #36 is ready for review with both GitHub
+checks passing. Issue #31 remains open until the gates pass and the implementation
+merges. M0 is not complete.
 The non-blocking malformed/ambiguous `earliest_stale_stage` follow-up is
 [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28); the helper has
 no production callers.
