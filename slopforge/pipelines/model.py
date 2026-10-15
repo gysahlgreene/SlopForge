@@ -354,21 +354,57 @@ def _mesh_slot_history(asset, execution_id, scope_sha256, budget):
         if not isinstance(decisions, list) or not all(isinstance(item, dict) for item in decisions):
             raise ValueError("Retry decisions are malformed; resume accounting stopped")
         for decision in decisions:
-            if (not isinstance(decision.get("scope_sha256"), str) or
-                    not isinstance(decision.get("stage_id"), str) or
-                    decision.get("action") not in {"next_candidate", "stop", "exhausted"}):
-                raise ValueError("Retry decision identity is malformed; resume accounting stopped")
+            category = decision.get("category")
+            action = decision.get("action")
+            next_seed = decision.get("next_seed_index")
+            if (decision.get("scope") != "mesh" or
+                    not isinstance(decision.get("scope_sha256"), str) or
+                    len(decision["scope_sha256"]) != 64 or
+                    any(char not in "0123456789abcdef" for char in decision["scope_sha256"].lower()) or
+                    decision.get("stage") != "mesh_workflow_execution" or
+                    not isinstance(decision.get("stage_id"), str) or not decision["stage_id"] or
+                    type(decision.get("attempt")) is not int or decision["attempt"] < 1 or
+                    type(decision.get("used")) is not int or decision["used"] < 1 or
+                    type(decision.get("limit")) is not int or decision["limit"] < 1 or
+                    decision["used"] > decision["limit"] or
+                    not isinstance(category, str) or
+                    category not in {"configuration", "environment", "inference",
+                                     "candidate_quality", "processing_validation",
+                                     "interruption", "unknown"} or
+                    not isinstance(action, str) or
+                    action not in {"next_candidate", "stop", "exhausted"} or
+                    (next_seed is not None and (type(next_seed) is not int or next_seed < 0))):
+                raise ValueError("Retry decision is malformed; resume accounting stopped")
+            if ((category == "candidate_quality" and action not in {"next_candidate", "exhausted"}) or
+                    (category != "candidate_quality" and action != "stop") or
+                    (action == "next_candidate" and
+                     (next_seed is None or next_seed >= decision["limit"] or
+                      decision["used"] >= decision["limit"])) or
+                    (action != "next_candidate" and next_seed is not None) or
+                    (action == "exhausted" and decision["used"] != decision["limit"])):
+                raise ValueError("Retry decision action contradicts its accounting; resume accounting stopped")
             if decision["scope_sha256"] != scope_sha256:
                 continue
+            if decision["limit"] != budget:
+                raise ValueError("Retry decision budget contradicts its mesh scope; resume accounting stopped")
             stage = stages_by_id.get(decision["stage_id"])
             if stage is None:
                 raise ValueError("Retry decision refers to a missing stage; resume accounting stopped")
+            if (stage.get("name") != decision["stage"] or
+                    type(stage.get("attempt")) is not int or
+                    stage.get("attempt") != decision["attempt"]):
+                raise ValueError("Retry decision refers to a contradictory stage; resume accounting stopped")
             slot = stage.get("attempt_slot")
             if not isinstance(slot, dict) or slot.get("scope_sha256") != scope_sha256:
                 raise ValueError("Retry decision does not match its mesh slot")
-            if decision.get("category") == "candidate_quality" and decision["action"] in {
-                    "next_candidate", "exhausted"}:
+            if category == "candidate_quality":
+                if (type(slot.get("seed_index")) is not int or
+                        decision["used"] != slot["seed_index"] + 1 or
+                        (action == "next_candidate" and next_seed != slot["seed_index"] + 1)):
+                    raise ValueError("Retry decision does not match its mesh slot accounting")
                 rejected.add(slot["seed_index"])
+            elif type(slot.get("seed_index")) is not int or decision["used"] != slot["seed_index"] + 1:
+                raise ValueError("Retry decision does not match its mesh slot accounting")
     return slots, rejected
 
 
@@ -1392,17 +1428,26 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
         except (Exception, KeyboardInterrupt) as exc:
-            if backups_complete:
-                for destination in publication_paths:
-                    if destination in backups:
-                        shutil.copy2(backups[destination], destination)
-                    else:
-                        destination.unlink(missing_ok=True)
-            failure = failure_record(
+            rollback_failure = None
+            try:
+                if backups_complete:
+                    for destination in publication_paths:
+                        if destination in backups:
+                            shutil.copy2(backups[destination], destination)
+                        else:
+                            destination.unlink(missing_ok=True)
+            except (Exception, KeyboardInterrupt) as rb_exc:
+                rollback_failure = rb_exc
+            primary_failure = failure_record(
                 exc, stage="final_publication", stage_id=publication_stage["id"], attempt=1,
                 operation=exc.operation if isinstance(exc, StageFailure) else "final_publication")
-            finish_stage(publication_stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
-            finish_execution(execution, "failed", failure=failure)
+            if rollback_failure is not None:
+                primary_failure["evidence"] = primary_failure.get("evidence") or {}
+                primary_failure["evidence"]["rollback_failure"] = str(rollback_failure)
+                primary_failure["evidence"]["rollback_partial"] = True
+            finish_stage(publication_stage, "failed",
+                         error=str(exc) or type(exc).__name__, failure=primary_failure)
+            finish_execution(execution, "failed", failure=primary_failure)
             save_manifest(root / pipeline["manifest"], manifest)
             raise
     candidate["approval"] = "approved"

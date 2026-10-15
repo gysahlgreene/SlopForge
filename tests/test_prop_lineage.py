@@ -597,6 +597,53 @@ avoid: [environment]
         self.assertEqual(preserved_conditioning["status"], "succeeded")
         self.assertEqual(len(preserved_conditioning["outputs"]), succeeded_output_count)
 
+    def _mesh_history(self, decision):
+        from slopforge.pipelines.model import _mesh_slot_history
+
+        slot = {"scope_sha256": "a" * 64,
+                "seed_index": decision.get("used", 1) - 1,
+                "origin_execution_id": "execution-1"}
+        stage = {"id": "stage-1", "name": "mesh_workflow_execution",
+                 "attempt": 1, "status": "failed", "attempt_slot": slot}
+        execution = {"id": "execution-1", "parent_execution_id": None,
+                     "stages": [stage], "retry_decisions": [decision]}
+        return _mesh_slot_history({"executions": [execution]}, "execution-1", "a" * 64, 2)
+
+    def test_complete_candidate_quality_retry_decisions_consume_seed(self):
+        for action, used, next_seed in (("next_candidate", 1, 1), ("exhausted", 2, None)):
+            with self.subTest(action=action):
+                decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                            "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                            "attempt": 1, "category": "candidate_quality", "used": used,
+                            "limit": 2, "action": action, "next_seed_index": next_seed}
+                slots, rejected = self._mesh_history(decision)
+                seed_index = used - 1
+                self.assertEqual(set(slots), {seed_index})
+                self.assertEqual(rejected, {seed_index})
+
+    def test_incomplete_candidate_quality_stop_decision_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "candidate_quality", "action": "stop"}
+        with self.assertRaisesRegex(ValueError, "Retry decision"):
+            self._mesh_history(decision)
+
+        decision.update({"used": 1, "limit": 2, "next_seed_index": None})
+        with self.assertRaisesRegex(ValueError, "action contradicts"):
+            self._mesh_history(decision)
+
+    def test_incomplete_non_quality_stop_decision_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "unknown", "action": "stop"}
+        with self.assertRaisesRegex(ValueError, "Retry decision"):
+            self._mesh_history(decision)
+
+        decision.update({"used": 1, "limit": 2, "next_seed_index": None})
+        slots, rejected = self._mesh_history(decision)
+        self.assertEqual(set(slots), {0})
+        self.assertEqual(rejected, set())
+
 
 if __name__ == "__main__":
     unittest.main()

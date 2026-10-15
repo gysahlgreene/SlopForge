@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from slopforge.config import load_project
+from slopforge.manifest import load_manifest
 from slopforge.failures import StageFailure
 from slopforge.initializer import init_project
 from slopforge.pipelines import model
@@ -117,3 +118,72 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                         self.assertEqual(path.read_bytes(), originals[path])
                     else:
                         self.assertFalse(path.exists(), str(path))
+
+    def test_backup_rollback_failure_records_terminal_failure(self):
+        """When restoring a backup after publication failure fails, the
+        publication must still be recorded as terminal-failed and the
+        manifest saved with rollback-error context. The original
+        publication error remains the primary failure evidence.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'Assets').mkdir()
+            init_project(root)
+            config = load_project(root)
+            final = model.model_paths(root, config, 'relic')
+            candidate = model.material_candidate_paths(root, config, 'relic', 1)
+            keys = ('surface', 'fbx', 'blend', 'basecolor', 'normal', 'roughness',
+                    'metallic', 'metallic_gloss', 'emission', 'preview_front',
+                    'preview_side', 'preview_rear', 'preview_three_quarter')
+            outputs = {}
+            for name in keys:
+                candidate[name].parent.mkdir(parents=True, exist_ok=True)
+                candidate[name].write_bytes(('new ' + name).encode())
+                outputs[name] = candidate[name].relative_to(root).as_posix()
+            source = root / 'retained.glb'
+            source.write_bytes(b'original source')
+            asset = {'name': 'relic', 'status': 'awaiting_texture_approval',
+                     'source': {'glb': 'retained.glb'}, 'generator': {'workflow': {}, 'seed': {}},
+                     'material_candidates': {'selected': None,
+                         'items': [{'number': 1, 'status': 'candidate', 'prompt': 'steel',
+                                    'outputs': outputs, 'validation': {'status': 'passed'}}]}}
+            manifest = {'assets': {'prop:relic': asset}}
+            final['surface'].parent.mkdir(parents=True, exist_ok=True)
+            final['surface'].write_bytes(b'orphan prior output')
+
+            real_copy = shutil.copy2
+            # During initial backup: source is production file, dest is in backup dir.
+            # During restore: source is in backup dir, dest is production file.
+            # We distinguish by checking if SOURCE is from a backup dir.
+
+            def selective_fail(source_path, destination):
+                # Check if this is a restore operation (source comes from backup)
+                src_parent = Path(source_path).parent.name
+                if src_parent.startswith("slopforge-texture-backup-"):
+                    raise RuntimeError("backup restoration failed")
+                return real_copy(source_path, destination)
+
+            with patch('slopforge.pipelines.model.unity_cli', return_value='unity'), \
+                 patch('slopforge.pipelines.model.build_unity_material',
+                       side_effect=lambda _r, _f, out, _m: (_ for _ in ()).throw(RuntimeError("Unity failed"))), \
+                 patch('slopforge.pipelines.model.shutil.copy2', side_effect=selective_fail):
+                with self.assertRaises(RuntimeError):
+                    model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
+
+                # Asset is still terminal-failed and manifest was saved.
+                publication = asset['executions'][-1]
+                self.assertEqual(asset['status'], 'awaiting_texture_approval')
+                self.assertEqual(publication['status'], 'failed')
+                self.assertEqual(publication['stages'][-1]['status'], 'failed')
+                self.assertEqual(publication['stages'][-1]['failure']['stage'], 'final_publication')
+                self.assertEqual(publication['failure']['message'], 'Unity failed')
+                # Rollback error context preserved alongside original publication error.
+                failure_evidence = publication['failure']['evidence']
+                self.assertIn('rollback_failure', failure_evidence)
+                self.assertIn('backup restoration failed', failure_evidence['rollback_failure'])
+                self.assertTrue(failure_evidence['rollback_partial'])
+                persisted = load_manifest(root / config['asset_pipeline']['manifest'])
+                saved_publication = persisted['assets']['prop:relic']['executions'][-1]
+                self.assertEqual(saved_publication['status'], 'failed')
+                self.assertIn('backup restoration failed',
+                              saved_publication['failure']['evidence']['rollback_failure'])
