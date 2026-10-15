@@ -173,6 +173,24 @@ class InspectSourceInlineTests(unittest.TestCase):
             f"Expected no findings for valid candidate_reuse_decision, got {findings}",
         )
 
+    def test_new_findings_ignores_legacy_patterns_and_reports_added_ones(self):
+        from scripts.check_provenance_antipatterns import new_findings
+
+        baseline = """\
+def legacy(records, wanted):
+    ids = [item['id'] for item in records]
+    return [item for item in records if item['id'] == wanted]
+"""
+        current = baseline + """\
+
+def new_unsafe(records):
+    return [item for item in records if isinstance(item, dict) and item['id']]
+"""
+        findings = new_findings(current, baseline)
+        self.assertTrue(findings)
+        self.assertEqual({finding[0] for finding in findings}, {"new_unsafe"})
+        self.assertIn("malformed-member filtering", {finding[2] for finding in findings})
+
 
 # ---------------------------------------------------------------------------
 # Integration test: audit CLI file scope on a scratch repo

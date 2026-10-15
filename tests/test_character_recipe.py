@@ -135,7 +135,7 @@ class CharacterRecipeTests(unittest.TestCase):
                     "measured": {"face_count": 100, "component_count": 1189,
                                  "nonmanifold_edge_count": 4168, "boundary_edge_count": 549}}):
             result = _native_material_candidate(
-                self.root, config, character, asset, 1, {"textures": texture_names})
+                self.root, config, None, character, asset, 1, {"textures": texture_names})
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("component count 1189 exceeds budget 64", result["validation"]["errors"])

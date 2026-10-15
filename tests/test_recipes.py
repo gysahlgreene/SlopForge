@@ -8,6 +8,7 @@ from unittest.mock import patch
 import yaml
 
 from slopforge import recipes
+from slopforge.failures import StageFailure
 from slopforge.manifest import load_manifest, new_record, save_manifest
 from slopforge.provenance import file_sha256
 
@@ -426,11 +427,35 @@ class RecipeTests(unittest.TestCase):
             partial = recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
                                          "sample_pack", instance_name="demo")
             self.assertEqual(partial["status"], "partial")
-            self.assertEqual(partial["recipe_instance"]["stages"]["dependent"]["status"], "blocked")
+            source_stage = partial["recipe_instance"]["stages"]["source"]
+            dependent_stage = partial["recipe_instance"]["stages"]["dependent"]
+            self.assertEqual(source_stage["failure"]["category"], "unknown")
+            self.assertFalse(source_stage["failure"]["retryable"])
+            self.assertEqual(dependent_stage["status"], "blocked")
+            self.assertIn("source", dependent_stage["errors"][0])
             completed = recipes.resume_recipe(self.root, self.config, self.style, self.types, self.manifest, "demo")
 
         self.assertEqual(self.events, ["source", "independent", "source", "dependent"])
         self.assertEqual(completed["status"], "awaiting_approval")
+
+    def test_typed_child_failure_is_persisted_with_stage_attempt(self):
+        self.definition["children"] = [{"id": "source", "type": "concept",
+                                        "description": "Source concept"}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+
+        def fail(*_args):
+            raise StageFailure("environment", "ComfyUI is unavailable", operation="connect",
+                               remedy="start ComfyUI")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"image": fail}):
+            result = recipes.run_recipe(self.root, self.config, self.style, self.types,
+                                        self.manifest, "sample_pack", instance_name="failed")
+
+        failure = result["recipe_instance"]["stages"]["source"]["failure"]
+        self.assertEqual(failure["category"], "environment")
+        self.assertEqual(failure["attempt"], 1)
+        self.assertEqual(failure["operation"], "connect")
+        self.assertFalse(failure["retryable"])
 
     def test_interrupted_running_stage_resumes_and_persists_transitions(self):
         interrupted = False
@@ -451,12 +476,29 @@ class RecipeTests(unittest.TestCase):
                                    save=persist)
             self.manifest = load_manifest(manifest_path)
             running = self.manifest["assets"]["recipe:demo"]["recipe_instance"]["stages"]["source"]
-            self.assertEqual(running["status"], "running")
+            self.assertEqual(running["status"], "failed")
+            self.assertEqual(running["failure"]["category"], "interruption")
             result = recipes.resume_recipe(self.root, self.config, self.style, self.types, self.manifest,
                                            "demo", save=persist)
 
         self.assertEqual(result["recipe_instance"]["stages"]["source"]["status"], "completed")
         self.assertEqual(load_manifest(manifest_path)["assets"]["recipe:demo"]["status"], "awaiting_approval")
+
+    def test_interruption_records_recipe_child_failure_before_reraising(self):
+        manifest_path = self.root / "ai/assets/manifest.json"
+        persist = lambda data: save_manifest(manifest_path, data)
+        def interrupt(*_args):
+            raise KeyboardInterrupt("cancelled")
+
+        with patch.dict(recipes.PIPELINE_HANDLERS, {"image": interrupt}):
+            with self.assertRaises(KeyboardInterrupt):
+                recipes.run_recipe(self.root, self.config, self.style, self.types, self.manifest,
+                                   "sample_pack", instance_name="interrupted", save=persist)
+
+        self.manifest = load_manifest(manifest_path)
+        stage = self.manifest["assets"]["recipe:interrupted"]["recipe_instance"]["stages"]["source"]
+        self.assertEqual(stage["status"], "failed")
+        self.assertEqual(stage["failure"]["category"], "interruption")
 
     def test_resume_preserves_approved_children_and_regenerate_targets_only_one_child(self):
         with patch.dict(recipes.PIPELINE_HANDLERS, {"image": self.fake_pipeline}):

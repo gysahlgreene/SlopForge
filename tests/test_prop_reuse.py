@@ -1359,6 +1359,7 @@ avoid: [environment]
             stack.enter_context(patch("slopforge.pipelines.model.generate_model", side_effect=self._mesh))
             stack.enter_context(patch("slopforge.pipelines.model.generate_image", side_effect=self._material))
             stack.enter_context(patch("slopforge.pipelines.model.process_model", side_effect=self._assembly))
+            stack.enter_context(patch("slopforge.pipelines.model.blender_executable", return_value="blender"))
             stack.enter_context(patch("slopforge.pipelines.model.inspect_model", return_value={}))
             stack.enter_context(patch("slopforge.pipelines.model.validate_model_outputs",
                                       return_value={"status": "passed", "errors": [], "warnings": [], "measured": {}}))
@@ -1462,11 +1463,14 @@ avoid: [environment]
         self.manifest = load_manifest(manifest_path)
         self.asset = self.manifest["assets"]["prop:relay"]
         execution = self.asset["executions"][-1]
-        self.assertEqual(execution["status"], "running")
+        self.assertEqual(execution["status"], "failed")
         self.assertEqual(next(stage for stage in execution["stages"]
                               if stage["name"] == "conditioning_preparation")["status"], "succeeded")
         self.assertEqual(next(stage for stage in execution["stages"]
-                              if stage["name"] == "mesh_workflow_execution")["status"], "running")
+                              if stage["name"] == "mesh_workflow_execution")["status"], "failed")
+        self.assertEqual(next(stage for stage in execution["stages"]
+                              if stage["name"] == "mesh_workflow_execution")["failure"]["category"],
+                         "interruption")
         self._approve(resume=True)
         self.assertEqual((self.calls["prepare"], self.calls["mesh"]), (1, 2))
 
@@ -1487,13 +1491,16 @@ avoid: [environment]
                 self._approve(resume=True)
                 self.assertEqual(self.calls["mesh"], 1)
 
-    def test_resume_uses_later_successful_mesh_after_an_earlier_attempt_failed(self):
+    def test_resume_retries_mesh_after_nonretryable_failure_before_material_stage(self):
         self.config["asset_pipeline"]["defaults"]["model_candidates"] = 2
         self.config["_quality_base_pipeline"]["defaults"]["model_candidates"] = 2
         self.fail_times["mesh"] = 1
         self.fail_once = "material"
         with self.assertRaises(ValueError):
             self._approve()
+        self.assertEqual(self.calls["mesh"], 1)
+        with self.assertRaises(ValueError):
+            self._approve(resume=True)
         self.assertEqual(self.calls["mesh"], 2)
         self._approve(resume=True)
         self.assertEqual(self.calls["mesh"], 2)

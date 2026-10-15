@@ -12,6 +12,7 @@ from slopforge.pipelines.image import generate as generate_concepts
 from slopforge.pipelines.model import approve as approve_model, generate as generate_prop_concepts
 from slopforge.style import load_style
 from slopforge.taxonomy import load_taxonomy
+from slopforge.validation import validate_model_outputs
 
 
 class PropLineageTests(unittest.TestCase):
@@ -64,7 +65,7 @@ avoid: [environment]
             generate_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 2,
                               self.manifest, "prop:relay", generation_prompt="A copper relay")
 
-    def _approve(self, generator, materializer=None, native_materializer=None, force=False):
+    def _approve(self, generator, materializer=None, native_materializer=None, force=False, resume=False, material_count=1):
         def commands(command, check):
             if "prepare_3d_input.py" in command[1]:
                 Image.new("RGBA", (32, 32), (120, 120, 120, 255)).save(command[command.index("--cutout") + 1])
@@ -78,7 +79,7 @@ avoid: [environment]
                 patch("slopforge.pipelines.model._native_material_candidate", side_effect=native_materializer), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=commands):
             return approve_model(self.root, self.config, self.asset_type, self.style, self.manifest,
-                                 "prop:relay", 2, force=force, material_count=1)
+                                 "prop:relay", 2, force=force, material_count=material_count, resume=resume)
 
     def _materializer(self, root, config, asset_type, asset, number, prompt, _stage_mesh, lineage=None, seed=None):
         from slopforge.pipelines.model import material_candidate_paths
@@ -95,25 +96,83 @@ avoid: [environment]
                 "validation": {"status": "passed", "errors": []},
                 "outputs": outputs, "prompt": prompt, "path": outputs["surface"], "kind": "surface_swatch"}
 
+    def _topology_rejection(self):
+        return validate_model_outputs({}, inspection={
+            "status": "passed", "errors": [], "warnings": [],
+            "measured": {"mesh_objects": 1, "vertex_count": 24, "face_count": 8,
+                         "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
+                         "image_texture_count": 4, "component_count": 60,
+                         "nonmanifold_edge_count": 5, "transforms_applied": True,
+                         "missing_textures": []}},
+            max_components=50, max_nonmanifold_edges=None, max_boundary_edges=None)
+
     def test_selected_concept_remains_linked_to_correct_mesh_attempt(self):
         self._concept_candidates()
         concept = self.record["candidates"]["items"][1]
         calls = []
         def generator(_root, _config, _image, _name, destination, metadata, seed):
             calls.append(seed)
-            if len(calls) == 1:
-                raise RuntimeError("first mesh failed")
-            destination.write_bytes(b"mesh from selected concept")
+            destination.write_bytes(f"mesh from selected concept {seed}".encode())
             metadata.write_text(json.dumps({"workflow": "model.json", "seed": seed, "model": "mesh"}))
-        self._approve(generator)
+
+        topology_rejection = self._topology_rejection()
+        material_calls = []
+
+        def materializer(root, config, asset_type, asset, number, prompt, stage_mesh,
+                         lineage=None, seed=None):
+            item = self._materializer(root, config, asset_type, asset, number,
+                                      prompt, stage_mesh, lineage, seed)
+            material_calls.append(number)
+            if len(material_calls) == 1:
+                item.update({"status": "failed", "validation": topology_rejection})
+            return item
+
+        self._approve(generator, materializer=materializer)
         reloaded = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])
         record = reloaded["assets"]["prop:relay"]
         execution = record["executions"][-1]
-        success = next(stage for stage in execution["stages"] if stage["name"] == "mesh_workflow_execution"
-                       and stage["status"] == "succeeded")
-        self.assertEqual(success["inputs"][0]["sha256"], concept["artifact"]["sha256"])
+        mesh_stages = [stage for stage in execution["stages"]
+                       if stage["name"] == "mesh_workflow_execution"]
+        self.assertEqual([stage["attempt"] for stage in mesh_stages], [1, 2])
+        self.assertTrue(all(stage["inputs"][0]["sha256"] == concept["artifact"]["sha256"]
+                            for stage in mesh_stages))
+        success = mesh_stages[-1]
+        self.assertEqual(len(calls), 2)
+        self.assertNotEqual(calls[0], calls[1])
+        self.assertEqual(success["status"], "succeeded")
         self.assertEqual(success["attempt"], 2)
         self.assertEqual(record["model_attempts"][-1]["execution_id"], execution["id"])
+        self.assertEqual(execution["retry_decisions"][-1]["action"], "next_candidate")
+
+    def test_topology_rejections_exhaust_configured_mesh_budget(self):
+        self._concept_candidates()
+        self.config["asset_pipeline"]["defaults"]["model_candidates"] = 3
+        mesh_calls = []
+        material_calls = []
+
+        def generator(_root, _config, _image, _name, destination, metadata, seed):
+            mesh_calls.append(seed)
+            destination.write_bytes(f"mesh {seed}".encode())
+            metadata.write_text(json.dumps({"workflow": "model.json", "seed": seed}))
+
+        def materializer(root, config, asset_type, asset, number, prompt, stage_mesh,
+                         lineage=None, seed=None):
+            item = self._materializer(root, config, asset_type, asset, number,
+                                      prompt, stage_mesh, lineage, seed)
+            item.update({"status": "failed", "validation": self._topology_rejection()})
+            material_calls.append(number)
+            return item
+
+        with self.assertRaisesRegex(ValueError, "No qualified model after 3 attempts"):
+            self._approve(generator, materializer=materializer)
+
+        self.assertEqual(len(mesh_calls), 3)
+        self.assertEqual(len(set(mesh_calls)), 3)
+        self.assertEqual(len(material_calls), 3)
+        execution = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])[
+            "assets"]["prop:relay"]["executions"][-1]
+        self.assertEqual([item["action"] for item in execution["retry_decisions"]],
+                         ["next_candidate", "next_candidate", "exhausted"])
 
     def test_conditioning_artifacts_link_to_approved_concept_content(self):
         self._concept_candidates()
@@ -127,8 +186,13 @@ avoid: [environment]
 
     def test_failed_mesh_stage_survives_reload_with_prior_success(self):
         self._concept_candidates()
+        calls = []
+        def generator(*_args, **_kwargs):
+            calls.append(1)
+            raise RuntimeError("mesh boundary failed")
         with self.assertRaisesRegex(ValueError, "No qualified model"):
-            self._approve(lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("mesh boundary failed")))
+            self._approve(generator)
+        self.assertEqual(len(calls), 1)
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         execution = record["executions"][-1]
         self.assertEqual(next(stage for stage in execution["stages"] if stage["name"] == "conditioning_preparation")["status"], "succeeded")
@@ -136,6 +200,23 @@ avoid: [environment]
         self.assertEqual(failed["status"], "failed")
         self.assertIn("mesh boundary failed", failed["error"])
         self.assertEqual(execution["status"], "failed")
+
+    def test_source_copy_failure_after_execution_start_is_persisted(self):
+        self._concept_candidates()
+        original_status = self.record["status"]
+        with patch("slopforge.pipelines.model.shutil.copy2", side_effect=OSError("copy boundary failed")):
+            with self.assertRaisesRegex(OSError, "copy boundary failed"):
+                self._approve(lambda *_args, **_kwargs: self.fail("mesh generation must not start"))
+
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        execution = record["executions"][-1]
+        self.assertEqual(execution["status"], "failed")
+        self.assertEqual(execution["failure"]["category"], "unknown")
+        self.assertEqual(execution["failure"]["stage"], "model_approval")
+        self.assertEqual(record["status"], original_status)
+        self.assertEqual(record["last_failure"], execution["failure"])
+        self.assertTrue(all(item["outcome"] == "not_run" for item in execution["blocked_stages"]))
+        self.assertTrue(all(stage["status"] != "running" for stage in execution["stages"]))
 
     def test_worker_journal_updates_survive_parent_manifest_save(self):
         self._concept_candidates()
@@ -175,7 +256,7 @@ avoid: [environment]
             metadata.write_text(json.dumps({"workflow": "trellis", "seed": seed, "textured": True,
                 "textures": {name: f"native_material/{name}.png" for name in
                              ("basecolor", "normal", "roughness", "metallic")}}))
-        def native(root, config, asset_type, asset, number, mesh_info, lineage=None):
+        def native(root, config, _context, asset_type, asset, number, mesh_info, lineage=None):
             result = self._materializer(root, config, asset_type, asset, number, "mesh PBR", Path("unused"), lineage)
             result["kind"] = "mesh_pbr"
             return result
@@ -403,6 +484,165 @@ avoid: [environment]
         assembly_input_ids = {item["id"] for item in assembly["inputs"]}
         self.assertTrue(all({parent["artifact_id"] for parent in item["derived_from"]} == assembly_input_ids
                             for item in assembly["outputs"]))
+
+
+    def test_resume_on_running_prior_rejects_unresolved_mesh_and_preserves_successes(self):
+        """Recovery must validate unresolved stages, mark interruptions, and block resume
+        when a mesh stage may have accepted a remote prompt.
+
+        Regression: on ``approve(..., resume=True)`` a prior whose work was killed mid-
+        inference could survive with ``status == 'running'``.  Without recovery the
+        resume logic blindly reused that execution as a parent.  This test verifies
+        that:
+
+        1. The running mesh stage is terminated with ``category=interruption`` and its
+           exact ``stage_id``.
+        2. Evidence shows ``completion_not_persisted``, ``recovery_detected_at``, and
+           unknown original termination time/cause.
+        3. Resume is stopped with an actionable service-inspection message before any
+           new inference submission.
+        4. Re-loaded manifest reflects the recovered interruption evidence and
+           preserved successes.
+        """
+        # -- Phase 1: create a normal prior execution with one succeeded stage --
+        self._concept_candidates()
+
+        calls = []
+        def generator(*_args, **_kwargs):
+            calls.append(1)
+            raise StageFailure("configuration", "preflight broken", operation="preflight",
+                               remedy="fix config")
+
+        with self.assertRaises(ValueError):
+            self._approve(generator)
+
+        manifest_path = self.root / self.config["asset_pipeline"]["manifest"]
+        record = load_manifest(manifest_path)["assets"]["prop:relay"]
+        prior = record["executions"][-1]
+
+        # Add a succeeded conditioning_preparation stage to prove it survives recovery.
+        conditioning_stage = next(
+            s for s in prior["stages"] if s["name"] == "conditioning_preparation")
+        self.assertEqual(conditioning_stage["status"], "succeeded")
+        succeeded_output_count = len(conditioning_stage.get("outputs", []))
+
+        # -- Phase 2: corrupt the prior -- mark it running with a running mesh stage
+        prior["status"] = "running"
+        mesh_stage = {"id": "running-mesh-id-001",
+                      "name": "mesh_workflow_execution",
+                      "attempt": 1,
+                      "status": "running",
+                      "started_at": "2025-01-01T00:00:00+00:00",
+                      "failed_at": None,
+                      "inputs": [], "outputs": [],
+                      "settings": {"seed": 42},
+                      "provenance": {}}
+        prior["stages"].append(mesh_stage)
+        record["schema_version"] = 4
+        full = load_manifest(manifest_path)  # get full wrapper
+        full["assets"]["prop:relay"] = record  # update the asset in place
+        save_manifest(manifest_path, full)
+        self.manifest = load_manifest(manifest_path)
+        self.record = self.manifest["assets"]["prop:relay"]
+
+        # -- Phase 3: resume -- must reject before any new inference --
+        execution_count_before = len(self.record["executions"])
+        with self.assertRaisesRegex(ValueError,
+                                     r"Cannot resume: unresolved mesh_workflow_execution.*inspect"):
+            self._approve(generator, resume=True)
+
+        # The persisted interruption must keep later resume attempts blocked too.
+        with self.assertRaises(ValueError):
+            self._approve(generator, resume=True)
+
+        # No new execution was created by the resume call.
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(self.record["executions"]), execution_count_before)
+
+        # -- Phase 4: verify recovered interruption evidence after reload --
+        reloaded = load_manifest(manifest_path)
+        reloaded_prior = reloaded["assets"]["prop:relay"]["executions"][-1]
+
+        # Prior execution is now marked failed with interruption category.
+        self.assertEqual(reloaded_prior["status"], "failed")
+        self.assertEqual(reloaded_prior["failure"]["category"], "interruption")
+        self.assertTrue(
+            reloaded_prior["failure"]["evidence"].get("completion_not_persisted"))
+        self.assertIsNotNone(
+            reloaded_prior["failure"]["evidence"].get("recovery_detected_at"))
+        self.assertTrue(
+            reloaded_prior["failure"]["evidence"].get(
+                "unknown_original_termination_time"))
+        self.assertTrue(
+            reloaded_prior["failure"]["evidence"].get(
+                "unknown_original_termination_cause"))
+
+        # The running mesh stage is terminated with interruption evidence.
+        recovered_stage = reloaded_prior["stages"][-1]
+        self.assertEqual(recovered_stage["id"], mesh_stage["id"])
+        self.assertEqual(recovered_stage["status"], "failed")
+        self.assertEqual(recovered_stage["failure"]["category"], "interruption")
+        self.assertEqual(recovered_stage["failure"]["stage"], "mesh_workflow_execution")
+        self.assertEqual(recovered_stage["failure"]["stage_id"], "running-mesh-id-001")
+        self.assertTrue(recovered_stage["failure"]["evidence"]["outcome_unknown"])
+        self.assertIsNotNone(
+            recovered_stage["failure"]["evidence"].get("recovery_detected_at"))
+        self.assertTrue(
+            recovered_stage["failure"]["evidence"].get("completion_not_persisted"))
+
+        # Succeeded stages are preserved intact.
+        preserved_conditioning = next(
+            s for s in reloaded_prior["stages"]
+            if s["name"] == "conditioning_preparation")
+        self.assertEqual(preserved_conditioning["status"], "succeeded")
+        self.assertEqual(len(preserved_conditioning["outputs"]), succeeded_output_count)
+
+    def _mesh_history(self, decision):
+        from slopforge.pipelines.model import _mesh_slot_history
+
+        slot = {"scope_sha256": "a" * 64,
+                "seed_index": decision.get("used", 1) - 1,
+                "origin_execution_id": "execution-1"}
+        stage = {"id": "stage-1", "name": "mesh_workflow_execution",
+                 "attempt": 1, "status": "failed", "attempt_slot": slot}
+        execution = {"id": "execution-1", "parent_execution_id": None,
+                     "stages": [stage], "retry_decisions": [decision]}
+        return _mesh_slot_history({"executions": [execution]}, "execution-1", "a" * 64, 2)
+
+    def test_complete_candidate_quality_retry_decisions_consume_seed(self):
+        for action, used, next_seed in (("next_candidate", 1, 1), ("exhausted", 2, None)):
+            with self.subTest(action=action):
+                decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                            "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                            "attempt": 1, "category": "candidate_quality", "used": used,
+                            "limit": 2, "action": action, "next_seed_index": next_seed}
+                slots, rejected = self._mesh_history(decision)
+                seed_index = used - 1
+                self.assertEqual(set(slots), {seed_index})
+                self.assertEqual(rejected, {seed_index})
+
+    def test_incomplete_candidate_quality_stop_decision_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "candidate_quality", "action": "stop"}
+        with self.assertRaisesRegex(ValueError, "Retry decision"):
+            self._mesh_history(decision)
+
+        decision.update({"used": 1, "limit": 2, "next_seed_index": None})
+        with self.assertRaisesRegex(ValueError, "action contradicts"):
+            self._mesh_history(decision)
+
+    def test_incomplete_non_quality_stop_decision_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "a" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "unknown", "action": "stop"}
+        with self.assertRaisesRegex(ValueError, "Retry decision"):
+            self._mesh_history(decision)
+
+        decision.update({"used": 1, "limit": 2, "next_seed_index": None})
+        slots, rejected = self._mesh_history(decision)
+        self.assertEqual(set(slots), {0})
+        self.assertEqual(rejected, set())
 
 
 if __name__ == "__main__":

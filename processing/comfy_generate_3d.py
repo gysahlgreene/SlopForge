@@ -8,19 +8,21 @@ import subprocess
 import sys
 import os
 import struct
+import tempfile
 import time
 import zlib
 from contextlib import contextmanager
 from pathlib import Path
-from slopforge.backends.comfyui import ComfyUIClient
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError
 from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
-from slopforge.backends.comfyui import backend_provenance
+from slopforge.backends.comfyui import backend_provenance, _write_failure_report
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 from slopforge.validation import validate_image
 from slopforge.manifest import (load_manifest, save_manifest, find_asset, begin_stage,
                                 start_stage, finish_stage)
+from slopforge.failures import StageFailure, failure_record
 
 
 COMFY_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -45,15 +47,25 @@ def _journal_stage(context, name, attempt, settings, provenance=None, *, inputs=
         yield
         return
     context, manifest, execution = state
-    stage = next((item for item in reversed(execution.get("stages", []))
-                  if item["name"] == name and item["attempt"] == attempt
-                  and item["status"] in {"pending", "running"}), None)
-    if stage is None:
+    stages = execution.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Execution stages are malformed; worker journal attribution stopped")
+    ids = [item["id"] for item in stages if "id" in item]
+    if (not all(isinstance(item, str) and item for item in ids) or len(ids) != len(set(ids))):
+        raise ValueError("Execution stage IDs are malformed or ambiguous")
+    if name == "mesh_workflow_execution":
+        stage_id = context.get("stage_id")
+        matches = [item for item in stages if item.get("id") == stage_id]
+        if (not stage_id or len(matches) != 1 or matches[0].get("name") != name or
+                matches[0].get("attempt") != attempt or matches[0].get("status") != "running"):
+            raise ValueError("Parent mesh stage handle is missing or ambiguous")
+        stage = matches[0]
+    else:
         stage = start_stage(execution, name, attempt,
                             context.get("upstream_artifacts", []) if inputs is None else inputs,
                             settings, provenance or {})
         save_manifest(context["manifest_path"], manifest)
-    else:
+    if name == "mesh_workflow_execution":
         stage.setdefault("provenance", {}).update(provenance or {})
         save_manifest(context["manifest_path"], manifest)
     if stage["status"] == "pending":
@@ -61,9 +73,26 @@ def _journal_stage(context, name, attempt, settings, provenance=None, *, inputs=
         save_manifest(context["manifest_path"], manifest)
     try:
         yield stage
-    except Exception as exc:
-        finish_stage(stage, "failed", error=str(exc) or type(exc).__name__)
+    except (Exception, KeyboardInterrupt) as exc:
+        if isinstance(exc, ComfyUIError) and exc.category:
+            reported = StageFailure(
+                exc.category, str(exc), operation=exc.operation or name,
+                remedy="inspect the retained stage evidence and resolve the reported boundary",
+                stage=name, stage_id=stage["id"], evidence=exc.evidence)
+        elif isinstance(exc, KeyboardInterrupt):
+            reported = StageFailure(
+                "interruption", str(exc) or "Worker interrupted", operation=name,
+                remedy="inspect retained state and explicitly resume; remote inference may still be running",
+                stage=name, stage_id=stage["id"])
+        else:
+            reported = exc
+        failure = failure_record(
+            reported, stage=name, stage_id=stage["id"], attempt=attempt,
+            operation=(reported.operation if isinstance(reported, StageFailure) else name))
+        finish_stage(stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
         save_manifest(context["manifest_path"], manifest)
+        if reported is not exc:
+            raise reported from exc
         raise
 
 
@@ -74,10 +103,20 @@ def _journal_finish(context, stage, outputs):
     if state is None:
         return
     context, manifest, execution = state
-    current = next((item for item in execution["stages"] if item is stage), None)
-    if current is None:
-        current = next(item for item in reversed(execution["stages"])
-                       if item["name"] == stage["name"] and item["attempt"] == stage["attempt"])
+    stages = execution.get("stages")
+    if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+        raise ValueError("Execution stages are malformed; worker journal attribution stopped")
+    ids = [item["id"] for item in stages if "id" in item]
+    if (not all(isinstance(item, str) and item for item in ids) or len(ids) != len(set(ids))):
+        raise ValueError("Execution stage IDs are malformed or ambiguous")
+    if stage.get("id"):
+        matches = [item for item in stages if item.get("id") == stage["id"]]
+    else:
+        matches = [item for item in stages if item.get("name") == stage.get("name")
+                   and item.get("attempt") == stage.get("attempt")]
+    if len(matches) != 1:
+        raise ValueError("Worker stage handle is missing or ambiguous")
+    current = matches[0]
     root = Path(context["project_root"]).resolve()
     refs = []
     for index, (path, kind) in enumerate(outputs):
@@ -279,10 +318,26 @@ def write_flat_normal(normal):
     normal.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixel) + chunk(b"IEND", b""))
 
 
-def run_model_workflow(workflow, client):
+def run_model_workflow(workflow, client, *args):
     prompt_id = client.queue_workflow(workflow)
     print(f"Queued 3D generation: {prompt_id}", flush=True)
-    return client.wait_for_completion(prompt_id), prompt_id
+    try:
+        return client.wait_for_completion(prompt_id), prompt_id
+    except ComfyUIError as exc:
+        # Tag at known boundary (execution → inference); never infer
+        # retryability from message text.
+        exc.category = exc.category or "inference"
+        evidence = exc.evidence if isinstance(exc.evidence, dict) else {}
+        evidence = {**evidence, "prompt_id": prompt_id}
+        if evidence.get("remote_terminal") is not True:
+            evidence["outcome_unknown"] = True
+        exc.evidence = evidence
+        raise
+    except Exception as exc:
+        raise ComfyUIError(
+            f"Could not validate ComfyUI history for prompt {prompt_id}: {exc}",
+            category="inference", operation="wait_for_completion",
+            evidence={"prompt_id": prompt_id, "outcome_unknown": True}) from exc
 
 
 def main():
@@ -301,6 +356,7 @@ def main():
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
+    parser.add_argument("--failure-report", help="Path to write atomic failure report on handled error")
     args = parser.parse_args()
     if args.face_budget <= 0:
         parser.error("--face-budget must be positive")
@@ -329,7 +385,12 @@ def main():
     client = ComfyUIClient(COMFY_URL)
     try:
         health = client.health()
-    except Exception as exc:
+    except ComfyUIError as exc:
+        # Tag at known boundary (health → environment).
+        if not exc.category:
+            exc.category = "environment"
+        if args.failure_report:
+            _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI is not reachable at {COMFY_URL}: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -495,5 +556,26 @@ def main():
     print(f"GLB: {dest}")
 
 
+def _write_invocation_failure(error):
+    try:
+        report_index = sys.argv.index("--failure-report")
+        report_path = sys.argv[report_index + 1]
+    except (ValueError, IndexError):
+        return
+    if isinstance(error, (ComfyUIError, StageFailure)):
+        reported = error
+    elif isinstance(error, KeyboardInterrupt):
+        reported = StageFailure("interruption", "Worker interrupted", operation="worker",
+            remedy="inspect retained state and explicitly resume; remote inference may still be running")
+    else:
+        reported = StageFailure("unknown", str(error) or type(error).__name__, operation="worker",
+            remedy="inspect the retained worker output and identify the failing boundary")
+    _write_failure_report(report_path, error=reported)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (Exception, KeyboardInterrupt) as exc:
+        _write_invocation_failure(exc)
+        raise

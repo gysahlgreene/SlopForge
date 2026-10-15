@@ -120,7 +120,7 @@ class MeshPBRTests(unittest.TestCase):
             client.manifest_path = manifest_path
             context = {"project_root": str(root), "manifest_path": str(manifest_path),
                        "asset_selector": "prop:relay", "execution_id": execution["id"],
-                       "attempt": 1, "upstream_artifacts": [concept]}
+                       "attempt": 1, "stage_id": stage["id"], "upstream_artifacts": [concept]}
             with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=client), \
                     patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
                     patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image),
@@ -162,7 +162,11 @@ class MeshPBRTests(unittest.TestCase):
                                 for artifact in final_acquisition["outputs"]))
 
             second_mesh, second_metadata = root / "mesh-2.glb", root / "generation-2.json"
+            stage = start_stage(execution, "mesh_workflow_execution", 2, [concept], {}, {})
+            begin_stage(stage)
+            save_manifest(manifest_path, {"schema_version": 4, "assets": {"prop:relay": asset}})
             context["attempt"] = 2
+            context["stage_id"] = stage["id"]
             with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=client), \
                     patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
                     patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image),
@@ -177,6 +181,10 @@ class MeshPBRTests(unittest.TestCase):
 
             client.missing_shape_output = True
             context["attempt"] = 3
+            stage = start_stage(execution, "mesh_workflow_execution", 3, [concept], {}, {})
+            begin_stage(stage)
+            save_manifest(manifest_path, {"schema_version": 4, "assets": {"prop:relay": asset}})
+            context["stage_id"] = stage["id"]
             missing_mesh, missing_metadata = root / "missing.glb", root / "missing.json"
             with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=client), \
                     patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
@@ -314,7 +322,7 @@ class MeshPBRTests(unittest.TestCase):
                                        "transforms_applied": True, "missing_textures": []}}
             with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                     patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
-                candidate = _native_material_candidate(root, config, {"face_budget": "prop_faces"}, asset, 1,
+                candidate = _native_material_candidate(root, config, lineage, {"face_budget": "prop_faces"}, asset, 1,
                                                        metadata, lineage=lineage)
             self.assertEqual(candidate["kind"], "mesh_pbr")
             self.assertEqual(candidate["status"], "candidate")

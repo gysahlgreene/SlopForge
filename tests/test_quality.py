@@ -2,7 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from slopforge.config import load_project, select_quality_tier, workflow_node_inputs
 from slopforge.quality import apply_workflow_inputs
@@ -115,6 +115,7 @@ asset_pipeline:
                     "selected_compute_profile": "h100", "selected_quality_tier": "draft",
                     "quality_settings": {"workflow_inputs": {"image": {"workflow.json": {"1": {"width": 512}}}}}}}
         with patch("slopforge.backends.comfyui.subprocess.run") as run:
+            run.return_value = Mock(returncode=0)
             generate_image(self.root, config, workflow, "badge", self.root / "out.png", "badge", 1,
                            self.root / "meta.json")
         command = run.call_args.args[0]
@@ -130,6 +131,7 @@ asset_pipeline:
                         "trellis2_image_to_model_h100_api.json": {"10": {"resolution": 1024}}}}}}}
         with patch("slopforge.backends.comfyui.subprocess.run") as run, \
                 patch("slopforge.backends.comfyui.blender_executable", return_value="blender"):
+            run.return_value = Mock(returncode=0)
             generate_model(self.root, config, self.root / "concept.png", "statue", self.root / "statue.glb",
                            self.root / "mesh.json", 9, voxel_resolution=120)
         command = run.call_args.args[0]

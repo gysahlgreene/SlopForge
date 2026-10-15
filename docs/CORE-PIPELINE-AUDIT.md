@@ -102,6 +102,21 @@ This evidence verifies deterministic control flow only. Model weights and custom
 - **Dependencies:** Packages 1–2.
 - **Exit criteria:** every failure has one earliest stage, useful class/message and next action; retries are deterministic and bounded.
 
+**Implementation evidence (2026-10-14, branch `m0/failure-classification-retries`; not yet merged):**
+the deterministic failure and worker-boundary suites cover typed and unknown
+failures, exact stage attribution, failed and blocked stage records, interruptions,
+and bounded mesh-candidate retries. Only a complete structural validation report rejected
+by an allowlisted topology budget is retried, up to the configured
+`model_candidates` budget; invalid reports, configuration/environment errors,
+unknown outcomes, and interruptions stop without automatic retry. Retry slots
+remain accounted for across resume, and an uncertain remote inference outcome
+blocks resume until inspected. Failure metadata is JSON-safe and persists in
+the manifest. `make verify PYTHON=.venv/bin/python` passed on this branch
+(581 tests, 74 subtests; 6 opt-in skips). This verifies deterministic software
+behavior only; it does not establish live inference, asset appearance, Unity
+runtime, or qualification. Package 3 remains in progress until its final review
+gate and merge are complete.
+
 ### Package 4 — Project requirement resolution and technical readiness gates
 
 - **Problem:** taxonomy prompts and face budgets are not a complete, versioned project/category acceptance profile; automated `ready` can exceed evidence.

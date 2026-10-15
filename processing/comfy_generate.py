@@ -2,12 +2,21 @@
 import argparse
 import json
 import os
-import tempfile
 import sys
+import time
+import tempfile
 from pathlib import Path
-from slopforge.backends.comfyui import ComfyUIClient
-from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
-from slopforge.backends.comfyui import backend_provenance
+
+from slopforge.backends.comfyui import ComfyUIClient, ComfyUIError
+from slopforge.backends.comfyui import (
+    backend_provenance,
+    _write_failure_report,
+)
+from slopforge.provenance import (
+    canonical_workflow_identity,
+    file_sha256,
+    workflow_sha256,
+)
 from slopforge.quality import apply_workflow_inputs
 from slopforge.workflow_requirements import workflow_requirements_identity
 
@@ -84,6 +93,7 @@ def main():
     p.add_argument("--prefix", default="generated/asset")
     p.add_argument("--seed", type=int)
     p.add_argument("--metadata", type=Path)
+    p.add_argument("--failure-report", help="Path to write atomic failure report on handled error")
     p.add_argument("--references", help="JSON array of approved reference paths and strengths")
     p.add_argument("--reference-inputs", help="JSON array mapping reference slots to workflow node inputs")
     p.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
@@ -158,8 +168,15 @@ def main():
                 raise ValueError("A selected reference is missing local content and cannot be fingerprinted")
         prompt_id = client.queue_workflow(workflow)
         history = client.wait_for_completion(prompt_id, timeout=600)
-    except Exception as exc:
+    except ComfyUIError as exc:
+        # Tag errors at the client/boundary that knows their category.
+        # Never infer retryability from message text.
+        if not exc.category:
+            exc.category = "unknown"
+        if args.failure_report:
+            _write_failure_report(args.failure_report, error=exc)
         print(f"ComfyUI generation failed: {exc}", file=sys.stderr)
+        # Preserve subprocess return behavior: exit non-zero.
         sys.exit(1)
 
     extensions = (".png", ".jpg", ".jpeg", ".webp")
@@ -200,5 +217,26 @@ def main():
 
     print(dest)
 
+def _write_invocation_failure(error):
+    try:
+        report_index = sys.argv.index("--failure-report")
+        report_path = sys.argv[report_index + 1]
+    except (ValueError, IndexError):
+        return
+    if isinstance(error, ComfyUIError) and error.category:
+        reported = error
+    elif isinstance(error, KeyboardInterrupt):
+        reported = ComfyUIError("Worker interrupted", category="interruption",
+                                operation="worker", evidence={})
+    else:
+        reported = ComfyUIError(str(error) or type(error).__name__, category="unknown",
+                                operation="worker", evidence={})
+    _write_failure_report(report_path, error=reported)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (Exception, KeyboardInterrupt) as exc:
+        _write_invocation_failure(exc)
+        raise

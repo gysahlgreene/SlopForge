@@ -14,6 +14,14 @@ slopforge --project /path/to/unity-project candidates inventory_key
 slopforge --project /path/to/unity-project approve inventory_key 1
 ```
 
+## Failure and resume
+
+When prop processing fails, the CLI reports the failed stage, failure category, message, retry state, configured candidate budget, and remedy. The manifest retains the structured failure and any completed upstream artifacts. Inspect those records before changing inputs or resuming.
+
+Automatic mesh-candidate advancement is limited to a complete structural validation report that fails only an allowlisted component, nonmanifold-edge, or boundary-edge budget. Configuration, environment, inference, processing-validation, unknown, and interruption failures stop without speculative candidate retries. Recipe execution uses the same atomic pipeline budget and does not wrap it in another retry loop.
+
+If a worker failed after remote inference submission and the result is unknown, `approve --resume` refuses another submission. Inspect the recorded prompt ID and ComfyUI state first; resolve the remote run before starting a new execution. These controls establish deterministic failure handling only, not visual or pipeline qualification.
+
 ## Mesh-aware materials
 
 For a prop with different materials on different parts, use the bundled `trellis2_image_to_model_api.json` workflow. It generates shape and PBR properties from the selected concept, prepares the mesh in Blender, and bakes the learned colors, roughness, and metallic values into its UVs. The Mac/default graph upsamples shape from 512 to 1024; final quality on H100 uses 1536 shape and 4096 textures. Blender preserves closed geometry and repairs open/nonmanifold sources before reducing them to a triangle budget. An optional Blender probe can bake tangent normals from the retained source onto the reduced mesh’s UVs; this is disabled in the production TRELLIS path after live close-ups showed severe black staircase artifacts. Character repair stays at the qualified voxel resolution 120: a live resolution-256 comparison erased whole body surfaces, and direct reduction of that dense raw mesh failed. Increasing a conversion setting does not establish better quality. ComfyUI bakes its PBR fields onto those same UVs. Only a workflow-provided normal map that has passed visual review should be enabled; neutral normals remain the TRELLIS baseline. Previews are 1024 pixels with neutral world lighting. Each selected concept produces one material set for review. Revise the concept to change the design; `retexture` applies only to the surface-swatch route below. On approval, SlopForge creates a Unity PBR `.mat`, packs roughness into the smoothness channel, and maps it to the FBX. This requires a valid Unity project and Unity CLI; verify the renderer's base color, normal, and metallic/smoothness maps after import.
