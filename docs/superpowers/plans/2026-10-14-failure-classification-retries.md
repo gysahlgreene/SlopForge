@@ -1,6 +1,6 @@
 # M0 Package 3 — failure classification and bounded retries
 
-> **Status:** Codex/Luna implementation plan. Implementation is underway on `m0/failure-classification-retries` in [PR #36](https://github.com/gysahlgreene/SlopForge/pull/36); this plan was merged in [PR #35](https://github.com/gysahlgreene/SlopForge/pull/35) (`460dc2f`). Supersedes the repository-local October 11 draft, `2026-10-11-failure-classification-retries.md`, which is ignored rather than tracked in Git.
+> **Status:** Package 3 implementation merged in [PR #36](https://github.com/gysahlgreene/SlopForge/pull/36) (`1886bc3`); this plan merged in [PR #35](https://github.com/gysahlgreene/SlopForge/pull/35) (`460dc2f`). Supersedes the repository-local October 11 draft, `2026-10-11-failure-classification-retries.md`, which is ignored rather than tracked in Git.
 >
 > **For agentic workers:** Codex/Luna owns planning and independent review; local Pi with Qwen3.6 writes most implementation. Use the [provenance skill](../../../.agents/skills/slopforge-provenance/SKILL.md) and its [task template](../../../.agents/skills/slopforge-provenance/templates/pi-qwen-implementation-task.md) for each bounded task. Execute sequentially using `executing-plans`; no subagents, Astra, Sol, or Mira. Codex reviews each task before the next one and reviews the whole branch before integration.
 
@@ -136,8 +136,8 @@ On explicit recovery of an unresolved running record, record `interruption` with
 
 **Interfaces:** produces the four shared interfaces above and additive validation `failure_codes`; consumes existing validation reports. No journal mutation in this module.
 
-- [ ] Add table-driven tests for every category, empty messages, unknown exceptions, JSON-safe evidence, and retry counters `0`, `-1`, `True`, null, used equal/above limit. Unknown/malformed failures return no retry.
-- [ ] Add valid-inspection tests for each allowlisted topology threshold and mixed/legacy/invalid validation reports. This representative helper test must pass only after implementation:
+- [x] Add table-driven tests for every category, empty messages, unknown exceptions, JSON-safe evidence, and retry counters `0`, `-1`, `True`, null, used equal/above limit. Unknown/malformed failures return no retry.
+- [x] Add valid-inspection tests for each allowlisted topology threshold and mixed/legacy/invalid validation reports. This representative helper test must pass only after implementation:
 
 ```python
 failure = failure_record(RuntimeError("unclassified worker exit"),
@@ -148,9 +148,9 @@ assert candidate_quality_rejection({"status": "failed", "errors": ["broken"],
     "failure_codes": ["component_budget", "missing_output"]}) is False
 ```
 
-- [ ] Run `.venv/bin/python -m pytest tests/test_failure_classification.py tests/test_slopforge.py -q`; confirm new assertions fail for missing interfaces/behavior, not fixture mistakes.
-- [ ] Implement explicit categories, record validation, retry rule, and one validation code per existing error without changing validation thresholds or error strings. Emit dedicated non-quality codes for every other error; inspect every caller of `validate_model_outputs` before editing its result shape.
-- [ ] Run the same command, inspect the full functions/callers, and commit `feat: define stage failure and candidate retry policy` after Codex review.
+- [x] Run `.venv/bin/python -m pytest tests/test_failure_classification.py tests/test_slopforge.py -q`; confirm new assertions fail for missing interfaces/behavior, not fixture mistakes.
+- [x] Implement explicit categories, record validation, retry rule, and one validation code per existing error without changing validation thresholds or error strings. Emit dedicated non-quality codes for every other error; inspect every caller of `validate_model_outputs` before editing its result shape.
+- [x] Run the same command, inspect the full functions/callers, and commit `feat: define stage failure and candidate retry policy` after Codex review.
 
 ### Task 2 — Carry structured worker failures across the backend boundary
 
@@ -158,11 +158,11 @@ assert candidate_quality_rejection({"status": "failed", "errors": ["broken"],
 
 **Interfaces:** consumes `StageFailure` and `failure_record`; produces optional protocol-v1 worker reports and typed backend failures. Preserve `generate_image(...)`/`generate_model(...)` caller compatibility; only optional CLI transport flags are new.
 
-- [ ] Add mocked tests for node/model preflight rejection, HTTP rejection, connection loss, execution error, history timeout with known prompt ID, upload/download error, malformed JSON, worker signal termination, and missing/stale/malformed/version-mismatched reports. Assert each performs at most one submission and never calls inference after preflight rejection.
-- [ ] Add a worker-report fixture and fake subprocess that writes it to the fresh report path. Verify wrappers reject a preexisting unrelated report and return successful subprocess results unchanged. No running ComfyUI or Blender is needed.
-- [ ] Run `.venv/bin/python -m pytest tests/test_comfyui_service.py tests/test_comfy_generate.py tests/test_worker_failures.py -q` and confirm the new assertions are red.
-- [ ] Tag known client raise sites explicitly; add atomic worker reports and validated wrapper loading. Preserve uncaught diagnostics as `unknown`. Do not classify `CalledProcessError` from its stderr text. Keep local/remote HTTP behavior identical.
-- [ ] Run the same tests; Codex reviews the complete client/worker boundaries and commits `feat: retain structured generation worker failures`.
+- [x] Add mocked tests for node/model preflight rejection, HTTP rejection, connection loss, execution error, history timeout with known prompt ID, upload/download error, malformed JSON, worker signal termination, and missing/stale/malformed/version-mismatched reports. Assert each performs at most one submission and never calls inference after preflight rejection.
+- [x] Add a worker-report fixture and fake subprocess that writes it to the fresh report path. Verify wrappers reject a preexisting unrelated report and return successful subprocess results unchanged. No running ComfyUI or Blender is needed.
+- [x] Run `.venv/bin/python -m pytest tests/test_comfyui_service.py tests/test_comfy_generate.py tests/test_worker_failures.py -q` and confirm the new assertions are red.
+- [x] Tag known client raise sites explicitly; add atomic worker reports and validated wrapper loading. Preserve uncaught diagnostics as `unknown`. Do not classify `CalledProcessError` from its stderr text. Keep local/remote HTTP behavior identical.
+- [x] Run the same tests; Codex reviews the complete client/worker boundaries and commits `feat: retain structured generation worker failures`.
 
 ### Task 3 — Persist truthful leaf failures, dependencies, and interruption recovery
 
@@ -170,7 +170,7 @@ assert candidate_quality_rejection({"status": "failed", "errors": ["broken"],
 
 **Interfaces:** add UUID stage IDs in `start_stage`; extend `finish_stage(..., error=None, *, failure=None)` additively; failed stages may retain validated failure metadata, successful stages must reject it. Extend `finish_execution(execution, status, *, failure=None)` similarly. Old callers continue working. `_execution_stage` gains optional exact `stage_id` lookup; `_lineage_finish` gains optional `stage_id` and finishes the actual started handle. Orchestration binds fallback stage names to Task 2 failures and persists `blocked_stages` evidence.
 
-- [ ] Add manifest round-trip tests for failure metadata and rejection of contradictory success/failure records, duplicate IDs, malformed siblings, and ambiguous legacy name/attempt lookup. Test worker/local material stages sharing a name/attempt: only the explicitly referenced leaf may receive the failure; reuse must remain conservative. Start with this representative fixture:
+- [x] Add manifest round-trip tests for failure metadata and rejection of contradictory success/failure records, duplicate IDs, malformed siblings, and ambiguous legacy name/attempt lookup. Test worker/local material stages sharing a name/attempt: only the explicitly referenced leaf may receive the failure; reuse must remain conservative. Start with this representative fixture:
 
 ```python
 stage = start_stage(execution, "conditioning_preparation", 1, [], {}, {})
@@ -182,12 +182,12 @@ finish_stage(stage, "failed", error=failure["message"], failure=failure)
 assert stage["status"] == "failed" and stage["failure"]["stage"] == stage["name"]
 ```
 
-- [ ] Reuse `PropLineageTests` temporary-project/setup mocks for a boundary matrix: concept generation, conditioning preparation, raw acquisition, mesh preparation, material inference, final mesh/maps acquisition, swatch map processing, assembly inspection, and final publication. Assert exact leaf category/stage, validation/artifact retention, dependent evidence, save/reload survival, and zero dependent external calls.
-- [ ] Add native/swatch `KeyboardInterrupt` cases and preflight-before-execution cases. Inject publication failure and prove existing outputs/approval rollback. Recover a persisted running stage on explicit resume with unknown actual stop time; retain historical succeeded stages.
-- [ ] Run `.venv/bin/python -m pytest tests/test_manifest.py tests/test_prop_lineage.py tests/test_prop_failures.py -q`; confirm red assertions.
-- [ ] Wire structured failures through `_lineage_finish`, `_journal_stage`, both material helpers, `approve`, `retexture`, `approve_texture`, and prop `generate_candidates`. Use one root leaf failure plus scoped descendant evidence. Persist candidates before propagating fatal errors. Never mark a validation-rejected stage succeeded.
-- [ ] Move setup that can fail after execution creation inside a persisted failure boundary (including executable lookup and source-copy/setup). Pre-execution errors preserve existing asset state and set only `last_failure`. Preserve parent reload/save discipline and stage adoption settings.
-- [ ] Run the same tests plus `.venv/bin/python -m pytest tests/test_prop_reuse.py tests/test_provenance_guardrails.py -q`; Codex reviews full touched functions/callers and commits `feat: persist prop failure and interruption evidence`.
+- [x] Reuse `PropLineageTests` temporary-project/setup mocks for a boundary matrix: concept generation, conditioning preparation, raw acquisition, mesh preparation, material inference, final mesh/maps acquisition, swatch map processing, assembly inspection, and final publication. Assert exact leaf category/stage, validation/artifact retention, dependent evidence, save/reload survival, and zero dependent external calls.
+- [x] Add native/swatch `KeyboardInterrupt` cases and preflight-before-execution cases. Inject publication failure and prove existing outputs/approval rollback. Recover a persisted running stage on explicit resume with unknown actual stop time; retain historical succeeded stages.
+- [x] Run `.venv/bin/python -m pytest tests/test_manifest.py tests/test_prop_lineage.py tests/test_prop_failures.py -q`; confirm red assertions.
+- [x] Wire structured failures through `_lineage_finish`, `_journal_stage`, both material helpers, `approve`, `retexture`, `approve_texture`, and prop `generate_candidates`. Use one root leaf failure plus scoped descendant evidence. Persist candidates before propagating fatal errors. Never mark a validation-rejected stage succeeded.
+- [x] Move setup that can fail after execution creation inside a persisted failure boundary (including executable lookup and source-copy/setup). Pre-execution errors preserve existing asset state and set only `last_failure`. Preserve parent reload/save discipline and stage adoption settings.
+- [x] Run the same tests plus `.venv/bin/python -m pytest tests/test_prop_reuse.py tests/test_provenance_guardrails.py -q`; Codex reviews full touched functions/callers and commits `feat: persist prop failure and interruption evidence`.
 
 ### Task 4 — Replace broad retry loops with bounded candidate decisions
 
@@ -195,13 +195,13 @@ assert stage["status"] == "failed" and stage["failure"]["stage"] == stage["name"
 
 **Interfaces:** consumes Task 1 `should_retry`/quality predicate and Task 3 journal records; produces persisted `retry_decisions` and consistent terminal failures. Existing budgets and seed arrays remain the configuration API.
 
-- [ ] Add mocked call-count cases: configuration/environment/inference/processing/unknown error at the first attempt with a three-slot budget must make exactly one generation call; topology rejection then success makes two calls with distinct recorded seeds; all three topology rejections make exactly three calls and report exhaustion.
-- [ ] Add parity cases for native PBR and swatch routes. A map/assembly fault makes zero further mesh calls. A topology-only rejection skips remaining swatches on that mesh and advances once. Concept/retexture count remains a planned output count, not an extra backend retry multiplier.
-- [ ] Add save/reload/resume cases for exhausted budgets, non-exhausted quality history, consumed seeds through parent executions, ambiguous/malformed siblings and duplicate accounting. Confirm no counter is inferred from the largest artifact attempt number. Legacy records without trustworthy accounting must stop automatic retries with a remedy.
-- [ ] Add deterministic recovery and timeout cases: explicit local processing recovery adopts intact mesh/material artifacts, runs only stale/failed stages, and does not reset quality budget; `outcome_unknown` refuses silent submission on resume. A partial worker result that cannot be safely adopted must refuse resume before submitting shape inference and explain its limit. Verify all failed directories and inspection reports remain intact.
-- [ ] Run `.venv/bin/python -m pytest tests/test_prop_failures.py tests/test_prop_reuse.py tests/test_prop_lineage.py -q`; confirm new policy tests are red.
-- [ ] Refactor the existing `approve` mesh loop and swatch list comprehension into explicit bounded iteration. Advance only after validated `candidate_quality` and available next seed. Persist the decision before submission. Catching a generic error must not execute `continue`. Keep `retexture` and concept generation fail-fast rules scoped to props.
-- [ ] Run the same tests and `make verify-provenance PYTHON=.venv/bin/python`; Codex audits full collection validation, uniqueness before filtering, counters, and call counts, then commits `fix: bound prop retries to candidate quality rejection`.
+- [x] Add mocked call-count cases: configuration/environment/inference/processing/unknown error at the first attempt with a three-slot budget must make exactly one generation call; topology rejection then success makes two calls with distinct recorded seeds; all three topology rejections make exactly three calls and report exhaustion.
+- [x] Add parity cases for native PBR and swatch routes. A map/assembly fault makes zero further mesh calls. A topology-only rejection skips remaining swatches on that mesh and advances once. Concept/retexture count remains a planned output count, not an extra backend retry multiplier.
+- [x] Add save/reload/resume cases for exhausted budgets, non-exhausted quality history, consumed seeds through parent executions, ambiguous/malformed siblings and duplicate accounting. Confirm no counter is inferred from the largest artifact attempt number. Legacy records without trustworthy accounting must stop automatic retries with a remedy.
+- [x] Add deterministic recovery and timeout cases: explicit local processing recovery adopts intact mesh/material artifacts, runs only stale/failed stages, and does not reset quality budget; `outcome_unknown` refuses silent submission on resume. A partial worker result that cannot be safely adopted must refuse resume before submitting shape inference and explain its limit. Verify all failed directories and inspection reports remain intact.
+- [x] Run `.venv/bin/python -m pytest tests/test_prop_failures.py tests/test_prop_reuse.py tests/test_prop_lineage.py -q`; confirm new policy tests are red.
+- [x] Refactor the existing `approve` mesh loop and swatch list comprehension into explicit bounded iteration. Advance only after validated `candidate_quality` and available next seed. Persist the decision before submission. Catching a generic error must not execute `continue`. Keep `retexture` and concept generation fail-fast rules scoped to props.
+- [x] Run the same tests and `make verify-provenance PYTHON=.venv/bin/python`; Codex audits full collection validation, uniqueness before filtering, counters, and call counts, then commits `fix: bound prop retries to candidate quality rejection`.
 
 ### Task 5 — Report the failure through recipes and CLI without retry multiplication
 
@@ -209,22 +209,22 @@ assert stage["status"] == "failed" and stage["failure"]["stage"] == stage["name"
 
 **Interfaces:** existing CLI commands/options and recipe child statuses remain unchanged. Prop child stages gain an additive `failure` record copied from the atomic pipeline; existing `errors` strings remain available. No `should_retry` call belongs in recipes.
 
-- [ ] Add CLI cases showing stage/category/message/remedy, nonzero exit on failure, and retained manifest evidence. Interruption remains the existing CLI interruption outcome rather than a normal success.
-- [ ] Add a recipe fixture with a failing prop child, a dependent child, and an independent child. Assert exactly one atomic pipeline invocation for the failed child, the dependent remains blocked, independent work follows existing behavior, and previously valid approved children survive. Verify stale replacement is still not restored as approved.
-- [ ] Run `.venv/bin/python -m pytest tests/test_recipes.py tests/test_slopforge.py tests/test_prop_failures.py -q`; confirm red reporting/call-count assertions.
-- [ ] Carry structured records through `_execute` and existing CLI exception paths. On explicit recipe resume, rely on the atomic pipeline's Package 2/budget policy; do not wrap it in another automatic retry. Preserve failure evidence during state/artifact synchronization and reload.
-- [ ] Run the same tests; Codex reviews restoration, dependency handling, output compatibility, and commits `feat: expose prop stage failures in recipe and CLI reporting`.
+- [x] Add CLI cases showing stage/category/message/remedy, nonzero exit on failure, and retained manifest evidence. Interruption remains the existing CLI interruption outcome rather than a normal success.
+- [x] Add a recipe fixture with a failing prop child, a dependent child, and an independent child. Assert exactly one atomic pipeline invocation for the failed child, the dependent remains blocked, independent work follows existing behavior, and previously valid approved children survive. Verify stale replacement is still not restored as approved.
+- [x] Run `.venv/bin/python -m pytest tests/test_recipes.py tests/test_slopforge.py tests/test_prop_failures.py -q`; confirm red reporting/call-count assertions.
+- [x] Carry structured records through `_execute` and existing CLI exception paths. On explicit recipe resume, rely on the atomic pipeline's Package 2/budget policy; do not wrap it in another automatic retry. Preserve failure evidence during state/artifact synchronization and reload.
+- [x] Run the same tests; Codex reviews restoration, dependency handling, output compatibility, and commits `feat: expose prop stage failures in recipe and CLI reporting`.
 
 ### Task 6 — Whole-package gate and evidence-backed documentation
 
 **Files:** update `docs/ARCHITECTURE.md`, `docs/ASSET-OUTPUTS.md`, `docs/RECIPES.md`, `docs/AGENT-INTEGRATION.md`, `ROADMAP.md`, `CURRENT_STATE.md`; review all changed code/tests. Update issue #31/epic #26 only after verified integration.
 
-- [ ] Review the entire branch against all decisions and five Review Focus cases. Verify no production changes to `earliest_stale_stage`, no generic scheduler, no new approval authority, and no new live/qualification claims.
-- [ ] Run `.venv/bin/python -m pytest tests/test_failure_classification.py tests/test_worker_failures.py tests/test_prop_failures.py tests/test_prop_lineage.py tests/test_prop_reuse.py tests/test_recipes.py tests/test_manifest.py tests/test_comfyui_service.py tests/test_comfy_generate.py tests/test_slopforge.py -q`.
-- [ ] Document actual failure fields, exact retry allowlist/budget accounting, deterministic explicit resume versus automatic candidate retry, uncertain remote submission handling, and native/swatch limits. Update Current state only from observed results; leave live/visual/Unity checks separately unverified.
-- [ ] Run `make verify-provenance PYTHON=.venv/bin/python`, `make verify PYTHON=.venv/bin/python`, and `git diff --check main...HEAD`. Use the known-good unrestricted environment when sandbox restrictions prevent Blender/localhost fixtures; retain both results and all skips. No live inference is authorized by this plan.
-- [ ] Codex/Luna performs the final independent review of the Qwen-written diff and actual outputs. Any Critical/Important finding blocks integration. Push/create a PR with exact verification evidence, wait for required remote checks, then integrate under the user's authorized repository workflow. Preserve useful commit history.
-- [ ] After merge, link the PR and close #31 only if all package exit criteria below passed. Update #26/milestone without closing M0; mark Package 3 merged in Roadmap/Current state and name the next package. Return to clean synced `main`, prune the merged issue branch, and preserve no temporary review artifacts in public Git.
+- [x] Review the entire branch against all decisions and five Review Focus cases. Verify no production changes to `earliest_stale_stage`, no generic scheduler, no new approval authority, and no new live/qualification claims.
+- [x] Run `.venv/bin/python -m pytest tests/test_failure_classification.py tests/test_worker_failures.py tests/test_prop_failures.py tests/test_prop_lineage.py tests/test_prop_reuse.py tests/test_recipes.py tests/test_manifest.py tests/test_comfyui_service.py tests/test_comfy_generate.py tests/test_slopforge.py -q`.
+- [x] Document actual failure fields, exact retry allowlist/budget accounting, deterministic explicit resume versus automatic candidate retry, uncertain remote submission handling, and native/swatch limits. Update Current state only from observed results; leave live/visual/Unity checks separately unverified.
+- [x] Run `make verify-provenance PYTHON=.venv/bin/python`, `make verify PYTHON=.venv/bin/python`, and `git diff --check main...HEAD`. Use the known-good unrestricted environment when sandbox restrictions prevent Blender/localhost fixtures; retain both results and all skips. No live inference is authorized by this plan.
+- [x] Codex/Luna performs the final independent review of the Qwen-written diff and actual outputs. Any Critical/Important finding blocks integration. Push/create a PR with exact verification evidence, wait for required remote checks, then integrate under the user's authorized repository workflow. Preserve useful commit history.
+- [x] After merge, link the PR and close #31 only if all package exit criteria below passed. Update #26/milestone without closing M0; mark Package 3 merged in Roadmap/Current state and name the next package. Return to clean synced `main`, prune the merged issue branch, and preserve no temporary review artifacts in public Git.
 
 ## Exit criteria and self-review
 
@@ -239,4 +239,4 @@ assert stage["status"] == "failed" and stage["failure"]["stage"] == stage["name"
 | Publication rollback and human approval boundaries survive | Tasks 3, 5: existing-output restoration and approval-state regressions |
 | Complete offline gate plus independent review | Task 6; record unavailable/opt-in coverage separately |
 
-This plan replaces message-based classification and recipe retries in the old draft with explicit boundary evidence and one retry owner. All new interfaces are defined above; failure/validation fields are additive and excluded from identity. Every Review Focus case has a named test task. Guardrails are merged, implementation is underway, and no qualification result is implied by this planning document.
+This plan replaces message-based classification and recipe retries in the old draft with explicit boundary evidence and one retry owner. All new interfaces are defined above; failure/validation fields are additive and excluded from identity. Every Review Focus case has a named test task. Guardrails and Package 3 are merged. Offline verification does not imply live, visual, Unity runtime, or qualification results.
