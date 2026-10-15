@@ -1359,6 +1359,7 @@ avoid: [environment]
             stack.enter_context(patch("slopforge.pipelines.model.generate_model", side_effect=self._mesh))
             stack.enter_context(patch("slopforge.pipelines.model.generate_image", side_effect=self._material))
             stack.enter_context(patch("slopforge.pipelines.model.process_model", side_effect=self._assembly))
+            stack.enter_context(patch("slopforge.pipelines.model.blender_executable", return_value="blender"))
             stack.enter_context(patch("slopforge.pipelines.model.inspect_model", return_value={}))
             stack.enter_context(patch("slopforge.pipelines.model.validate_model_outputs",
                                       return_value={"status": "passed", "errors": [], "warnings": [], "measured": {}}))
