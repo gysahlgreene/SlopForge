@@ -1,6 +1,6 @@
 # M0 Package 3 — failure classification and bounded retries
 
-> **Status:** Codex/Luna implementation plan, ready for review. Implementation has not started. Supersedes the repository-local October 11 draft, `2026-10-11-failure-classification-retries.md`, which is ignored rather than tracked in Git.
+> **Status:** Codex/Luna implementation plan. Implementation is underway on `m0/failure-classification-retries` in [PR #36](https://github.com/gysahlgreene/SlopForge/pull/36); this plan's PR #35 remains open with its required review pending. Supersedes the repository-local October 11 draft, `2026-10-11-failure-classification-retries.md`, which is ignored rather than tracked in Git.
 >
 > **For agentic workers:** Codex/Luna owns planning and independent review; local Pi with Qwen3.6 writes most implementation. Use the [provenance skill](../../../.agents/skills/slopforge-provenance/SKILL.md) and its [task template](../../../.agents/skills/slopforge-provenance/templates/pi-qwen-implementation-task.md) for each bounded task. Execute sequentially using `executing-plans`; no subagents, Astra, Sol, or Mira. Codex reviews each task before the next one and reviews the whole branch before integration.
 
@@ -239,4 +239,4 @@ assert stage["status"] == "failed" and stage["failure"]["stage"] == stage["name"
 | Publication rollback and human approval boundaries survive | Tasks 3, 5: existing-output restoration and approval-state regressions |
 | Complete offline gate plus independent review | Task 6; record unavailable/opt-in coverage separately |
 
-This plan replaces message-based classification and recipe retries in the old draft with explicit boundary evidence and one retry owner. All new interfaces are defined above; failure/validation fields are additive and excluded from identity. Every Review Focus case has a named test task. Guardrails are merged, implementation is not started, and no qualification result is implied by this planning document.
+This plan replaces message-based classification and recipe retries in the old draft with explicit boundary evidence and one retry owner. All new interfaces are defined above; failure/validation fields are additive and excluded from identity. Every Review Focus case has a named test task. Guardrails are merged, implementation is underway, and no qualification result is implied by this planning document.
