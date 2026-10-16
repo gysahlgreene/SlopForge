@@ -268,6 +268,8 @@ def approve_character_readiness(project_root, manifest, character_selector, *, a
     relative, report_path = _project_file(root, readiness.get("report_path"), "Readiness report")
     if not report_path.is_file():
         raise FileNotFoundError(f"Animation-readiness report is missing: {relative}")
+    from .character_quality import require_current_character_source_approval
+    require_current_character_source_approval(root, character, readiness.get("source_output", "model"))
     readiness["approval"] = {"status": "approved", "approved_at": datetime.now(timezone.utc).isoformat()}
     if approved_by:
         readiness["approval"]["approved_by"] = approved_by

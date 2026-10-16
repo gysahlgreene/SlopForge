@@ -9,7 +9,7 @@ from PIL import Image
 
 from slopforge.character_rigging import rigify_character, welding_tolerance
 from slopforge.cli import parse_args
-from readiness_fixture import complete_measurements
+from readiness_fixture import complete_measurements, approve_source_review
 from slopforge.manifest import new_record, register_artifact
 
 
@@ -34,6 +34,7 @@ class RigifyProviderTests(unittest.TestCase):
         self.manifest = {"assets": {"character:pilot": character}}
         register_artifact(self.manifest, "character:pilot", "model", "model.glb",
                           "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
+        approve_source_review(self.root, self.manifest, "character:pilot")
         self.config = {"asset_pipeline": {"output_root": "Assets/Art/Generated", "tools": {"blender": "/fake/blender"}}}
 
     def tearDown(self):

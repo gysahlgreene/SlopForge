@@ -114,6 +114,25 @@ def parser():
     unity_animation_setup.add_argument("--rig-type", choices=("generic", "humanoid"), default="generic")
     character = sub.add_parser("character", help="Prepare reviewable 3D character rigs")
     character_commands = character.add_subparsers(dest="character_action", required=True)
+    source_review = character_commands.add_parser("source-review", help="Build hash-linked source geometry review evidence")
+    source_review.add_argument("name", help="Tracked character asset name")
+    source_review.add_argument("--source-output", default="model", help="Approved model artifact id")
+    source_review.add_argument("--concept-view", action="append", default=[], metavar="VIEW=PATH")
+    source_review.add_argument("--critical-region", action="append", default=[])
+    source_review.add_argument("--concept-crop", action="append", default=[], metavar="NAME=PATH")
+    source_review.add_argument("--model-closeup", action="append", default=[], metavar="NAME=PATH")
+    classify_source = character_commands.add_parser("classify-source", help="Classify source review findings")
+    classify_source.add_argument("name")
+    classify_source.add_argument("review_id")
+    classify_source.add_argument("--finding", action="append", required=True, metavar="ID=CLASSIFICATION")
+    approve_source = character_commands.add_parser("approve-source", help="Approve exact character source geometry evidence")
+    approve_source.add_argument("name")
+    approve_source.add_argument("review_id")
+    approve_source.add_argument("--confirm", action="store_true", help="Confirm human review of the complete evidence")
+    reject_source = character_commands.add_parser("reject-source", help="Reject a character source geometry review")
+    reject_source.add_argument("name")
+    reject_source.add_argument("review_id")
+    reject_source.add_argument("--reason", required=True)
     provider_setup = character_commands.add_parser("provider-setup", help="Prepare an explicitly configured character provider")
     provider_setup.add_argument("provider", choices=("skintokens",))
     readiness = character_commands.add_parser("readiness", help="Inspect an approved character mesh before rigging")
@@ -546,6 +565,37 @@ def _run(args):
         return 0
 
     if args.command == "character":
+        if args.character_action in {"source-review", "classify-source", "approve-source", "reject-source"}:
+            from .character_quality import (create_character_source_review, classify_character_source_findings,
+                approve_character_source_review, reject_character_source_review)
+            def assignments(values, label):
+                parsed = {}
+                for value in values:
+                    key, separator, item = value.partition("=")
+                    if not separator or not key or not item or key in parsed:
+                        raise ValueError(f"{label} values must be unique KEY=VALUE assignments")
+                    parsed[key] = item
+                return parsed
+            if args.character_action == "source-review":
+                concept_views = assignments(args.concept_view, "--concept-view")
+                crops = assignments(args.concept_crop, "--concept-crop")
+                closeups = assignments(args.model_closeup, "--model-closeup")
+                regions = [{"name": name, "concept_crop": crops.get(name), "model_closeup": closeups.get(name)}
+                           for name in args.critical_region]
+                result = create_character_source_review(root, manifest, args.name, concept_views, regions,
+                                                        source_output=args.source_output)
+            elif args.character_action == "classify-source":
+                result = classify_character_source_findings(root, manifest, args.name, args.review_id,
+                                                             assignments(args.finding, "--finding"))
+            elif args.character_action == "approve-source":
+                if not args.confirm:
+                    raise ValueError("Explicit --confirm is required to approve source geometry")
+                result = approve_character_source_review(root, manifest, args.name, args.review_id)
+            else:
+                result = reject_character_source_review(root, manifest, args.name, args.review_id, args.reason)
+            save_manifest(manifest_path, manifest)
+            print(json.dumps(result, indent=2))
+            return 0
         if args.character_action in {"normalize", "approve-normalization"}:
             from .character_normalization import approve_character_normalization, normalize_character
             if args.character_action == "normalize":

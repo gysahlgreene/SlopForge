@@ -6,6 +6,8 @@ import shlex
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
+from .character_quality import is_character_source_review_active
+
 
 def _safe_project_file(root, relative):
     if not isinstance(relative, str) or not relative or "\\" in relative:
@@ -159,6 +161,50 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
                 outputs.append(f'<div><strong>{html.escape(output_id)}</strong>{_file_link(root, destination.parent, path)}</div>')
         if outputs:
             sections.append(f'<article class="candidate"><h3>Tracked outputs</h3><div class="views">{"".join(outputs)}</div></article>')
+        for source_review in asset.get("source_quality_reviews", []):
+            comparisons = []
+            paired_views = (("front", "front"), ("left", "side"), ("rear", "rear"))
+            for concept_view, render_view in paired_views:
+                concept = source_review.get("concept_views", {}).get(concept_view, {}).get("path")
+                render = source_review.get("previews", {}).get(render_view, {}).get("path")
+                concept_html = _file_link(root, destination.parent, concept) if concept else '<span class="missing">Concept view missing</span>'
+                render_html = _file_link(root, destination.parent, render) if render else '<span class="missing">Model view missing</span>'
+                comparisons.append(f'<div><strong>{html.escape(concept_view)} concept</strong>{concept_html}</div>'
+                                   f'<div><strong>{html.escape(render_view)} model</strong>{render_html}</div>')
+            all_previews = []
+            for view, evidence in source_review.get("previews", {}).items():
+                path = evidence.get("path")
+                if path:
+                    all_previews.append(f'<div><strong>{html.escape(view)}</strong>{_file_link(root, destination.parent, path)}</div>')
+            closeups = []
+            for region in source_review.get("critical_regions", []):
+                for field in ("concept_crop", "model_closeup"):
+                    evidence = region.get(field, {})
+                    path = evidence.get("path")
+                    if path:
+                        closeups.append(f'<div><strong>{html.escape(region.get("name", "region"))} {html.escape(field.replace("_", " "))}</strong>'
+                                        f'{_file_link(root, destination.parent, path)}</div>')
+            evidence = {"id": source_review.get("id"), "status": source_review.get("status"),
+                        "conditioning": source_review.get("conditioning"), "missing": source_review.get("missing"),
+                        "findings": source_review.get("findings"), "unknowns": source_review.get("unknowns"),
+                        "sha256": source_review.get("sha256")}
+            report_link = _file_link(root, destination.parent, source_review["report_path"]) if source_review.get("report_path") else ""
+            inspection_data = source_review.get("inspection")
+            inspection = inspection_data.get("path") if isinstance(inspection_data, dict) else None
+            inspection_link = _file_link(root, destination.parent, inspection) if inspection else '<span class="missing">Inspection report missing</span>'
+            decisions = source_review.get("decisions", [])
+            latest = decisions[-1] if decisions else {}
+            fresh = is_character_source_review_active(root, asset, source_review)
+            decision_text = latest.get("decision", "pending")
+            if latest.get("decision") == "rejected":
+                decision_text += ": " + str(latest.get("reason", "reason not recorded"))
+            sections.append(f'<article class="candidate source-review"><h3>Source geometry review</h3>'
+                            f'<p>Completeness: <span class="status">{html.escape(str(source_review.get("status", "unknown")))}</span>'
+                            f' · Decision: {html.escape(str(decision_text))} · Evidence: {"current" if fresh else "stale or incomplete"}</p>'
+                            f'<div class="views">{"".join(comparisons)}</div><h4>Four model views</h4>'
+                            f'<div class="views">{"".join(all_previews)}</div><h4>Critical region close-ups</h4>'
+                            f'<div class="views">{"".join(closeups)}</div><h4>Structural evidence</h4>{inspection_link}'
+                            f'<h4>Immutable review record</h4>{report_link}<details><summary>Source review facts</summary>{_pre(evidence)}</details></article>')
         sections_html = f'<div class="grid">{"".join(sections)}</div>' if sections else '<p>No candidates or preview outputs yet.</p>'
         description = asset.get("description", "")
         asset_details = {field: asset[field] for field in ("generator", "conditioning", "validation", "approval") if field in asset}

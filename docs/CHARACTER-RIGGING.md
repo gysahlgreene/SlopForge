@@ -4,11 +4,38 @@
 
 ## Animation-readiness gate
 
+### Source geometry review gate
+
+Before approving structural readiness for a new rig, compare the retained mesh with the approved front, left, and rear design images. The source review is a separate human geometry decision. Blender's `front`, `side`, `rear`, and `three_quarter` renders are evidence of the candidate; they do not replace the three approved concepts. If the generation route used one image, the report records `single_image`; the review process does not turn it into multi-view conditioning.
+
+Capture at least one concept crop and one close-up rendered from the retained Blender candidate for every concept-critical region. Review in neutral lighting and decide whether the modeled forms match the concepts before material appearance review. The selected model, approved concepts, four model renders, inspection report, every linked texture map, and close-up pairs are hashed. Missing or corrupt evidence leaves the report incomplete and cannot be approved.
+
+```sh
+slopforge --project ~/UnityProjects/MyGame character source-review moon_scout_character \
+  --concept-view front=ai/references/moon_scout/front.png \
+  --concept-view left=ai/references/moon_scout/left.png \
+  --concept-view rear=ai/references/moon_scout/rear.png \
+  --critical-region helmet \
+  --concept-crop helmet=ai/references/moon_scout/helmet_detail.png \
+  --model-closeup helmet=Assets/Art/Generated/Characters/moon_scout_character/Previews/helmet_closeup.png
+slopforge --project ~/UnityProjects/MyGame review
+slopforge --project ~/UnityProjects/MyGame character classify-source moon_scout_character <review-id> \
+  --finding <finding-id>=intentional
+slopforge --project ~/UnityProjects/MyGame character approve-source moon_scout_character <review-id> --confirm
+```
+
+Repeat `--critical-region`, `--concept-crop`, and `--model-closeup` for each region. The close-up must be a retained render of the same source model, not a material image. The report starts with component and topology findings marked `unclassified`; classify each as `intentional`, `repairable`, or `unresolved`. Reclassification is appended to manifest history. `repairable` and `unresolved` findings block rigging until the geometry is repaired and reviewed in a new evidence package. A disconnected component is not automatically debris; diagnostic positions and bounds are evidence for human classification, not proof or automatic repair.
+
+Approval is tied to the full reviewed SHA-256 set. Changing the source model, concepts, preview, inspection report, close-ups, conditioning image, or material map makes that decision stale. Create a new review after changes. Source approval does not approve material appearance, alter asset readiness, clear topology findings, or establish deformation, performance, Unity playback, or pipeline qualification. Model and node identity, dependency versions, and license terms remain `unknown` when the retained provenance does not establish them.
+
+The readiness report records structural measurements separately. It can be run before visual approval, but its approval cannot authorize rigging without a current approved source review. The source review also does not replace the explicit readiness approval shown below.
+
 Run deterministic mesh inspection after approving a character model and before requesting a rig:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame character readiness moon_scout_character
 slopforge --project ~/UnityProjects/MyGame inspect moon_scout_character
+slopforge --project ~/UnityProjects/MyGame character approve-source moon_scout_character <review-id> --confirm
 slopforge --project ~/UnityProjects/MyGame character approve-readiness moon_scout_character
 slopforge --project ~/UnityProjects/MyGame character normalize moon_scout_character
 slopforge --project ~/UnityProjects/MyGame character approve-normalization moon_scout_character

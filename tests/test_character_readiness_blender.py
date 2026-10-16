@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -14,6 +15,95 @@ BLENDER = (os.environ.get("BLENDER_BIN") or shutil.which("blender")
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class CharacterReadinessBlenderTests(unittest.TestCase):
+    def test_inspection_reports_topology_locations_without_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "topology.py"
+            fixture.write_text(f'''import bpy, json, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / "blender")!r})
+root=Path(sys.argv[sys.argv.index("--")+1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+vertices=[(0,0,0),(1,0,0),(0,1,0),(0,-1,0),(0,0,1),(3,0,0),(4,0,0),(3,1,0),(3.5,0,0)]
+faces=[(0,1,2),(1,0,3),(0,1,4),(5,6,7),(5,6,8)]
+mesh=bpy.data.meshes.new("TopologyFixture"); mesh.from_pydata(vertices,[],faces); mesh.update()
+obj=bpy.data.objects.new("TopologyFixture",mesh); bpy.context.collection.objects.link(obj)
+obj.location=(10,20,30)
+from inspect_model import topology_diagnostics
+before=(tuple(tuple(v.co) for v in mesh.vertices), tuple(tuple(p.vertices) for p in mesh.polygons))
+topology_diagnostics(obj, 1e-5)
+after=(tuple(tuple(v.co) for v in mesh.vertices), tuple(tuple(p.vertices) for p in mesh.polygons))
+assert before == after, "topology inspection mutated in-memory geometry"
+uv=mesh.uv_layers.new(name="uv")
+material=bpy.data.materials.new("material"); material.use_nodes=True; obj.data.materials.append(material)
+bpy.ops.wm.save_as_mainfile(filepath=str(root/"source.blend"))
+''')
+            # Store the source coordinates independently, then inspect the saved file.
+            completed = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(root)], check=False, capture_output=True, text=True,
+                           env={**os.environ, "PYTHONPATH": str(ROOT / "blender")})
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            source_hash = hashlib.sha256((root / "source.blend").read_bytes()).hexdigest()
+            report = root / "report.json"
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(root / "source.blend"),
+                            str(report), "1000"], check=True, capture_output=True, text=True)
+            result = json.loads(report.read_text())
+            measured = result["measured"]
+            self.assertEqual(len(measured["component_details"]), measured["component_count"])
+            self.assertEqual(measured["component_count"], 2)
+            self.assertEqual(sorted((item["vertex_count"], item["face_count"]) for item in measured["component_details"]),
+                             [(4, 2), (5, 3)])
+            self.assertTrue(any(item["bounds_min"] == [10.0, 19.0, 30.0]
+                                and item["bounds_max"] == [11.0, 21.0, 31.0]
+                                for item in measured["component_details"]), measured["component_details"])
+            self.assertTrue(any(item["bounds_min"] == [13.0, 20.0, 30.0]
+                                and item["bounds_max"] == [14.0, 21.0, 30.0]
+                                for item in measured["component_details"]))
+            diagnostics = measured["topology_diagnostics"]
+            self.assertEqual(sum(item["kind"] == "boundary_edge" for item in diagnostics), measured["boundary_edge_count"])
+            self.assertEqual(sum(item["kind"] == "nonmanifold_edge" for item in diagnostics), measured["nonmanifold_edge_count"])
+            self.assertEqual(sum(item["kind"] == "degenerate_face" for item in diagnostics), measured["degenerate_face_count"])
+            boundary = next(item for item in diagnostics if item["kind"] == "boundary_edge"
+                            and item["positions"] == [[13.0, 20.0, 30.0], [13.0, 21.0, 30.0]])
+            self.assertEqual(boundary["positions"], [[13.0, 20.0, 30.0], [13.0, 21.0, 30.0]])
+            self.assertEqual(boundary["midpoint"], [13.0, 20.5, 30.0])
+            degenerate = next(item for item in diagnostics if item["kind"] == "degenerate_face")
+            self.assertEqual(degenerate["object_name"], "TopologyFixture")
+            self.assertEqual(degenerate["area"], 0.0)
+            # The saved source bytes are still the only input file; inspection writes only report.json.
+            self.assertEqual(hashlib.sha256((root / "source.blend").read_bytes()).hexdigest(), source_hash)
+
+    def test_topology_diagnostic_edges_map_to_seam_vertex_indices(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "seam.py"
+            fixture.write_text('''import bpy, sys
+from pathlib import Path
+root=Path(sys.argv[sys.argv.index("--")+1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+vertices=[(0,0,0),(1,0,0),(0,1,0),(0,0,0),(1,0,0),(0,-1,0)]
+mesh=bpy.data.meshes.new("SeamFixture"); mesh.from_pydata(vertices,[],[(0,1,2),(4,3,5)]); mesh.update()
+obj=bpy.data.objects.new("SeamFixture",mesh); bpy.context.collection.objects.link(obj)
+obj.data.uv_layers.new(name="uv"); material=bpy.data.materials.new("material"); obj.data.materials.append(material)
+bpy.ops.wm.save_as_mainfile(filepath=str(root/"source.blend"))
+''')
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(root)], check=True, capture_output=True, text=True)
+            report = root / "report.json"
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(root / "source.blend"),
+                            str(report), "1000"], check=True, capture_output=True, text=True)
+            measured = json.loads(report.read_text())["measured"]
+            self.assertEqual(measured["component_count"], len(measured["component_details"]))
+            self.assertEqual([(item["vertex_count"], item["face_count"], item["bounds_min"], item["bounds_max"])
+                              for item in measured["component_details"]],
+                             [(6, 2, [0.0, -1.0, 0.0], [1.0, 1.0, 0.0])])
+            edge = next(item for item in measured["topology_diagnostics"]
+                        if item["kind"] == "boundary_edge" and item["positions"] == [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+            self.assertEqual(edge["source_vertex_indices"], [0, 2, 3])
+            self.assertEqual(edge["component_index"], 0)
+
     def test_unused_textured_slot_does_not_cover_unassigned_faces(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -8,7 +8,7 @@ from unittest.mock import patch
 from slopforge.character_rigging import (record_rigging_result, resolve_rigging_source,
     run_character_rigging, classify_skintokens_structure, approve_deformation, skintokens_character)
 from slopforge.manifest import new_record, register_artifact
-from readiness_fixture import complete_measurements
+from readiness_fixture import complete_measurements, approve_source_review
 
 
 class CharacterRiggingTests(unittest.TestCase):
@@ -24,6 +24,7 @@ class CharacterRiggingTests(unittest.TestCase):
         source.write_bytes(b"glTF")
         register_artifact(self.manifest, "character:pilot", "model", "model.glb",
                           "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
+        approve_source_review(self.root, self.manifest, "character:pilot")
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
@@ -113,6 +114,21 @@ class CharacterRiggingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "readiness.*source"):
             resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
 
+    def test_unreviewed_legacy_character_cannot_rig(self):
+        character = self.manifest["assets"]["character:pilot"]
+        character.pop("source_quality_reviews", None)
+        with self.assertRaisesRegex(ValueError, "source-quality review"):
+            resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+
+    def test_repairable_or_unresolved_findings_block_rigging(self):
+        character = self.manifest["assets"]["character:pilot"]
+        review = character["source_quality_reviews"][0]
+        review["findings"] = [{"id": "boundary-1", "classification": "intentional"}]
+        for classification in ("repairable", "unresolved"):
+            review["findings"][0]["classification"] = classification
+            with self.assertRaisesRegex(ValueError, "findings must be intentional"):
+                resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+
     def test_skintokens_requires_the_approved_normalized_model(self):
         with self.assertRaisesRegex(ValueError, "normalized_model"):
             skintokens_character(self.root, {"asset_pipeline": {}}, self.manifest, "character:pilot")
@@ -158,6 +174,7 @@ class CharacterRiggingTests(unittest.TestCase):
         register_artifact(self.manifest, "character:pilot", "normalized_model", "model.glb",
                           "Assets/Characters/pilot/normalized.glb", status="ready", approval_status="approved")
         character = self.manifest["assets"]["character:pilot"]
+        approve_source_review(self.root, self.manifest, "character:pilot", "normalized_model")
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "normalized_model",
