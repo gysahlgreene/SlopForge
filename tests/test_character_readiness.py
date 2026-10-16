@@ -267,6 +267,14 @@ class CharacterReadinessTests(unittest.TestCase):
             require_current_character_source_approval(root, character, "model")
             self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), review["sha256"]["inspection"])
 
+            original_snapshot = snapshot.read_bytes()
+            try:
+                snapshot.write_bytes(b"corrupted inspection snapshot bytes")
+                with self.assertRaisesRegex(ValueError, "Rigging requires a current approved source-quality review"):
+                    require_current_character_source_approval(root, character, "model")
+            finally:
+                snapshot.write_bytes(original_snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()
