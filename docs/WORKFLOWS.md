@@ -31,6 +31,8 @@ Mesh repair, triangle budgeting, UV preparation, and PBR baking are configurable
 
 Model-provider capabilities do not guarantee manifold, watertight, riggable, or game-ready geometry. See [character rigging](CHARACTER-RIGGING.md) for the review requirements.
 
+Character source review is an offline evidence step over retained artifacts. Supply approved project-relative front, left, and rear concepts, at least one concept crop and Blender-rendered model close-up per critical region, and the selected model's existing four-view previews, inspection report, and linked maps. Run `slopforge character source-review`, inspect the generated review board, classify each component/topology finding, then approve or reject the exact review. A single-image conditioning reference is recorded as single-image and cannot stand in for missing design views. Topology diagnostics include component bounds, world-space defect positions, and source vertex indices; they support human investigation and do not infer that disconnected geometry is debris or repair it. Missing/corrupt evidence remains incomplete; an input hash change makes prior approval stale. Unknown model, node, dependency, and licensing facts remain `unknown`. Source geometry approval, structural readiness, material appearance, deformation, engine playback, and pipeline qualification remain separate gates.
+
 No workflow bundles weights. Weight terms are independent of SlopForge's MIT license. Check the selected model and custom-node terms before use; see [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 ## Reproducibility
