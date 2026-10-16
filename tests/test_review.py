@@ -86,6 +86,16 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertIn("unclassified", page)
         self.assertIn("inspection.json", page)
 
+    def test_board_renders_incomplete_review_without_inspection_and_shows_decision(self):
+        self.manifest["assets"]["character:pilot"] = {"id": "pilot-id", "name": "pilot", "type": "character",
+            "source_quality_reviews": [{"id": "incomplete", "status": "incomplete", "inspection": None,
+                "missing": ["inspection"], "decisions": [{"decision": "rejected", "reason": "missing topology evidence"}]}]}
+        page = generate_review_board(self.root, self.manifest).read_text()
+        self.assertIn("Completeness:", page)
+        self.assertIn("rejected: missing topology evidence", page)
+        self.assertIn("stale or incomplete", page)
+        self.assertIn("Inspection report missing", page)
+
 
 if __name__ == "__main__":
     unittest.main()

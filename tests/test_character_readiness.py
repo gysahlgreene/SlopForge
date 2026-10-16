@@ -12,7 +12,8 @@ from slopforge.character_readiness import (
     run_character_readiness,
 )
 from slopforge.cli import parse_args
-from readiness_fixture import complete_measurements
+from readiness_fixture import complete_measurements, approve_source_review
+from slopforge.character_quality import require_current_character_source_approval
 
 
 class CharacterReadinessTests(unittest.TestCase):
@@ -209,17 +210,14 @@ class CharacterReadinessTests(unittest.TestCase):
     def test_needs_review_report_requires_explicit_approval(self):
         character = {"type": "character", "name": "pilot", "animation_readiness": {
             "status": "needs_review", "approval": {"status": "pending"},
-            "measured": self.complete_measurements(rest_pose_status="visual_review_required")}}
+            "measured": self.complete_measurements(rest_pose_status="visual_review_required")}, "artifacts": {}}
         manifest = {"assets": {"character:pilot": character}}
         with tempfile.TemporaryDirectory() as directory:
             model = Path(directory) / "model.glb"
-            model.write_bytes(b"model")
-            source_hash = hashlib.sha256(model.read_bytes()).hexdigest()
-            character["source_quality_reviews"] = [{"id": "source-1", "status": "ready_for_review",
-                "source_output": "model", "missing": [], "sha256": {"source_artifact": source_hash},
-                "file_paths": {"source_artifact": "model.glb"},
-                "findings": [{"classification": "intentional"}],
-                "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": source_hash}}]}]
+            model.write_bytes(b"glTF" + bytes(16))
+            character["artifacts"]["model"] = {"id": "model", "type": "model.glb", "path": "model.glb",
+                "status": "ready", "approval": {"status": "approved"}}
+            approve_source_review(Path(directory), manifest, "pilot")
             path = Path(directory) / "readiness.json"
             path.write_text(json.dumps(character["animation_readiness"]))
             character["animation_readiness"]["report_path"] = "readiness.json"
@@ -239,6 +237,35 @@ class CharacterReadinessTests(unittest.TestCase):
             character["animation_readiness"]["report_path"] = "readiness.json"
             with self.assertRaisesRegex(ValueError, "source-quality review"):
                 approve_character_readiness(Path(directory), manifest, "pilot")
+
+    def test_readiness_approval_does_not_stale_unchanged_inspection_evidence(self):
+        character = {"type": "character", "name": "pilot", "artifacts": {"model": {
+            "id": "model", "type": "model.glb", "path": "model.glb", "status": "ready",
+            "approval": {"status": "approved"}}}}
+        manifest = {"assets": {"character:pilot": character}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "model.glb"
+            source.write_bytes(b"glTF" + bytes(16))
+            measured = complete_measurements(rest_pose_status="visual_review_required")
+            measured.update({"component_count": 1, "boundary_edge_count": 0, "nonmanifold_edge_count": 0,
+                "degenerate_face_count": 0, "component_details": [{"object_name": "Body", "component_index": 0,
+                    "vertex_count": 3, "face_count": 1, "bounds_min": [0,0,0], "bounds_max": [1,1,1]}],
+                "topology_diagnostics": []})
+            character["animation_readiness"] = {"status": "needs_review", "approval": {"status": "pending"},
+                "measured": measured,
+                "report_path": "readiness.json", "source_output": "model",
+                "source": {"artifact_id": "model", "path": "model.glb",
+                           "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}}
+            report = root / "readiness.json"
+            report.write_text(json.dumps({"source": character["animation_readiness"]["source"], "measured": measured}))
+            review = approve_source_review(root, manifest, "pilot", readiness_report_fallback=True)
+            snapshot = root / review["inspection"]["path"]
+            self.assertTrue(snapshot.is_file())
+            self.assertEqual(snapshot.read_bytes(), report.read_bytes())
+            approve_character_readiness(root, manifest, "pilot")
+            require_current_character_source_approval(root, character, "model")
+            self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), review["sha256"]["inspection"])
 
 
 if __name__ == "__main__":

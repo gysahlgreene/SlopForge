@@ -6,6 +6,8 @@ import shlex
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
+from .character_quality import is_character_source_review_active
+
 
 def _safe_project_file(root, relative):
     if not isinstance(relative, str) or not relative or "\\" in relative:
@@ -187,10 +189,18 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
                         "findings": source_review.get("findings"), "unknowns": source_review.get("unknowns"),
                         "sha256": source_review.get("sha256")}
             report_link = _file_link(root, destination.parent, source_review["report_path"]) if source_review.get("report_path") else ""
-            inspection = source_review.get("inspection", {}).get("path")
+            inspection_data = source_review.get("inspection")
+            inspection = inspection_data.get("path") if isinstance(inspection_data, dict) else None
             inspection_link = _file_link(root, destination.parent, inspection) if inspection else '<span class="missing">Inspection report missing</span>'
+            decisions = source_review.get("decisions", [])
+            latest = decisions[-1] if decisions else {}
+            fresh = is_character_source_review_active(root, asset, source_review)
+            decision_text = latest.get("decision", "pending")
+            if latest.get("decision") == "rejected":
+                decision_text += ": " + str(latest.get("reason", "reason not recorded"))
             sections.append(f'<article class="candidate source-review"><h3>Source geometry review</h3>'
-                            f'<p>Status: <span class="status">{html.escape(str(source_review.get("status", "unknown")))}</span></p>'
+                            f'<p>Completeness: <span class="status">{html.escape(str(source_review.get("status", "unknown")))}</span>'
+                            f' · Decision: {html.escape(str(decision_text))} · Evidence: {"current" if fresh else "stale or incomplete"}</p>'
                             f'<div class="views">{"".join(comparisons)}</div><h4>Four model views</h4>'
                             f'<div class="views">{"".join(all_previews)}</div><h4>Critical region close-ups</h4>'
                             f'<div class="views">{"".join(closeups)}</div><h4>Structural evidence</h4>{inspection_link}'

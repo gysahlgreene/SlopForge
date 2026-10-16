@@ -8,7 +8,7 @@ from unittest.mock import patch
 from slopforge.character_rigging import (record_rigging_result, resolve_rigging_source,
     run_character_rigging, classify_skintokens_structure, approve_deformation, skintokens_character)
 from slopforge.manifest import new_record, register_artifact
-from readiness_fixture import complete_measurements
+from readiness_fixture import complete_measurements, approve_source_review
 
 
 class CharacterRiggingTests(unittest.TestCase):
@@ -24,11 +24,7 @@ class CharacterRiggingTests(unittest.TestCase):
         source.write_bytes(b"glTF")
         register_artifact(self.manifest, "character:pilot", "model", "model.glb",
                           "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
-        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
-        character["source_quality_reviews"] = [{"id": "source-1", "status": "ready_for_review",
-            "source_output": "model", "missing": [], "sha256": {"source_artifact": source_hash},
-            "file_paths": {"source_artifact": "Assets/Characters/pilot/model.glb"}, "findings": [],
-            "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": source_hash}}]}]
+        approve_source_review(self.root, self.manifest, "character:pilot")
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
@@ -178,11 +174,7 @@ class CharacterRiggingTests(unittest.TestCase):
         register_artifact(self.manifest, "character:pilot", "normalized_model", "model.glb",
                           "Assets/Characters/pilot/normalized.glb", status="ready", approval_status="approved")
         character = self.manifest["assets"]["character:pilot"]
-        normalized_hash = hashlib.sha256(normalized.read_bytes()).hexdigest()
-        character["source_quality_reviews"] = [{"id": "source-normalized", "status": "ready_for_review",
-            "source_output": "normalized_model", "missing": [], "sha256": {"source_artifact": normalized_hash},
-            "file_paths": {"source_artifact": "Assets/Characters/pilot/normalized.glb"}, "findings": [],
-            "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": normalized_hash}}]}]
+        approve_source_review(self.root, self.manifest, "character:pilot", "normalized_model")
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "normalized_model",

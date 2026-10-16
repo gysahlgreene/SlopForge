@@ -29,7 +29,9 @@ class CharacterSourceQualityTests(unittest.TestCase):
         self._image("Assets/Characters/pilot/normal.png")
         self.asset["artifacts"]["normal"] = self._artifact("normal", "texture.normal", "Assets/Characters/pilot/normal.png")
         inspection_path = "Assets/Characters/pilot/inspection.json"
-        inspection = {"status": "passed_with_warnings", "measured": {
+        source_path = self.root / "Assets/Characters/pilot/model.glb"
+        inspection = {"status": "passed_with_warnings", "source": {"artifact_id": "model", "sha256": __import__("hashlib").sha256(source_path.read_bytes()).hexdigest()}, "measured": {
+            "component_count": 1, "boundary_edge_count": 1, "nonmanifold_edge_count": 0, "degenerate_face_count": 0,
             "component_details": [{"object_name": "Body", "component_index": 0, "vertex_count": 4,
                                    "face_count": 1, "bounds_min": [0, 0, 0], "bounds_max": [1, 1, 1]}],
             "topology_diagnostics": [{"object_name": "Body", "component_index": 0, "kind": "boundary_edge",
@@ -87,7 +89,8 @@ class CharacterSourceQualityTests(unittest.TestCase):
         incomplete.pop("left")
         result = create_character_source_review(self.root, self.manifest, "pilot", incomplete, self._regions())
         self.assertEqual(result["status"], "incomplete")
-        self.assertEqual(result["conditioning"]["route"], "single_image")
+        self.assertEqual(result["conditioning"]["route"], "unknown")
+        self.assertEqual(result["conditioning"]["style_references"], ["input.png"])
         self.assertIn("concept_views.left", result["missing"])
         self.assertNotIn("decisions", result)
         for view in ("side", "rear", "three_quarter"):
@@ -184,6 +187,13 @@ class CharacterSourceQualityTests(unittest.TestCase):
                  "Assets/Characters/pilot/inspection.json"]
         for relative in paths:
             with self.subTest(path=relative):
+                self._file("Assets/Characters/pilot/inspection.json", json.dumps({"status": "passed_with_warnings", "source": {
+                    "artifact_id": "model", "sha256": __import__("hashlib").sha256((self.root / "Assets/Characters/pilot/model.glb").read_bytes()).hexdigest()},
+                    "measured": {"component_count": 1, "boundary_edge_count": 1, "nonmanifold_edge_count": 0,
+                        "degenerate_face_count": 0, "component_details": [{"object_name": "Body", "component_index": 0,
+                            "vertex_count": 4, "face_count": 1, "bounds_min": [0,0,0], "bounds_max": [1,1,1]}],
+                        "topology_diagnostics": [{"object_name": "Body", "component_index": 0, "kind": "boundary_edge",
+                            "source_vertex_indices": [0,1], "positions": [[0,0,0],[1,0,0]]}]}}).encode())
                 result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
                 classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
                     {finding["id"]: "intentional" for finding in result["findings"]})
@@ -199,6 +209,93 @@ class CharacterSourceQualityTests(unittest.TestCase):
                 else:
                     target.write_bytes(target.read_bytes() + b"changed")
                 self.assertFalse(is_character_source_review_current(self.root, result))
+
+    def test_geometry_route_comes_from_retained_mesh_stage_input(self):
+        self.asset["model_attempts"] = [{"status": "qualified", "execution_id": "exec-1", "stage_attempt": 1}]
+        self.asset["executions"] = [{"id": "exec-1", "stages": [
+            {"name": "conditioning_preparation", "outputs": [{"id": "input-3d", "type": "image.3d_input",
+                "path": "input.png", "sha256": __import__("hashlib").sha256((self.root / "input.png").read_bytes()).hexdigest()}]},
+            {"name": "mesh_workflow_execution", "attempt": 1, "settings": {"workflow": "image-to-mesh"}}]}]
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        self.assertEqual(result["conditioning"]["route"], "single_image")
+        self.assertEqual(result["conditioning"]["geometry_inputs"][0]["type"], "image.3d_input")
+        self.assertEqual(result["conditioning"]["workflow_settings"]["workflow"], "image-to-mesh")
+
+    def test_approval_refuses_replaced_selected_artifact(self):
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+            {finding["id"]: "intentional" for finding in result["findings"]})
+        approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        self.asset["artifacts"]["model"] = {**self.asset["artifacts"]["model"], "id": "replacement"}
+        with self.assertRaisesRegex(ValueError, "current approved"):
+            require_current_character_source_approval(self.root, self.asset, "model")
+
+    def test_incomplete_inspection_cannot_be_packaged_for_approval(self):
+        path = self.root / "Assets/Characters/pilot/inspection.json"
+        path.write_text(json.dumps({"measured": {}}))
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        self.assertEqual(result["status"], "incomplete")
+        self.assertTrue(any("inspection" in item for item in result["missing"]))
+
+    def test_approval_refuses_replaced_preview_reference(self):
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+            {finding["id"]: "intentional" for finding in result["findings"]})
+        approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        self.asset["artifacts"]["preview_front"] = {**self.asset["artifacts"]["preview_front"], "id": "replacement"}
+        with self.assertRaisesRegex(ValueError, "current approved"):
+            require_current_character_source_approval(self.root, self.asset, "model")
+
+    def test_approval_refuses_replaced_source_before_recording_decision(self):
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+            {finding["id"]: "intentional" for finding in result["findings"]})
+        self.asset["artifacts"]["model"] = {**self.asset["artifacts"]["model"], "id": "replacement"}
+        with self.assertRaisesRegex(ValueError, "stale"):
+            approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+
+    def test_material_set_replacement_stales_approved_source_review(self):
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+            {finding["id"]: "intentional" for finding in result["findings"]})
+        approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        self.asset["artifacts"]["normal"] = {**self.asset["artifacts"]["normal"], "id": "replacement"}
+        with self.assertRaisesRegex(ValueError, "current approved"):
+            require_current_character_source_approval(self.root, self.asset, "model")
+
+    def test_readiness_report_can_supply_inspection_evidence(self):
+        self.asset["animation_readiness"] = {"report_path": "Assets/Characters/pilot/inspection.json",
+            "source": {"artifact_id": "model", "sha256": __import__("hashlib").sha256(
+                (self.root / "Assets/Characters/pilot/model.glb").read_bytes()).hexdigest()}}
+        self.asset["artifacts"].pop("inspection")
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        self.assertEqual(result["status"], "ready_for_review")
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+            {finding["id"]: "intentional" for finding in result["findings"]})
+        approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        self.assertTrue(is_character_source_review_current(self.root, result))
+
+    def test_missing_readiness_report_keeps_package_incomplete(self):
+        self.asset["animation_readiness"] = {"report_path": "Assets/Characters/pilot/missing-readiness.json"}
+        self.asset["artifacts"].pop("inspection")
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIn("inspection", result["missing"])
+        self.assertIsNone(result["inspection"]["sha256"])
+        self.assertFalse((self.root / result["inspection"]["path"]).exists())
+
+    def test_configured_mesh_workflow_uses_cutout_input_identity(self):
+        self._image("cutout.png")
+        self.asset["model_attempts"] = [{"status": "qualified", "execution_id": "exec-2", "stage_attempt": 1,
+            "input_sha256": __import__("hashlib").sha256((self.root / "cutout.png").read_bytes()).hexdigest()}]
+        self.asset["executions"] = [{"id": "exec-2", "stages": [
+            {"name": "conditioning_preparation", "outputs": [
+                {"id": "cutout", "type": "image.cutout", "path": "cutout.png", "sha256": __import__("hashlib").sha256((self.root / "cutout.png").read_bytes()).hexdigest()},
+                {"id": "input-3d", "type": "image.3d_input", "path": "input.png", "sha256": __import__("hashlib").sha256((self.root / "input.png").read_bytes()).hexdigest()}]},
+            {"name": "mesh_workflow_execution", "attempt": 1, "settings": {"workflow": "custom-mesh-workflow"}}]}]
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        self.assertEqual(result["conditioning"]["route"], "single_image")
+        self.assertEqual([item["type"] for item in result["conditioning"]["geometry_inputs"]], ["image.cutout"])
 
 
 if __name__ == "__main__":

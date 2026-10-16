@@ -79,7 +79,10 @@ def component_details(obj):
 
     positions = {}
     for vertex in mesh.vertices:
-        positions.setdefault(tuple(vertex.co), vertex.index)
+        other = positions.setdefault(tuple(vertex.co), vertex.index)
+        other_root, vertex_root = find(other), find(vertex.index)
+        if other_root != vertex_root:
+            parent[vertex_root] = other_root
     for polygon in mesh.polygons:
         if not polygon.vertices:
             continue
