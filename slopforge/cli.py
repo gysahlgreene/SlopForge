@@ -114,6 +114,17 @@ def parser():
     unity_animation_setup.add_argument("--rig-type", choices=("generic", "humanoid"), default="generic")
     character = sub.add_parser("character", help="Prepare reviewable 3D character rigs")
     character_commands = character.add_subparsers(dest="character_action", required=True)
+    source_review = character_commands.add_parser("source-review", help="Build hash-linked source geometry review evidence")
+    source_review.add_argument("name", help="Tracked character asset name")
+    source_review.add_argument("--source-output", default="model", help="Approved model artifact id")
+    source_review.add_argument("--concept-view", action="append", default=[], metavar="VIEW=PATH")
+    source_review.add_argument("--critical-region", action="append", default=[])
+    source_review.add_argument("--concept-crop", action="append", default=[], metavar="NAME=PATH")
+    source_review.add_argument("--model-closeup", action="append", default=[], metavar="NAME=PATH")
+    classify_source = character_commands.add_parser("classify-source", help="Classify source review findings")
+    classify_source.add_argument("name")
+    classify_source.add_argument("review_id")
+    classify_source.add_argument("--finding", action="append", required=True, metavar="ID=CLASSIFICATION")
     provider_setup = character_commands.add_parser("provider-setup", help="Prepare an explicitly configured character provider")
     provider_setup.add_argument("provider", choices=("skintokens",))
     readiness = character_commands.add_parser("readiness", help="Inspect an approved character mesh before rigging")
@@ -546,6 +557,30 @@ def _run(args):
         return 0
 
     if args.command == "character":
+        if args.character_action in {"source-review", "classify-source"}:
+            from .character_quality import create_character_source_review, classify_character_source_findings
+            def assignments(values, label):
+                parsed = {}
+                for value in values:
+                    key, separator, item = value.partition("=")
+                    if not separator or not key or not item or key in parsed:
+                        raise ValueError(f"{label} values must be unique KEY=VALUE assignments")
+                    parsed[key] = item
+                return parsed
+            if args.character_action == "source-review":
+                concept_views = assignments(args.concept_view, "--concept-view")
+                crops = assignments(args.concept_crop, "--concept-crop")
+                closeups = assignments(args.model_closeup, "--model-closeup")
+                regions = [{"name": name, "concept_crop": crops.get(name), "model_closeup": closeups.get(name)}
+                           for name in args.critical_region]
+                result = create_character_source_review(root, manifest, args.name, concept_views, regions,
+                                                        source_output=args.source_output)
+            else:
+                result = classify_character_source_findings(root, manifest, args.name, args.review_id,
+                                                             assignments(args.finding, "--finding"))
+            save_manifest(manifest_path, manifest)
+            print(json.dumps(result, indent=2))
+            return 0
         if args.character_action in {"normalize", "approve-normalization"}:
             from .character_normalization import approve_character_normalization, normalize_character
             if args.character_action == "normalize":

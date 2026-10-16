@@ -66,6 +66,26 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertIn("Missing file: Assets/Robot/missing.png", html)
         self.assertIn("robot.glb", html)
 
+    def test_board_pairs_character_concepts_with_model_views_and_source_review_evidence(self):
+        (self.root / "concept.png").write_bytes(b"concept")
+        (self.root / "model.png").write_bytes(b"model")
+        self.manifest["assets"]["character:pilot"] = {"id": "pilot-id", "name": "pilot", "type": "character",
+            "source_quality_reviews": [{"id": "review-1", "status": "ready_for_review",
+                "report_path": "review.json", "concept_views": {"front": {"path": "concept.png"}},
+                "previews": {"front": {"path": "model.png"}, "side": {"path": None}},
+                "critical_regions": [{"name": "helmet", "concept_crop": {"path": "concept.png"},
+                                      "model_closeup": {"path": "model.png"}}],
+                "inspection": {"path": "inspection.json"}, "conditioning": {"route": "single_image"},
+                "findings": [{"id": "boundary-1", "classification": "unclassified"}],
+                "missing": [], "sha256": {"model": "abc"}}]}
+        page = generate_review_board(self.root, self.manifest).read_text()
+        self.assertIn("Source geometry review", page)
+        self.assertIn("front concept", page)
+        self.assertIn("front model", page)
+        self.assertIn("single_image", page)
+        self.assertIn("unclassified", page)
+        self.assertIn("inspection.json", page)
+
 
 if __name__ == "__main__":
     unittest.main()
