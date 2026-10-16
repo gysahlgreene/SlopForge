@@ -67,6 +67,91 @@ def topology_edge_counts(mesh, weld_distance):
     return boundary_edges, nonmanifold_edges
 
 
+def component_details(obj):
+    mesh = obj.data
+    parent = list(range(len(mesh.vertices)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    positions = {}
+    for vertex in mesh.vertices:
+        positions.setdefault(tuple(vertex.co), vertex.index)
+    for polygon in mesh.polygons:
+        if not polygon.vertices:
+            continue
+        first = find(polygon.vertices[0])
+        for index in polygon.vertices[1:]:
+            other = find(index)
+            if first != other:
+                parent[other] = first
+    groups = {}
+    for vertex in mesh.vertices:
+        groups.setdefault(find(vertex.index), []).append(vertex.index)
+    face_groups = {root: [] for root in groups}
+    for polygon in mesh.polygons:
+        if polygon.vertices:
+            face_groups[find(polygon.vertices[0])].append(polygon)
+    ordered = sorted(groups.items(), key=lambda item: min(item[1]))
+    details = []
+    for component_index, (root, indices) in enumerate(ordered):
+        points = [obj.matrix_world @ mesh.vertices[index].co for index in indices]
+        minimum = [float(min(point[axis] for point in points)) for axis in range(3)]
+        maximum = [float(max(point[axis] for point in points)) for axis in range(3)]
+        details.append({"object_name": obj.name, "component_index": component_index,
+                        "vertex_count": len(indices), "face_count": len(face_groups[root]),
+                        "source_vertex_indices": indices, "bounds_min": minimum, "bounds_max": maximum})
+    return details
+
+
+def topology_diagnostics(obj, weld_distance):
+    mesh = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=weld_distance)
+    local_vertices = [vertex.co.copy() for vertex in mesh.vertices]
+
+    def source_indices(position):
+        return [index for index, co in enumerate(local_vertices) if (co - position).length <= weld_distance]
+
+    world = obj.matrix_world
+    diagnostics = []
+    for edge in bm.edges:
+        if edge.is_boundary:
+            kind = "boundary_edge"
+        elif not edge.is_manifold:
+            kind = "nonmanifold_edge"
+        else:
+            continue
+        endpoints = sorted((edge.verts[0].co.copy(), edge.verts[1].co.copy()), key=lambda co: tuple(co))
+        endpoint_indices = [source_indices(point) for point in endpoints]
+        points = [world @ point for point in endpoints]
+        diagnostics.append({"object_name": obj.name, "component_index": None, "kind": kind,
+                            "source_vertex_indices": sorted({index for group in endpoint_indices for index in group}),
+                            "endpoint_vertex_indices": endpoint_indices,
+                            "positions": [[float(value) for value in point] for point in points],
+                            "midpoint": [float(value) for value in (points[0] + points[1]) / 2]})
+    bm.free()
+    for polygon in mesh.polygons:
+        if polygon.area > 1e-12:
+            continue
+        center = world @ polygon.center
+        diagnostics.append({"object_name": obj.name, "component_index": None, "kind": "degenerate_face",
+                            "polygon_index": polygon.index, "source_vertex_indices": list(polygon.vertices),
+                            "center": [float(value) for value in center], "area": float(polygon.area)})
+    components = component_details(obj)
+    for item in diagnostics:
+        indices = set(item["source_vertex_indices"])
+        component = next((part for part in components if indices.intersection(part["source_vertex_indices"])), None)
+        item["component_index"] = component["component_index"] if component else None
+    return sorted(diagnostics, key=lambda item: (item["object_name"], item["component_index"] or 0,
+                                                 item["kind"], item.get("positions", [item.get("center", [])]),
+                                                 item.get("polygon_index", -1)))
+
+
 def inspect(source, face_budget):
     errors, warnings = [], []
     extension = source.suffix.lower()
@@ -122,10 +207,12 @@ def inspect(source, face_budget):
     scales_applied = all(all(abs(value - 1.0) < 1e-4 for value in obj.scale) and all(abs(value) < 1e-4 for value in obj.rotation_euler) for obj in objects)
     component_sizes = [connected_components(obj.data) for obj in objects]
     components = sum(len(sizes) for sizes in component_sizes)
+    component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
     boundary_edges = sum(item[0] for item in topology_edges)
     nonmanifold_edges = sum(item[1] for item in topology_edges)
+    topology_records = [record for obj in objects for record in topology_diagnostics(obj, weld_distance)]
     object_bounds = []
     for obj in objects:
         points = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
@@ -154,7 +241,8 @@ def inspect(source, face_budget):
                 "normal_count": len(polygons), "zero_normal_count": zero_normals,
                 "degenerate_face_count": zero_area_faces,
                 "component_count": components, "boundary_edge_count": boundary_edges,
-                "nonmanifold_edge_count": nonmanifold_edges, "face_budget": face_budget}
+                "nonmanifold_edge_count": nonmanifold_edges, "component_details": component_records,
+                "topology_diagnostics": topology_records, "face_budget": face_budget}
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:
