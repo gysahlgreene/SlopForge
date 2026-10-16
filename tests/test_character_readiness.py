@@ -212,12 +212,33 @@ class CharacterReadinessTests(unittest.TestCase):
             "measured": self.complete_measurements(rest_pose_status="visual_review_required")}}
         manifest = {"assets": {"character:pilot": character}}
         with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / "model.glb"
+            model.write_bytes(b"model")
+            source_hash = hashlib.sha256(model.read_bytes()).hexdigest()
+            character["source_quality_reviews"] = [{"id": "source-1", "status": "ready_for_review",
+                "source_output": "model", "missing": [], "sha256": {"source_artifact": source_hash},
+                "file_paths": {"source_artifact": "model.glb"},
+                "findings": [{"classification": "intentional"}],
+                "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": source_hash}}]}]
             path = Path(directory) / "readiness.json"
             path.write_text(json.dumps(character["animation_readiness"]))
             character["animation_readiness"]["report_path"] = "readiness.json"
+            self.assertFalse(readiness_allows_rigging(character["animation_readiness"]))
             result = approve_character_readiness(Path(directory), manifest, "pilot")
             self.assertEqual(result["approval"]["status"], "approved")
             self.assertTrue(readiness_allows_rigging(result))
+
+    def test_structural_readiness_cannot_be_approved_without_current_source_review(self):
+        character = {"type": "character", "name": "pilot", "animation_readiness": {
+            "status": "pass", "approval": {"status": "pending"},
+            "measured": self.complete_measurements()}}
+        manifest = {"assets": {"character:pilot": character}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "readiness.json"
+            path.write_text(json.dumps(character["animation_readiness"]))
+            character["animation_readiness"]["report_path"] = "readiness.json"
+            with self.assertRaisesRegex(ValueError, "source-quality review"):
+                approve_character_readiness(Path(directory), manifest, "pilot")
 
 
 if __name__ == "__main__":

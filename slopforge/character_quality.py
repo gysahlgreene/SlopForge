@@ -14,6 +14,7 @@ _VIEWS = {"front": "preview.front", "side": "preview.side", "rear": "preview.rea
           "three_quarter": "preview.three_quarter"}
 _CONCEPT_VIEWS = ("front", "left", "rear")
 _CLASSIFICATIONS = {"intentional", "repairable", "unresolved"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _sha256(path):
@@ -101,6 +102,14 @@ def create_character_source_review(project_root, manifest, character_selector, c
             or source.get("status") != "ready" or source.get("approval", {}).get("status") != "approved"):
         raise ValueError(f"Source output {source_output!r} must be a ready approved model artifact")
     source_record = _file_record(root, source.get("path"), "source_artifact", missing, artifact=source)
+    source_path = root / source_record["path"] if source_record["path"] else None
+    if source_path and source_record["status"] == "verified":
+        with source_path.open("rb") as stream:
+            header = stream.read(21)
+        valid_model = (header[:4] == b"glTF" if source_path.suffix.lower() == ".glb"
+                       else header.startswith(b"Kaydara FBX Binary  "))
+        if not valid_model:
+            raise ValueError(f"Source model file has an invalid {source_path.suffix.lower()} header: {source_record['path']}")
     concepts = {}
     for view in _CONCEPT_VIEWS:
         relative = concept_views.get(view)
@@ -133,12 +142,12 @@ def create_character_source_review(project_root, manifest, character_selector, c
     material_artifacts = []
     for record in asset.get("artifacts", {}).values():
         if str(record.get("type", "")).startswith("texture."):
-            material_artifacts.append(_file_record(root, record.get("path"), "material_artifacts", missing,
-                                                   artifact=record))
+                material_artifacts.append(_file_record(root, record.get("path"), "material_artifacts", missing,
+                                                       artifact=record, image=True))
     for record in asset.get("material_artifacts", []):
         if isinstance(record, dict) and record.get("path"):
             material_artifacts.append(_file_record(root, record["path"], "material_artifacts", missing,
-                                                   artifact=record))
+                                                   artifact=record, image=True))
     if not material_artifacts:
         missing.append("material_artifacts")
     inspection_artifact = _artifact(asset, "inspection") or _artifact(asset, "inspection.json")
@@ -173,7 +182,8 @@ def create_character_source_review(project_root, manifest, character_selector, c
     for index, reference in enumerate(references):
         relative = reference.get("path") if isinstance(reference, dict) else reference if isinstance(reference, str) else None
         if isinstance(relative, str) and relative and not Path(relative).is_absolute() and "://" not in relative:
-            record = _file_record(root, relative, f"conditioning.references.{index}", missing)
+            record = _file_record(root, relative, f"conditioning.references.{index}", missing,
+                                  image=Path(relative).suffix.lower() in _IMAGE_EXTENSIONS)
             recorded_references.append({"value": reference, **record})
         else:
             recorded_references.append({"value": reference, "sha256": None, "status": "unknown"})
@@ -200,6 +210,16 @@ def create_character_source_review(project_root, manifest, character_selector, c
                         **{f"conditioning.references.{index}": value["sha256"]
                            for index, value in enumerate(recorded_references)},
                         "inspection": inspection["sha256"] if inspection else None}
+    review["file_paths"] = {"source_artifact": source_record["path"],
+                            **{f"concept_views.{key}": value.get("path") for key, value in concepts.items()},
+                            **{f"previews.{key}": value.get("path") for key, value in previews.items()},
+                            **{f"critical_regions.{region['name']}.{key}": region[key].get("path")
+                               for region in regions for key in ("concept_crop", "model_closeup")},
+                            **{f"material_artifacts.{index}": value.get("path")
+                               for index, value in enumerate(material_artifacts)},
+                            **{f"conditioning.references.{index}": value.get("path")
+                               for index, value in enumerate(recorded_references)},
+                            "inspection": inspection.get("path") if inspection else None}
     report_file = root / report_path
     if not report_file.resolve().is_relative_to(root):
         raise ValueError("Source review output must stay within the project")
@@ -231,3 +251,79 @@ def classify_character_source_findings(project_root, manifest, character_selecto
         finding.setdefault("classification_history", []).append(entry)
         finding["classification"] = classification
     return review
+
+
+def is_character_source_review_current(project_root, review):
+    if not isinstance(review, dict) or review.get("status") != "ready_for_review" or review.get("missing"):
+        return False
+    paths = review.get("file_paths", {})
+    expected = review.get("sha256", {})
+    if set(paths) != set(expected):
+        return False
+    root = Path(project_root).expanduser().resolve()
+    current = {}
+    for key, relative in paths.items():
+        if not relative:
+            return False
+        try:
+            path = _safe_file(root, relative, key)
+        except (OSError, TypeError, ValueError):
+            return False
+        if not path:
+            return False
+        current[key] = _sha256(path)
+    return current == expected
+
+
+def _source_review(manifest, character_selector, review_id):
+    asset = find_asset(manifest, character_selector)
+    review = next((item for item in asset.get("source_quality_reviews", []) if item.get("id") == review_id), None)
+    if review is None:
+        raise ValueError(f"No source-quality review {review_id!r} is recorded for this character")
+    return asset, review
+
+
+def approve_character_source_review(project_root, manifest, character_selector, review_id, *, approved_by=None):
+    asset, review = _source_review(manifest, character_selector, review_id)
+    if review.get("status") != "ready_for_review" or review.get("missing"):
+        raise ValueError("A complete source-quality review is required before approval")
+    if any(finding.get("classification") not in _CLASSIFICATIONS for finding in review.get("findings", [])):
+        raise ValueError("Every source-quality finding must be classified before approval")
+    if not is_character_source_review_current(project_root, review):
+        raise ValueError("Source-quality review evidence is stale or missing; create a new review")
+    decision = {"decision": "approved", "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                "reviewed_sha256": dict(review["sha256"])}
+    if approved_by:
+        decision["reviewed_by"] = approved_by
+    review.setdefault("decisions", []).append(decision)
+    return review
+
+
+def reject_character_source_review(project_root, manifest, character_selector, review_id, reason):
+    _, review = _source_review(manifest, character_selector, review_id)
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("A non-empty rejection reason is required")
+    review.setdefault("decisions", []).append({"decision": "rejected", "reason": reason.strip(),
+                                                "reviewed_at": datetime.now(timezone.utc).isoformat()})
+    return review
+
+
+def require_current_character_source_approval(project_root, character, source_output):
+    reviews = character.get("source_quality_reviews", [])
+    for review in reversed(reviews):
+        decisions = review.get("decisions", [])
+        if not decisions:
+            continue
+        latest = decisions[-1]
+        if review.get("source_output") == source_output and latest.get("decision") == "rejected":
+            raise ValueError("The current source-quality review was rejected")
+        if latest.get("decision") != "approved":
+            continue
+        if review.get("source_output") != source_output or latest.get("reviewed_sha256") != review.get("sha256"):
+            continue
+        if not is_character_source_review_current(project_root, review):
+            continue
+        if any(finding.get("classification") != "intentional" for finding in review.get("findings", [])):
+            raise ValueError("Source-quality findings must be intentional before rigging")
+        return review
+    raise ValueError("Rigging requires a current approved source-quality review")

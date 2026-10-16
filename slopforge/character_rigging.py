@@ -307,6 +307,8 @@ def resolve_rigging_source(project_root, manifest, character_selector, source_ou
                        "sha256": _sha256(path)}
     if readiness.get("source_output") != source_output or readiness.get("source") != expected_source:
         raise ValueError("Approved animation-readiness report does not match the selected source model")
+    from .character_quality import require_current_character_source_approval
+    require_current_character_source_approval(root, character, source_output)
     return path
 
 
@@ -478,6 +480,8 @@ def record_rigging_result(project_root, manifest, character_selector, result):
             or source_output not in character.get("artifacts", {})
             and source_output not in character.get("outputs", {})):
         raise ValueError("Rigging result must name an existing source output")
+    from .character_quality import require_current_character_source_approval
+    require_current_character_source_approval(root, character, source_output)
     if source_output in character.get("artifacts", {}):
         artifact = character["artifacts"][source_output]
         if artifact.get("status") != "ready" or artifact.get("approval", {}).get("status") != "approved":

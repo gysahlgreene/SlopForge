@@ -24,6 +24,11 @@ class CharacterRiggingTests(unittest.TestCase):
         source.write_bytes(b"glTF")
         register_artifact(self.manifest, "character:pilot", "model", "model.glb",
                           "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        character["source_quality_reviews"] = [{"id": "source-1", "status": "ready_for_review",
+            "source_output": "model", "missing": [], "sha256": {"source_artifact": source_hash},
+            "file_paths": {"source_artifact": "Assets/Characters/pilot/model.glb"}, "findings": [],
+            "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": source_hash}}]}]
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "model",
@@ -113,6 +118,21 @@ class CharacterRiggingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "readiness.*source"):
             resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
 
+    def test_unreviewed_legacy_character_cannot_rig(self):
+        character = self.manifest["assets"]["character:pilot"]
+        character.pop("source_quality_reviews", None)
+        with self.assertRaisesRegex(ValueError, "source-quality review"):
+            resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+
+    def test_repairable_or_unresolved_findings_block_rigging(self):
+        character = self.manifest["assets"]["character:pilot"]
+        review = character["source_quality_reviews"][0]
+        review["findings"] = [{"id": "boundary-1", "classification": "intentional"}]
+        for classification in ("repairable", "unresolved"):
+            review["findings"][0]["classification"] = classification
+            with self.assertRaisesRegex(ValueError, "findings must be intentional"):
+                resolve_rigging_source(self.root, self.manifest, "character:pilot", "model")
+
     def test_skintokens_requires_the_approved_normalized_model(self):
         with self.assertRaisesRegex(ValueError, "normalized_model"):
             skintokens_character(self.root, {"asset_pipeline": {}}, self.manifest, "character:pilot")
@@ -158,6 +178,11 @@ class CharacterRiggingTests(unittest.TestCase):
         register_artifact(self.manifest, "character:pilot", "normalized_model", "model.glb",
                           "Assets/Characters/pilot/normalized.glb", status="ready", approval_status="approved")
         character = self.manifest["assets"]["character:pilot"]
+        normalized_hash = hashlib.sha256(normalized.read_bytes()).hexdigest()
+        character["source_quality_reviews"] = [{"id": "source-normalized", "status": "ready_for_review",
+            "source_output": "normalized_model", "missing": [], "sha256": {"source_artifact": normalized_hash},
+            "file_paths": {"source_artifact": "Assets/Characters/pilot/normalized.glb"}, "findings": [],
+            "decisions": [{"decision": "approved", "reviewed_sha256": {"source_artifact": normalized_hash}}]}]
         character["animation_readiness"] = {
             "measured": complete_measurements(),
             "status": "pass", "approval": {"status": "approved"}, "source_output": "normalized_model",

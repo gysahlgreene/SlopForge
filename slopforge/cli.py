@@ -125,6 +125,14 @@ def parser():
     classify_source.add_argument("name")
     classify_source.add_argument("review_id")
     classify_source.add_argument("--finding", action="append", required=True, metavar="ID=CLASSIFICATION")
+    approve_source = character_commands.add_parser("approve-source", help="Approve exact character source geometry evidence")
+    approve_source.add_argument("name")
+    approve_source.add_argument("review_id")
+    approve_source.add_argument("--confirm", action="store_true", help="Confirm human review of the complete evidence")
+    reject_source = character_commands.add_parser("reject-source", help="Reject a character source geometry review")
+    reject_source.add_argument("name")
+    reject_source.add_argument("review_id")
+    reject_source.add_argument("--reason", required=True)
     provider_setup = character_commands.add_parser("provider-setup", help="Prepare an explicitly configured character provider")
     provider_setup.add_argument("provider", choices=("skintokens",))
     readiness = character_commands.add_parser("readiness", help="Inspect an approved character mesh before rigging")
@@ -557,8 +565,9 @@ def _run(args):
         return 0
 
     if args.command == "character":
-        if args.character_action in {"source-review", "classify-source"}:
-            from .character_quality import create_character_source_review, classify_character_source_findings
+        if args.character_action in {"source-review", "classify-source", "approve-source", "reject-source"}:
+            from .character_quality import (create_character_source_review, classify_character_source_findings,
+                approve_character_source_review, reject_character_source_review)
             def assignments(values, label):
                 parsed = {}
                 for value in values:
@@ -575,9 +584,15 @@ def _run(args):
                            for name in args.critical_region]
                 result = create_character_source_review(root, manifest, args.name, concept_views, regions,
                                                         source_output=args.source_output)
-            else:
+            elif args.character_action == "classify-source":
                 result = classify_character_source_findings(root, manifest, args.name, args.review_id,
                                                              assignments(args.finding, "--finding"))
+            elif args.character_action == "approve-source":
+                if not args.confirm:
+                    raise ValueError("Explicit --confirm is required to approve source geometry")
+                result = approve_character_source_review(root, manifest, args.name, args.review_id)
+            else:
+                result = reject_character_source_review(root, manifest, args.name, args.review_id, args.reason)
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
             return 0

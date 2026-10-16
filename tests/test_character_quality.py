@@ -6,7 +6,9 @@ from pathlib import Path
 from PIL import Image
 
 from slopforge.character_quality import (classify_character_source_findings,
-    create_character_source_review)
+    create_character_source_review, approve_character_source_review,
+    reject_character_source_review, is_character_source_review_current,
+    require_current_character_source_approval)
 from slopforge.cli import parse_args
 
 
@@ -15,15 +17,16 @@ class CharacterSourceQualityTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.asset = {"id": "character-id", "name": "pilot", "type": "character",
-                      "artifacts": {}, "conditioning": {"strategy": "single_image", "references_used": ["input.png"]}}
+                      "status": "ready", "artifacts": {},
+                      "conditioning": {"strategy": "single_image", "references_used": ["input.png"]}}
         (self.root / "Assets/Characters/pilot").mkdir(parents=True)
-        self._file("Assets/Characters/pilot/model.glb", b"retained-model")
+        self._file("Assets/Characters/pilot/model.glb", b"glTF" + (12).to_bytes(4, "little") + (2).to_bytes(4, "little"))
         self.asset["artifacts"]["model"] = self._artifact("model", "model.glb", "Assets/Characters/pilot/model.glb")
         for view in ("front", "side", "rear", "three_quarter"):
             path = f"Assets/Characters/pilot/{view}.png"
             self._image(path)
             self.asset["artifacts"][f"preview_{view}"] = self._artifact(f"preview.{view}", f"preview.{view}", path)
-        self._file("Assets/Characters/pilot/normal.png", b"normal-map")
+        self._image("Assets/Characters/pilot/normal.png")
         self.asset["artifacts"]["normal"] = self._artifact("normal", "texture.normal", "Assets/Characters/pilot/normal.png")
         inspection_path = "Assets/Characters/pilot/inspection.json"
         inspection = {"status": "passed_with_warnings", "measured": {
@@ -111,6 +114,9 @@ class CharacterSourceQualityTests(unittest.TestCase):
         result = create_character_source_review(self.root, self.manifest, "pilot",
             {**self.concepts, "rear": "ai/concepts/missing.png"}, self._regions())
         self.assertIn("concept_views.rear", result["missing"])
+        (self.root / "Assets/Characters/pilot/model.glb").write_bytes(b"invalid model")
+        with self.assertRaisesRegex(ValueError, "invalid .glb header"):
+            create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
 
     def test_critical_regions_require_matching_concept_and_model_closeups(self):
         regions = [{"name": "helmet", "concept_crop": "ai/concepts/helmet-crop.png"}]
@@ -148,6 +154,51 @@ class CharacterSourceQualityTests(unittest.TestCase):
         classified = parse_args(["character", "classify-source", "pilot", "review-id",
                                  "--finding", "finding-id=intentional"])
         self.assertEqual(classified.character_action, "classify-source")
+        approved = parse_args(["character", "approve-source", "pilot", "review-id", "--confirm"])
+        self.assertTrue(approved.confirm)
+        rejected = parse_args(["character", "reject-source", "pilot", "review-id", "--reason", "missing glove geometry"])
+        self.assertEqual(rejected.reason, "missing glove geometry")
+
+    def test_source_approval_requires_complete_review_and_classification(self):
+        result = create_character_source_review(self.root, self.manifest, "pilot", {"front": self.concepts["front"]}, self._regions())
+        with self.assertRaisesRegex(ValueError, "complete"):
+            approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+        with self.assertRaisesRegex(ValueError, "classified"):
+            approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+        classifications = {finding["id"]: "intentional" for finding in result["findings"]}
+        classify_character_source_findings(self.root, self.manifest, "pilot", result["id"], classifications)
+        approved = approve_character_source_review(self.root, self.manifest, "pilot", result["id"], approved_by="reviewer")
+        self.assertEqual(approved["decisions"][-1]["decision"], "approved")
+        self.assertEqual(approved["decisions"][-1]["reviewed_sha256"], approved["sha256"])
+        self.assertEqual(self.asset["status"], "ready")
+        self.assertNotIn("material_approval", self.asset)
+        rejected = reject_character_source_review(self.root, self.manifest, "pilot", result["id"], "Geometry misses the shoulder form")
+        self.assertEqual(rejected["decisions"][-1]["reason"], "Geometry misses the shoulder form")
+        with self.assertRaisesRegex(ValueError, "rejected"):
+            require_current_character_source_approval(self.root, self.asset, "model")
+
+    def test_source_approval_stales_after_any_reviewed_input_changes(self):
+        paths = ["Assets/Characters/pilot/model.glb", self.concepts["front"],
+                 "Assets/Characters/pilot/front.png", "Assets/Characters/pilot/normal.png",
+                 "Assets/Characters/pilot/inspection.json"]
+        for relative in paths:
+            with self.subTest(path=relative):
+                result = create_character_source_review(self.root, self.manifest, "pilot", self.concepts, self._regions())
+                classify_character_source_findings(self.root, self.manifest, "pilot", result["id"],
+                    {finding["id"]: "intentional" for finding in result["findings"]})
+                approve_character_source_review(self.root, self.manifest, "pilot", result["id"])
+                self.assertTrue(is_character_source_review_current(self.root, result))
+                target = self.root / relative
+                if target.suffix == ".png":
+                    Image.new("RGB", (4, 4), (2, 4, 8)).save(target)
+                elif target.suffix == ".json":
+                    report = json.loads(target.read_text())
+                    report["changed"] = True
+                    target.write_text(json.dumps(report))
+                else:
+                    target.write_bytes(target.read_bytes() + b"changed")
+                self.assertFalse(is_character_source_review_current(self.root, result))
 
 
 if __name__ == "__main__":
