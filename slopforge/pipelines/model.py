@@ -1165,7 +1165,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     with Image.open(paths["basecolor"]) as image:
         Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
     paths["generator"].write_text(json.dumps(mesh_info, indent=2) + "\n")
-    material_refs = _lineage_finish(lineage, "material_generation", number,
+    material_refs = _lineage_finish(context, "material_generation", number,
         [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
          ("surface", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")]
         + [(paths["generator"], "generation.metadata")])

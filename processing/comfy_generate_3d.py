@@ -430,7 +430,6 @@ def main():
             raw = find_glb(entry["outputs"].get("save_raw", {}))
             if not raw:
                 raise ValueError("Model workflow did not produce its raw mesh")
-            _journal_finish(journal, stage, [])
         raw_path = dest.with_name(dest.stem + "_untextured.glb")
         with _journal_stage(journal, "mesh_raw_acquisition", journal_attempt,
                             {"phase": "raw_shape"}) as stage:

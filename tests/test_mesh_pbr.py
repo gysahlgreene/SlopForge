@@ -146,6 +146,12 @@ class MeshPBRTests(unittest.TestCase):
             self.assertEqual(output_digests["native_material/basecolor.png"],
                              __import__("hashlib").sha256(b"basecolor.png").hexdigest())
             record = json.loads(manifest_path.read_text())["assets"]["prop:relay"]
+            # The worker has not yet returned control to the model orchestrator;
+            # the parent mesh_workflow_execution stage must remain running with no outputs.
+            parent_stage = next(stage for stage in record["executions"][-1]["stages"]
+                                if stage["name"] == "mesh_workflow_execution")
+            self.assertEqual(parent_stage["status"], "running")
+            self.assertEqual(parent_stage["outputs"], [])
             raw = next(item for stage in record["executions"][-1]["stages"] for item in stage["outputs"]
                        if item["type"] == "mesh.raw")
             prepared_stage = next(stage for stage in record["executions"][-1]["stages"]
@@ -296,12 +302,15 @@ class MeshPBRTests(unittest.TestCase):
                            "stage": "mesh_output_acquisition", "attempt": 1, "derived_from": []}
                           for key in originals]
             execution = start_execution(asset, {"brief": "relay"})
+            worker_stage = start_stage(execution, "material_generation", 1, map_inputs, {}, {})
+            worker_stage.update(status="succeeded", outputs=[])
             manifest = {"schema_version": 4, "assets": {"prop:relay": asset}}
             save_manifest(root / "manifest.json", manifest)
             lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
                        "key": "prop:relay", "execution_id": execution["id"],
                        "upstream": [concept, mesh], "material_inputs": map_inputs,
                        "assembly_inputs": [prepared]}
+            context = {**lineage, "_stage_handles": {}}
             metadata = {"workflow": "trellis.json", "seed": 42, "textures": textures,
                         "conditioning_image": "conditioning.png"}
 
@@ -322,7 +331,7 @@ class MeshPBRTests(unittest.TestCase):
                                        "transforms_applied": True, "missing_textures": []}}
             with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                     patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
-                candidate = _native_material_candidate(root, config, lineage, {"face_budget": "prop_faces"}, asset, 1,
+                candidate = _native_material_candidate(root, config, context, {"face_budget": "prop_faces"}, asset, 1,
                                                        metadata, lineage=lineage)
             self.assertEqual(candidate["kind"], "mesh_pbr")
             self.assertEqual(candidate["status"], "candidate")
@@ -334,7 +343,7 @@ class MeshPBRTests(unittest.TestCase):
                 self.assertEqual((root / candidate["outputs"][key]).read_bytes(), data)
             saved = json.loads((root / "manifest.json").read_text())["assets"]["prop:relay"]
             material_stage = next(stage for stage in saved["executions"][0]["stages"]
-                                  if stage["name"] == "material_generation")
+                                  if stage["name"] == "material_generation" and stage["outputs"])
             material_refs = material_stage["outputs"]
             self.assertEqual({item["id"] for item in material_stage["inputs"]},
                              {item["id"] for item in map_inputs})
@@ -352,7 +361,6 @@ class MeshPBRTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(ValueError, "basecolor map"):
                 copy_generated_maps({}, Path(temporary))
-
 
 if __name__ == "__main__":
     unittest.main()
