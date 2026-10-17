@@ -94,16 +94,19 @@ class WorkflowRequirementsTests(unittest.TestCase):
                     self.assertEqual(mask_output, 1)
                     self.assertEqual(workflow[image]["class_type"], "LoadImage")
 
-    def test_h100_final_workflow_bakes_and_saves_a_real_normal_map(self):
+    def test_h100_trellis_workflows_bake_and_save_a_real_normal_map(self):
         from slopforge.paths import tool_root
 
-        workflow = json.loads((tool_root() / "workflows/trellis2_image_to_model_h100_final_api.json").read_text())
-        bake = workflow["normal_bake"]
-        self.assertEqual(bake["class_type"], "BakeNormalMapFromMesh")
-        self.assertEqual(bake["inputs"]["low_poly"], ["smooth", 0])
-        self.assertEqual(bake["inputs"]["high_poly"], ["mesh", 0])
-        self.assertEqual(workflow["textured"]["inputs"]["normal_map"], ["normal_bake", 0])
-        self.assertEqual(workflow["save_normal"]["inputs"]["images"], ["normal_bake", 0])
+        for name in ("trellis2_image_to_model_h100_api.json", "trellis2_image_to_model_h100_final_api.json"):
+            with self.subTest(workflow=name):
+                workflow = json.loads((tool_root() / "workflows" / name).read_text())
+                bake = workflow["normal_bake"]
+                self.assertEqual(bake["class_type"], "BakeNormalMapFromMesh")
+                self.assertEqual(bake["inputs"]["low_poly"], ["smooth", 0])
+                self.assertEqual(bake["inputs"]["high_poly"], ["mesh", 0])
+                self.assertEqual(bake["inputs"]["resolution"], workflow["maps"]["inputs"]["texture_size"])
+                self.assertEqual(workflow["textured"]["inputs"]["normal_map"], ["normal_bake", 0])
+                self.assertEqual(workflow["save_normal"]["inputs"]["images"], ["normal_bake", 0])
 
     def test_static_requirements_reject_direct_transparency_crop(self):
         workflow = dict(self.workflow)
