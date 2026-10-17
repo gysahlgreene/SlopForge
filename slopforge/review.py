@@ -147,7 +147,8 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
                                  f'{_file_link(root, destination.parent, relative)}</div>')
             sections.append(f'<article class="candidate"><div class="views">{"".join(views)}</div>'
                             f'<h3>Material {html.escape(str(candidate.get("number", "?")))}</h3>'
-                            f'<p>Status: {html.escape(str(candidate.get("status", "unknown")))}</p>'
+                            f'<p>Status: {html.escape(str(candidate.get("status", "unknown")))}'
+                            f' · Normal map: {html.escape(str(candidate.get("normal_source", "not recorded")))}</p>'
                             f'{_action(f"{code} approve-texture {shlex.quote(name)} {shlex.quote(str(candidate.get("number", "")))}", "Approve texture")}'
                             f'<details><summary>Validation and provenance</summary>{_pre(candidate)}</details></article>')
         outputs = []

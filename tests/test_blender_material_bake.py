@@ -226,3 +226,28 @@ bpy.ops.export_scene.gltf(filepath=str(target), export_format='GLB')
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderUVCoverageTests(unittest.TestCase):
+    def test_inspection_reports_uv_area_and_out_of_bounds_loops(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture, blend, result = root / "fixture.py", root / "plane.blend", root / "inspection.json"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_plane_add()
+obj = bpy.context.active_object
+obj.data.uv_layers.new(name="UVMap")
+for loop, uv in zip(obj.data.uv_layers.active.data, [(0, 0), (1, 0), (1, 2), (0, 2)]):
+    loop.uv = uv
+bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(blend)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(blend), str(result), "100"],
+                           check=True, capture_output=True)
+            measured = json.loads(result.read_text())["measured"]
+            self.assertAlmostEqual(measured["uv_area_sum"], 2.0, places=4)
+            self.assertAlmostEqual(measured["uv_loop_outside_unit_fraction"], 0.5)
