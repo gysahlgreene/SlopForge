@@ -32,6 +32,7 @@ ai/styles/*/references/candidates/
 *.glb
 *.fbx
 *.blend
+*.blend[0-9]
 
 # Local audit archives and scratch databases
 *.ses
