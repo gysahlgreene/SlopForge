@@ -24,7 +24,7 @@ from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
-from ..validation import is_placeholder_normal, summarize_validation, validate_image, validate_model_outputs
+from ..validation import is_placeholder_normal, measure_material_maps, summarize_validation, validate_image, validate_model_outputs
 
 
 def _sha256(path):
@@ -1185,6 +1185,11 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
+    maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
+    validation.setdefault("measured", {})["material_maps"] = maps["maps"]
+    validation["warnings"] = [*validation.get("warnings", []), *maps["warnings"]]
+    if maps["warnings"] and validation["status"] == "passed":
+        validation["status"] = "passed_with_warnings"
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in

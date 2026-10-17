@@ -273,6 +273,20 @@ class MeshPBRTests(unittest.TestCase):
             self.assertTrue(is_placeholder_normal(root / textures["normal"]))
             self.assertFalse(is_placeholder_normal(root / textures["basecolor"]))
 
+    def test_material_map_measurement_flags_near_black_atlas_and_size_mismatch(self):
+        from slopforge.validation import measure_material_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            black = Image.new("RGB", (64, 64), (0, 0, 0)); black.putpixel((0, 0), (200, 90, 40))
+            black.save(root / "basecolor.png")
+            Image.new("L", (32, 32), 128).save(root / "roughness.png")
+            result = measure_material_maps({"basecolor": root / "basecolor.png", "roughness": root / "roughness.png"})
+            self.assertGreater(result["maps"]["basecolor"]["near_black_fraction"], 0.99)
+            joined = " | ".join(result["warnings"])
+            self.assertIn("basecolor map is", joined)
+            self.assertIn("single constant color", joined)
+            self.assertIn("dimensions differ", joined)
+
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -44,6 +44,32 @@ def is_placeholder_normal(path):
         return False  # undecodable maps are a separate validity failure
 
 
+def measure_material_maps(paths, near_black_level=8):
+    """Report per-map pixel statistics. Warnings are informational: the quality contract declares no thresholds."""
+    maps, warnings = {}, []
+    for key, path in paths.items():
+        try:
+            with Image.open(path) as image:
+                size = list(image.size)
+                small = image.convert("RGB")
+                small.thumbnail((256, 256))
+        except Exception as exc:
+            warnings.append(f"{key} map could not be measured: {exc}")
+            continue
+        pixels = list(zip(*[iter(small.tobytes())] * 3))
+        near_black = sum(max(pixel) <= near_black_level for pixel in pixels) / len(pixels)
+        maps[key] = {"dimensions": size, "near_black_fraction": round(near_black, 4),
+                     "distinct_colors_sampled": len(set(pixels)), "thresholds": "undeclared"}
+        if near_black >= 0.9:
+            warnings.append(f"{key} map is {near_black:.0%} near-black")
+        if len(set(pixels)) == 1:
+            warnings.append(f"{key} map is a single constant color")
+    if len({tuple(item["dimensions"]) for item in maps.values()}) > 1:
+        warnings.append("material map dimensions differ: " +
+                        ", ".join(f"{key}={item['dimensions']}" for key, item in maps.items()))
+    return {"maps": maps, "warnings": warnings}
+
+
 def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None,
                            max_components=None, max_nonmanifold_edges=None,
                            max_boundary_edges=None):

@@ -229,4 +229,4 @@ Opened issues [#41](https://github.com/gysahlgreene/SlopForge/issues/41) (placeh
 [#43](https://github.com/gysahlgreene/SlopForge/issues/43) (blotch/variance diagnosis) and
 [#44](https://github.com/gysahlgreene/SlopForge/issues/44) (glass/emissive). Part of #41 is implemented:
 `approve-texture` rejects a 1×1 placeholder normal unless waived (`make verify`: 618 passed, 6 skipped).
-Not verified: a live candidate, whether a real normal bake improves appearance, and #42–#44.
+`measure_material_maps` now records per-map near-black fraction, distinct colors and dimensions in each native candidate's validation, as warnings only (thresholds undeclared; part of #42; Blender-side UV coverage not done). Not verified: a live candidate, whether a real normal bake improves appearance, and #42–#44.
