@@ -60,7 +60,7 @@ def measure_material_maps(paths, near_black_level=8):
         near_black = sum(max(pixel) <= near_black_level for pixel in pixels) / len(pixels)
         maps[key] = {"dimensions": size, "near_black_fraction": round(near_black, 4),
                      "distinct_colors_sampled": len(set(pixels)), "thresholds": "undeclared"}
-        if near_black >= 0.9:
+        if near_black >= 0.9 and key != "metallic":  # black metallic is valid non-metal
             warnings.append(f"{key} map is {near_black:.0%} near-black")
         if len(set(pixels)) == 1:
             warnings.append(f"{key} map is a single constant color")

@@ -295,6 +295,9 @@ class MeshPBRTests(unittest.TestCase):
             result = measure_material_maps({"metallic": path})
             self.assertGreater(result["maps"]["metallic"]["near_full_metal_fraction"], 0.99)
             self.assertIn("fully metallic", " | ".join(result["warnings"]))
+            Image.new("L", (64, 64), 0).save(path)
+            self.assertFalse([item for item in measure_material_maps({"metallic": path})["warnings"]
+                              if "near-black" in item])
 
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
