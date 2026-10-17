@@ -68,9 +68,9 @@ def measure_material_maps(paths, near_black_level=8):
             metal = sum(min(pixel) >= 230 for pixel in pixels) / len(pixels)
             maps[key]["near_full_metal_fraction"] = round(metal, 4)
             if metal >= 0.9:
-                # The H100 backend emitted metallic ~1 on stone (issue #43); confirm the asset is really metal.
+                # TRELLIS.2 can decode glossy non-metal concepts as fully metallic (issue #43); confirm the asset is metal.
                 warnings.append(f"metallic map is {metal:.0%} fully metallic; confirm the asset is metal "
-                                "or check the backend's metallic channel")
+                                "or revise the concept so the material reads as non-metal")
     if len({tuple(item["dimensions"]) for item in maps.values()}) > 1:
         warnings.append("material map dimensions differ: " +
                         ", ".join(f"{key}={item['dimensions']}" for key, item in maps.items()))
