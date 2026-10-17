@@ -23,7 +23,7 @@ from ..provenance import generator_provenance, file_sha256
 from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
-from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
+from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
 from ..validation import is_placeholder_normal, measure_material_maps, summarize_validation, validate_image, validate_model_outputs
 
 
@@ -1162,8 +1162,13 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
-    with Image.open(paths["basecolor"]) as image:
-        Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
+    declared = asset.get("materials") or []
+    emissive_fraction = None
+    if any(item.get("class") == "emissive" for item in declared):
+        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"])
+    else:
+        with Image.open(paths["basecolor"]) as image:
+            Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
     paths["generator"].write_text(json.dumps(mesh_info, indent=2) + "\n")
     material_refs = _lineage_finish(context, "material_generation", number,
         [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1190,6 +1195,20 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     validation["warnings"] = [*validation.get("warnings", []), *maps["warnings"]]
     if maps["warnings"] and validation["status"] == "passed":
         validation["status"] = "passed_with_warnings"
+    metal = maps["maps"].get("metallic", {}).get("near_full_metal_fraction", 0)
+    if declared and not any(item.get("class") == "metal" for item in declared) and metal >= 0.5:
+        validation["errors"] = [*validation.get("errors", []),
+            f"metallic map is {metal:.0%} fully metallic but the brief declares no metal regions; "
+            "revise the concept so non-metal materials read as matte, or declare the metal region"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "material_mismatch"]
+        validation["status"] = "failed"
+    if emissive_fraction is not None:
+        validation.setdefault("measured", {})["emissive_fraction"] = round(emissive_fraction, 4)
+        if emissive_fraction == 0:
+            validation["warnings"] = [*validation.get("warnings", []),
+                "brief declares an emissive region but no near-white region was found in base color"]
+            if validation["status"] == "passed":
+                validation["status"] = "passed_with_warnings"
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1202,6 +1221,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "status": "candidate" if validation["status"] != "failed" else "failed",
             "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
             "normal_source": mesh_info.get("normal_source", "unknown"),
+            "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
             "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,

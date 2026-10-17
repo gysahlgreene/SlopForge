@@ -15,7 +15,7 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
-from .style import build_prompt, load_style
+from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
@@ -39,7 +39,9 @@ def parser():
     generate.add_argument("asset_type")
     generate.add_argument("name")
     generate.add_argument("description")
-    generate.add_argument("--image-prompt", help="Send this agent-authored prompt unchanged to the image workflow")
+    generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
+    generate.add_argument("--material", action="append", default=[], dest="materials",
+                          help="Declare a material region: 'region=nonmetal|metal|emissive[: description]' (repeatable)")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -829,7 +831,12 @@ def _run(args):
     recipe = types[asset_type]
     if args.count is not None and args.count < 1:
         raise ValueError("--count must be at least 1")
-    prompt_text = args.image_prompt or build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"))
+    materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
+    if args.image_prompt:
+        rules = reconstruction_rules(recipe, materials)
+        prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")
+    else:
+        prompt_text = build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"), materials)
     if args.dry_run:
         print(prompt_text)
         return 0
@@ -843,9 +850,13 @@ def _run(args):
             raise FileExistsError(f"Asset is already ready; pass --force to regenerate: {args.name}")
         record.update({"description": args.description, "style": style["name"],
                        "style_version": style["version"], "status": "generating"})
+        if materials:
+            record["materials"] = materials
     else:
         record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
         record["status"] = "generating"
+        if materials:
+            record["materials"] = materials
         manifest["assets"][key] = record
     save_manifest(manifest_path, manifest)
 

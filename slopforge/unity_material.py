@@ -4,7 +4,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
 
 
@@ -28,6 +28,27 @@ def make_metallic_gloss(metallic_path, roughness_path, destination):
     if metallic.size != roughness.size:
         raise ValueError("Metallic and roughness maps must have matching dimensions")
     Image.merge("RGBA", (metallic, metallic, metallic, ImageChops.invert(roughness))).save(destination)
+
+
+def derive_emission(basecolor_path, destination, color=(255, 178, 102)):
+    """Emission for declared glowing regions: image-to-3D bakes their glow into near-white base color.
+
+    Keeps large near-white, low-saturation regions; a morphological opening drops small white
+    surface flecks. Returns the emissive fraction of the map.
+    """
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGB")
+    r, g, b = base.split()
+    low = ImageChops.darker(ImageChops.darker(r, g), b)
+    high = ImageChops.lighter(ImageChops.lighter(r, g), b)
+    mask = ImageChops.multiply(low.point(lambda v: 255 if v >= 225 else 0),
+                               ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
+    size = max(3, round(15 * base.width / 2048) | 1)  # odd kernel, 15 px at 2048
+    mask = mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
+    fraction = sum(mask.histogram()[128:]) / (base.width * base.height)
+    soft = mask.filter(ImageFilter.GaussianBlur(max(1, size // 5)))
+    Image.composite(Image.new("RGB", base.size, color), Image.new("RGB", base.size), soft).save(destination)
+    return fraction
 
 
 def build_unity_material(project_root, fbx, material, maps):
