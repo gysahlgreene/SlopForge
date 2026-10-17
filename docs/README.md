@@ -37,6 +37,8 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 
 ## For contributors
 
+- [Session handoff](SESSION-HANDOFF.md): active worktree status, branch scope, and
+  exact instructions for resuming work in a new session. Read before any implementation.
 - [Product contract](PRODUCT_CONTRACT.md), [pipeline contract](PIPELINE_CONTRACT.md), [quality contract](QUALITY_CONTRACT.md), [roadmap](../ROADMAP.md), and [current state](../CURRENT_STATE.md)
 - [Architecture](ARCHITECTURE.md), [asset outputs](ASSET-OUTPUTS.md), and [agent integration](AGENT-INTEGRATION.md)
 - [Contributing and verification](../CONTRIBUTING.md)

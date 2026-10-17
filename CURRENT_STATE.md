@@ -30,6 +30,8 @@ was hardened in [PR #38](https://github.com/gysahlgreene/SlopForge/pull/38)
 (`f63239a`); [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28) is
 closed. The helper still has no production callers. M0 is not complete.
 
+The only open M0 issue is #26; packages 1–3 are closed.
+
 Contracts describe intended behavior. The inventory below separates recorded
 historical evidence, current implementation inspection, and checks performed during
 this documentation task. Code existence does not establish production readiness.
@@ -62,7 +64,7 @@ The guided workflow remains development work in the registered
 `feat/guided-character-to-unity` worktree, confirmed by `git worktree list` during
 this task. Preserve it; its existence is not integration or qualification evidence.
 
-## Character source geometry quality follow-up
+## Active character quality work (bounded parallel follow-up)
 
 On 2026-10-16, the Aster-9 geometry-only review confirmed that material maps do
 not supply the missing modeled suit forms, while existing topology totals do not
@@ -70,10 +72,12 @@ locate individual defects. Opened [issue #40](https://github.com/gysahlgreene/Sl
 related to [character pipeline issue #14](https://github.com/gysahlgreene/SlopForge/issues/14),
 with a proposed source-review and approval gate. The design and implementation
 plan are in `docs/superpowers/specs/2026-10-16-character-source-quality-design.md`
-and `docs/superpowers/plans/2026-10-16-character-source-quality.md` on the current
-local branch. This is planning only: no production code or Aster-9 assets were
-changed, no inference was submitted, and the work remains behind M0–M3. Awaiting
-review of the implementation plan and selection of its execution method.
+and `docs/superpowers/plans/2026-10-16-character-source-quality.md`.
+
+This is a separate user-directed bounded track, not a roadmap reordering.
+Do not change milestone order or claim qualification. See
+[SESSION-HANDOFF](docs/SESSION-HANDOFF.md) for branch status, dirty diff scope,
+and verified resumption instructions.
 
 ## Remaining gaps after Package 1
 

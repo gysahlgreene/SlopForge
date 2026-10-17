@@ -59,6 +59,12 @@ Core scope is production plumbing and review/recovery reliability. Props establi
 the first category quality claim. Do not close core with undefined acceptance gates
 or claim category qualification from a core smoke test.
 
+## Active character quality work (bounded parallel follow-up)
+
+User-directed follow-up to M0; does not reorder milestones or claim qualification.
+See [SESSION-HANDOFF](docs/SESSION-HANDOFF.md) for branch status, dirty diff scope,
+and resumption instructions.
+
 Early humanoid smoke tests are permitted only as bounded architectural checks when
 needed to test core boundaries (such as rig handoff or engine delivery). Record the
 question, scope, evidence, and stopping point. They do not reorder milestones,
