@@ -35,6 +35,15 @@ def validate_image(path, expected_format="PNG", require_alpha=False, max_bytes=5
     return {"status": "failed" if errors else "passed_with_warnings" if warnings else "passed", "checks": checks, "errors": errors, "warnings": warnings, "measured": measured}
 
 
+def is_placeholder_normal(path):
+    """True for a decodable 1x1 image, the neutral stand-in written when no real normal map exists."""
+    try:
+        with Image.open(path) as image:
+            return image.size == (1, 1)
+    except Exception:
+        return False  # undecodable maps are a separate validity failure
+
+
 def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None,
                            max_components=None, max_nonmanifold_edges=None,
                            max_boundary_edges=None):

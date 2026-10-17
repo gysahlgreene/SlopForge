@@ -260,6 +260,19 @@ class MeshPBRTests(unittest.TestCase):
                 self.assertEqual(image.size, (128, 128))
                 self.assertEqual(image.getpixel((0, 0)), (80, 160, 240))
 
+    def test_missing_workflow_normal_yields_detectable_placeholder(self):
+        from slopforge.validation import is_placeholder_normal
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outputs = {"save_" + key: {"images": [{"filename": key + ".png"}]}
+                       for key in ("basecolor", "roughness", "metallic")}
+            class Client:
+                def download_output(self, item, target):
+                    Image.new("RGB", (128, 128), "gray").save(target)
+            textures = copy_generated_maps(outputs, root, Client())
+            self.assertTrue(is_placeholder_normal(root / textures["normal"]))
+            self.assertFalse(is_placeholder_normal(root / textures["basecolor"]))
+
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

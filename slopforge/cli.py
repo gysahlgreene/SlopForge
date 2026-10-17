@@ -91,6 +91,8 @@ def parser():
     approve_texture.add_argument("name")
     approve_texture.add_argument("candidate", type=int)
     approve_texture.add_argument("--force", action="store_true")
+    approve_texture.add_argument("--allow-placeholder-normal", action="store_true",
+                                 help="waive the 1x1 placeholder normal-map check")
     inspect = sub.add_parser("inspect", help="Show manifest and validation details for an asset")
     inspect.add_argument("name")
     sub.add_parser("doctor", help="Diagnose local dependencies and the selected project")
@@ -798,7 +800,8 @@ def _run(args):
                 raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
         else:
             result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
-                                           asset_type=recipe)
+                                           asset_type=recipe,
+                                           allow_placeholder_normal=args.allow_placeholder_normal)
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0

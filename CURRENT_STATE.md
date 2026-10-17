@@ -221,3 +221,12 @@ review and passing checks.
 These results verify offline behavior only. Package 3 is merged. Live ComfyUI
 inference, Unity runtime, visual/material review, and asset or pipeline
 qualification were not performed. M0 remains incomplete.
+
+## Texture/material quality track (bounded; no qualification claim)
+
+Opened issues [#41](https://github.com/gysahlgreene/SlopForge/issues/41) (placeholder normal),
+[#42](https://github.com/gysahlgreene/SlopForge/issues/42) (pixel-level map inspection),
+[#43](https://github.com/gysahlgreene/SlopForge/issues/43) (blotch/variance diagnosis) and
+[#44](https://github.com/gysahlgreene/SlopForge/issues/44) (glass/emissive). Part of #41 is implemented:
+`approve-texture` rejects a 1×1 placeholder normal unless waived (`make verify`: 618 passed, 6 skipped).
+Not verified: a live candidate, whether a real normal bake improves appearance, and #42–#44.

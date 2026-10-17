@@ -187,3 +187,32 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                 self.assertEqual(saved_publication['status'], 'failed')
                 self.assertIn('backup restoration failed',
                               saved_publication['failure']['evidence']['rollback_failure'])
+
+
+class PlaceholderNormalGateTests(unittest.TestCase):
+    def _setup(self, root):
+        from PIL import Image
+        (root / "Assets").mkdir()
+        init_project(root)
+        config = load_project(root)
+        candidate = model.material_candidate_paths(root, config, "relic", 1)
+        outputs = {}
+        for name in ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss",
+                     "emission", "preview_front", "preview_side", "preview_rear", "preview_three_quarter"):
+            candidate[name].parent.mkdir(parents=True, exist_ok=True)
+            candidate[name].write_bytes(b"x")
+            outputs[name] = candidate[name].relative_to(root).as_posix()
+        Image.new("RGB", (1, 1), (0, 128, 128)).save(candidate["normal"])
+        (root / "retained.glb").write_bytes(b"glb")
+        asset = {"name": "relic", "status": "awaiting_texture_approval", "source": {"glb": "retained.glb"},
+                 "material_candidates": {"items": [{"number": 1, "status": "candidate", "outputs": outputs}]}}
+        return config, {"assets": {"prop:relic": asset}}
+
+    def test_placeholder_normal_blocks_approval_before_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, manifest = self._setup(root)
+            with patch("slopforge.pipelines.model.unity_cli"):
+                with self.assertRaisesRegex(ValueError, "placeholder normal"):
+                    model.approve_texture(root, config, manifest, "prop:relic", 1)
+            self.assertEqual(manifest["assets"]["prop:relic"].get("executions", []), [])

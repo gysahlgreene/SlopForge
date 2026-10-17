@@ -24,7 +24,7 @@ from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
-from ..validation import summarize_validation, validate_image, validate_model_outputs
+from ..validation import is_placeholder_normal, summarize_validation, validate_image, validate_model_outputs
 
 
 def _sha256(path):
@@ -1344,7 +1344,8 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     return results
 
 
-def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop"):
+def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop",
+                    allow_placeholder_normal=False):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
@@ -1377,6 +1378,11 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     missing = [str(path) for path in sources.values() if not path.is_file() or not path.stat().st_size]
     if missing:
         raise ValueError("Material candidate output missing or empty: " + missing[0])
+    if is_placeholder_normal(sources["normal"]) and not allow_placeholder_normal:
+        raise ValueError(f"Material candidate {number} has a placeholder normal map ({sources['normal']}); "
+                         "regenerate with a real normal map or pass --allow-placeholder-normal to waive")
+    if is_placeholder_normal(sources["normal"]):
+        candidate["placeholder_normal_waived"] = True
     mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
