@@ -375,6 +375,10 @@
       "roughness": [
         "maps",
         2
+      ],
+      "normal_map": [
+        "normal_bake",
+        0
       ]
     }
   },
@@ -463,6 +467,32 @@
         0
       ],
       "filename_prefix": "generated_models/conditioning"
+    }
+  },
+  "normal_bake": {
+    "class_type": "BakeNormalMapFromMesh",
+    "inputs": {
+      "low_poly": [
+        "smooth",
+        0
+      ],
+      "high_poly": [
+        "mesh",
+        0
+      ],
+      "resolution": 4096,
+      "cage_distance": 0.05,
+      "ignore_backfaces": true
+    }
+  },
+  "save_normal": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "normal_bake",
+        0
+      ],
+      "filename_prefix": "slopforge/mesh_pbr/save_normal"
     }
   }
 }

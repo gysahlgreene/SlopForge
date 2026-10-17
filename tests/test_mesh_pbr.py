@@ -287,6 +287,15 @@ class MeshPBRTests(unittest.TestCase):
             self.assertIn("single constant color", joined)
             self.assertIn("dimensions differ", joined)
 
+    def test_material_map_measurement_flags_near_fully_metallic_map(self):
+        from slopforge.validation import measure_material_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "metallic.png"
+            metal = Image.new("L", (64, 64), 255); metal.putpixel((0, 0), 0); metal.save(path)
+            result = measure_material_maps({"metallic": path})
+            self.assertGreater(result["maps"]["metallic"]["near_full_metal_fraction"], 0.99)
+            self.assertIn("fully metallic", " | ".join(result["warnings"]))
+
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

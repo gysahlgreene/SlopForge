@@ -64,6 +64,13 @@ def measure_material_maps(paths, near_black_level=8):
             warnings.append(f"{key} map is {near_black:.0%} near-black")
         if len(set(pixels)) == 1:
             warnings.append(f"{key} map is a single constant color")
+        if key == "metallic":
+            metal = sum(min(pixel) >= 230 for pixel in pixels) / len(pixels)
+            maps[key]["near_full_metal_fraction"] = round(metal, 4)
+            if metal >= 0.9:
+                # The H100 backend emitted metallic ~1 on stone (issue #43); confirm the asset is really metal.
+                warnings.append(f"metallic map is {metal:.0%} fully metallic; confirm the asset is metal "
+                                "or check the backend's metallic channel")
     if len({tuple(item["dimensions"]) for item in maps.values()}) > 1:
         warnings.append("material map dimensions differ: " +
                         ", ".join(f"{key}={item['dimensions']}" for key, item in maps.items()))
