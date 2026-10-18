@@ -82,12 +82,12 @@ def reconstruction_rules(asset_type, materials=()):
 def build_prompt(style, asset_type, description, mode="asset", materials=()):
     identity = style["identity"]
     palette = "\n".join(f"- {key}: {value.get('hex', '')} — {value.get('usage', '')}" for key, value in style["palette"].items())
-    materials = "\n".join(f"- {key}: {value.get('description', '')}" for key, value in style["materials"].items())
+    style_materials = "\n".join(f"- {key}: {value.get('description', '')}" for key, value in style["materials"].items())
     if mode == "material":
         rules = style["material_generation"].get("rules", [])
         requirements = asset_type.get("requirements", []) if asset_type.get("pipeline") != "model" else []
         avoid = asset_type.get("avoid", []) if asset_type.get("pipeline") != "model" else []
-        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
+        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{style_materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
     rules = list(asset_type.get("requirements", []))
     avoid = asset_type.get("avoid", [])
     project_rules = style["asset_rules"].get(asset_type["name"], [])
@@ -95,5 +95,5 @@ def build_prompt(style, asset_type, description, mode="asset", materials=()):
         project_rules = style["asset_rules"].get("model", [])
     lighting = _bullets([f"{key}: {value}" for key, value in style["lighting"].items()])
     composition = _bullets([f"{key}: {value}" for key, value in style.get("composition", {}).items()])
-    return f"PROJECT ART DIRECTION: {style['name']}\nSTYLE VERSION: {style['version']}\nGENRE: {identity.get('genre', '')}\nRENDERING: {identity.get('rendering', '')}\nDETAIL LEVEL: {identity.get('detail_level', '')}\nMOOD:\n{_bullets(identity.get('mood', []))}\nSHAPE LANGUAGE:\n{_bullets(style['shape_language'].get('preferred', []))}\nAVOID:\n{_bullets(style['shape_language'].get('avoid', []))}\nPALETTE:\n{palette}\nMATERIALS:\n{materials}\nSURFACE LANGUAGE:\n{_bullets(style['surface_language'].get('preferred', []))}\nSURFACE AVOID:\n{_bullets(style['surface_language'].get('avoid', []))}\nLIGHTING:\n{lighting}\nCOMPOSITION:\n{composition}\nASSET TYPE REQUIREMENTS:\n{_bullets(rules)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nSTYLE-SPECIFIC ASSET RULES:\n{_bullets(project_rules)}\nREQUESTED ASSET:\n{description}" + (
+    return f"PROJECT ART DIRECTION: {style['name']}\nSTYLE VERSION: {style['version']}\nGENRE: {identity.get('genre', '')}\nRENDERING: {identity.get('rendering', '')}\nDETAIL LEVEL: {identity.get('detail_level', '')}\nMOOD:\n{_bullets(identity.get('mood', []))}\nSHAPE LANGUAGE:\n{_bullets(style['shape_language'].get('preferred', []))}\nAVOID:\n{_bullets(style['shape_language'].get('avoid', []))}\nPALETTE:\n{palette}\nMATERIALS:\n{style_materials}\nSURFACE LANGUAGE:\n{_bullets(style['surface_language'].get('preferred', []))}\nSURFACE AVOID:\n{_bullets(style['surface_language'].get('avoid', []))}\nLIGHTING:\n{lighting}\nCOMPOSITION:\n{composition}\nASSET TYPE REQUIREMENTS:\n{_bullets(rules)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nSTYLE-SPECIFIC ASSET RULES:\n{_bullets(project_rules)}\nREQUESTED ASSET:\n{description}" + (
         "\n" + reconstruction_rules(asset_type, materials) if asset_type["pipeline"] == "model" else "")

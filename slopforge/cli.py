@@ -832,6 +832,8 @@ def _run(args):
     if args.count is not None and args.count < 1:
         raise ValueError("--count must be at least 1")
     materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
+    if materials and recipe["pipeline"] != "model":
+        raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
     if args.image_prompt:
         rules = reconstruction_rules(recipe, materials)
         prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")

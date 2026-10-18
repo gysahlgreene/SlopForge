@@ -479,5 +479,18 @@ class DeclaredMaterialTests(unittest.TestCase):
         self.assertIn("- body: weathered granite; matte non-metallic surface", rules)
         self.assertIn("- windows: shown switched off as an opaque solid surface", rules)
         self.assertEqual(reconstruction_rules({"pipeline": "image"}, materials), "")
+        from slopforge.config import load_project
+        from slopforge.initializer import init_project
+        from slopforge.style import build_prompt, load_style
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            style = load_style(root, load_project(root))
+            style["materials"] = {"stone": {"description": "weathered"}}  # non-empty style materials
+            prompt = build_prompt(style, load_taxonomy(root)["prop"], "lantern", "asset", materials)
+            self.assertIn("- body: weathered granite; matte non-metallic surface", prompt)
+            self.assertIn("- stone: weathered", prompt)
         with self.assertRaisesRegex(ValueError, "--material must be"):
             parse_material_spec("body=plastic")

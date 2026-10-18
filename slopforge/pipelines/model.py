@@ -1406,10 +1406,10 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     missing = [str(path) for path in sources.values() if not path.is_file() or not path.stat().st_size]
     if missing:
         raise ValueError("Material candidate output missing or empty: " + missing[0])
-    if is_placeholder_normal(sources["normal"]) and not allow_placeholder_normal:
-        raise ValueError(f"Material candidate {number} has a placeholder normal map ({sources['normal']}); "
-                         "regenerate with a real normal map or pass --allow-placeholder-normal to waive")
     if is_placeholder_normal(sources["normal"]):
+        if not allow_placeholder_normal:
+            raise ValueError(f"Material candidate {number} has a placeholder normal map ({sources['normal']}); "
+                             "regenerate with a real normal map or pass --allow-placeholder-normal to waive")
         candidate["placeholder_normal_waived"] = True
     mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
