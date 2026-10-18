@@ -84,6 +84,10 @@ def reconstruction_rules(asset_type, materials=()):
              "- Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
              "- Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
              "- Solid chunky forms with thick walls; no thin hollow tubes, open rings, wires, or paper-thin parts"]
+    if asset_type.get("prompt_mode") == "character":
+        # Hands touching the thighs reconstruct as fused geometry that tears when the arm moves.
+        lines.append("- Arms held 30 to 45 degrees from the body with a clear gap between each hand and the hips "
+                     "and thighs; fingers together, hands not touching the body or clothing")
     if materials:
         lines.append("MATERIAL REGIONS:")
         lines.extend(f"- {item['region']}: {item['description'] + '; ' if item['description'] else ''}"

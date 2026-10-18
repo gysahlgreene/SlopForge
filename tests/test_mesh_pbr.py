@@ -495,6 +495,9 @@ class DeclaredMaterialTests(unittest.TestCase):
         self.assertIn("- body: weathered granite; matte non-metallic surface", rules)
         self.assertIn("- windows: shown switched off as an opaque solid surface", rules)
         self.assertEqual(reconstruction_rules({"pipeline": "image"}, materials), "")
+        self.assertIn("clear gap between each hand and the hips",
+                      reconstruction_rules({"pipeline": "model", "prompt_mode": "character"}))
+        self.assertNotIn("clear gap", reconstruction_rules({"pipeline": "model"}))
         from slopforge.config import load_project
         from slopforge.initializer import init_project
         from slopforge.style import build_prompt, load_style
