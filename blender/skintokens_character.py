@@ -104,6 +104,22 @@ def semantic_bones(rig):
                         side + "_thigh": thigh.name, side + "_shin": shin.name})
     if len(set(mapping.values())) != len(mapping):
         raise ValueError("Semantic bones overlap")
+    # Sides above assume the character faces +Y. Read the real facing from heel-to-toe direction:
+    # generated characters face -Y, which puts their left side on +X.
+    forward = Vector((0.0, 0.0, 0.0))
+    for side in ("left", "right"):
+        feet = list(rig.data.bones[mapping[side + "_shin"]].children)
+        if len(feet) == 1:
+            forward += feet[0].tail_local - feet[0].head_local
+            for toe in feet[0].children:
+                forward += toe.tail_local - toe.head_local
+    forward.z = 0.0
+    if forward.length > height * 0.01:
+        left_direction = Vector((0.0, 0.0, 1.0)).cross(forward)
+        left_bone = rig.data.bones[mapping["left_thigh"]]
+        if (left_bone.head_local.x - hips.head_local.x) * left_direction.x < 0:
+            mapping = {(("right" + key[4:]) if key.startswith("left") else ("left" + key[5:]) if key.startswith("right")
+                        else key): value for key, value in mapping.items()}
     return mapping
 
 
@@ -271,7 +287,9 @@ def pose(rig, mapping, name):
         for semantic in ("left_upper_arm", "right_upper_arm"):
             bone = rig.pose.bones[mapping[semantic]]
             bpy.context.view_layer.update()
-            direction = (rig.matrix_world.to_3x3() @ (bone.tail - bone.head)).normalized()
+            # glTF/FBX do not store bone tails; aim at the elbow (forearm head), not the guessed tail.
+            elbow = rig.pose.bones[mapping[semantic.replace("upper_arm", "forearm")]].head
+            direction = (rig.matrix_world.to_3x3() @ (elbow - bone.head)).normalized()
             level = Vector((direction.x, direction.y, 0.0)).normalized()
             world_swing = direction.rotation_difference(level)
             armature_axis = rig.matrix_world.to_3x3().inverted() @ world_swing.axis
