@@ -53,7 +53,7 @@ def remove_isolated_single_faces(mesh):
     return len(remove_indices)
 
 
-def repair_manifold_locally(mesh, merge_distance, rounds=6):
+def repair_manifold_locally(mesh, merge_distance, rounds=10):
     """Close holes and remove non-manifold spots without remeshing the whole surface.
 
     A full voxel remesh makes a watertight mesh but melts modelled detail (pockets, folds, faces)
@@ -85,10 +85,32 @@ def repair_manifold_locally(mesh, merge_distance, rounds=6):
             try:
                 if len(loop) <= 4 and len(vertices) == len(loop):
                     bm.faces.new(list(vertices))
-                else:
-                    bmesh.ops.triangle_fill(bm, edges=list(loop), use_beauty=True, use_dissolve=False)
+                elif not bmesh.ops.triangle_fill(bm, edges=list(loop), use_beauty=True, use_dissolve=False)["geom"]:
+                    fan_fill(loop)
             except ValueError:
                 pass  # face exists already or the loop is degenerate; the next round removes it
+
+    def fan_fill(loop):
+        """Close a boundary loop with a centre vertex; works for non-planar loops triangle_fill rejects."""
+        ordered, edges = [], set(loop)
+        start = next(iter(edges))
+        current, previous = start.verts[0], None
+        while True:
+            ordered.append(current)
+            step = next((edge for edge in current.link_edges if edge in edges and edge is not previous), None)
+            if step is None:
+                return
+            previous, current = step, step.other_vert(current)
+            if current is ordered[0]:
+                break
+            if len(ordered) > len(edges):
+                return  # not a simple cycle (pinched); a later round opens it wider
+        centre = bm.verts.new(sum((vertex.co for vertex in ordered), ordered[0].co * 0) / len(ordered))
+        for a, b in zip(ordered, ordered[1:] + ordered[:1]):
+            try:
+                bm.faces.new((a, b, centre))
+            except ValueError:
+                pass
 
     previous = None
     for round_index in range(rounds):

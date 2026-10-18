@@ -80,7 +80,15 @@ With `blender_rigify` selected, `slopforge character rig <name> [--source-output
 4. **Clean-up.** Weights are capped to the influence limit and remapped to body deform bones. Forearm and hand weight is kept only on vertices connected to the arm along the surface within a limb radius, so clothing beside a hanging hand does not follow it. Faces that fuse a hand or forearm to the thigh, pelvis or spine (common where A-pose hands touch the body) are deleted and counted in the report.
 5. **Evidence.** It renders six review poses from a three-quarter view with key, fill and rim light (rest, raised arms, crouch, forward leg lift, forward elbow bend, shoulder rotation), measures vertex displacement and exports an FBX with deform bones only. The report maps Unity Humanoid bones to those exported `DEF-` bones.
 
-Rig and pose artifacts are registered as pending review; the command never approves them. `blender/render_turntable.py <rig.blend> <frames> --walk` renders a lit in-place walk test cycle on the FK controls for reviewing deformation in motion; it is a test cycle, not production animation.
+Rig and pose artifacts are registered as pending review; the command never approves them.
+
+### Mesh preparation for characters
+
+Character asset types require a closed (manifold) mesh. Raw image-to-3D characters are open, multi-shell surfaces, so mesh preparation runs `--local-repair`: it deletes components hidden inside the body (inner duplicate shells), then removes only the faces around non-manifold edges and pinched vertices and refills every hole, widening the area around holes that will not close. The rest of the surface is untouched. A full voxel remesh is used only if local repair fails, because it melts faces, pockets and folds into clay.
+
+### Motion-capture preview
+
+`blender/retarget_mocap.py` retargets a BVH or FBX clip onto the rig's `DEF-` skeleton (the bones exported to Unity). Mocap rest poses (usually T-pose) differ from generated A-pose characters, so each target bone is first aligned to its source bone's rest direction and then follows the source bone's world-space rotation from rest; the clip is turned to face the character, scaled to its hip height, optionally kept in place, and one gait cycle (left foot plant to plant) is recorded for looping. Hands follow the forearms because mocap wrist data is noisy. `blender/render_turntable.py <walk.blend> <frames> --animate` plays that cycle at capture speed on a lit turntable with the lowest foot planted. For walk previews the [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu/) clip 08_01 works well; CMU states the data is free for all uses and may be included in commercial products but not resold directly. Clips are downloaded into the ignored `private/` directory, not committed.
 
 The provider uses the installed Blender executable and its bundled code; no extra Python package or model weights are installed. The provider reports Blender/Rigify version and GPL-2.0-or-later provenance. Review the installed Blender distribution's notices for the exact bundled add-on terms.
 
