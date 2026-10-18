@@ -253,8 +253,11 @@ def render_previews(obj, output_dir, prefix):
         light.data.size = size
         light.rotation_euler = (target - light.location).to_track_quat("-Z", "Y").to_euler()
 
-    views = {"front": Vector((0, -3, 0)), "side": Vector((3, 0, 0)), "rear": Vector((0, 3, 0)),
-             "three_quarter": Vector((2, -2, 0))}
+    extent = bounds_max - bounds_min
+    # Flat props (keys, coins, lying weapons) are unreadable edge-on; look down at them instead.
+    elevation = 2.5 if extent.z < 0.35 * max(extent.x, extent.y) else 0
+    views = {"front": Vector((0, -3, elevation)), "side": Vector((3, 0, elevation)), "rear": Vector((0, 3, elevation)),
+             "three_quarter": Vector((2, -2, elevation))}
     for name, direction in views.items():
         camera.location = target + direction
         camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()

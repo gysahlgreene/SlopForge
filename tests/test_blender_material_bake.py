@@ -251,3 +251,33 @@ bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
             measured = json.loads(result.read_text())["measured"]
             self.assertAlmostEqual(measured["uv_area_sum"], 2.0, places=4)
             self.assertAlmostEqual(measured["uv_loop_outside_unit_fraction"], 0.5)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderFlatPreviewTests(unittest.TestCase):
+    def test_flat_prop_previews_look_down_instead_of_edge_on(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, fbx, blend, previews = root / "slab.glb", root / "slab.fbx", root / "slab.blend", root / "previews"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path, color in zip(maps, ((200, 160, 60), (128, 128, 255), (128, 128, 128), (0, 0, 0), (0, 0, 0))):
+                Image.new("RGB", (64, 64), color).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.05))
+bpy.context.object.scale = (1, 0.6, 0.1)
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(fbx), str(blend), *map(str, maps), "--face-budget", "1000",
+                            "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                           check=True, capture_output=True, text=True)
+            front = Image.open(previews / "slab_front.png").convert("RGB")
+            background = front.getpixel((0, 0))
+            pixels = list(zip(*[iter(front.tobytes())] * 3))
+            foreground = sum(max(abs(a - b) for a, b in zip(pixel, background)) > 24 for pixel in pixels)
+            self.assertGreater(foreground / len(pixels), 0.2)

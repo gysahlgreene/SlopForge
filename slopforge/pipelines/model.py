@@ -1191,6 +1191,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
+    if any(item.get("class") == "metal" for item in declared):  # the brief explains a metallic map
+        maps["warnings"] = [item for item in maps["warnings"] if not item.startswith("metallic map is")]
     validation.setdefault("measured", {})["material_maps"] = maps["maps"]
     validation["warnings"] = [*validation.get("warnings", []), *maps["warnings"]]
     if maps["warnings"] and validation["status"] == "passed":

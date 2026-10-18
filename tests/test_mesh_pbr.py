@@ -449,6 +449,13 @@ class DeclaredMaterialTests(unittest.TestCase):
             self.assertIn("material_mismatch", candidate["validation"]["failure_codes"])
             self.assertEqual(candidate["failure"]["category"], "processing_validation")
 
+    def test_declared_metal_brief_accepts_full_metal_map_without_warning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = self._candidate(Path(temporary), [{"region": "key", "class": "metal", "description": "brass"}],
+                                        255, Image.new("RGB", (64, 64), (180, 140, 60)))
+            self.assertEqual(candidate["status"], "candidate")
+            self.assertFalse([item for item in candidate["validation"]["warnings"] if "metallic" in item])
+
     def test_declared_emissive_region_derives_emission_from_white_panels_not_flecks(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
