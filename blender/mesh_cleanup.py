@@ -117,3 +117,64 @@ def repair_manifold_locally(mesh, merge_distance, rounds=6):
     bm.free()
     mesh.update()
     return remaining
+
+
+def remove_enclosed_components(mesh, merge_distance, sample=200, inside_share=0.8):
+    """Delete components that lie inside the largest component (hidden inner shells).
+
+    Image-to-3D meshes often contain an inner duplicate of the body just under the visible
+    surface. It is invisible, doubles the face count and, rigged, pokes through when the body
+    bends. A component counts as enclosed when most of its sampled vertices are inside the main
+    surface by ray-cast parity. Returns the number of vertices removed.
+    """
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=merge_distance)
+    bm.verts.ensure_lookup_table()
+    seen, components = set(), []
+    for vertex in bm.verts:
+        if vertex.index in seen:
+            continue
+        stack, members = [vertex], []
+        seen.add(vertex.index)
+        while stack:
+            current = stack.pop()
+            members.append(current)
+            for edge in current.link_edges:
+                other = edge.other_vert(current)
+                if other.index not in seen:
+                    seen.add(other.index)
+                    stack.append(other)
+        components.append(members)
+    if len(components) < 2:
+        bm.free()
+        return 0
+    components.sort(key=len, reverse=True)
+    main_faces = {face for vertex in components[0] for face in vertex.link_faces}
+    tree = BVHTree.FromPolygons([vertex.co.copy() for vertex in bm.verts],
+                                [[v.index for v in face.verts] for face in main_faces])
+    direction = Vector((0.0, 0.0, 1.0))
+
+    def inside(point):
+        hits, origin = 0, point.copy()
+        while True:
+            location, _, _, _ = tree.ray_cast(origin, direction)
+            if location is None:
+                return hits % 2 == 1
+            hits += 1
+            origin = location + direction * 1e-6
+
+    doomed = []
+    for members in components[1:]:
+        step = max(1, len(members) // sample)
+        probes = members[::step]
+        if sum(inside(vertex.co) for vertex in probes) >= inside_share * len(probes):
+            doomed.extend(members)
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    return len(doomed)

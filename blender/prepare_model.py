@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mesh_cleanup import remove_isolated_single_faces, repair_manifold_locally
+from mesh_cleanup import remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally
 from inspect_model import topology_edge_counts
 
 
@@ -401,6 +401,10 @@ if mesh_only:
         detail_source.data = obj.data.copy()
         bpy.context.collection.objects.link(detail_source)
         detail_source.select_set(False)
+    if "--local-repair" in sys.argv:
+        removed = remove_enclosed_components(obj.data, max(maximum - minimum) * 1e-5)
+        if removed:
+            print(f"Removed enclosed inner-shell vertices: {removed}")
     boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
     # A voxel remesh needs closed volumes; it erases thin open parts (planks, handles, lattices).
     # Workflows that already ran a UDF remesh on the GPU pass --no-voxel-repair.

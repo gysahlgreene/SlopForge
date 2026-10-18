@@ -21,12 +21,12 @@ import bpy
 from mathutils import Matrix, Vector
 
 
+# Hands follow the forearms: CMU wrist data is noisy and turned palms outward on retargeted characters.
 CMU_TO_RIGIFY = {
     "Hips": "DEF-spine", "LowerBack": "DEF-spine.001", "Spine": "DEF-spine.002", "Spine1": "DEF-spine.003",
     "Neck": "DEF-spine.004", "Neck1": "DEF-spine.005", "Head": "DEF-spine.006",
     "LeftShoulder": "DEF-shoulder.L", "LeftArm": "DEF-upper_arm.L", "LeftForeArm": "DEF-forearm.L",
-    "LeftHand": "DEF-hand.L", "RightShoulder": "DEF-shoulder.R", "RightArm": "DEF-upper_arm.R",
-    "RightForeArm": "DEF-forearm.R", "RightHand": "DEF-hand.R",
+    "RightShoulder": "DEF-shoulder.R", "RightArm": "DEF-upper_arm.R", "RightForeArm": "DEF-forearm.R",
     "LeftUpLeg": "DEF-thigh.L", "LeftLeg": "DEF-shin.L", "LeftFoot": "DEF-foot.L", "LeftToeBase": "DEF-toe.L",
     "RightUpLeg": "DEF-thigh.R", "RightLeg": "DEF-shin.R", "RightFoot": "DEF-foot.R", "RightToeBase": "DEF-toe.R",
 }

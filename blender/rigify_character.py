@@ -371,6 +371,17 @@ def cap_influences(mesh, rig, limit, torso_slices=(), slice_half=0.0):
                     arm_reach.add(other)
                     stack.append(other)
 
+    # Loose pieces (pouches, buckles) whose centre is not on the arm never take arm weight; the proxy
+    # can fuse a belt pouch with the hand hanging beside it, and the pouch then swings with the arm.
+    loose_off_arm = set()
+    if limb_radius > 0:
+        for root, vertices in components.items():
+            if root == largest:
+                continue
+            centre = sum((mesh.matrix_world @ vertex.co for vertex in vertices), Vector()) / len(vertices)
+            if min(distance_to(centre, segment) for segment in chain.values()) > limb_radius:
+                loose_off_arm.update(vertex.index for vertex in vertices)
+
     def in_torso(point):
         # Below the armpit, the landmark pass measured the torso's width per slice; vertices inside
         # it are body or clothing, never arm, even when the voxel proxy fused them with a hand.
@@ -391,6 +402,9 @@ def cap_influences(mesh, rig, limit, torso_slices=(), slice_half=0.0):
             if limb_radius > 0:
                 aggregated = {name: weight for name, weight in aggregated.items()
                               if name not in limb_segments or (vertex.index in arm_reach and not outside_limb(point, name))}
+            if vertex.index in loose_off_arm:
+                aggregated = {name: weight for name, weight in aggregated.items()
+                              if not name.startswith(("DEF-upper_arm.", "DEF-forearm.", "DEF-hand."))}
             if in_torso(point):
                 aggregated = {name: weight for name, weight in aggregated.items()
                               if not name.startswith(("DEF-upper_arm.", "DEF-forearm.", "DEF-hand."))}
@@ -403,9 +417,41 @@ def cap_influences(mesh, rig, limit, torso_slices=(), slice_half=0.0):
         for name, weight in kept:
             groups[name].add([vertex.index], weight / total, "REPLACE")
         maximum = max(maximum, len(vertex.groups))
+    # Loose pieces (pockets, buckles, glove fragments) ride rigidly on the nearest main-body point: each
+    # takes that point's final weights. Proxy weights alone left fragments hanging in the air.
+    from mathutils.kdtree import KDTree
+    arm_names = ("DEF-upper_arm.", "DEF-forearm.", "DEF-hand.")
+    main = [vertex for vertex in components[largest]]
+
+    def dominant(vertex):
+        best = max(vertex.groups, key=lambda item: item.weight, default=None)
+        return mesh.vertex_groups[best.group].name if best else ""
+
+    trees = {}
+    for key, members in (("all", main), ("off_arm", [v for v in main if not dominant(v).startswith(arm_names)])):
+        tree = KDTree(len(members))
+        for index, vertex in enumerate(members):
+            tree.insert(mesh.matrix_world @ vertex.co, index)
+        tree.balance()
+        trees[key] = (tree, members)
+    attached = 0
+    for root, vertices in components.items():
+        if root == largest or len(vertices) > 0.05 * len(main):
+            continue  # large pieces keep their proxy weights; only small ones ride rigidly
+        centre = sum((mesh.matrix_world @ vertex.co for vertex in vertices), Vector()) / len(vertices)
+        tree, members = trees["off_arm" if vertices[0].index in loose_off_arm else "all"]
+        _, index, _ = tree.find(centre)
+        anchor = [(mesh.vertex_groups[item.group].name, item.weight) for item in members[index].groups]
+        for vertex in vertices:
+            for item in list(vertex.groups):
+                mesh.vertex_groups[item.group].remove([vertex.index])
+            for name, weight in anchor:
+                groups[name].add([vertex.index], weight, "REPLACE")
+        attached += 1
     # Proxy bone heat now solves arm weights; the former arm-envelope override dragged hip and
     # tunic vertices near hanging A-pose hands along with the forearms.
-    return maximum, {"strategy": "proxy bone-heat weights capped and remapped to body deform bones; nearest core bone on disconnected islands",
+    return maximum, {"strategy": "proxy bone-heat weights capped and remapped to body deform bones; loose pieces copy the nearest main-body vertex weights",
+                     "loose_pieces_attached": attached,
                      "disconnected_islands": component_report}
 
 
