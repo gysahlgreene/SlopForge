@@ -8,55 +8,73 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
 
-## See it working
+## What it makes
 
-| Humanoid test 1 | Prop test 2 |
-| :---: | :---: |
-| ![Humanoid test 1 walking in Unity](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif) | ![Prop test 2 imported into Unity](img/power-relay-unity.png) |
-| **Humanoid test 1** — valid Unity Humanoid Avatar with a looping walk preview. Movement is demonstrated; arm deformation remains under review. [Evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) | **Prop test 2** — mesh, materials, and Unity import demonstrated. Reconstruction defects remain visible. [Example commands →](docs/EXAMPLES.md) |
+| Asset type | Status | Evidence |
+| --- | --- | --- |
+| [Props](#props) — pickups, furniture, containers, devices | Working end to end; owner-rated about 60% of target quality | Five varied-material props as lit turntables |
+| [Characters](#characters) — rigged humanoids | Rig, Unity Humanoid Avatar and walk playback demonstrated on one character | Unity walk cycle; deformation still under review |
+| [Environments](#environments) — modular kits | Recipe and modular checks implemented | No reviewed visual evidence yet |
+| Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
-These are measured examples. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
+Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
-The Unity preview uses the latest arm-fit candidate and a retargeted walk clip. Unity measured movement on all 49,886 imported vertices; this confirms playback, not deformation quality. [Idle screenshot](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Idle-GameView.png) · [Walk pose](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Side.png) · [Evidence and limits](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md).
-
-## Materials and textures
+## Props
 
 | Brass key | Glazed jug | Supply crate | Power relay | Stone lantern |
 | :---: | :---: | :---: | :---: | :---: |
 | ![Brass key turntable](docs/media/material-showcase-2026-10/brass_key_turntable.gif) | ![Glazed jug turntable](docs/media/material-showcase-2026-10/ceramic_jug_turntable.gif) | ![Supply crate turntable](docs/media/material-showcase-2026-10/supply_crate_turntable.gif) | ![Power relay turntable](docs/media/material-showcase-2026-10/power_relay_v2_turntable.gif) | ![Stone lantern turntable](docs/media/material-showcase-2026-10/stone_lantern_v3_turntable.gif) |
 | metal | glossy non-metal | wood + iron | ceramic + copper + graphite | granite + paper + wood |
 
-Every 3D prop gets mesh-aware PBR materials generated with its geometry: base color,
-roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an
-emission map, all at 4096² on the H100 final profile. The brief says what each region is
-made of; SlopForge writes that into the concept prompt and checks the generated maps against
-it before review.
-
-![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
+Each prop was generated from a written brief through `generate` → `approve` on an H100, with no manual repair, and rendered as a lit turntable in Blender. One run each; not yet visually approved or imported into Unity. [Showcase evidence, before/after and limits →](docs/media/material-showcase-2026-10/README.md)
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern "Weathered stone lantern" \
-  --image-prompt "A squat carved stone lantern: upturned ribbed roof, square light box with opaque off-white rice-paper panels behind a dark wooden lattice, chunky square base; rough matte speckled granite; complete three-quarter view on a plain light-grey background." \
-  --material "stone body=nonmetal: rough matte speckled granite" \
-  --material "paper panels=emissive: opaque off-white rice paper" \
-  --material "lattice=nonmetal: dark stained wood"
+  --image-prompt "Squat carved stone lantern, ribbed roof, opaque paper window panels behind a wooden lattice, chunky base; matte speckled granite; complete three-quarter view on a plain neutral background." \
+  --material "body=nonmetal: matte granite" --material "panels=emissive: off-white paper" \
+  --material "lattice=nonmetal: dark wood"
+slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
+slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1
+slopforge --project ~/UnityProjects/MyGame approve-texture stone_lantern 1
 ```
 
-- **Material regions:** declare `nonmetal`, `metal` or `emissive[#rrggbb]` per region. A candidate whose metallic map contradicts an all-non-metal brief fails before review.
-- **Reconstruction-ready concepts:** even lighting, matte non-metals, thick parts, and glowing parts drawn unlit so they reconstruct as solid surfaces.
-- **Clean geometry:** raw shapes are remeshed on the GPU and baked against the full-detail mesh, so thin planks, handles and lattices survive.
+Inspect the concept, mesh views, materials, and validation report before each approval. [More prop examples →](docs/EXAMPLES.md)
+
+## Characters
+
+| Rigged humanoid walking in Unity |
+| :---: |
+| ![Humanoid test 1 walking in Unity](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif) |
+
+Humanoid test 1 has a valid Unity Humanoid Avatar and plays a retargeted walk clip; Unity measured movement on all 49,886 imported vertices. This confirms playback, not deformation quality: arm deformation and source topology remain under review. [Evidence and limits →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [Diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)
+
+Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
+
+## Environments
+
+The `starter_environment_kit` recipe composes modular floors, walls, corners, ceilings, doorways, columns, pipes, terminals and crates from the same 3D pipeline, and `environment-check` measures grid fit, pivots and transforms. Reviewed visual and Unity evidence for a kit is still to come. [Environment kits →](docs/ENVIRONMENT-KITS.md)
+
+## Materials and textures
+
+![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
+
+Every 3D asset gets mesh-aware PBR materials generated with its geometry: base color, roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an emission map, at 4096² on the H100 final profile.
+
+- **Material regions:** the brief declares `nonmetal`, `metal` or `emissive[#rrggbb]` per region. A candidate whose metallic map contradicts an all-non-metal brief fails before review.
+- **Reconstruction-ready concepts:** every 3D concept prompt asks for even lighting, matte non-metals, thick parts, and glowing parts drawn unlit so they reconstruct as solid surfaces.
+- **Clean geometry:** raw shapes are remeshed on the GPU and normals are baked against the full-detail mesh, so thin planks, handles and lattices survive.
 - **Checks:** placeholder normal maps cannot be approved; map statistics, UV coverage and topology are recorded with every candidate.
 
-These five are generation evidence from one run each, with no manual repair, rendered as lit turntables in Blender. The project owner rates them about 60% of the target prop quality; they have not been visually approved or imported into Unity. [How materials are made →](docs/MATERIALS.md) · [Showcase evidence and limits →](docs/media/material-showcase-2026-10/README.md)
+[How materials are made →](docs/MATERIALS.md)
 
-## The workflow
+## How it works
 
 ```mermaid
 flowchart LR
-    Brief[Brief + style] --> Concept[Concept candidates]
+    Brief[Brief + style + materials] --> Concept[Concept candidates]
     Concept --> Review[Human selection]
     Review --> Mesh[3D generation + checks]
-    Mesh --> Materials[Material review]
+    Mesh --> Materials[PBR materials + review]
     Materials --> Unity[Unity delivery]
     Mesh --> Rig[Character rigging]
     Rig --> Motion[Deformation review]
@@ -64,7 +82,7 @@ flowchart LR
 ```
 
 - **Generate:** props, collectibles, architecture, and humanoid character candidates using configurable ComfyUI workflows.
-- **Prepare:** inspect geometry, preserve sources, process meshes and PBR maps, and render review views in Blender.
+- **Prepare:** inspect geometry, preserve sources, process meshes and PBR maps, and render review views and turntables in Blender.
 - **Review:** compare candidates, approve explicitly, and retain failed attempts and processing evidence.
 - **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
 - **Deliver:** export models/materials and prepare character animation tooling for Unity.
@@ -83,22 +101,7 @@ slopforge init ~/UnityProjects/MyGame
 slopforge --project ~/UnityProjects/MyGame doctor
 ```
 
-[Installation](docs/INSTALL.md) covers dependencies. [ComfyUI configuration](docs/COMFYUI.md) covers local/remote inference and model/workflow compatibility.
-
-### Generate a prop
-
-```sh
-slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern \
-  "Weathered stone lantern for a fantasy ruin" \
-  --image-prompt "Squat carved stone lantern, broad square cap, opaque paper window panels, chunky base; matte granite; complete three-quarter view, isolated on a plain neutral background." \
-  --material "body=nonmetal: matte granite" --material "panels=emissive: off-white paper"
-slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
-slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1
-slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
-slopforge --project ~/UnityProjects/MyGame approve-texture stone_lantern 1
-```
-
-Inspect the concept, mesh views, materials, and validation report before each approval. For characters, continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
+[Installation](docs/INSTALL.md) covers dependencies. [ComfyUI configuration](docs/COMFYUI.md) covers local/remote inference and model/workflow compatibility. Then follow the [props](#props) or [characters](#characters) example above.
 
 ## What is qualified today?
 
@@ -120,7 +123,7 @@ Contributors: read [AGENTS.md](AGENTS.md), the [product contract](docs/PRODUCT_C
 | Directory | Purpose |
 | --- | --- |
 | `slopforge/` | CLI, asset lifecycle, recipes, providers, and Unity integration |
-| `blender/` · `processing/` | Background mesh, rigging, and image helpers |
+| `blender/` · `processing/` | Background mesh, rigging, turntable and image helpers |
 | `workflows/` · `templates/` | ComfyUI graphs, requirement declarations, and project defaults |
 | `tests/` | Offline checks and opt-in Blender, Unity, and GPU integrations |
 | `docs/` | User guides, contributor notes, and selected qualification examples |
