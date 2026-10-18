@@ -47,7 +47,10 @@ def _bullets(values):
 MATERIAL_CLASSES = {
     "nonmetal": "matte non-metallic surface; no mirror-like reflections or polished highlights",
     "metal": "metallic surface with visible metal sheen",
-    "emissive": "glows from within with soft even light; evenly lit, not a reflection",
+    # Image-to-3D reads glowing or translucent regions as empty space (issue #44), so concepts show
+    # emissive regions switched off; the material stage adds the glow from this declaration.
+    "emissive": ("shown switched off as an opaque solid surface in its natural pale colour, not glowing "
+                 "and not see-through; its glow is added later in the material stage"),
 }
 
 

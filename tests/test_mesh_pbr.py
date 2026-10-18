@@ -470,7 +470,7 @@ class DeclaredMaterialTests(unittest.TestCase):
         rules = reconstruction_rules({"pipeline": "model"}, materials)
         self.assertIn("no dramatic shadows or baked highlights", rules)
         self.assertIn("- body: weathered granite; matte non-metallic surface", rules)
-        self.assertIn("- windows: glows from within", rules)
+        self.assertIn("- windows: shown switched off as an opaque solid surface", rules)
         self.assertEqual(reconstruction_rules({"pipeline": "image"}, materials), "")
         with self.assertRaisesRegex(ValueError, "--material must be"):
             parse_material_spec("body=plastic")
