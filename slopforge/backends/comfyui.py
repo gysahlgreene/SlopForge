@@ -550,7 +550,7 @@ def _build_failure_from_report(report_path, default_category="unknown"):
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
-                  voxel_resolution=None, journal_context=None):
+                  voxel_resolution=None, journal_context=None, require_manifold=False):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
@@ -570,6 +570,8 @@ def generate_model(project_root, config, image, name, destination, metadata, see
                         "--blender", blender_executable(config, root)])
         if voxel_resolution is not None:
             command.extend(["--voxel-resolution", str(voxel_resolution)])
+        if require_manifold:
+            command.append("--require-manifold")
     quality = config["asset_pipeline"].get("quality_settings", {})
     command.extend(["--quality", json.dumps({"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                                                "settings": quality})])
