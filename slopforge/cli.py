@@ -8,17 +8,18 @@ from pathlib import Path
 from . import __version__
 from .config import load_project, select_quality_tier
 from .backends.comfyui import ComfyUIClient
-from .manifest import asset_key, find_asset, load_manifest, new_record, register_artifact, save_manifest
+from .manifest import acquire_project_lock, asset_key, release_project_locks, find_asset, load_manifest, new_record, register_artifact, save_manifest
 from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
-from .style import build_prompt, load_style
+from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
+READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
 COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check"}
 
 
@@ -39,7 +40,9 @@ def parser():
     generate.add_argument("asset_type")
     generate.add_argument("name")
     generate.add_argument("description")
-    generate.add_argument("--image-prompt", help="Send this agent-authored prompt unchanged to the image workflow")
+    generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
+    generate.add_argument("--material", action="append", default=[], dest="materials",
+                          help="Declare a material region: 'region=nonmetal|metal|emissive[: description]' (repeatable)")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -91,6 +94,8 @@ def parser():
     approve_texture.add_argument("name")
     approve_texture.add_argument("candidate", type=int)
     approve_texture.add_argument("--force", action="store_true")
+    approve_texture.add_argument("--allow-placeholder-normal", action="store_true",
+                                 help="waive the 1x1 placeholder normal-map check")
     inspect = sub.add_parser("inspect", help="Show manifest and validation details for an asset")
     inspect.add_argument("name")
     sub.add_parser("doctor", help="Diagnose local dependencies and the selected project")
@@ -298,6 +303,7 @@ def _make_operation(command, root, style_key, **values):
 def _run_make(args):
     root = _make_project(args)
     config = load_project(root)
+    acquire_project_lock(root / config["asset_pipeline"]["manifest"])
     types = load_taxonomy(root)
     style_options = _make_style_options(root, config)
     if not style_options:
@@ -531,6 +537,8 @@ def _run(args):
         config = select_quality_tier(config, "draft")
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
+    if args.command not in READ_ONLY_COMMANDS:
+        acquire_project_lock(manifest_path)
     manifest = load_manifest(manifest_path)
 
     if args.command == "library":
@@ -798,7 +806,8 @@ def _run(args):
                 raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
         else:
             result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
-                                           asset_type=recipe)
+                                           asset_type=recipe,
+                                           allow_placeholder_normal=args.allow_placeholder_normal)
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0
@@ -826,7 +835,14 @@ def _run(args):
     recipe = types[asset_type]
     if args.count is not None and args.count < 1:
         raise ValueError("--count must be at least 1")
-    prompt_text = args.image_prompt or build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"))
+    materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
+    if materials and recipe["pipeline"] != "model":
+        raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
+    if args.image_prompt:
+        rules = reconstruction_rules(recipe, materials)
+        prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")
+    else:
+        prompt_text = build_prompt(style, recipe, args.description, recipe.get("prompt_mode", "asset"), materials)
     if args.dry_run:
         print(prompt_text)
         return 0
@@ -840,9 +856,13 @@ def _run(args):
             raise FileExistsError(f"Asset is already ready; pass --force to regenerate: {args.name}")
         record.update({"description": args.description, "style": style["name"],
                        "style_version": style["version"], "status": "generating"})
+        if materials:
+            record["materials"] = materials
     else:
         record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
         record["status"] = "generating"
+        if materials:
+            record["materials"] = materials
         manifest["assets"][key] = record
     save_manifest(manifest_path, manifest)
 
@@ -900,6 +920,8 @@ def main(argv=None):
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    finally:
+        release_project_locks()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import bpy
+import math
 import sys
 from pathlib import Path
 from mathutils import Vector
@@ -236,7 +237,9 @@ def render_previews(obj, output_dir, prefix):
     bounds_min = Vector(tuple(min(point[axis] for point in corners) for axis in range(3)))
     bounds_max = Vector(tuple(max(point[axis] for point in corners) for axis in range(3)))
     target = (bounds_min + bounds_max) * 0.5
-    frame_scale = max(bounds_max - bounds_min) * 1.25
+    size = bounds_max - bounds_min
+    # The three-quarter view sees the footprint diagonal, which is wider than any single side.
+    frame_scale = max(math.hypot(size.x, size.y), size.z) * 1.15
     bpy.ops.object.camera_add(location=(0, -3, 1.5))
     camera = bpy.context.object
     camera.data.type = "ORTHO"
@@ -253,8 +256,11 @@ def render_previews(obj, output_dir, prefix):
         light.data.size = size
         light.rotation_euler = (target - light.location).to_track_quat("-Z", "Y").to_euler()
 
-    views = {"front": Vector((0, -3, 0)), "side": Vector((3, 0, 0)), "rear": Vector((0, 3, 0)),
-             "three_quarter": Vector((2, -2, 0))}
+    extent = bounds_max - bounds_min
+    # Flat props (keys, coins, lying weapons) are unreadable edge-on; look down at them instead.
+    elevation = 2.5 if extent.z < 0.35 * max(extent.x, extent.y) else 0
+    views = {"front": Vector((0, -3, elevation)), "side": Vector((3, 0, elevation)), "rear": Vector((0, 3, elevation)),
+             "three_quarter": Vector((2, -2, elevation))}
     for name, direction in views.items():
         camera.location = target + direction
         camera.rotation_euler = (target - camera.location).to_track_quat("-Z", "Y").to_euler()
@@ -367,7 +373,9 @@ if mesh_only:
         bpy.context.collection.objects.link(detail_source)
         detail_source.select_set(False)
     boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
-    if boundary or nonmanifold:
+    # A voxel remesh needs closed volumes; it erases thin open parts (planks, handles, lattices).
+    # Workflows that already ran a UDF remesh on the GPU pass --no-voxel-repair.
+    if (boundary or nonmanifold) and "--no-voxel-repair" not in sys.argv:
         modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
         modifier.mode = "VOXEL"
         modifier.voxel_size = max(maximum - minimum) / voxel_resolution

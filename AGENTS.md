@@ -80,3 +80,13 @@ from the architecture guide and keep personal diagnostics outside public Git.
 For provenance, lineage, stage reuse, resume, or invalidation changes, follow
 [the SlopForge provenance skill](.agents/skills/slopforge-provenance/SKILL.md)
 and run `make verify-provenance`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context; the glossary is `CONTEXT.md`. See `docs/agents/domain.md`.

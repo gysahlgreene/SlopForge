@@ -260,6 +260,45 @@ class MeshPBRTests(unittest.TestCase):
                 self.assertEqual(image.size, (128, 128))
                 self.assertEqual(image.getpixel((0, 0)), (80, 160, 240))
 
+    def test_missing_workflow_normal_yields_detectable_placeholder(self):
+        from slopforge.validation import is_placeholder_normal
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outputs = {"save_" + key: {"images": [{"filename": key + ".png"}]}
+                       for key in ("basecolor", "roughness", "metallic")}
+            class Client:
+                def download_output(self, item, target):
+                    Image.new("RGB", (128, 128), "gray").save(target)
+            textures = copy_generated_maps(outputs, root, Client())
+            self.assertTrue(is_placeholder_normal(root / textures["normal"]))
+            self.assertFalse(is_placeholder_normal(root / textures["basecolor"]))
+
+    def test_material_map_measurement_flags_near_black_atlas_and_size_mismatch(self):
+        from slopforge.validation import measure_material_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            black = Image.new("RGB", (64, 64), (0, 0, 0)); black.putpixel((0, 0), (200, 90, 40))
+            black.save(root / "basecolor.png")
+            Image.new("L", (32, 32), 128).save(root / "roughness.png")
+            result = measure_material_maps({"basecolor": root / "basecolor.png", "roughness": root / "roughness.png"})
+            self.assertGreater(result["maps"]["basecolor"]["near_black_fraction"], 0.99)
+            joined = " | ".join(result["warnings"])
+            self.assertIn("basecolor map is", joined)
+            self.assertIn("single constant color", joined)
+            self.assertIn("dimensions differ", joined)
+
+    def test_material_map_measurement_flags_near_fully_metallic_map(self):
+        from slopforge.validation import measure_material_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "metallic.png"
+            metal = Image.new("L", (64, 64), 255); metal.putpixel((0, 0), 0); metal.save(path)
+            result = measure_material_maps({"metallic": path})
+            self.assertGreater(result["maps"]["metallic"]["near_full_metal_fraction"], 0.99)
+            self.assertIn("fully metallic", " | ".join(result["warnings"]))
+            Image.new("L", (64, 64), 0).save(path)
+            self.assertFalse([item for item in measure_material_maps({"metallic": path})["warnings"]
+                              if "near-black" in item])
+
     def test_unity_metallic_gloss_map_packs_inverse_roughness_in_alpha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -364,3 +403,110 @@ class MeshPBRTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeclaredMaterialTests(unittest.TestCase):
+    def _candidate(self, root, materials, metallic_value, basecolor):
+        source = root / "source"
+        source.mkdir()
+        (source / "relay.glb").write_bytes(b"mesh")
+        basecolor.save(source / "basecolor.png")
+        for key, value in (("normal", (128, 128, 255)), ("roughness", (200,) * 3), ("metallic", (metallic_value,) * 3)):
+            Image.new("RGB", basecolor.size, value).save(source / f"{key}.png")
+        textures = {key: f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
+        config = {"asset_pipeline": {"candidate_root": "candidates", "manifest": "manifest.json",
+                                     "model_budgets": {"prop_faces": 1000}}}
+        asset = {"name": "lantern", "description": "Stone lantern", "materials": materials, "executions": [],
+                 "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"}}
+        execution = start_execution(asset, {"brief": "lantern"})
+        manifest = {"schema_version": 4, "assets": {"prop:lantern": asset}}
+        save_manifest(root / "manifest.json", manifest)
+        lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
+                   "key": "prop:lantern", "execution_id": execution["id"], "upstream": [],
+                   "material_inputs": [], "assembly_inputs": []}
+
+        def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
+            fbx.write_bytes(b"fbx"); blend.write_bytes(b"blend"); options["preview_dir"].mkdir()
+            for view in ("front", "side", "rear", "three_quarter"):
+                Image.new("RGB", (64, 64), "gray").save(options["preview_dir"] / f"lantern_{view}.png")
+
+        inspection = {"status": "passed", "errors": [], "warnings": [],
+                      "measured": {"mesh_objects": 1, "vertex_count": 1000, "face_count": 500,
+                                   "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
+                                   "image_texture_count": 4, "component_count": 1, "nonmanifold_edge_count": 0,
+                                   "transforms_applied": True, "missing_textures": []}}
+        with patch("slopforge.pipelines.model.process_model", side_effect=process), \
+                patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
+            return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}}, {"face_budget": "prop_faces"},
+                                              asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
+                                              lineage=lineage)
+
+    def test_full_metal_map_fails_when_brief_declares_only_non_metal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = self._candidate(Path(temporary), [{"region": "body", "class": "nonmetal", "description": "stone"}],
+                                        255, Image.new("RGB", (64, 64), (90, 90, 90)))
+            self.assertEqual(candidate["status"], "failed")
+            self.assertIn("material_mismatch", candidate["validation"]["failure_codes"])
+            self.assertEqual(candidate["failure"]["category"], "processing_validation")
+
+    def test_declared_metal_brief_accepts_full_metal_map_without_warning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = self._candidate(Path(temporary), [{"region": "key", "class": "metal", "description": "brass"}],
+                                        255, Image.new("RGB", (64, 64), (180, 140, 60)))
+            self.assertEqual(candidate["status"], "candidate")
+            self.assertFalse([item for item in candidate["validation"]["warnings"] if "metallic" in item])
+
+    def test_declared_emissive_region_derives_emission_from_white_panels_not_flecks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 256), (90, 90, 90))
+            base.paste((250, 250, 250), (40, 40, 120, 140))  # glowing panel
+            for x in range(150, 250, 12):
+                base.putpixel((x, 200), (255, 255, 255))  # stone flecks
+            candidate = self._candidate(root, [{"region": "body", "class": "nonmetal", "description": ""},
+                                               {"region": "windows", "class": "emissive", "description": ""}], 0, base)
+            self.assertEqual(candidate["status"], "candidate")
+            self.assertEqual(candidate["emission_source"], "declared_emissive_mask")
+            with Image.open(root / candidate["outputs"]["emission"]) as emission:
+                self.assertGreater(max(emission.getpixel((80, 90))), 150)
+                self.assertEqual(emission.getpixel((210, 200)), (0, 0, 0))
+
+    def test_declared_emissive_colour_matches_coloured_lens_and_glows_in_that_colour(self):
+        from slopforge.style import parse_material_spec
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 256), (40, 40, 45))
+            base.paste((230, 160, 40), (100, 100, 160, 160))  # amber lens
+            lens = parse_material_spec("lens=emissive#e6a028: amber glass")
+            self.assertEqual(lens["color"], "#e6a028")
+            candidate = self._candidate(root, [{"region": "housing", "class": "nonmetal", "description": ""}, lens], 0, base)
+            self.assertGreater(candidate["validation"]["measured"]["emissive_fraction"], 0.04)
+            with Image.open(root / candidate["outputs"]["emission"]) as emission:
+                self.assertEqual(emission.getpixel((130, 130)), (230, 160, 40))
+                self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
+        with self.assertRaisesRegex(ValueError, "--material must be"):
+            parse_material_spec("housing=nonmetal#ffffff")
+
+    def test_reconstruction_rules_are_appended_to_agent_prompts_with_materials(self):
+        from slopforge.style import parse_material_spec, reconstruction_rules
+        materials = [parse_material_spec("body=nonmetal: weathered granite"), parse_material_spec("windows=emissive")]
+        rules = reconstruction_rules({"pipeline": "model"}, materials)
+        self.assertIn("no dramatic shadows or baked highlights", rules)
+        self.assertIn("- body: weathered granite; matte non-metallic surface", rules)
+        self.assertIn("- windows: shown switched off as an opaque solid surface", rules)
+        self.assertEqual(reconstruction_rules({"pipeline": "image"}, materials), "")
+        from slopforge.config import load_project
+        from slopforge.initializer import init_project
+        from slopforge.style import build_prompt, load_style
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            style = load_style(root, load_project(root))
+            style["materials"] = {"stone": {"description": "weathered"}}  # non-empty style materials
+            prompt = build_prompt(style, load_taxonomy(root)["prop"], "lantern", "asset", materials)
+            self.assertIn("- body: weathered granite; matte non-metallic surface", prompt)
+            self.assertIn("- stone: weathered", prompt)
+        with self.assertRaisesRegex(ValueError, "--material must be"):
+            parse_material_spec("body=plastic")

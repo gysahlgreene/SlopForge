@@ -19,6 +19,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 ## Create and review assets
 
 - [Style packs](STYLE-SYSTEM.md) and [reference libraries](REFERENCE-LIBRARIES.md)
+- [Materials and textures](MATERIALS.md): declared material regions, PBR maps, normal bake, emission and checks
 - [Candidate review board](REVIEW-BOARD.md) and [quality tiers](QUALITY-TIERS.md)
 - [Recipes](RECIPES.md) and [environment kits](ENVIRONMENT-KITS.md)
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
@@ -27,6 +28,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 
 ## Examples and qualification evidence
 
+- [Material showcase](media/material-showcase-2026-10/README.md): five props of different materials generated from briefs, with maps, renders, conditions and limits.
 - [Texture mask recovery](media/texture-mask-recovery-2026-10/README.md): controlled failure, correction, fresh case and repeat; remaining appearance limitations.
 - [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity walk playback, motion measurements, and current rig limitations.
 - [Diagnostic humanoid benchmark](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed body deformation, valid Humanoid Avatar, and animation evidence.

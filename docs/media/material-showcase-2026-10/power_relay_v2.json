@@ -1,0 +1,77 @@
+{
+  "asset": "power_relay_v2",
+  "material_candidate": 2,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "housing",
+      "class": "nonmetal",
+      "description": "matte dark graphite composite"
+    },
+    {
+      "region": "front plate",
+      "class": "nonmetal",
+      "description": "turquoise glazed ceramic"
+    },
+    {
+      "region": "end caps",
+      "class": "metal",
+      "description": "polished copper"
+    },
+    {
+      "region": "lens",
+      "class": "emissive",
+      "description": "amber glass",
+      "color": "#e0a030"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "declared_emissive_mask",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 9 disconnected components",
+    "mesh has a very small disconnected component",
+    "brief declares an emissive region but no matching region was found in base color"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 11771,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0067,
+      "distinct_colors_sampled": 130,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.5053,
+      "distinct_colors_sampled": 256,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.1135
+    }
+  },
+  "sha256": {
+    "concept": "7489ff94209f8f97413caeb692ae39d325612d4d75b71b54a624c332816163de",
+    "basecolor": "9cf176309e1a44cb863df96ec566a087ca7ef2fc46e9eac0f5486e5a616241c3",
+    "normal": "e5763d55f12e3627bda5ad2b088e15b10c97d10aba23d470802951f629552a32",
+    "roughness": "63ac6d4403197d2ce6495c9718d4c4752365ca3e80b5c4f682963d7a1ae5f627",
+    "metallic": "3b705ecb64bb7d1a1155d80fbe2e6c72ac17f18bba4b709f16977523923dc5f3",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "e5ae467fbfc82188cb45a1708824675ded83b1c38b3fd36e6936a814ce838e88",
+    "preview_three_quarter": "56317e3a05db3dfc56d1af10c3438caf5c1dcbbae662a3c84ea614336206ff0c"
+  }
+}

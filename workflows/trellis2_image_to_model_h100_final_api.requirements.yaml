@@ -1,13 +1,16 @@
 schema_version: 1
 id: model.trellis2.h100_final
-version: 2
+version: 5
 capabilities:
 - image_to_3d
 - pbr_texturing
-workflow_sha256: b0623e54016321f12b59eb8c409bbff006aa0a77d6a3578b3ec1e6c52563c45e
+workflow_sha256: 753e32eb1c8ab408b82b538a271b15ff1bc77f8af51320eb86b454db1fd90dd6
 nodes:
 - class: ApplyTextureToMesh
   source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: BakeNormalMapFromMesh
+  source: ComfyUI core
   revision: unknown
 - class: BakeTextureFromVoxel
   source: ComfyUI TRELLIS.2 node extension
@@ -20,6 +23,9 @@ nodes:
   revision: unknown
 - class: EmptyTrellis2LatentStructure
   source: ComfyUI TRELLIS.2 node extension
+  revision: unknown
+- class: DecimateMesh
+  source: ComfyUI core
   revision: unknown
 - class: Get3DComponents
   source: ComfyUI TRELLIS.2 node extension
@@ -46,6 +52,9 @@ nodes:
   source: ComfyUI core
   revision: unknown
 - class: RescaleCFG
+  source: ComfyUI core
+  revision: unknown
+- class: RemeshMesh
   source: ComfyUI core
   revision: unknown
 - class: SaveGLB

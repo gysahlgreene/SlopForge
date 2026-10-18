@@ -13,7 +13,7 @@ from .libraries import list_libraries, resolve_library
 from .pipelines import image, model
 from .pipelines.reuse import artifact_integrity
 from .conditioning import resolve_conditioning
-from .style import build_prompt, style_identity
+from .style import build_prompt, parse_material_spec, reconstruction_rules, style_identity
 from .taxonomy import canonical_type, validate_asset_name
 
 
@@ -632,6 +632,8 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
     for child, child_name, key in planned_children:
         asset = new_record(child["type"], child_name, child["description"], style,
                            {"strategy": config.get("asset_pipeline", {}).get("conditioning", {}).get("strategy", "text_only")})
+        if child.get("materials"):
+            asset["materials"] = [parse_material_spec(spec) for spec in child["materials"]]
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",
@@ -699,11 +701,15 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             child_config = select_quality_tier(config, tier)
             requested_child = dict(child)
             requested_child["requested_style_identity"] = style_identity(style)
+            child_materials = [parse_material_spec(spec) for spec in child.get("materials", [])]
             requested_prompt = child.get("generation_prompt")
-            if not requested_prompt and all(key in style for key in
-                                            ("identity", "palette", "materials", "shape_language",
-                                             "surface_language", "lighting", "asset_rules")):
-                requested_prompt = build_prompt(style, asset_types[child["type"]], child["description"])
+            if requested_prompt:
+                rules = reconstruction_rules(asset_types[child["type"]], child_materials)
+                requested_prompt += "\n\n" + rules if rules else ""
+            elif all(key in style for key in ("identity", "palette", "materials", "shape_language",
+                                              "surface_language", "lighting", "asset_rules")):
+                requested_prompt = build_prompt(style, asset_types[child["type"]], child["description"],
+                                                materials=child_materials)
             requested_child["requested_generation_prompt"] = requested_prompt
             reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
                                  if child.get("reference_library") else None)

@@ -182,6 +182,17 @@ def inspect(source, face_budget):
     uv_layers = sum(len(obj.data.uv_layers) for obj in objects)
     mesh_without_uv_count = sum(not obj.data.uv_layers for obj in objects)
     polygons = [polygon for obj in objects for polygon in obj.data.polygons]
+    # Sum of per-face UV areas on the active UV layer; overlapping faces count twice, so this is not unique coverage.
+    uv_area, uv_loops, uv_loops_outside = 0.0, 0, 0
+    for obj in objects:
+        layer = obj.data.uv_layers.active
+        if not layer:
+            continue
+        for polygon in obj.data.polygons:
+            points = [layer.data[index].uv for index in polygon.loop_indices]
+            uv_area += abs(sum(a.x * b.y - b.x * a.y for a, b in zip(points, points[1:] + points[:1]))) / 2
+            uv_loops += len(points)
+            uv_loops_outside += sum(not (0 <= p.x <= 1 and 0 <= p.y <= 1) for p in points)
     zero_area_faces = sum(polygon.area <= 1e-12 for polygon in polygons)
     zero_normals = sum(polygon.normal.length <= 1e-8 for polygon in polygons)
     assigned_materials = []
@@ -235,6 +246,7 @@ def inspect(source, face_budget):
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,
                 "uv_layers": uv_layers, "mesh_without_uv_count": mesh_without_uv_count,
+                "uv_area_sum": uv_area, "uv_loop_outside_unit_fraction": (uv_loops_outside / uv_loops if uv_loops else 0.0),
                 "material_count": len(materials), "mesh_without_material_count": mesh_without_material_count,
                 "image_texture_count": len(image_nodes), "mesh_without_texture_count": mesh_without_texture_count,
                 "missing_textures": missing_textures,
@@ -250,6 +262,8 @@ def inspect(source, face_budget):
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:
         errors.append("mesh has no UV map")
+    if uv_layers and uv_area <= 1e-9:
+        warnings.append("UV map has zero total area; textures cannot map onto the surface")
     if not materials:
         errors.append("mesh has no material")
     if missing_textures:

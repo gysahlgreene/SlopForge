@@ -44,26 +44,68 @@ def _bullets(values):
     return "\n".join(f"- {value}" for value in values)
 
 
-def build_prompt(style, asset_type, description, mode="asset"):
+MATERIAL_CLASSES = {
+    "nonmetal": "matte non-metallic surface; no mirror-like reflections or polished highlights",
+    "metal": "metallic surface with visible metal sheen",
+    # Image-to-3D reads glowing or translucent regions as empty space (issue #44), so concepts show
+    # emissive regions switched off; the material stage adds the glow from this declaration.
+    "emissive": ("shown switched off as an opaque solid surface in its natural pale colour, not glowing "
+                 "and not see-through; its glow is added later in the material stage"),
+}
+
+
+def parse_material_spec(spec):
+    """Parse 'region=class[: description]'; class is nonmetal, metal, emissive or emissive#rrggbb.
+
+    The optional emissive colour is the region's base colour in the concept; the material stage
+    matches it in the generated base colour map and glows in that colour.
+    """
+    region, separator, rest = spec.partition("=")
+    material_class, _, detail = rest.partition(":")
+    material_class, _, color = material_class.strip().lower().partition("#")
+    region, detail = region.strip(), detail.strip()
+    valid_color = not color or (material_class == "emissive" and len(color) == 6
+                                and all(c in "0123456789abcdef" for c in color))
+    if not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color:
+        raise ValueError("--material must be 'region=nonmetal|metal|emissive[#rrggbb][: description]', "
+                         f"got {spec!r}")
+    item = {"region": region, "class": material_class, "description": detail}
+    if color:
+        item["color"] = "#" + color
+    return item
+
+
+def reconstruction_rules(asset_type, materials=()):
+    """Rules every image-to-3D concept needs, appended even to agent-authored prompts."""
+    if asset_type.get("pipeline") != "model":
+        return ""
+    lines = ["RECONSTRUCTION REQUIREMENTS:",
+             "- Complete centered asset with margin around every extremity; plain neutral background, no scene or cast shadow",
+             "- Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
+             "- Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
+             "- Solid chunky forms with thick walls; no thin hollow tubes, open rings, wires, or paper-thin parts"]
+    if materials:
+        lines.append("MATERIAL REGIONS:")
+        lines.extend(f"- {item['region']}: {item['description'] + '; ' if item['description'] else ''}"
+                     f"{MATERIAL_CLASSES[item['class']]}" for item in materials)
+    return "\n".join(lines)
+
+
+def build_prompt(style, asset_type, description, mode="asset", materials=()):
     identity = style["identity"]
     palette = "\n".join(f"- {key}: {value.get('hex', '')} — {value.get('usage', '')}" for key, value in style["palette"].items())
-    materials = "\n".join(f"- {key}: {value.get('description', '')}" for key, value in style["materials"].items())
+    style_materials = "\n".join(f"- {key}: {value.get('description', '')}" for key, value in style["materials"].items())
     if mode == "material":
         rules = style["material_generation"].get("rules", [])
         requirements = asset_type.get("requirements", []) if asset_type.get("pipeline") != "model" else []
         avoid = asset_type.get("avoid", []) if asset_type.get("pipeline") != "model" else []
-        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
+        return f"PROJECT STYLE: {style['name']} v{style['version']}\n{identity.get('genre', '')}; {identity.get('rendering', '')}\nPALETTE:\n{palette}\nMATERIAL LANGUAGE:\n{style_materials}\nMATERIAL RULES:\n{_bullets(rules)}\nASSET TYPE REQUIREMENTS:\n{_bullets(requirements)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nASSET DESCRIPTION:\n{description}\nCreate a flat material surface consistent with this style, filling the frame. Surface only: no standalone object, no environment, no perspective, no text, no cast shadows or baked lighting."
     rules = list(asset_type.get("requirements", []))
-    if asset_type["pipeline"] == "model":
-        rules.extend([
-            "Complete centered asset with margin around every extremity; plain neutral background, no scene or cast shadow",
-            "Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
-            "Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
-        ])
     avoid = asset_type.get("avoid", [])
     project_rules = style["asset_rules"].get(asset_type["name"], [])
     if asset_type["pipeline"] == "model" and not project_rules:
         project_rules = style["asset_rules"].get("model", [])
     lighting = _bullets([f"{key}: {value}" for key, value in style["lighting"].items()])
     composition = _bullets([f"{key}: {value}" for key, value in style.get("composition", {}).items()])
-    return f"PROJECT ART DIRECTION: {style['name']}\nSTYLE VERSION: {style['version']}\nGENRE: {identity.get('genre', '')}\nRENDERING: {identity.get('rendering', '')}\nDETAIL LEVEL: {identity.get('detail_level', '')}\nMOOD:\n{_bullets(identity.get('mood', []))}\nSHAPE LANGUAGE:\n{_bullets(style['shape_language'].get('preferred', []))}\nAVOID:\n{_bullets(style['shape_language'].get('avoid', []))}\nPALETTE:\n{palette}\nMATERIALS:\n{materials}\nSURFACE LANGUAGE:\n{_bullets(style['surface_language'].get('preferred', []))}\nSURFACE AVOID:\n{_bullets(style['surface_language'].get('avoid', []))}\nLIGHTING:\n{lighting}\nCOMPOSITION:\n{composition}\nASSET TYPE REQUIREMENTS:\n{_bullets(rules)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nSTYLE-SPECIFIC ASSET RULES:\n{_bullets(project_rules)}\nREQUESTED ASSET:\n{description}"
+    return f"PROJECT ART DIRECTION: {style['name']}\nSTYLE VERSION: {style['version']}\nGENRE: {identity.get('genre', '')}\nRENDERING: {identity.get('rendering', '')}\nDETAIL LEVEL: {identity.get('detail_level', '')}\nMOOD:\n{_bullets(identity.get('mood', []))}\nSHAPE LANGUAGE:\n{_bullets(style['shape_language'].get('preferred', []))}\nAVOID:\n{_bullets(style['shape_language'].get('avoid', []))}\nPALETTE:\n{palette}\nMATERIALS:\n{style_materials}\nSURFACE LANGUAGE:\n{_bullets(style['surface_language'].get('preferred', []))}\nSURFACE AVOID:\n{_bullets(style['surface_language'].get('avoid', []))}\nLIGHTING:\n{lighting}\nCOMPOSITION:\n{composition}\nASSET TYPE REQUIREMENTS:\n{_bullets(rules)}\nASSET TYPE AVOID:\n{_bullets(avoid)}\nSTYLE-SPECIFIC ASSET RULES:\n{_bullets(project_rules)}\nREQUESTED ASSET:\n{description}" + (
+        "\n" + reconstruction_rules(asset_type, materials) if asset_type["pipeline"] == "model" else "")

@@ -47,7 +47,9 @@ Describe the physical regions in the concept prompt, then approve without a surf
 
 ```sh
 slopforge --project <project> generate prop power_relay "Alien power relay" \
-  --image-prompt "One chunky graphite housing, broad turquoise ceramic front plate, copper side couplings, small amber glass lens; complete three-quarter view, isolated, evenly lit, detailed stylized game prop."
+  --image-prompt "One chunky graphite housing, broad turquoise ceramic front plate, copper side couplings, small amber glass lens; complete three-quarter view, isolated, evenly lit, detailed stylized game prop." \
+  --material "housing=nonmetal: matte graphite" --material "front plate=nonmetal: turquoise ceramic" \
+  --material "couplings=metal: copper" --material "lens=emissive: amber glass"
 slopforge --project <project> approve power_relay 1
 slopforge --project <project> candidates power_relay
 slopforge --project <project> approve-texture power_relay 1

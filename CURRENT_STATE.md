@@ -221,3 +221,20 @@ review and passing checks.
 These results verify offline behavior only. Package 3 is merged. Live ComfyUI
 inference, Unity runtime, visual/material review, and asset or pipeline
 qualification were not performed. M0 remains incomplete.
+
+## Texture/material quality track (bounded; no qualification claim)
+
+Opened issues [#41](https://github.com/gysahlgreene/SlopForge/issues/41) (placeholder normal),
+[#42](https://github.com/gysahlgreene/SlopForge/issues/42) (pixel-level map inspection),
+[#43](https://github.com/gysahlgreene/SlopForge/issues/43) (blotch/variance diagnosis) and
+[#44](https://github.com/gysahlgreene/SlopForge/issues/44) (glass/emissive). Part of #41 is implemented:
+`approve-texture` rejects a 1×1 placeholder normal unless waived (`make verify`: 618 passed, 6 skipped).
+`measure_material_maps` now records per-map near-black fraction, distinct colors and dimensions in each native candidate's validation, as warnings only (thresholds undeclared). Blender inspection also reports `uv_area_sum` (overlaps counted twice) and `uv_loop_outside_unit_fraction`, and candidates carry `normal_source`, shown on the review board (checked against a real Blender plane fixture; #41 and the measurement part of #42 are implemented offline, not checked on a live candidate). Not verified: a live candidate, whether a real normal bake improves appearance, and #42–#44.
+
+H100 diagnosis ladder (2026-10-18, private evidence, one input/seed): `h100_final` resolution gave finer texture than 1024/2048; same-seed H100 repeats were byte-identical; the native normal bake now ships in `h100_final` (live preflight passed; one generated candidate inspected). Metallic: same ComfyUI code on both hosts; the H100 decodes a brass key as fully metallic (correct) but also the glossy stone lantern (model misprediction), while Mac MPS output was ≈0 for every asset (suspected MPS channel loss, unverified on a metal asset). Validation warns on ≥90% fully metallic maps. No visual approval or qualification claim.
+
+Brief-declared materials (2026-10-18, one private H100 run): a fresh project generated the stone lantern from a brief with `--material` declarations; the candidate had no false metal, a real baked normal map and fine-grained stone. The glowing window panels reconstructed as empty cavities, so no emissive surface exists (#44 open). Visual approval and Unity import were not performed.
+
+Material showcase (2026-10-18, commit `01ff304`, H100 profile, final tier): five props — brass key, glazed jug, supply crate, power relay, stone lantern — generated from briefs through `generate`/`approve` with no manual repair; [evidence and limits](docs/media/material-showcase-2026-10/README.md). Shared fixes found on the way: concept prompts always carry reconstruction rules and declared materials; GPU UDF remesh at 384 replaces Blender's voxel repair (which erased thin parts); preview cameras handle flat and wide props; a project lock prevents concurrent commands from erasing manifest records. Remaining: one run per prop (no repeatability claim), no visual approval or Unity import, multiple small components on some props, guessed hidden sides, and emitter detection on dark-baked albedo (#44).
+
+Owner review (2026-10-18): the five-prop showcase is about 60% of the target prop quality. Lit turntables (`blender/render_turntable.py`, `scripts/turntable_gif.py`) are published with the [showcase evidence](docs/media/material-showcase-2026-10/README.md). Largest remaining gaps: guessed hidden sides, small detached components, emitter detection on dark-baked albedo, and no repeatability or Unity evidence for the set.

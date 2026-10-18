@@ -4,7 +4,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
 
 
@@ -28,6 +28,36 @@ def make_metallic_gloss(metallic_path, roughness_path, destination):
     if metallic.size != roughness.size:
         raise ValueError("Metallic and roughness maps must have matching dimensions")
     Image.merge("RGBA", (metallic, metallic, metallic, ImageChops.invert(roughness))).save(destination)
+
+
+def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)),)):
+    """Emission for declared glowing regions, found in the generated base color map.
+
+    Each target is (match_rgb, glow_rgb). match_rgb None means large near-white regions (pale
+    emitters such as paper); otherwise texels within a small colour distance of match_rgb.
+    A morphological opening drops small flecks. Returns the emissive fraction of the map.
+    """
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGB")
+    size = max(3, round(15 * base.width / 2048) | 1)  # odd kernel, 15 px at 2048
+    emission, total = Image.new("RGB", base.size), Image.new("L", base.size)
+    for match, glow in targets:
+        if match is None:
+            r, g, b = base.split()
+            low = ImageChops.darker(ImageChops.darker(r, g), b)
+            high = ImageChops.lighter(ImageChops.lighter(r, g), b)
+            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= 225 else 0),
+                                       ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
+        else:
+            distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
+            mask = ImageChops.lighter(ImageChops.lighter(*distance.split()[:2]), distance.split()[2])
+            mask = mask.point(lambda v: 255 if v <= 48 else 0)
+        mask = mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
+        total = ImageChops.lighter(total, mask)
+        soft = mask.filter(ImageFilter.GaussianBlur(max(1, size // 5)))
+        emission = Image.composite(Image.new("RGB", base.size, tuple(glow)), emission, soft)
+    emission.save(destination)
+    return sum(total.histogram()[128:]) / (base.width * base.height)
 
 
 def build_unity_material(project_root, fbx, material, maps):

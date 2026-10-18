@@ -65,6 +65,7 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertIn('src="Assets/Robot/front.png"', html)
         self.assertIn("Missing file: Assets/Robot/missing.png", html)
         self.assertIn("robot.glb", html)
+        self.assertIn("Normal map: not recorded", html)
 
     def test_board_pairs_character_concepts_with_model_views_and_source_review_evidence(self):
         (self.root / "concept.png").write_bytes(b"concept")

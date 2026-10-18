@@ -1,0 +1,57 @@
+{
+  "asset": "brass_key",
+  "material_candidate": 4,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "key",
+      "class": "metal",
+      "description": "satin aged brass with darker patina in recesses"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed",
+  "validation_warnings": [],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 17112,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 97,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 3,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 1.0
+    }
+  },
+  "sha256": {
+    "concept": "d8229475efa2453a27df3d725125e254898b590e6a4a10a5e2934f62e25ef279",
+    "basecolor": "ed7e7ca654540bf6244c313b056a306eba80b210ef13b74ed709776ccc0f03bf",
+    "normal": "065b1789edb2287466128c26cd061127c9a1b977ec76c33b9fb97b6388d2c887",
+    "roughness": "7283b85eaccf08833b2f4f94425e8c280be28b6b51e0f0c4150123b22157360d",
+    "metallic": "0b6d8a0f7d34f896b4bab26d415667146ed1db5f94bbfd06e4bf09175f0bd6dd",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "76105875c32a8976f059407d86b0324c6f23d742ba99bb5efba35773f87bcfeb",
+    "preview_three_quarter": "973a57163d6e53a94814ff65ceca431e5420cf075d293906471afa224b78154c"
+  }
+}

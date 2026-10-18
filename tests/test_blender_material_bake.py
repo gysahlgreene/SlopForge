@@ -226,3 +226,138 @@ bpy.ops.export_scene.gltf(filepath=str(target), export_format='GLB')
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderUVCoverageTests(unittest.TestCase):
+    def test_inspection_reports_uv_area_and_out_of_bounds_loops(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture, blend, result = root / "fixture.py", root / "plane.blend", root / "inspection.json"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_plane_add()
+obj = bpy.context.active_object
+obj.data.uv_layers.new(name="UVMap")
+for loop, uv in zip(obj.data.uv_layers.active.data, [(0, 0), (1, 0), (1, 2), (0, 2)]):
+    loop.uv = uv
+bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(blend)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(blend), str(result), "100"],
+                           check=True, capture_output=True)
+            measured = json.loads(result.read_text())["measured"]
+            self.assertAlmostEqual(measured["uv_area_sum"], 2.0, places=4)
+            self.assertAlmostEqual(measured["uv_loop_outside_unit_fraction"], 0.5)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderFlatPreviewTests(unittest.TestCase):
+    def test_flat_prop_previews_look_down_instead_of_edge_on(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, fbx, blend, previews = root / "slab.glb", root / "slab.fbx", root / "slab.blend", root / "previews"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path, color in zip(maps, ((200, 160, 60), (128, 128, 255), (128, 128, 128), (0, 0, 0), (0, 0, 0))):
+                Image.new("RGB", (64, 64), color).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.05))
+bpy.context.object.scale = (1, 0.6, 0.1)
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(fbx), str(blend), *map(str, maps), "--face-budget", "1000",
+                            "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                           check=True, capture_output=True, text=True)
+            front = Image.open(previews / "slab_front.png").convert("RGB")
+            background = front.getpixel((0, 0))
+            pixels = list(zip(*[iter(front.tobytes())] * 3))
+            foreground = sum(max(abs(a - b) for a, b in zip(pixel, background)) > 24 for pixel in pixels)
+            self.assertGreater(foreground / len(pixels), 0.2)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderVoxelRepairTests(unittest.TestCase):
+    def test_no_voxel_repair_keeps_open_thin_geometry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb = root / "open.glb"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=20, y_subdivisions=20, size=1, location=(0, 0, 0.5))
+bpy.context.object.rotation_euler = (1.5708, 0, 0)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            faces = {}
+            for flag in ([], ["--no-voxel-repair"]):
+                out = root / f"prepared{len(flag)}.glb"
+                result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                         str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(out),
+                                         str(root / f"prepared{len(flag)}.blend"), "--mesh-only",
+                                         "--face-budget", "10000", "--voxel-resolution", "64", *flag],
+                                        check=True, capture_output=True, text=True)
+                faces[bool(flag)] = int(result.stdout.split("Input faces: ")[1].split()[0])
+            self.assertEqual(faces[True], 800)  # 20x20 quads triangulated, untouched by voxel repair
+            self.assertNotEqual(faces[False], 800)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderPreviewFramingTests(unittest.TestCase):
+    def test_three_quarter_preview_frames_the_footprint_diagonal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, previews = root / "box.glb", root / "previews"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path, color in zip(maps, ((200, 160, 60), (128, 128, 255), (128, 128, 128), (0, 0, 0), (0, 0, 0))):
+                Image.new("RGB", (64, 64), color).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.3))
+bpy.context.object.scale = (1, 1, 0.6)
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(root / "box.fbx"), str(root / "box.blend"), *map(str, maps),
+                            "--face-budget", "1000", "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                           check=True, capture_output=True, text=True)
+            image = Image.open(previews / "box_three_quarter.png").convert("RGB")
+            background = image.getpixel((0, 0))
+            edges = [image.getpixel((x, y)) for y in range(image.height) for x in (0, image.width - 1)]
+            self.assertTrue(all(max(abs(a - b) for a, b in zip(pixel, background)) <= 24 for pixel in edges))
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderTurntableTests(unittest.TestCase):
+    def test_turntable_renders_rotating_frames_from_a_prepared_blend(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            blend, frames = root / "asset.blend", root / "frames"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0.2, 0, 0.5))
+bpy.context.object.scale = (1, 0.3, 1)
+bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(blend)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/render_turntable.py"), "--", str(blend), str(frames),
+                            "--frames", "4", "--size", "64"], check=True, capture_output=True, text=True)
+            rendered = sorted(frames.glob("frame_*.png"))
+            self.assertEqual([path.name for path in rendered], [f"frame_{index:03d}.png" for index in range(4)])
+            self.assertNotEqual(rendered[0].read_bytes(), rendered[1].read_bytes())

@@ -1,0 +1,69 @@
+{
+  "asset": "ceramic_jug",
+  "material_candidate": 3,
+  "concept_candidate": 2,
+  "materials": [
+    {
+      "region": "jug",
+      "class": "nonmetal",
+      "description": "glossy cobalt glaze over brown clay"
+    },
+    {
+      "region": "stopper",
+      "class": "nonmetal",
+      "description": "natural cork"
+    },
+    {
+      "region": "twine",
+      "class": "nonmetal",
+      "description": "rough natural twine"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 3 disconnected components"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0002,
+      "distinct_colors_sampled": 10671,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 222,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0864,
+      "distinct_colors_sampled": 191,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "c84c0b5dc75ccc24f3ca348d1a3a5594cbe11c36ca4349721a380d8cda677a26",
+    "basecolor": "0b820fc8942acb18b5d82a7b47dc4c4b172a01dc16b80d31311a1f78279b7abe",
+    "normal": "0d711f44ad6e7be5d3b44a2beec764aee28c9df6231a3522133585640283deaf",
+    "roughness": "17ecd1f1f93a4c8fc2eda142b92b0e108c5f3272dbc2ee05e234c4d28e263639",
+    "metallic": "0b3bee2cda74289a2b645b4e5225bb11b5701666e7df07eee32b6e4f14377957",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "c405ef71c7dfc4ea81bf0bba87be57e7d756285788dcffc27cef805e0afb9acc",
+    "preview_three_quarter": "1849c89bef066e2f248c392d019f6ac2fd05f09518c222324244e4db73fe9e11"
+  }
+}

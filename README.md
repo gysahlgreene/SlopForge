@@ -19,6 +19,36 @@ These are measured examples. Generation is stochastic: candidates must pass chec
 
 The Unity preview uses the latest arm-fit candidate and a retargeted walk clip. Unity measured movement on all 49,886 imported vertices; this confirms playback, not deformation quality. [Idle screenshot](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Idle-GameView.png) · [Walk pose](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Side.png) · [Evidence and limits](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md).
 
+## Materials and textures
+
+| Brass key | Glazed jug | Supply crate | Power relay | Stone lantern |
+| :---: | :---: | :---: | :---: | :---: |
+| ![Brass key turntable](docs/media/material-showcase-2026-10/brass_key_turntable.gif) | ![Glazed jug turntable](docs/media/material-showcase-2026-10/ceramic_jug_turntable.gif) | ![Supply crate turntable](docs/media/material-showcase-2026-10/supply_crate_turntable.gif) | ![Power relay turntable](docs/media/material-showcase-2026-10/power_relay_v2_turntable.gif) | ![Stone lantern turntable](docs/media/material-showcase-2026-10/stone_lantern_v3_turntable.gif) |
+| metal | glossy non-metal | wood + iron | ceramic + copper + graphite | granite + paper + wood |
+
+Every 3D prop gets mesh-aware PBR materials generated with its geometry: base color,
+roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an
+emission map, all at 4096² on the H100 final profile. The brief says what each region is
+made of; SlopForge writes that into the concept prompt and checks the generated maps against
+it before review.
+
+![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
+
+```sh
+slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern "Weathered stone lantern" \
+  --image-prompt "A squat carved stone lantern: upturned ribbed roof, square light box with opaque off-white rice-paper panels behind a dark wooden lattice, chunky square base; rough matte speckled granite; complete three-quarter view on a plain light-grey background." \
+  --material "stone body=nonmetal: rough matte speckled granite" \
+  --material "paper panels=emissive: opaque off-white rice paper" \
+  --material "lattice=nonmetal: dark stained wood"
+```
+
+- **Material regions:** declare `nonmetal`, `metal` or `emissive[#rrggbb]` per region. A candidate whose metallic map contradicts an all-non-metal brief fails before review.
+- **Reconstruction-ready concepts:** even lighting, matte non-metals, thick parts, and glowing parts drawn unlit so they reconstruct as solid surfaces.
+- **Clean geometry:** raw shapes are remeshed on the GPU and baked against the full-detail mesh, so thin planks, handles and lattices survive.
+- **Checks:** placeholder normal maps cannot be approved; map statistics, UV coverage and topology are recorded with every candidate.
+
+These five are generation evidence from one run each, with no manual repair, rendered as lit turntables in Blender. The project owner rates them about 60% of the target prop quality; they have not been visually approved or imported into Unity. [How materials are made →](docs/MATERIALS.md) · [Showcase evidence and limits →](docs/media/material-showcase-2026-10/README.md)
+
 ## The workflow
 
 ```mermaid
@@ -60,7 +90,8 @@ slopforge --project ~/UnityProjects/MyGame doctor
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern \
   "Weathered stone lantern for a fantasy ruin" \
-  --image-prompt "Squat carved stone lantern, broad square cap, open sides, warm glass core; complete three-quarter view, isolated on a plain neutral background."
+  --image-prompt "Squat carved stone lantern, broad square cap, opaque paper window panels, chunky base; matte granite; complete three-quarter view, isolated on a plain neutral background." \
+  --material "body=nonmetal: matte granite" --material "panels=emissive: off-white paper"
 slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
 slopforge --project ~/UnityProjects/MyGame approve stone_lantern 1
 slopforge --project ~/UnityProjects/MyGame candidates stone_lantern
@@ -74,6 +105,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | Area | Current evidence |
 | --- | --- |
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
+| Material and texture generation | Five varied-material props generated from briefs on the H100 profile with declared-material checks and baked normal maps; one run each, visual approval pending. |
 | Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
 | Humanoid rigging | Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. Arm deformation and source topology still need review. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |

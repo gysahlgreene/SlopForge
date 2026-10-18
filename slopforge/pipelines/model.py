@@ -23,8 +23,8 @@ from ..provenance import generator_provenance, file_sha256
 from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
-from ..unity_material import build_unity_material, make_metallic_gloss, unity_cli
-from ..validation import summarize_validation, validate_image, validate_model_outputs
+from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
+from ..validation import is_placeholder_normal, measure_material_maps, summarize_validation, validate_image, validate_model_outputs
 
 
 def _sha256(path):
@@ -1162,8 +1162,17 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
-    with Image.open(paths["basecolor"]) as image:
-        Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
+    declared = asset.get("materials") or []
+    emissive_fraction = None
+    emissive = [item for item in declared if item.get("class") == "emissive"]
+    if emissive:
+        rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+        targets = {(rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
+                   for item in emissive}
+        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"], sorted(targets, key=str))
+    else:
+        with Image.open(paths["basecolor"]) as image:
+            Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
     paths["generator"].write_text(json.dumps(mesh_info, indent=2) + "\n")
     material_refs = _lineage_finish(context, "material_generation", number,
         [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1185,6 +1194,28 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
+    maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
+    if any(item.get("class") == "metal" for item in declared):  # the brief explains a metallic map
+        maps["warnings"] = [item for item in maps["warnings"] if not item.startswith("metallic map is")]
+    validation.setdefault("measured", {})["material_maps"] = maps["maps"]
+    validation["warnings"] = [*validation.get("warnings", []), *maps["warnings"]]
+    if maps["warnings"] and validation["status"] == "passed":
+        validation["status"] = "passed_with_warnings"
+    metal = maps["maps"].get("metallic", {}).get("near_full_metal_fraction", 0)
+    if declared and not any(item.get("class") == "metal" for item in declared) and metal >= 0.5:
+        validation["errors"] = [*validation.get("errors", []),
+            f"metallic map is {metal:.0%} fully metallic but the brief declares no metal regions; "
+            "revise the concept so non-metal materials read as matte, or declare the metal region"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "material_mismatch"]
+        validation["status"] = "failed"
+    if emissive_fraction is not None:
+        validation.setdefault("measured", {})["emissive_fraction"] = round(emissive_fraction, 4)
+        if emissive_fraction == 0:
+            validation["warnings"] = [*validation.get("warnings", []),
+                "brief declares an emissive region but no matching region was found in base color; "
+                "declare its colour with emissive#rrggbb or show it as a pale opaque surface"]
+            if validation["status"] == "passed":
+                validation["status"] = "passed_with_warnings"
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1196,6 +1227,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     return {"number": number, "prompt": asset.get("generation_prompt", asset["description"]),
             "status": "candidate" if validation["status"] != "failed" else "failed",
             "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
+            "normal_source": mesh_info.get("normal_source", "unknown"),
+            "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
             "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,
@@ -1344,7 +1377,8 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     return results
 
 
-def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop"):
+def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop",
+                    allow_placeholder_normal=False):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
@@ -1377,6 +1411,11 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     missing = [str(path) for path in sources.values() if not path.is_file() or not path.stat().st_size]
     if missing:
         raise ValueError("Material candidate output missing or empty: " + missing[0])
+    if is_placeholder_normal(sources["normal"]):
+        if not allow_placeholder_normal:
+            raise ValueError(f"Material candidate {number} has a placeholder normal map ({sources['normal']}); "
+                             "regenerate with a real normal map or pass --allow-placeholder-normal to waive")
+        candidate["placeholder_normal_waived"] = True
     mesh_source = candidate.get("mesh_source") or asset.get("source", {}).get("glb")
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
