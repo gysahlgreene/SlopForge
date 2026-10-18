@@ -44,3 +44,15 @@ class MaterialShowcaseTests(unittest.TestCase):
             self.assertEqual(saved["concept_candidate"], 2)
             self.assertEqual(set(saved["sha256"]), {"concept", "basecolor", "normal", "roughness", "metallic",
                                                     "emission", "preview_front", "preview_three_quarter"})
+
+
+class TurntableGifTests(unittest.TestCase):
+    def test_frames_become_a_looping_gif(self):
+        build = runpy.run_path(str(ROOT / "scripts/turntable_gif.py"))["build"]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index, color in enumerate(((200, 40, 40), (40, 200, 40), (40, 40, 200))):
+                Image.new("RGB", (32, 32), color).save(root / f"frame_{index:03d}.png")
+            self.assertEqual(build(root, root / "spin.gif", size=16), 3)
+            with Image.open(root / "spin.gif") as gif:
+                self.assertEqual((gif.n_frames, gif.size, gif.info.get("loop")), (3, (16, 16), 0))

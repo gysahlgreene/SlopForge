@@ -2,6 +2,17 @@
 
 > Read on return: [AGENTS](../AGENTS.md) → [contracts](PRODUCT_CONTRACT.md) / [roadmap](../ROADMAP.md) / [current state](../CURRENT_STATE.md). Inspect preserved worktrees. Review full dirty diff against the applicable plan/spec below. Then freshly verify before any claim. Baseline at audit start was `main` at `e56d188`.
 
+## Props and materials track (2026-10-18)
+
+Merged to `main` from `fix/placeholder-normal-gate`: declared material regions (`--material`),
+reconstruction rules on every 3D concept prompt, baked normal maps and GPU UDF remesh in the
+H100 TRELLIS.2 graphs, material-map checks, adaptive review cameras, lit turntables and a
+project-manifest lock. Evidence: [material showcase](media/material-showcase-2026-10/README.md);
+owner rating about 60% of target prop quality. Open next: guessed hidden sides (multi-view
+conditioning), small detached components, emitter detection on dark-baked albedo (#44), and
+the three-brief/two-run props protocol with Unity import. Generated assets stay under the
+ignored `private/` root.
+
 ## Remaining worktrees
 
 | Worktree | Branch | HEAD | Ahead / Behind | Status |

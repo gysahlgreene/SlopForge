@@ -48,7 +48,9 @@ result against that declaration before anyone reviews it.
 
 6. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
-   above so they are not rendered edge-on.
+   above so they are not rendered edge-on. For a lit turntable of any material candidate,
+   run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`
+   and `python3 scripts/turntable_gif.py <frames> <name>.gif`.
 
 ## Checks before review
 

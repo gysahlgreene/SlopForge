@@ -5,6 +5,18 @@ Five props generated on 2026-10-18 from written briefs through the normal CLI
 the selected concept, the generated base color, baked normal, roughness, metallic and
 emission maps, and two Blender review renders.
 
+| Brass key | Glazed jug | Supply crate | Power relay | Stone lantern |
+| :---: | :---: | :---: | :---: | :---: |
+| ![Brass key](brass_key_turntable.gif) | ![Glazed jug](ceramic_jug_turntable.gif) | ![Supply crate](supply_crate_turntable.gif) | ![Power relay](power_relay_v2_turntable.gif) | ![Stone lantern](stone_lantern_v3_turntable.gif) |
+
+Turntables rotate each prepared asset once under fixed key, fill and rim lights (Blender EEVEE,
+48 frames), so highlights show how roughness and metallic respond:
+
+```sh
+blender --background --python blender/render_turntable.py -- <material_NN>/<name>_preview.blend frames/<name>
+python3 scripts/turntable_gif.py frames/<name> <name>_turntable.gif
+```
+
 ![Five generated props](renders.png)
 
 | Prop | Declared materials | Result |
@@ -50,6 +62,23 @@ covered by regression tests:
 - Flat props were reviewed edge-on and wide props were clipped; preview cameras now adapt.
 - Two commands on one project could erase each other's manifest records; writes now hold a
   project lock.
+
+## Review and progress
+
+The project owner reviewed this set on 2026-10-18 and rated it about **60% of the target
+quality for props**. Measured against the start of this work, on the same briefs and H100:
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Normal map | 1×1 placeholder on every native candidate | 4096² baked tangent normal |
+| Metallic | Glossy stone decoded as metal; no check | Declared materials; mismatch fails before review |
+| Thin parts | Planks, handles and lattices erased by Blender voxel repair | UDF remesh on the GPU keeps them |
+| Surface | Blocky blotches at 1024/2048; hole "shards" from over-decimation | Fine texture at 1536/4096; remesh matched to face budget |
+| Glowing parts | Painted white or reconstructed as holes | Solid unlit panels; emission from the declaration |
+| Review renders | Edge-on flat props, clipped wide props, no turntable | Adaptive cameras and lit turntables |
+
+The remaining 40% is listed below; the largest visible gaps are unseen sides, small detached
+parts and emitter detection.
 
 ## Limits
 

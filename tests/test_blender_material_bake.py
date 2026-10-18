@@ -338,3 +338,26 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             background = image.getpixel((0, 0))
             edges = [image.getpixel((x, y)) for y in range(image.height) for x in (0, image.width - 1)]
             self.assertTrue(all(max(abs(a - b) for a, b in zip(pixel, background)) <= 24 for pixel in edges))
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderTurntableTests(unittest.TestCase):
+    def test_turntable_renders_rotating_frames_from_a_prepared_blend(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            blend, frames = root / "asset.blend", root / "frames"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0.2, 0, 0.5))
+bpy.context.object.scale = (1, 0.3, 1)
+bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(blend)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/render_turntable.py"), "--", str(blend), str(frames),
+                            "--frames", "4", "--size", "64"], check=True, capture_output=True, text=True)
+            rendered = sorted(frames.glob("frame_*.png"))
+            self.assertEqual([path.name for path in rendered], [f"frame_{index:03d}.png" for index in range(4)])
+            self.assertNotEqual(rendered[0].read_bytes(), rendered[1].read_bytes())

@@ -21,7 +21,10 @@ The Unity preview uses the latest arm-fit candidate and a retargeted walk clip. 
 
 ## Materials and textures
 
-![Five props generated from briefs: brass key, glazed jug, supply crate, power relay, stone lantern](docs/media/material-showcase-2026-10/renders.png)
+| Brass key | Glazed jug | Supply crate | Power relay | Stone lantern |
+| :---: | :---: | :---: | :---: | :---: |
+| ![Brass key turntable](docs/media/material-showcase-2026-10/brass_key_turntable.gif) | ![Glazed jug turntable](docs/media/material-showcase-2026-10/ceramic_jug_turntable.gif) | ![Supply crate turntable](docs/media/material-showcase-2026-10/supply_crate_turntable.gif) | ![Power relay turntable](docs/media/material-showcase-2026-10/power_relay_v2_turntable.gif) | ![Stone lantern turntable](docs/media/material-showcase-2026-10/stone_lantern_v3_turntable.gif) |
+| metal | glossy non-metal | wood + iron | ceramic + copper + graphite | granite + paper + wood |
 
 Every 3D prop gets mesh-aware PBR materials generated with its geometry: base color,
 roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an
@@ -44,7 +47,7 @@ slopforge --project ~/UnityProjects/MyGame generate prop stone_lantern "Weathere
 - **Clean geometry:** raw shapes are remeshed on the GPU and baked against the full-detail mesh, so thin planks, handles and lattices survive.
 - **Checks:** placeholder normal maps cannot be approved; map statistics, UV coverage and topology are recorded with every candidate.
 
-These five are generation evidence from one run each, with no manual repair. They have not been visually approved or imported into Unity. [How materials are made →](docs/MATERIALS.md) · [Showcase evidence and limits →](docs/media/material-showcase-2026-10/README.md)
+These five are generation evidence from one run each, with no manual repair, rendered as lit turntables in Blender. The project owner rates them about 60% of the target prop quality; they have not been visually approved or imported into Unity. [How materials are made →](docs/MATERIALS.md) · [Showcase evidence and limits →](docs/media/material-showcase-2026-10/README.md)
 
 ## The workflow
 
