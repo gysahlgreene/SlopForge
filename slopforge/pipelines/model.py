@@ -1164,8 +1164,12 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     shutil.copy2(paths["basecolor"], paths["surface"])
     declared = asset.get("materials") or []
     emissive_fraction = None
-    if any(item.get("class") == "emissive" for item in declared):
-        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"])
+    emissive = [item for item in declared if item.get("class") == "emissive"]
+    if emissive:
+        rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+        targets = {(rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
+                   for item in emissive}
+        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"], sorted(targets, key=str))
     else:
         with Image.open(paths["basecolor"]) as image:
             Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
@@ -1208,7 +1212,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["emissive_fraction"] = round(emissive_fraction, 4)
         if emissive_fraction == 0:
             validation["warnings"] = [*validation.get("warnings", []),
-                "brief declares an emissive region but no near-white region was found in base color"]
+                "brief declares an emissive region but no matching region was found in base color; "
+                "declare its colour with emissive#rrggbb or show it as a pale opaque surface"]
             if validation["status"] == "passed":
                 validation["status"] = "passed_with_warnings"
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")

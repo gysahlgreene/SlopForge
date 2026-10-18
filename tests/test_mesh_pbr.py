@@ -471,6 +471,22 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertGreater(max(emission.getpixel((80, 90))), 150)
                 self.assertEqual(emission.getpixel((210, 200)), (0, 0, 0))
 
+    def test_declared_emissive_colour_matches_coloured_lens_and_glows_in_that_colour(self):
+        from slopforge.style import parse_material_spec
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 256), (40, 40, 45))
+            base.paste((230, 160, 40), (100, 100, 160, 160))  # amber lens
+            lens = parse_material_spec("lens=emissive#e6a028: amber glass")
+            self.assertEqual(lens["color"], "#e6a028")
+            candidate = self._candidate(root, [{"region": "housing", "class": "nonmetal", "description": ""}, lens], 0, base)
+            self.assertGreater(candidate["validation"]["measured"]["emissive_fraction"], 0.04)
+            with Image.open(root / candidate["outputs"]["emission"]) as emission:
+                self.assertEqual(emission.getpixel((130, 130)), (230, 160, 40))
+                self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
+        with self.assertRaisesRegex(ValueError, "--material must be"):
+            parse_material_spec("housing=nonmetal#ffffff")
+
     def test_reconstruction_rules_are_appended_to_agent_prompts_with_materials(self):
         from slopforge.style import parse_material_spec, reconstruction_rules
         materials = [parse_material_spec("body=nonmetal: weathered granite"), parse_material_spec("windows=emissive")]

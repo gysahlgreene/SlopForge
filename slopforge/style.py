@@ -55,13 +55,24 @@ MATERIAL_CLASSES = {
 
 
 def parse_material_spec(spec):
-    """Parse 'region=class[: description]' where class is nonmetal, metal or emissive."""
+    """Parse 'region=class[: description]'; class is nonmetal, metal, emissive or emissive#rrggbb.
+
+    The optional emissive colour is the region's base colour in the concept; the material stage
+    matches it in the generated base colour map and glows in that colour.
+    """
     region, separator, rest = spec.partition("=")
     material_class, _, detail = rest.partition(":")
-    region, material_class, detail = region.strip(), material_class.strip().lower(), detail.strip()
-    if not separator or not region or material_class not in MATERIAL_CLASSES:
-        raise ValueError(f"--material must be 'region=nonmetal|metal|emissive[: description]', got {spec!r}")
-    return {"region": region, "class": material_class, "description": detail}
+    material_class, _, color = material_class.strip().lower().partition("#")
+    region, detail = region.strip(), detail.strip()
+    valid_color = not color or (material_class == "emissive" and len(color) == 6
+                                and all(c in "0123456789abcdef" for c in color))
+    if not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color:
+        raise ValueError("--material must be 'region=nonmetal|metal|emissive[#rrggbb][: description]', "
+                         f"got {spec!r}")
+    item = {"region": region, "class": material_class, "description": detail}
+    if color:
+        item["color"] = "#" + color
+    return item
 
 
 def reconstruction_rules(asset_type, materials=()):
@@ -71,7 +82,8 @@ def reconstruction_rules(asset_type, materials=()):
     lines = ["RECONSTRUCTION REQUIREMENTS:",
              "- Complete centered asset with margin around every extremity; plain neutral background, no scene or cast shadow",
              "- Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
-             "- Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark"]
+             "- Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
+             "- Solid chunky forms with thick walls; no thin hollow tubes, open rings, wires, or paper-thin parts"]
     if materials:
         lines.append("MATERIAL REGIONS:")
         lines.extend(f"- {item['region']}: {item['description'] + '; ' if item['description'] else ''}"
