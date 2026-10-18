@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mesh_cleanup import remove_isolated_single_faces
+from mesh_cleanup import remove_isolated_single_faces, repair_manifold_locally
 from inspect_model import topology_edge_counts
 
 
@@ -404,6 +404,10 @@ if mesh_only:
     boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
     # A voxel remesh needs closed volumes; it erases thin open parts (planks, handles, lattices).
     # Workflows that already ran a UDF remesh on the GPU pass --no-voxel-repair.
+    if (boundary or nonmanifold) and "--local-repair" in sys.argv:
+        # Characters need a closed body for rigging; repair locally so modelled detail survives.
+        boundary, nonmanifold = repair_manifold_locally(obj.data, max(maximum - minimum) * 1e-5)
+        print(f"Local manifold repair left boundary={boundary} non_manifold={nonmanifold}")
     if (boundary or nonmanifold) and "--no-voxel-repair" not in sys.argv:
         modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
         modifier.mode = "VOXEL"

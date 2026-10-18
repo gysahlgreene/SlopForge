@@ -354,7 +354,7 @@ def main():
                         help="Voxel remesh resolution used before reducing a generated shape")
     parser.add_argument("--blender", type=Path)
     parser.add_argument("--require-manifold", action="store_true",
-                        help="Keep Blender's voxel repair after a GPU UDF remesh (characters must be manifold to rig)")
+                        help="Make the mesh manifold (characters must be closed to rig): local repair, voxel repair as fallback")
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
@@ -449,7 +449,9 @@ def main():
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
                             "--voxel-resolution", str(args.voxel_resolution), "--mesh-only",
                             # The graph already ran a UDF remesh; Blender's voxel remesh would erase thin parts.
-                            *(["--no-voxel-repair"] if "shape_remesh" in workflow and not args.require_manifold else [])],
+                            *(["--no-voxel-repair"] if "shape_remesh" in workflow and not args.require_manifold else []),
+                            # Manifold types try a local repair first; voxel repair only runs if it fails.
+                            *(["--local-repair"] if args.require_manifold else [])],
                            check=True, env=blender_environment())
             if not prepared.is_file():
                 raise RuntimeError("Blender did not produce the prepared mesh")

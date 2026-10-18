@@ -403,3 +403,31 @@ json.dump(list(obj.dimensions), open(sys.argv[-1], 'w'))
             self.assertAlmostEqual(x, 3.0, places=3)  # the 1.0-long side was turned onto X
             self.assertAlmostEqual(z, 3.0, places=3)
             self.assertLess(y, 1.0)  # free thickness keeps a proportional size
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderLocalRepairTests(unittest.TestCase):
+    def test_local_repair_closes_holes_without_remeshing_detail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, out = root / "holed.glb", root / "prepared.glb"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=0.5, location=(0, 0, 0.5))
+obj = bpy.context.object
+bm = bmesh.new(); bm.from_mesh(obj.data); bm.faces.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[bm.faces[i] for i in (100, 101, 102, 900, 901)], context="FACES")  # open holes
+bm.to_mesh(obj.data); bm.free()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(out),
+                                     str(root / "prepared.blend"), "--mesh-only", "--face-budget", "100000",
+                                     "--voxel-resolution", "32", "--local-repair"],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn("Local manifold repair left boundary=0 non_manifold=0", result.stdout)
+            faces = int(result.stdout.split("Input faces: ")[1].split()[0])
+            self.assertGreater(faces, 3500)  # a 32-voxel remesh would leave a few hundred faces

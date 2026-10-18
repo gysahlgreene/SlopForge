@@ -152,6 +152,7 @@ asset_pipeline:
         self.assertIn("--require-manifold", run.call_args.args[0])
         worker = (Path(__file__).resolve().parents[1] / "processing/comfy_generate_3d.py").read_text()
         self.assertIn('"shape_remesh" in workflow and not args.require_manifold', worker)
+        self.assertIn('["--local-repair"] if args.require_manifold', worker)
 
 
 if __name__ == "__main__":
