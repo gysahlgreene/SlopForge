@@ -110,6 +110,8 @@ class WorkflowRequirementsTests(unittest.TestCase):
                 # Raw shapes are UDF-remeshed on the GPU; Blender's voxel remesh erased thin open parts.
                 self.assertEqual(workflow["shape_remesh"]["class_type"], "RemeshMesh")
                 self.assertEqual(workflow["shape_remesh"]["inputs"]["sign_mode"], "udf")
+                # 768 made ~10M faces; decimating that to a 30k budget shattered thin parts. 384 gives ~250k.
+                self.assertEqual(workflow["shape_remesh"]["inputs"]["resolution"], 384)
                 self.assertEqual(workflow["shape_remesh"]["inputs"]["mesh"], ["mesh", 0])
                 self.assertEqual(workflow["shape_decimate"]["inputs"]["mesh"], ["shape_remesh", 0])
                 self.assertEqual(workflow["save_raw"]["inputs"]["mesh"], ["shape_decimate", 0])

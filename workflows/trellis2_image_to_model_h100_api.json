@@ -502,7 +502,7 @@
         "mesh",
         0
       ],
-      "resolution": 768,
+      "resolution": 384,
       "sign_mode": "udf",
       "sign_mode.qef": false,
       "sign_mode.drop_inverted_components": false,

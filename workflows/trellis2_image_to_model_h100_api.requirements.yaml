@@ -1,10 +1,10 @@
 schema_version: 1
 id: model.trellis2.h100
-version: 4
+version: 5
 capabilities:
 - image_to_3d
 - pbr_texturing
-workflow_sha256: 961222dde3f3b363e569ed5d3b5d5066b19fb9f7feb0d614b0a86b226545218a
+workflow_sha256: c681f04fdc8cf15e64ee0321e2388a74953f836ba5766a3aa41b0058f7662316
 nodes:
 - class: ApplyTextureToMesh
   source: ComfyUI TRELLIS.2 node extension
