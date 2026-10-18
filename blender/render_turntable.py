@@ -1,10 +1,12 @@
 """Render a lit turntable of a prepared asset .blend for review and showcase.
 
-Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512]
+Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512] [--walk]
 
 The asset rotates once about its vertical axis under fixed key, fill and rim lights so
 highlights travel across its materials. Frames are written as frame_###.png; the scene in
-the source .blend is not saved.
+the source .blend is not saved. With --walk, a rigged Rigify character also plays a procedural
+in-place walk test cycle on its FK controls (two strides per turn); it shows deformation in motion
+and is not production animation.
 """
 import math
 import sys
@@ -22,7 +24,7 @@ def parse():
     for key in options:
         if key in args:
             options[key] = int(args[args.index(key) + 1])
-    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"]
+    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"], "--walk" in args
 
 
 def area_light(name, location, target, energy, size):
@@ -34,7 +36,7 @@ def area_light(name, location, target, energy, size):
 
 
 def main():
-    source, frames_dir, frames, size = parse()
+    source, frames_dir, frames, size, walk = parse()
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     for obj in list(scene.objects):
@@ -52,10 +54,20 @@ def main():
     pivot = bpy.data.objects.new("TurntablePivot", None)
     pivot.location = (center.x, center.y, low.z)
     scene.collection.objects.link(pivot)
-    for obj in meshes:
-        if obj.parent is None:
+    for obj in scene.objects:
+        if obj.parent is None and obj.type in {"MESH", "ARMATURE"} and obj is not pivot:
             obj.parent = pivot
             obj.matrix_parent_inverse = pivot.matrix_world.inverted()
+    rig = next((obj for obj in scene.objects if obj.type == "ARMATURE" and obj.pose.bones.get("thigh_fk.L")), None)
+    if walk and rig is None:
+        raise SystemExit("--walk needs a Rigify character with FK leg controls")
+    if walk:
+        for name in ("upper_arm_parent.L", "upper_arm_parent.R", "thigh_parent.L", "thigh_parent.R"):
+            switch = rig.pose.bones.get(name)
+            if switch is not None and "IK_FK" in switch:
+                switch["IK_FK"] = 1.0
+        for bone in rig.pose.bones:
+            bone.rotation_mode = "XYZ"
 
     floor_material = bpy.data.materials.new("TurntableFloor")
     floor_material.use_nodes = True
@@ -94,6 +106,28 @@ def main():
     frames_dir.mkdir(parents=True, exist_ok=True)
     for frame in range(frames):
         pivot.rotation_euler = (0, 0, 2 * math.pi * frame / frames)
+        if walk:
+            # Axes measured on the generated basic-human rig: +X on thigh_fk swings the leg forward,
+            # -X on shin_fk bends the knee; arm swing is Z on upper_arm_fk, opposite to the same-side leg.
+            phase = 4 * math.pi * frame / frames
+            swing = math.sin(phase)
+            for side, sign in (("L", 1), ("R", -1)):
+                leg = sign * swing
+                rig.pose.bones[f"thigh_fk.{side}"].rotation_euler = (0.42 * leg, 0, 0)
+                rig.pose.bones[f"shin_fk.{side}"].rotation_euler = (-0.75 * max(0.0, -leg) - 0.1, 0, 0)
+                arm = rig.pose.bones.get(f"upper_arm_fk.{side}")
+                if arm is not None:
+                    arm.rotation_euler = (0, 0, 0.35 * swing)
+            # Plant the lowest foot: measure the posed mesh and lower the whole character onto the floor.
+            pivot.location.z = low.z
+            bpy.context.view_layer.update()
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            lowest = min(min((obj.matrix_world @ vertex.co).z
+                             for vertex in obj.evaluated_get(depsgraph).to_mesh().vertices) for obj in meshes)
+            for obj in meshes:
+                obj.evaluated_get(depsgraph).to_mesh_clear()
+            pivot.location.z = low.z - (lowest - low.z)
+            bpy.context.view_layer.update()
         scene.render.filepath = str(frames_dir / f"frame_{frame:03d}.png")
         bpy.ops.render.render(write_still=True)
 

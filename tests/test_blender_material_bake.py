@@ -361,6 +361,11 @@ bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
             rendered = sorted(frames.glob("frame_*.png"))
             self.assertEqual([path.name for path in rendered], [f"frame_{index:03d}.png" for index in range(4)])
             self.assertNotEqual(rendered[0].read_bytes(), rendered[1].read_bytes())
+            walk = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                   str(ROOT / "blender/render_turntable.py"), "--", str(blend), str(root / "walk"),
+                                   "--frames", "2", "--size", "32", "--walk"], capture_output=True, text=True)
+            self.assertNotEqual(walk.returncode, 0)
+            self.assertIn("--walk needs a Rigify character", walk.stdout + walk.stderr)
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
