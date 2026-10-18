@@ -107,6 +107,12 @@ class WorkflowRequirementsTests(unittest.TestCase):
                 self.assertEqual(bake["inputs"]["resolution"], workflow["maps"]["inputs"]["texture_size"])
                 self.assertEqual(workflow["textured"]["inputs"]["normal_map"], ["normal_bake", 0])
                 self.assertEqual(workflow["save_normal"]["inputs"]["images"], ["normal_bake", 0])
+                # Raw shapes are UDF-remeshed on the GPU; Blender's voxel remesh erased thin open parts.
+                self.assertEqual(workflow["shape_remesh"]["class_type"], "RemeshMesh")
+                self.assertEqual(workflow["shape_remesh"]["inputs"]["sign_mode"], "udf")
+                self.assertEqual(workflow["shape_remesh"]["inputs"]["mesh"], ["mesh", 0])
+                self.assertEqual(workflow["shape_decimate"]["inputs"]["mesh"], ["shape_remesh", 0])
+                self.assertEqual(workflow["save_raw"]["inputs"]["mesh"], ["shape_decimate", 0])
 
     def test_static_requirements_reject_direct_transparency_crop(self):
         workflow = dict(self.workflow)

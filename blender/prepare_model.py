@@ -370,7 +370,9 @@ if mesh_only:
         bpy.context.collection.objects.link(detail_source)
         detail_source.select_set(False)
     boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
-    if boundary or nonmanifold:
+    # A voxel remesh needs closed volumes; it erases thin open parts (planks, handles, lattices).
+    # Workflows that already ran a UDF remesh on the GPU pass --no-voxel-repair.
+    if (boundary or nonmanifold) and "--no-voxel-repair" not in sys.argv:
         modifier = obj.modifiers.new(name="CleanReconstruction", type="REMESH")
         modifier.mode = "VOXEL"
         modifier.voxel_size = max(maximum - minimum) / voxel_resolution

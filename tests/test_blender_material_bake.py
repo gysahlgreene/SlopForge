@@ -281,3 +281,31 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             pixels = list(zip(*[iter(front.tobytes())] * 3))
             foreground = sum(max(abs(a - b) for a, b in zip(pixel, background)) > 24 for pixel in pixels)
             self.assertGreater(foreground / len(pixels), 0.2)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderVoxelRepairTests(unittest.TestCase):
+    def test_no_voxel_repair_keeps_open_thin_geometry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb = root / "open.glb"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_grid_add(x_subdivisions=20, y_subdivisions=20, size=1, location=(0, 0, 0.5))
+bpy.context.object.rotation_euler = (1.5708, 0, 0)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            faces = {}
+            for flag in ([], ["--no-voxel-repair"]):
+                out = root / f"prepared{len(flag)}.glb"
+                result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                         str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(out),
+                                         str(root / f"prepared{len(flag)}.blend"), "--mesh-only",
+                                         "--face-budget", "10000", "--voxel-resolution", "64", *flag],
+                                        check=True, capture_output=True, text=True)
+                faces[bool(flag)] = int(result.stdout.split("Input faces: ")[1].split()[0])
+            self.assertEqual(faces[True], 800)  # 20x20 quads triangulated, untouched by voxel repair
+            self.assertNotEqual(faces[False], 800)

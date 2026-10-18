@@ -445,7 +445,9 @@ def main():
                             inputs=raw_refs):
             subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(raw_path),
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
-                            "--voxel-resolution", str(args.voxel_resolution), "--mesh-only"],
+                            "--voxel-resolution", str(args.voxel_resolution), "--mesh-only",
+                            # The graph already ran a UDF remesh; Blender's voxel remesh would erase thin parts.
+                            *(["--no-voxel-repair"] if "shape_remesh" in workflow else [])],
                            check=True, env=blender_environment())
             if not prepared.is_file():
                 raise RuntimeError("Blender did not produce the prepared mesh")

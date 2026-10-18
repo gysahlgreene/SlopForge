@@ -444,7 +444,7 @@
     "class_type": "SaveGLB",
     "inputs": {
       "mesh": [
-        "mesh",
+        "shape_decimate",
         0
       ],
       "filename_prefix": "slopforge/mesh_pbr/save_raw"
@@ -493,6 +493,37 @@
         0
       ],
       "filename_prefix": "slopforge/mesh_pbr/save_normal"
+    }
+  },
+  "shape_remesh": {
+    "class_type": "RemeshMesh",
+    "inputs": {
+      "mesh": [
+        "mesh",
+        0
+      ],
+      "resolution": 768,
+      "sign_mode": "udf",
+      "sign_mode.qef": false,
+      "sign_mode.drop_inverted_components": false,
+      "sign_mode.drop_enclosed_components": false,
+      "band": 1.0,
+      "project_back": 0.0,
+      "fix_poles": false,
+      "smooth_iters": 2,
+      "drop_small_components": 0.01,
+      "precluster_max_verts": 20000000
+    }
+  },
+  "shape_decimate": {
+    "class_type": "DecimateMesh",
+    "inputs": {
+      "mesh": [
+        "shape_remesh",
+        0
+      ],
+      "target_face_count": 30000,
+      "placement_mode": "midpoint"
     }
   }
 }
