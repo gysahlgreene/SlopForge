@@ -1,0 +1,70 @@
+{
+  "asset": "stone_well",
+  "material_candidate": 1,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "stone wall",
+      "class": "nonmetal",
+      "description": "rough matte fieldstone and mortar"
+    },
+    {
+      "region": "roof and posts",
+      "class": "nonmetal",
+      "description": "weathered timber shingles"
+    },
+    {
+      "region": "bucket",
+      "class": "nonmetal",
+      "description": "dark oak"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 15 disconnected components",
+    "mesh has a very small disconnected component"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 12350,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 206,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 1.0,
+      "distinct_colors_sampled": 4,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "899f62d425982323359b6086a2e0f3e89626c740b1512f07b59c5f66beab6b57",
+    "basecolor": "8438ff39b8d579401da7ff4e63aaf6de6a6e933b3e51a166b9f849b139f41e52",
+    "normal": "08b1b3892847e10b2b27c81a0c497a3266fc560ed0a8834be3237a3710bcff05",
+    "roughness": "70376f03de83c1b579cb4a422282b483d9a66f75a91b2925a5450bd064928dd9",
+    "metallic": "d568d7db02210fc413782e90567ff65951cac90bb7295b902ec77faab1803dc0",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "abc191dec7a0f979c675775dc11dab299da925e24ab387cf1c9c6ac6221e47c6",
+    "preview_three_quarter": "de03ee686bcfaa0b78f06dcd5007a72ef6929e97297bb0c8481aacbcb9bffaf0"
+  }
+}

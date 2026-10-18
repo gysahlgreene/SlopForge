@@ -1,0 +1,69 @@
+{
+  "asset": "watchtower",
+  "material_candidate": 1,
+  "concept_candidate": 2,
+  "materials": [
+    {
+      "region": "base",
+      "class": "nonmetal",
+      "description": "rough fieldstone"
+    },
+    {
+      "region": "timber",
+      "class": "nonmetal",
+      "description": "weathered timber planks"
+    },
+    {
+      "region": "roof",
+      "class": "nonmetal",
+      "description": "dry straw thatch"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 2 disconnected components"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 16131,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 36,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 1.0,
+      "distinct_colors_sampled": 4,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "58cc6a19aac3a794590599b560c9cb93068e34918fdec92a98e74e9e2f6b0988",
+    "basecolor": "696ecbcefcf59c8f21eeab6e37e5ac9fd853ea5356e5ded49486901735850cf1",
+    "normal": "302c183a01665a5cdbe192d7a3d338cf17be4d06c902f4f6b06ceb96fbe03cc8",
+    "roughness": "6da7ba09a2c0baca8291d2196ba17645fc785b860b251fc1d3417554e431ac77",
+    "metallic": "3e4a4496bfdfa5b258b3b370754f373b5af89b75749ca96bde3ab7b18cde84a3",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "1ab150d9ea68e20d49bfb629f6d288f4e1f80b6433748e404295cf278adb3864",
+    "preview_three_quarter": "c281d5cc38366a56a26bcb4876cd35ae56f201032a0e6e19aedbad6df5c893a4"
+  }
+}

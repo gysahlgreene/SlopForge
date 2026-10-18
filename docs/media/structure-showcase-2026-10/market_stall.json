@@ -1,0 +1,70 @@
+{
+  "asset": "market_stall",
+  "material_candidate": 1,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "frame and counter",
+      "class": "nonmetal",
+      "description": "worn pine timber"
+    },
+    {
+      "region": "awning",
+      "class": "nonmetal",
+      "description": "thick matte striped canvas"
+    },
+    {
+      "region": "crates",
+      "class": "nonmetal",
+      "description": "rough wood"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 18 disconnected components",
+    "metallic map is a single constant color"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 7992,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 46,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 1.0,
+      "distinct_colors_sampled": 1,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "137f36690ee4fcea7f2e74e6ce87ec5785cec78c4909301d0d4ab7950724853b",
+    "basecolor": "39fc6e0cf9265b09a0970368df13996ca382dcd17f2b26fc644f9c230ad397fa",
+    "normal": "b15b4fa8f0d5b9f50424d7bc13652f9f7dc1e1b16f41730a51ee699db7c12d59",
+    "roughness": "8bdbe36715c9edac55361aeaf9e27cb32c9b77f64828236d4dcdc6ab59473b53",
+    "metallic": "26531c8d85a901dd2cdb5a830af51796391f59ab4f8b34ba363600bc8175575c",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "841788c0c9d195106e0c0bff62dc50ca720b2dfa866e0430539e04aacef61ad3",
+    "preview_three_quarter": "5c7ebd374c7ab931dc5fd3117486122e1af9496e802167eb18dfbd86ba30fa7f"
+  }
+}
