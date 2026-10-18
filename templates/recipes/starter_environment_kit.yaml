@@ -1,5 +1,5 @@
 id: starter_environment_kit
-version: 1
+version: 2
 description: A modular sci-fi room kit with reusable surfaces, structures, and props.
 kit_constraints:
   grid_size: 1.0
@@ -9,20 +9,25 @@ kit_constraints:
   pivot: center
   modules:
     floor:
+      target_size: [3, 3, null]
       snap_axes: [0, 1]
       flat_axis: 2
       max_dimension: 4.1
     wall:
+      target_size: [3, null, 3]
       snap_axes: [0, 2]
       vertical_axis: 2
       max_dimension: 4.1
     corner:
+      target_size: [3, 3, 3]
       vertical_axis: 2
     doorway:
+      target_size: [3, null, 3]
       snap_axes: [0, 2]
       vertical_axis: 2
       max_dimension: 4.1
     ceiling:
+      target_size: [3, 3, null]
       flat_axis: 2
 children:
   - id: floor

@@ -2,7 +2,7 @@ import bpy
 import math
 import sys
 from pathlib import Path
-from mathutils import Vector
+from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import remove_isolated_single_faces
 from inspect_model import topology_edge_counts
@@ -357,6 +357,35 @@ if not reuse_stage_mesh and not mesh_only:
     obj.location += offset
     obj.scale *= 1.0 / max_dimension
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    if "--target-size" in sys.argv:
+        # Kit modules declare real sizes, e.g. "3,-,3" for a wall; "-" keeps proportion on that axis.
+        target = [None if value == "-" else float(value)
+                  for value in sys.argv[sys.argv.index("--target-size") + 1].split(",")]
+        if len(target) != 3 or all(value is None for value in target) or any(value is not None and value <= 0 for value in target):
+            raise SystemExit("--target-size needs three comma-separated positive sizes or '-', e.g. 3,-,3")
+        # Transform mesh data directly: the transform_apply operator did not take effect here.
+        coords = [vertex.co for vertex in obj.data.vertices]
+        size = Vector([max(co[axis] for co in coords) - min(co[axis] for co in coords) for axis in range(3)])
+        # A declared horizontal size marks the long side when the other is free (a wall is 3,-,3).
+        x_long = None if target[0] is None and target[1] is None else (
+            target[1] is None or (target[0] is not None and target[0] >= target[1]))
+        if x_long is not None and x_long != (size.x >= size.y):
+            obj.data.transform(Matrix.Rotation(math.pi / 2, 4, "Z"))
+            size = Vector((size.y, size.x, size.z))
+        factors = [None if value is None else value / max(size[axis], 1e-6) for axis, value in enumerate(target)]
+        fixed = [factor for factor in factors if factor is not None]
+        factors = [factor if factor is not None else sum(fixed) / len(fixed) for factor in factors]
+        obj.data.transform(Matrix.Diagonal((*factors, 1.0)))
+        obj.data.update()
+        coords = [vertex.co for vertex in obj.data.vertices]
+        low = Vector([min(co[axis] for co in coords) for axis in range(3)])
+        high = Vector([max(co[axis] for co in coords) for axis in range(3)])
+        obj.data.transform(Matrix.Translation(Vector((-(low.x + high.x) / 2.0, -(low.y + high.y) / 2.0, -low.z))))
+        obj.data.update()
+        obj.location = Vector((0.0, 0.0, 0.0))  # geometry is now bottom-centred in its own space
+        bpy.context.view_layer.update()
+        print(f"Scaled to target size {[round(v, 4) for v in high - low]}; "
+              f"axis stretch ratio {max(factors) / min(factors):.3f}")
 
 
 # -------------------------------------------------

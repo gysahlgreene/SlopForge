@@ -361,3 +361,40 @@ bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
             rendered = sorted(frames.glob("frame_*.png"))
             self.assertEqual([path.name for path in rendered], [f"frame_{index:03d}.png" for index in range(4)])
             self.assertNotEqual(rendered[0].read_bytes(), rendered[1].read_bytes())
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderTargetSizeTests(unittest.TestCase):
+    def test_target_size_scales_declared_axes_and_turns_the_long_side(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend = root / "wall.glb", root / "wall.blend"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.5))
+bpy.context.object.scale = (0.2, 1.0, 0.9)
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "wall.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(maps[0]),
+                            "--target-size", "3,-,3"], check=True, capture_output=True, text=True)
+            result = root / "dims.json"
+            probe = root / "probe.py"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+json.dump(list(obj.dimensions), open(sys.argv[-1], 'w'))
+""")
+            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
+                           check=True, capture_output=True, text=True)
+            x, y, z = json.loads(result.read_text())
+            self.assertAlmostEqual(x, 3.0, places=3)  # the 1.0-long side was turned onto X
+            self.assertAlmostEqual(z, 3.0, places=3)
+            self.assertLess(y, 1.0)  # free thickness keeps a proportional size
