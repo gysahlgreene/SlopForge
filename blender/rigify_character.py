@@ -9,7 +9,7 @@ from pathlib import Path
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 
 POSES = {
@@ -610,6 +610,19 @@ def render_pose(rig, meshes, pose, controls, destination):
         bone.rotation_euler = (0, 0, 0)
         bone.scale = (1, 1, 1)
     missing = []
+    if pose == "t_pose":
+        # A real T-pose: aim each upper arm horizontally outward, whatever the rest (A-pose) angle is.
+        bpy.context.view_layer.update()
+        for side in ("L", "R"):
+            bone = rig.pose.bones.get(f"upper_arm_fk.{side}")
+            if bone is None:
+                missing.append(f"upper_arm_fk.{side}")
+                continue
+            direction = (bone.tail - bone.head).normalized()
+            level = Vector((direction.x, direction.y, 0.0)).normalized()
+            swing = direction.rotation_difference(level).to_matrix().to_4x4()
+            bone.matrix = Matrix.Translation(bone.head) @ swing @ Matrix.Translation(-bone.head) @ bone.matrix
+        bpy.context.view_layer.update()
     for name, rotation in controls.items():
         bone = rig.pose.bones.get(name)
         if bone is None:
@@ -624,7 +637,16 @@ def render_pose(rig, meshes, pose, controls, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     bpy.context.scene.render.filepath = str(destination)
     bpy.ops.render.render(write_still=True)
-    return {"missing_controls": missing}
+    report = {"missing_controls": missing}
+    if pose == "t_pose":
+        elevations = []
+        for side in ("L", "R"):
+            bone = rig.pose.bones.get(f"DEF-upper_arm.{side}")
+            if bone is not None:
+                direction = (bone.tail - bone.head).normalized()
+                elevations.append(math.degrees(math.asin(max(-1.0, min(1.0, direction.z)))))
+        report["upper_arm_elevation_degrees"] = [round(value, 2) for value in elevations]
+    return report
 
 
 def run(request):

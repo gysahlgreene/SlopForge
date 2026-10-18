@@ -267,8 +267,16 @@ def pose(rig, mapping, name):
         bone = rig.pose.bones[mapping[semantic]]
         bone.rotation_quaternion = Quaternion(Vector(axis), math.radians(degrees))
     if name == "t_pose":
-        rotate_world("left_upper_arm", (0, 1, 0), 25)
-        rotate_world("right_upper_arm", (0, 1, 0), -25)
+        # A real T-pose: swing each upper arm until it is horizontal, whatever its rest angle.
+        for semantic in ("left_upper_arm", "right_upper_arm"):
+            bone = rig.pose.bones[mapping[semantic]]
+            bpy.context.view_layer.update()
+            direction = (rig.matrix_world.to_3x3() @ (bone.tail - bone.head)).normalized()
+            level = Vector((direction.x, direction.y, 0.0)).normalized()
+            world_swing = direction.rotation_difference(level)
+            armature_axis = rig.matrix_world.to_3x3().inverted() @ world_swing.axis
+            local_axis = bone.bone.matrix_local.to_3x3().inverted() @ armature_axis
+            bone.rotation_quaternion = Quaternion(local_axis.normalized(), world_swing.angle)
     elif name == "raised_arms":
         rotate_world("left_upper_arm", (0, 1, 0), 65, toward_height=True)
         rotate_world("right_upper_arm", (0, 1, 0), 65, toward_height=True)

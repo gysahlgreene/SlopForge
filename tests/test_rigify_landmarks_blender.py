@@ -117,6 +117,10 @@ class RigifyLandmarkTests(unittest.TestCase):
             report = json.loads((root / "report.json").read_text())
             self.assertEqual(report["status"], "complete", run.stdout[-2000:])
             self.assertEqual(report["arm_depth_fit"]["strategy"], "mesh cross-section landmarks")
+            # The evidence labelled t_pose is a real T-pose: upper arms level, not the rest A-pose.
+            elevations = report["deformation_evidence"]["t_pose"]["upper_arm_elevation_degrees"]
+            self.assertEqual(len(elevations), 2)
+            self.assertTrue(all(abs(value) < 5 for value in elevations), elevations)
             binding = report["skin_binding"]["meshes"][0]
             self.assertEqual(binding["weighted_vertices"], binding["vertices"])
             (root / "probe.py").write_text(PROBE)
