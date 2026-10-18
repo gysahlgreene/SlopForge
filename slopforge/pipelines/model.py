@@ -1097,7 +1097,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
-                      reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")))
+                      reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
+                      target_size=asset.get("target_size"))
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1186,7 +1187,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                    {"preserve_uvs": True, "face_budget": budget}, parents=assembly_inputs)
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
-                  stage_mesh=root / asset["source"]["processed_mesh"])
+                  stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"))
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
             "preview_front", "preview_side", "preview_rear", "preview_three_quarter")

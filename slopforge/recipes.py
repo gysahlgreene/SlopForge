@@ -88,6 +88,13 @@ def _validate_kit_constraints(definition, child_ids):
         pivot = rule.get("pivot")
         if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
+        target = rule.get("target_size")
+        if target is not None and (not isinstance(target, list) or len(target) != 3
+                                   or all(value is None for value in target)
+                                   or any(value is not None and (not isinstance(value, (int, float))
+                                          or isinstance(value, bool) or not math.isfinite(value) or value <= 0)
+                                          for value in target)):
+            raise ValueError(f"kit_constraints.modules.{child_id}.target_size must be three positive sizes or null")
 
 
 def load_recipe(project_root, name, asset_types, *, reference_library=None):
@@ -634,6 +641,9 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
                            {"strategy": config.get("asset_pipeline", {}).get("conditioning", {}).get("strategy", "text_only")})
         if child.get("materials"):
             asset["materials"] = [parse_material_spec(spec) for spec in child["materials"]]
+        target = definition.get("kit_constraints", {}).get("modules", {}).get(child["id"], {}).get("target_size")
+        if target:
+            asset["target_size"] = target
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",

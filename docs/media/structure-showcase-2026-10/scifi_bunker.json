@@ -1,0 +1,75 @@
+{
+  "asset": "scifi_bunker",
+  "material_candidate": 1,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "walls",
+      "class": "nonmetal",
+      "description": "matte cast concrete"
+    },
+    {
+      "region": "door and vents",
+      "class": "metal",
+      "description": "brushed steel"
+    },
+    {
+      "region": "stripes",
+      "class": "nonmetal",
+      "description": "painted hazard stripes"
+    },
+    {
+      "region": "light",
+      "class": "emissive",
+      "description": "pale signal panel",
+      "color": "#f2f0e6"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "declared_emissive_mask",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 5 disconnected components"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 13192,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 82,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.6477,
+      "distinct_colors_sampled": 256,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.1943
+    }
+  },
+  "sha256": {
+    "concept": "57042fa641adaf8c5a5c2ecb967618f9fbd073bdfbd6aceb6729b8f07b865da0",
+    "basecolor": "a8a45c0331e3109242405332bfa991d56ff6774c3e83f2417d77c0f09f4c834e",
+    "normal": "714150ccfb481428fca29fedd3121d5569f502a70fa443d793f6c64ce3bb7e3b",
+    "roughness": "6ea2a7fb0eed72598380b57ee88f1abb27ec1c586b0ee620c8389d8907a214f4",
+    "metallic": "ddb4149a8aba5ef89c962d4a058eafd8ef92dd5ac5c05e111d68a796398a9a8c",
+    "emission": "25e86529141f2fd4a41e0899080bbe8ae2fda0e203f786896a771803a9ecb4d4",
+    "preview_front": "7642d33248faf520a20d8b712f0d309b9567ead63787139ecef55c479dc2db11",
+    "preview_three_quarter": "2da4cf9f1d22520d9605538866b3bb9c178cd20b7b1f5b7f1f300ad0c84a942b"
+  }
+}

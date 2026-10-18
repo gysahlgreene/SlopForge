@@ -22,6 +22,23 @@ class EnvironmentKitTests(unittest.TestCase):
         self.assertIn("architecture", {child["type"] for child in children})
         self.assertIn("prop", {child["type"] for child in children})
         self.assertIn("texture", {child["type"] for child in children})
+        self.assertEqual(definition["kit_constraints"]["modules"]["wall"]["target_size"], [3, None, 3])
+
+    def test_target_size_must_be_three_positive_sizes_or_null(self):
+        from slopforge.recipes import _validate_kit_constraints
+        for bad in ([3, 3], [None, None, None], [3, 0, 3], [3, "3", 3], [3, True, 3]):
+            with self.subTest(target=bad), self.assertRaisesRegex(ValueError, "target_size"):
+                _validate_kit_constraints({"kit_constraints": {"modules": {"wall": {"target_size": bad}}}}, {"wall"})
+        _validate_kit_constraints({"kit_constraints": {"modules": {"wall": {"target_size": [3, None, 3]}}}}, {"wall"})
+
+    def test_process_model_passes_module_target_size_to_blender(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        with patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, target_size=[3, None, 3.5])
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--target-size") + 1], "3,-,3.5")
 
     def test_validation_checks_grid_bounds_pivots_and_pending_children(self):
         recipe = {

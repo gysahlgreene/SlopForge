@@ -1,0 +1,65 @@
+{
+  "asset": "ruined_arch",
+  "material_candidate": 1,
+  "concept_candidate": 3,
+  "materials": [
+    {
+      "region": "stone",
+      "class": "nonmetal",
+      "description": "weathered matte granite blocks"
+    },
+    {
+      "region": "moss",
+      "class": "nonmetal",
+      "description": "soft green moss"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 17 disconnected components",
+    "mesh has a very small disconnected component"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0126,
+      "distinct_colors_sampled": 31805,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 122,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 1.0,
+      "distinct_colors_sampled": 6,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "48cfaf887cb8078ae617b380e37590c6dc72e52850481da4af2a0b5c19898220",
+    "basecolor": "891d7a8e4e18faef0df78447396a68bd16e65ee8e3aa24dbc5741f3fe0f0a26a",
+    "normal": "a4121051ab432f3dff4edff8df644766f65928b7094fa10ef4d2a1a083a9abba",
+    "roughness": "54a7188974e8450b281adf51a3dee60c310b2d3d2d07a8940ef80fe24e22b06e",
+    "metallic": "b5bf1abc4849e86ba7c99ce40a77f34403448ceb755c61e5628173af4cd7ee41",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "1f25c38019e3970f8668aef88c483440f40af45cae99fcd766899d130c8e5a99",
+    "preview_three_quarter": "247cf870595733644b1eb326fba9ace175904062f1db48420ffd0aa7dc41b052"
+  }
+}

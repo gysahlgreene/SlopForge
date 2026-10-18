@@ -1,0 +1,64 @@
+{
+  "asset": "stone_shrine",
+  "material_candidate": 1,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "stone",
+      "class": "nonmetal",
+      "description": "pale matte weathered limestone"
+    },
+    {
+      "region": "bowl",
+      "class": "metal",
+      "description": "aged bronze with green patina"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 13 disconnected components"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 14142,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 140,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.7616,
+      "distinct_colors_sampled": 256,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0126
+    }
+  },
+  "sha256": {
+    "concept": "0b933c8d156f8828d253da408c4a35d7f8ead199173c53766ced290cc6408818",
+    "basecolor": "9f1ff7bb42775e33f05d4f361b6fc64fae0c065d03221b3e02ce6f7b264d1ec5",
+    "normal": "e4bd9a12afec7a1567263f9ce2b9a7ae88d5fcac1b62319cefc3f5ab6f0fffc1",
+    "roughness": "e5c5cd1ee6bc8cc19e15dc7c14a371664fd0ada4ddbc7ffa2ce1aeeca5afe165",
+    "metallic": "bfa3b86ff4940f4799cf7135ac8eaf1d2c735ddaec58793e3c479da81466b032",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "f443c271bda0bb4265b89b9a99867699588ec69857589ec219bc65fdf4f40340",
+    "preview_three_quarter": "3c027ba296ae37bc2fcf8771ef542d0d1813cd5b3f8d5a5df936e3f5f1e5cf4c"
+  }
+}

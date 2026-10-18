@@ -14,7 +14,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | --- | --- | --- |
 | [Props](#props) — pickups, furniture, containers, devices | Working end to end; owner-rated about 60% of target quality | Five varied-material props as lit turntables |
 | [Characters](#characters) — rigged humanoids | Rig, Unity Humanoid Avatar and walk playback demonstrated on one character | Unity walk cycle; deformation still under review |
-| [Environments](#environments) — modular kits | Recipe and modular checks implemented | No reviewed visual evidence yet |
+| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | Standalone structures and real-scale kit modules generated end to end | Six structures and a modular stone-kit courtyard as lit turntables |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
@@ -50,9 +50,21 @@ Humanoid test 1 has a valid Unity Humanoid Avatar and plays a retargeted walk cl
 
 Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
 
-## Environments
+## Structures and environments
 
-The `starter_environment_kit` recipe composes modular floors, walls, corners, ceilings, doorways, columns, pipes, terminals and crates from the same 3D pipeline, and `environment-check` measures grid fit, pivots and transforms. Reviewed visual and Unity evidence for a kit is still to come. [Environment kits →](docs/ENVIRONMENT-KITS.md)
+| Stone well | Market stall | Stone shrine |
+| :---: | :---: | :---: |
+| ![Stone well turntable](docs/media/structure-showcase-2026-10/stone_well_turntable.gif) | ![Market stall turntable](docs/media/structure-showcase-2026-10/market_stall_turntable.gif) | ![Stone shrine turntable](docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif) |
+| **Watchtower** | **Ruined arch** | **Sci-fi bunker** |
+| ![Watchtower turntable](docs/media/structure-showcase-2026-10/watchtower_turntable.gif) | ![Ruined arch turntable](docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif) | ![Sci-fi bunker turntable](docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif) |
+
+Standalone structures use the `architecture` asset type with the same brief-declared materials as props. Modular kits are recipes whose modules declare real sizes, so pieces snap on a shared grid:
+
+| Modular stone kit courtyard |
+| :---: |
+| ![Stone ruin kit courtyard turntable](docs/media/structure-showcase-2026-10/stone_ruin_kit_turntable.gif) |
+
+The floor, wall, doorway and column modules come out at their declared 3 m sizes and pass the kit's grid and pivot rules; the courtyard is assembled from them in Blender as a demonstration. One run each, not yet visually approved or imported into Unity; the kit's corner module reconstructed incorrectly. [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md) · [Environment kits →](docs/ENVIRONMENT-KITS.md)
 
 ## Materials and textures
 
@@ -109,6 +121,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | --- | --- |
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Material and texture generation | Five varied-material props generated from briefs on the H100 profile with declared-material checks and baked normal maps; one run each, visual approval pending. |
+| Structures and modular kits | Six standalone structures and a five-module stone kit generated on the H100 profile; kit modules keep declared real sizes and pass grid/pivot rules on their measurements. One run each; visual approval, corner reconstruction and Unity evidence pending. |
 | Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
 | Humanoid rigging | Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. Arm deformation and source topology still need review. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
