@@ -1,6 +1,10 @@
 import copy
 import json
 import os
+try:
+    import fcntl
+except ImportError:  # shortcut: no lock on Windows; add msvcrt locking if Windows support is needed
+    fcntl = None
 import re
 import tempfile
 import uuid
@@ -74,6 +78,39 @@ def _migrate(data):
 def load_manifest(path):
     path = Path(path)
     return _migrate(json.loads(path.read_text())) if path.is_file() else {"schema_version": SCHEMA_VERSION, "active_style": {}, "assets": {}}
+
+
+_HELD_LOCKS = []
+
+
+def acquire_project_lock(manifest_path):
+    """Hold an exclusive lock on the project manifest until release_project_locks().
+
+    Two commands that both load and later save the manifest otherwise overwrite each other's
+    records (last writer wins). The second command stops instead of waiting, because an
+    approval can hold the project for many minutes.
+    """
+    if fcntl is None:
+        return None
+    lock_path = Path(manifest_path).with_name(Path(manifest_path).name + ".lock")
+    held = next((handle for handle in _HELD_LOCKS if Path(handle.name).resolve() == lock_path.resolve()), None)
+    if held:  # re-entrant: guided `make` runs nested commands in this process
+        return held
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        raise RuntimeError(f"Another SlopForge command is changing this project ({lock_path.parent}); "
+                           "wait for it to finish, then run this command again") from None
+    _HELD_LOCKS.append(handle)
+    return handle
+
+
+def release_project_locks():
+    while _HELD_LOCKS:
+        _HELD_LOCKS.pop().close()  # closing the descriptor releases its flock
 
 
 def save_manifest(path, data):

@@ -8,7 +8,7 @@ from pathlib import Path
 from . import __version__
 from .config import load_project, select_quality_tier
 from .backends.comfyui import ComfyUIClient
-from .manifest import asset_key, find_asset, load_manifest, new_record, register_artifact, save_manifest
+from .manifest import acquire_project_lock, asset_key, release_project_locks, find_asset, load_manifest, new_record, register_artifact, save_manifest
 from .paths import comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from . import recipes
@@ -19,6 +19,7 @@ from .style import build_prompt, load_style, parse_material_spec, reconstruction
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
+READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
 COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check"}
 
 
@@ -302,6 +303,7 @@ def _make_operation(command, root, style_key, **values):
 def _run_make(args):
     root = _make_project(args)
     config = load_project(root)
+    acquire_project_lock(root / config["asset_pipeline"]["manifest"])
     types = load_taxonomy(root)
     style_options = _make_style_options(root, config)
     if not style_options:
@@ -535,6 +537,8 @@ def _run(args):
         config = select_quality_tier(config, "draft")
     pipeline = config["asset_pipeline"]
     manifest_path = root / pipeline["manifest"]
+    if args.command not in READ_ONLY_COMMANDS:
+        acquire_project_lock(manifest_path)
     manifest = load_manifest(manifest_path)
 
     if args.command == "library":
@@ -916,6 +920,8 @@ def main(argv=None):
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+    finally:
+        release_project_locks()
 
 
 if __name__ == "__main__":
