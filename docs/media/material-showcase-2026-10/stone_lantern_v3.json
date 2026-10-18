@@ -1,0 +1,69 @@
+{
+  "asset": "stone_lantern_v3",
+  "material_candidate": 2,
+  "concept_candidate": 3,
+  "materials": [
+    {
+      "region": "stone body",
+      "class": "nonmetal",
+      "description": "rough matte speckled grey granite"
+    },
+    {
+      "region": "paper panels",
+      "class": "emissive",
+      "description": "opaque off-white rice paper"
+    },
+    {
+      "region": "lattice",
+      "class": "nonmetal",
+      "description": "dark stained wood"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "declared_emissive_mask",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 2 disconnected components"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 8547,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 113,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 1.0,
+      "distinct_colors_sampled": 4,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "b2bf5327543cdf982e4c1ea6d2b77eb1d894a90fc86b2d1bd95e9fcbd239d5ba",
+    "basecolor": "a190d87059be2d1cb196be9d734b6d35b6023940493fabd6b15b98654ab094ff",
+    "normal": "751f6321ba8ef5cd36c5c10988456b2a98c8ed1ffa37dad3465ced54efa154cf",
+    "roughness": "e252062cfcf04eb07cf2f53b4fea71176d7259128d79bcfe53848b3c366986a5",
+    "metallic": "4f8a4738868453f38b1d5bf4f4da34521adb4aa579d0a9ca85dcfdcf5ab87ea3",
+    "emission": "52f3b66abf10970cfa0ee4462e8d60905498a48e33c5625be4766a674eeb34f5",
+    "preview_front": "f382adab21a2b2850dfffa1bd2ef87a4cd0a0dad31e44f3560a5c05ebe25228d",
+    "preview_three_quarter": "4c78ad8adcf3d062ca6167fa9a5864c5a58dda461ddc48f920906addd8e06247"
+  }
+}

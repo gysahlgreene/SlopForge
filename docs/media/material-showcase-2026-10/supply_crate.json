@@ -1,0 +1,65 @@
+{
+  "asset": "supply_crate",
+  "material_candidate": 3,
+  "concept_candidate": 1,
+  "materials": [
+    {
+      "region": "planks",
+      "class": "nonmetal",
+      "description": "weathered oak with visible grain"
+    },
+    {
+      "region": "brackets",
+      "class": "metal",
+      "description": "dark wrought iron with rivets"
+    }
+  ],
+  "normal_source": "workflow",
+  "emission_source": "none",
+  "workflow": "trellis2_image_to_model_h100_api.json",
+  "validation_status": "passed_with_warnings",
+  "validation_warnings": [
+    "mesh contains 5 disconnected components",
+    "mesh has a very small disconnected component"
+  ],
+  "map_statistics": {
+    "basecolor": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 6391,
+      "thresholds": "undeclared"
+    },
+    "roughness": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.0,
+      "distinct_colors_sampled": 144,
+      "thresholds": "undeclared"
+    },
+    "metallic": {
+      "dimensions": [
+        4096,
+        4096
+      ],
+      "near_black_fraction": 0.9094,
+      "distinct_colors_sampled": 195,
+      "thresholds": "undeclared",
+      "near_full_metal_fraction": 0.0
+    }
+  },
+  "sha256": {
+    "concept": "8a50d9734ecc2589c8264b1721cde79b9ea9b8be7e998d4067a9f72f8cf94439",
+    "basecolor": "736887f876a09591d3a657ae14fe1a7ad66262b9b257d283232e16adf37f4c0c",
+    "normal": "bb2d27305bfb9a735f62abd44fcac4ff630c681a07c37314a24991f4ae71d504",
+    "roughness": "2a7a74c3ca9ea7768e75ea3dcaa0792ba16ed65da4bbe02a0fa1dd9b1632895c",
+    "metallic": "c6efb8ae31a86c70011076629c5d56b3e6862c6ac96584cd00e8dfc755d5d71b",
+    "emission": "04677a4cd9894ebc7cdc62b07f0adfb2c50147562c5ecab179974c131695e1be",
+    "preview_front": "d503408bfb15e42c70d75ee4bd5d52c8a6e4f2fca8f821a514d46c9127702ea4",
+    "preview_three_quarter": "ee5ac568022847b3bd61013a942e486b414182c5f83239a850c4d777c5786478"
+  }
+}
