@@ -1,4 +1,5 @@
 import bpy
+import math
 import sys
 from pathlib import Path
 from mathutils import Vector
@@ -236,7 +237,9 @@ def render_previews(obj, output_dir, prefix):
     bounds_min = Vector(tuple(min(point[axis] for point in corners) for axis in range(3)))
     bounds_max = Vector(tuple(max(point[axis] for point in corners) for axis in range(3)))
     target = (bounds_min + bounds_max) * 0.5
-    frame_scale = max(bounds_max - bounds_min) * 1.25
+    size = bounds_max - bounds_min
+    # The three-quarter view sees the footprint diagonal, which is wider than any single side.
+    frame_scale = max(math.hypot(size.x, size.y), size.z) * 1.15
     bpy.ops.object.camera_add(location=(0, -3, 1.5))
     camera = bpy.context.object
     camera.data.type = "ORTHO"

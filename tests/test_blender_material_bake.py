@@ -309,3 +309,32 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                 faces[bool(flag)] = int(result.stdout.split("Input faces: ")[1].split()[0])
             self.assertEqual(faces[True], 800)  # 20x20 quads triangulated, untouched by voxel repair
             self.assertNotEqual(faces[False], 800)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderPreviewFramingTests(unittest.TestCase):
+    def test_three_quarter_preview_frames_the_footprint_diagonal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, previews = root / "box.glb", root / "previews"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path, color in zip(maps, ((200, 160, 60), (128, 128, 255), (128, 128, 128), (0, 0, 0), (0, 0, 0))):
+                Image.new("RGB", (64, 64), color).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.3))
+bpy.context.object.scale = (1, 1, 0.6)
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(root / "box.fbx"), str(root / "box.blend"), *map(str, maps),
+                            "--face-budget", "1000", "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                           check=True, capture_output=True, text=True)
+            image = Image.open(previews / "box_three_quarter.png").convert("RGB")
+            background = image.getpixel((0, 0))
+            edges = [image.getpixel((x, y)) for y in range(image.height) for x in (0, image.width - 1)]
+            self.assertTrue(all(max(abs(a - b) for a, b in zip(pixel, background)) <= 24 for pixel in edges))
