@@ -13,7 +13,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | Asset type | Status | Evidence |
 | --- | --- | --- |
 | [Props](#props) — pickups, furniture, containers, devices | Working end to end; owner-rated about 60% of target quality | Five varied-material props as lit turntables |
-| [Characters](#characters) — rigged humanoids | Rig, Unity Humanoid Avatar and walk playback demonstrated on one character | Unity walk cycle; deformation still under review |
+| [Characters](#characters) — rigged humanoids | Generated characters rigged automatically and walking; one character with Unity Humanoid playback | Three rigged characters walking as lit turntables; deformation still under review |
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | Standalone structures and real-scale kit modules generated end to end | Six structures and a modular stone-kit courtyard as lit turntables |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
@@ -42,11 +42,17 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 
 ## Characters
 
+| Ranger | Mechanic | Knight |
+| :---: | :---: | :---: |
+| ![Ranger walking](docs/media/character-rigging-2026-10/ranger_walk.gif) | ![Mechanic walking](docs/media/character-rigging-2026-10/mechanic_walk.gif) | ![Knight walking](docs/media/character-rigging-2026-10/knight_walk.gif) |
+
+Generated from briefs and rigged automatically with Blender Rigify: joints are placed from the character's own shape, skin weights come from a watertight proxy, and fused hand–thigh geometry is separated. On the same poses the new rigs stretch about 1.5–3× fewer mesh edges than before. The walk is a procedural test cycle for reviewing deformation, not production animation; shoulders and some straps still stretch, and none of the three is approved. [Rigging evidence and limits →](docs/media/character-rigging-2026-10/README.md)
+
 | Rigged humanoid walking in Unity |
 | :---: |
 | ![Humanoid test 1 walking in Unity](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif) |
 
-Humanoid test 1 has a valid Unity Humanoid Avatar and plays a retargeted walk clip; Unity measured movement on all 49,886 imported vertices. This confirms playback, not deformation quality: arm deformation and source topology remain under review. [Evidence and limits →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [Diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)
+Humanoid test 1 has a valid Unity Humanoid Avatar and plays a retargeted walk clip; Unity measured movement on all 49,886 imported vertices. This confirms playback, not deformation quality. [Evidence and limits →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [Diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)
 
 Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
 
@@ -123,7 +129,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Material and texture generation | Five varied-material props generated from briefs on the H100 profile with declared-material checks and baked normal maps; one run each, visual approval pending. |
 | Structures and modular kits | Six standalone structures and a five-module stone kit generated on the H100 profile; kit modules keep declared real sizes and pass grid/pivot rules on their measurements. One run each; visual approval, corner reconstruction and Unity evidence pending. |
 | Mesh/material preparation and Unity delivery | Demonstrated on selected props; geometry and material defects still require review. |
-| Humanoid rigging | Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. Arm deformation and source topology still need review. A separate diagnostic rig has approved body deformation. |
+| Humanoid rigging | Three generated characters rig automatically (landmark joints, proxy weights) with measured stretch reductions; not approved. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. Arm deformation and source topology still need review. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
 | Safe Unity replacement/reimport | Stable GUIDs and replacement validation remain open. |
 

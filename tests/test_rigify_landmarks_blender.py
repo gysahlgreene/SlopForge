@@ -74,3 +74,10 @@ class RigifyLandmarkTests(unittest.TestCase):
             self.assertGreater(x, 0.3)
             self.assertLess(z, 1.3)
             self.assertEqual(probe["unweighted"], 0)
+            metrics_path = root / "metrics.json"
+            subprocess.run([BLENDER, "--background", str(root / "rig.blend"), "--python",
+                            str(ROOT / "blender/rig_stretch_metrics.py"), "--", str(metrics_path)],
+                           check=True, capture_output=True, text=True)
+            metrics = json.loads(metrics_path.read_text())
+            self.assertEqual(set(metrics), {"raised_arms", "crouch", "leg_lift", "elbow_bend", "walk_stride"})
+            self.assertTrue(all(0 <= item["edges_over_1_5x_pct"] <= 100 for item in metrics.values()))

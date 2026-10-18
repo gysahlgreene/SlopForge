@@ -90,7 +90,7 @@ def main():
 
     camera = bpy.data.objects.new("TurntableCamera", bpy.data.cameras.new("TurntableCamera"))
     camera.data.lens = 70
-    distance = radius * 2.7
+    distance = radius * (2.0 if walk else 2.7)  # tall walking characters need a closer frame
     elevation = 0.8 if extent.z < 0.35 * max(extent.x, extent.y) else 0.32  # look down at flat props
     camera.location = center + Vector((0, -distance * math.cos(elevation), distance * math.sin(elevation)))
     camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
