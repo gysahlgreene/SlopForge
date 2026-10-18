@@ -1,12 +1,11 @@
 """Render a lit turntable of a prepared asset .blend for review and showcase.
 
-Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512] [--walk]
+Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512] [--animate]
 
 The asset rotates once about its vertical axis under fixed key, fill and rim lights so
 highlights travel across its materials. Frames are written as frame_###.png; the scene in
-the source .blend is not saved. With --walk, a rigged Rigify character also plays a procedural
-in-place walk test cycle on its FK controls (two strides per turn); it shows deformation in motion
-and is not production animation.
+the source .blend is not saved. With --animate, a .blend whose armature carries a retargeted
+clip (see retarget_mocap.py) plays its gait cycle at capture speed, looping, while the view turns.
 """
 import math
 import sys
@@ -24,7 +23,7 @@ def parse():
     for key in options:
         if key in args:
             options[key] = int(args[args.index(key) + 1])
-    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"], "--walk" in args
+    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"], "--animate" in args
 
 
 def area_light(name, location, target, energy, size):
@@ -36,7 +35,7 @@ def area_light(name, location, target, energy, size):
 
 
 def main():
-    source, frames_dir, frames, size, walk = parse()
+    source, frames_dir, frames, size, animate = parse()
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     for obj in list(scene.objects):
@@ -58,16 +57,6 @@ def main():
         if obj.parent is None and obj.type in {"MESH", "ARMATURE"} and obj is not pivot:
             obj.parent = pivot
             obj.matrix_parent_inverse = pivot.matrix_world.inverted()
-    rig = next((obj for obj in scene.objects if obj.type == "ARMATURE" and obj.pose.bones.get("thigh_fk.L")), None)
-    if walk and rig is None:
-        raise SystemExit("--walk needs a Rigify character with FK leg controls")
-    if walk:
-        for name in ("upper_arm_parent.L", "upper_arm_parent.R", "thigh_parent.L", "thigh_parent.R"):
-            switch = rig.pose.bones.get(name)
-            if switch is not None and "IK_FK" in switch:
-                switch["IK_FK"] = 1.0
-        for bone in rig.pose.bones:
-            bone.rotation_mode = "XYZ"
 
     floor_material = bpy.data.materials.new("TurntableFloor")
     floor_material.use_nodes = True
@@ -90,7 +79,7 @@ def main():
 
     camera = bpy.data.objects.new("TurntableCamera", bpy.data.cameras.new("TurntableCamera"))
     camera.data.lens = 70
-    distance = radius * (2.0 if walk else 2.7)  # tall walking characters need a closer frame
+    distance = radius * (2.0 if animate else 2.7)  # tall animated characters need a closer frame
     elevation = 0.8 if extent.z < 0.35 * max(extent.x, extent.y) else 0.32  # look down at flat props
     camera.location = center + Vector((0, -distance * math.cos(elevation), distance * math.sin(elevation)))
     camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
@@ -104,20 +93,18 @@ def main():
     scene.render.film_transparent = False
     scene.view_settings.view_transform = "AgX"
     frames_dir.mkdir(parents=True, exist_ok=True)
+    if animate:
+        cycle = scene.get("gait_cycle") or (scene.frame_start, scene.frame_end)
+        capture_fps = float(scene.get("capture_fps") or scene.render.fps)
+        cycle_length = cycle[1] - cycle[0]
+        # Whole strides per turn so the GIF loops on both rotation and gait; ~real-time at 80 ms/frame.
+        strides = max(1, round(frames * 0.08 * capture_fps / cycle_length))
+        step = strides * cycle_length / frames
     for frame in range(frames):
         pivot.rotation_euler = (0, 0, 2 * math.pi * frame / frames)
-        if walk:
-            # Axes measured on the generated basic-human rig: +X on thigh_fk swings the leg forward,
-            # -X on shin_fk bends the knee; arm swing is Z on upper_arm_fk, opposite to the same-side leg.
-            phase = 4 * math.pi * frame / frames
-            swing = math.sin(phase)
-            for side, sign in (("L", 1), ("R", -1)):
-                leg = sign * swing
-                rig.pose.bones[f"thigh_fk.{side}"].rotation_euler = (0.42 * leg, 0, 0)
-                rig.pose.bones[f"shin_fk.{side}"].rotation_euler = (-0.75 * max(0.0, -leg) - 0.1, 0, 0)
-                arm = rig.pose.bones.get(f"upper_arm_fk.{side}")
-                if arm is not None:
-                    arm.rotation_euler = (0, 0, 0.35 * swing)
+        if animate:
+            source_frame = cycle[0] + (frame * step) % cycle_length
+            scene.frame_set(int(source_frame), subframe=source_frame % 1)
             # Plant the lowest foot: measure the posed mesh and lower the whole character onto the floor.
             pivot.location.z = low.z
             bpy.context.view_layer.update()
