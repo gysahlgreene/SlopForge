@@ -40,6 +40,11 @@ class SkinTokensBlenderTests(unittest.TestCase):
             # The raw parts keep the source UVs, so the source maps are reused, not rebaked.
             self.assertEqual(set(report["material_transfer"].values()), {"reused_source_material"})
             self.assertEqual(report["unweighted_vertices"], 0)
+            # Fixture leg vertices tied to a fingertip (11 bones apart): the one led by the fingertip takes
+            # its neighbours' weights, and the stray fingertip influences are dropped.
+            self.assertEqual(report["relabelled_isolated_vertices"], 1)
+            self.assertGreaterEqual(report["pruned_distant_influences"], 1)
+            self.assertAlmostEqual(report["weight_sum_min"], 1, places=3)
             mapping = report["semantic_mapping"]
             self.assertEqual(mapping["left_upper_arm"], "LeftUpperArm")
             self.assertEqual(mapping["left_forearm"], "LeftLowerArm")

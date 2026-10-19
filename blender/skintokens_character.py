@@ -203,6 +203,87 @@ def weight_metrics(meshes, rig):
             "max_influences": max(counts, default=0)}
 
 
+def prune_distant_influences(meshes, rig, max_steps=5):
+    """Remove weights that jump across the skeleton, then renormalise.
+
+    Sampled SkinTokens weights can tie a thigh holster the hanging hand touched to a fingertip
+    (11 bones apart); it tears when the arm lifts. Armpit and cape blends stay within 4 steps.
+    First, a patch of vertices dominated by one bone whose every mesh neighbour is dominated by a
+    bone more than max_steps away takes its neighbours' mean weights (a real hand borders the
+    forearm). Then each vertex drops influences more than max_steps from its dominant bone.
+    Returns (relabelled vertices, pruned influences).
+    """
+    chains = {bone.name: [bone.name] + [parent.name for parent in bone.parent_recursive] for bone in rig.data.bones}
+
+    def steps(a, b):
+        common = next(name for name in chains[a] if name in chains[b])
+        return chains[a].index(common) + chains[b].index(common)
+
+    relabelled = pruned = 0
+    for obj in meshes:
+        groups = {group.index: group for group in obj.vertex_groups if group.name in chains}
+
+        def weights_of(vertex):
+            return {groups[item.group].name: item.weight for item in vertex.groups
+                    if item.group in groups and item.weight > 0}
+
+        def assign(vertex, weights):
+            total = sum(weights.values())
+            for group in groups.values():
+                group.remove([vertex.index])
+            for name, weight in weights.items():
+                obj.vertex_groups[name].add([vertex.index], weight / total, "REPLACE")
+
+        vertices = obj.data.vertices
+        current = [weights_of(vertex) for vertex in vertices]
+        dominant = [max(weights, key=weights.get) if weights else None for weights in current]
+        neighbours = [[] for _ in vertices]
+        for edge in obj.data.edges:
+            a, b = edge.vertices
+            neighbours[a].append(b)
+            neighbours[b].append(a)
+        seen, islands = [False] * len(vertices), []
+        for start in range(len(vertices)):
+            if seen[start] or dominant[start] is None:
+                continue
+            island, stack = [], [start]
+            seen[start] = True
+            while stack:
+                index = stack.pop()
+                island.append(index)
+                for other in neighbours[index]:
+                    if not seen[other] and dominant[other] == dominant[start]:
+                        seen[other] = True
+                        stack.append(other)
+            islands.append(island)
+        # Smallest first, so the patch is relabelled and the body around it then borders its own bone.
+        for island in sorted(islands, key=len):
+            bone = dominant[island[0]]
+            border = {other for index in island for other in neighbours[index]
+                      if dominant[other] not in (None, bone)}
+            if border and all(steps(bone, dominant[other]) > max_steps for other in border):
+                mean = {}
+                for other in border:
+                    for name, weight in current[other].items():
+                        mean[name] = mean.get(name, 0) + weight
+                mean = dict(sorted(mean.items(), key=lambda item: -item[1])[:4])
+                for index in island:
+                    assign(vertices[index], mean)
+                    current[index], dominant[index] = mean, max(mean, key=mean.get)
+                relabelled += len(island)
+        for vertex in vertices:
+            weights = [(item.weight, item.group) for item in vertex.groups if item.group in groups and item.weight > 0]
+            if len(weights) < 2:
+                continue
+            top = groups[max(weights)[1]].name
+            keep = {groups[index].name: weight for weight, index in weights
+                    if steps(top, groups[index].name) <= max_steps}
+            if len(keep) < len(weights):
+                pruned += len(weights) - len(keep)
+                assign(vertex, keep)
+    return relabelled, pruned
+
+
 def setup_material(obj):
     material = bpy.data.materials.new(obj.name + "_rebaked")
     material.use_nodes = True
@@ -445,6 +526,7 @@ def run(request):
     if unknown or not meshes:
         raise ValueError(f"Unclassified geometry or missing skinned mesh: {unknown}")
     mapping = name_humanoid_bones(rig, meshes, semantic_bones(rig))
+    relabelled_vertices, pruned_influences = prune_distant_influences(meshes, rig)
     output = Path(request["rigged_model"]).parent
     coverage, material_transfer = transfer(source_meshes, meshes, output)
     if coverage.get("base_color", 0) <= 0:
@@ -465,6 +547,8 @@ def run(request):
             "helper_objects": helpers, "unclassified_objects": unknown,
             "bind_pose_count": len(rig.data.bones), "material_coverage": coverage,
             "material_transfer": material_transfer,
+            "relabelled_isolated_vertices": relabelled_vertices,
+            "pruned_distant_influences": pruned_influences,
             "semantic_mapping": mapping, "bone_names": sorted(rig.data.bones.keys()),
             "deformation_evidence": deformation,
             "contact_sheet_dimensions": dimensions, "pose_parameters": "fixed skintokens_character.py v1",
@@ -543,6 +627,10 @@ def make_fixture(request):
         obj.parent = rig
         obj.modifiers.new("Skin", "ARMATURE").object = rig
         obj.data.materials.clear()
+    # Sampled-weight leaks: one leg vertex also follows a left fingertip, another follows only it.
+    leg = bpy.data.objects["LegL"]
+    leg.vertex_groups.new(name="bone_19").add([0, 1], 0.4, "REPLACE")
+    leg.vertex_groups["bone_10"].remove([1])
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.02, location=(0, 0, 2))
     bpy.context.object.name = "Icosphere"
     bpy.ops.export_scene.gltf(filepath=request["raw"], export_format="GLB")
