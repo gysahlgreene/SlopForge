@@ -43,13 +43,23 @@ result against that declaration before anyone reviews it.
    tilted, against 1.1% for the Blender bake on the same input and seed). Other workflows still record `normal_source: neutral_placeholder`; `approve-texture`
    refuses a 1×1 placeholder normal unless `--allow-placeholder-normal` is passed.
 
-5. **Emission.** When a region is declared `emissive`, the material stage builds the
+5. **Concept projection (characters).** Asset types with `concept_projection: front` (the
+   `character` type) project their front A-pose concept orthographically onto the base color of
+   surfaces that face the camera and are not hidden from it, keeping the voxel bake elsewhere
+   (`native_material/basecolor_voxel.png`; candidates record `basecolor_source` and the
+   `concept_projection` report). The voxel bake turns eyes into slits; the projection carries the
+   concept's eyes, brows, beard and print. A reconstruction whose proportions differ from the
+   concept by more than 5% is left unprojected (`status: skipped`). The projected colors include
+   the concept's soft studio shading, and features can sit a few concept pixels off the sculpted
+   forms, which shows in extreme close-ups.
+
+6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large near-white regions (pale paper or glass).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
    declaration the emission map is black.
 
-6. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
+7. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
    run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`

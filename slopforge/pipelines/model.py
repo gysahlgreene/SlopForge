@@ -1888,7 +1888,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
-                                       require_manifold=asset_type.get("max_nonmanifold_edges") == 0)
+                                       require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
+                                       project_concept=asset_type.get("concept_projection") == "front")
                     else:
                         generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
                     config.pop("_journal_context", None)

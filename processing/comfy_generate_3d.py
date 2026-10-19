@@ -298,6 +298,27 @@ def copy_generated_maps(outputs, destination, client=None, *, baked_normal=None)
     return textures
 
 
+def project_concept(args, dest, textures):
+    """Project the front concept onto the base color; the voxel bake is kept beside it."""
+    basecolor = dest.parent / textures["basecolor"]
+    voxel = basecolor.with_name("basecolor_voxel.png")
+    shutil.copy2(basecolor, voxel)
+    request = dest.parent / "concept_projection_request.json"
+    report = dest.parent / "concept_projection.json"
+    request.write_text(json.dumps({"model": str(dest), "basecolor": str(voxel), "concept": str(args.image),
+                                   "output": str(basecolor), "report": str(report)}))
+    result = subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python",
+                             str(Path(__file__).resolve().parents[1] / "blender/project_concept.py"), "--", str(request)],
+                            capture_output=True, text=True)
+    if result.returncode != 0 or not report.is_file():
+        raise ValueError("Concept projection failed: " + (result.stdout + result.stderr)[-2000:])
+    projection = json.loads(report.read_text())
+    if projection["status"] == "skipped":
+        shutil.copy2(voxel, basecolor)
+    print(f"Concept projection {projection['status']}: aspect error {projection.get('aspect_error')}")
+    return {**projection, "voxel_basecolor": voxel.relative_to(dest.parent).as_posix()}
+
+
 def copy_conditioning_image(outputs, destination, client):
     images = outputs.get("save_conditioning", {}).get("images", [])
     if not images:
@@ -353,6 +374,8 @@ def main():
     parser.add_argument("--voxel-resolution", type=int, default=256,
                         help="Voxel remesh resolution used before reducing a generated shape")
     parser.add_argument("--blender", type=Path)
+    parser.add_argument("--project-concept", action="store_true",
+                        help="Project the front concept onto camera-facing base color (character concepts)")
     parser.add_argument("--require-manifold", action="store_true",
                         help="Make the mesh manifold (characters must be closed to rig): local repair, voxel repair as fallback")
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
@@ -504,6 +527,9 @@ def main():
         mikktspace = locals().get("baked_normal")
         mikktspace = mikktspace if mikktspace is not None and Path(mikktspace).is_file() else None
         textures = copy_generated_maps(entry["outputs"], dest.parent, client, baked_normal=mikktspace) if textured else {}
+        projection = None
+        if args.project_concept and textures:
+            projection = project_concept(args, dest, textures)
         conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
                               if "save_conditioning" in workflow else None)
         acquired = [(dest, "mesh.final")] + [(dest.parent / path, f"texture.{name}")
@@ -530,6 +556,10 @@ def main():
         if conditioning_image:
             target = dest.parent / conditioning_image
             output_records.append({"path": conditioning_image, "sha256": file_sha256(target), "kind": "conditioning_image"})
+        if projection and projection.get("voxel_basecolor"):
+            output_records.append({"path": projection["voxel_basecolor"],
+                                   "sha256": file_sha256(dest.parent / projection["voxel_basecolor"]),
+                                   "kind": "texture.basecolor_voxel"})
         remesh = next((node["inputs"] for node in workflow.values()
                        if node.get("class_type") == "RemeshMesh"), None)
         unwrap = next((node["inputs"] for node in workflow.values()
@@ -568,6 +598,10 @@ def main():
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
                                         "conditioning_image": conditioning_image,
+                                        "basecolor_source": ("voxel_with_front_concept_projection"
+                                                             if projection and projection["status"] == "projected"
+                                                             else "voxel") if textures else None,
+                                        "concept_projection": projection,
                                         "normal_source": "workflow" if entry["outputs"].get("save_normal", {}).get("images") else
                                                          "blender_mikktspace_bake" if mikktspace else
                                                          "neutral_placeholder",

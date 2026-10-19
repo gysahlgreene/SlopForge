@@ -140,6 +140,7 @@ asset_pipeline:
         self.assertEqual(json.loads(command[command.index("--quality") + 1])["tier"], "final")
         self.assertEqual(command[command.index("--voxel-resolution") + 1], "120")
         self.assertNotIn("--require-manifold", command)
+        self.assertNotIn("--project-concept", command)
 
     def test_manifold_asset_types_keep_blender_voxel_repair_after_gpu_remesh(self):
         config = {"asset_pipeline": {"tools": {"hunyuan_checkpoint": "model.safetensors"},
@@ -153,6 +154,22 @@ asset_pipeline:
         worker = (Path(__file__).resolve().parents[1] / "processing/comfy_generate_3d.py").read_text()
         self.assertIn('"shape_remesh" in workflow and not args.require_manifold', worker)
         self.assertIn('["--local-repair"] if args.require_manifold', worker)
+
+    def test_character_types_project_their_front_concept(self):
+        from slopforge.paths import tool_root
+
+        config = {"asset_pipeline": {"tools": {"hunyuan_checkpoint": "model.safetensors"},
+                    "workflows": {"model": "trellis2_image_to_model_h100_api.json"}}}
+        with patch("slopforge.backends.comfyui.subprocess.run") as run, \
+                patch("slopforge.backends.comfyui.blender_executable", return_value="blender"):
+            run.return_value = Mock(returncode=0)
+            generate_model(self.root, config, self.root / "concept.png", "hero", self.root / "hero.glb",
+                           self.root / "mesh.json", 9, project_concept=True)
+        self.assertIn("--project-concept", run.call_args.args[0])
+        character = (tool_root() / "templates/asset_types/character.yaml").read_text()
+        self.assertIn("concept_projection: front", character)
+        model = (tool_root() / "slopforge/pipelines/model.py").read_text()
+        self.assertIn('project_concept=asset_type.get("concept_projection") == "front"', model)
 
 
 if __name__ == "__main__":
