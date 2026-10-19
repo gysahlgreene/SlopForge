@@ -24,7 +24,8 @@ from .reuse import artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
-from ..validation import is_placeholder_normal, measure_material_maps, summarize_validation, validate_image, validate_model_outputs
+from ..validation import (apply_concept_silhouette, is_placeholder_normal, measure_material_maps, summarize_validation,
+                          validate_image, validate_model_outputs)
 
 
 def _sha256(path):
@@ -1195,6 +1196,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"))
+    if asset_type.get("concept_projection"):
+        validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
     if any(item.get("class") == "metal" for item in declared):  # the brief explains a metallic map
         maps["warnings"] = [item for item in maps["warnings"] if not item.startswith("metallic map is")]

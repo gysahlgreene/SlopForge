@@ -475,7 +475,7 @@
       "resolution": 512,
       "sign_mode": "udf",
       "sign_mode.qef": true,
-      "sign_mode.drop_inverted_components": true,
+      "sign_mode.drop_inverted_components": false,
       "sign_mode.drop_enclosed_components": false,
       "band": 1.0,
       "project_back": 0.5,
