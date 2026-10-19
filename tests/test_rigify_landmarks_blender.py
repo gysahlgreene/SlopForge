@@ -118,6 +118,28 @@ BVH_LEAN = BVH_ZERO_LINK.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0
     " ".join(["0", "90", "0", "0", "0", "0", "0", f"{30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}",
               "0", "0", "0", "0", "0", "20"] + ["0"] * 10) + "\n" for f in range(61))
 
+# An actor whose rest pose faces +Z but who walks along +X (hips yawed 90 degrees), legs swinging in
+# their own sagittal plane. Channel order as BVH: Hips(6) LeftUpLeg(3) LeftLeg(3) RightUpLeg(3) RightLeg(3).
+BVH_HEADING = BVH.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0.0333333\n" + "".join(
+    " ".join([f"{2 * f}", "90", "0", "0", "0", "90", "0", f"{30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}",
+              "0", "0", "0", "0", "0", f"{-30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}", "0",
+              "0", "0", "0"]) + "\n" for f in range(61))
+
+HEADING_PROBE = """import bpy, json, sys
+arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+W = arm.matrix_world
+side = (W @ arm.data.bones["DEF-thigh.L"].head_local - W @ arm.data.bones["DEF-thigh.R"].head_local).normalized()
+worst, residue = 0.0, 0.0
+for frame in range(1, 61):
+    bpy.context.scene.frame_set(frame)
+    bone = arm.pose.bones["DEF-thigh.L"]
+    swing = (W @ bone.tail - W @ bone.head).normalized()
+    worst = max(worst, abs(swing.dot(side)))
+    residue = max([residue] + [b.location.length for b in arm.pose.bones if b.name != "DEF-spine"])
+json.dump({"sideways": worst, "location_residue": residue}, open(sys.argv[-1], "w"))
+"""
+
+
 SPINE_PROBE = """import bpy, json, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 rest = arm.data.bones["DEF-spine.001"]
@@ -254,3 +276,20 @@ class RigifyLandmarkTests(unittest.TestCase):
             subprocess.run([BLENDER, "--background", str(root / "lean.blend"), "--python", str(root / "spine_probe.py"),
                             "--", str(root / "spine.json")], check=True, capture_output=True, text=True)
             self.assertLess(json.loads((root / "spine.json").read_text())["lean_degrees"], 3)
+
+            # Legs swing along the character's forward axis even when the actor walks off its rest facing,
+            # and no retargeted bone but the hips is left with a location offset.
+            (root / "heading.bvh").write_text(BVH_HEADING)
+            heading = {**retarget, "motion": str(root / "heading.bvh"), "output_blend": str(root / "heading.blend"),
+                       "report": str(root / "heading.json")}
+            (root / "heading_request.json").write_text(json.dumps(heading))
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "heading_request.json")],
+                           check=True, capture_output=True, text=True)
+            (root / "heading_probe.py").write_text(HEADING_PROBE)
+            subprocess.run([BLENDER, "--background", str(root / "heading.blend"), "--python",
+                            str(root / "heading_probe.py"), "--", str(root / "heading_probe.json")],
+                           check=True, capture_output=True, text=True)
+            probe = json.loads((root / "heading_probe.json").read_text())
+            self.assertLess(probe["sideways"], 0.2, probe)
+            self.assertLess(probe["location_residue"], 1e-3, probe)

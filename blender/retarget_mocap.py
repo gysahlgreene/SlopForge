@@ -16,6 +16,7 @@ character and scaled to its hip height. With in_place, horizontal hip travel is 
 character walks on the spot for review.
 """
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -76,6 +77,199 @@ def facing(armature, left, right):
     forward = Vector((0, 0, 1)).cross(across)
     forward.z = 0
     return forward.normalized()
+
+
+def clear_arms(target, meshes, mapping, forward, frames, scene):
+    """Swing each arm outward just enough that forearm and hand clear the character's own body.
+
+    Limbs copy the actor's hang angle, but generated characters are often much wider at the hips
+    (holsters, armour, stylized waists), so the actor's angle drives the hand through the thigh.
+    From the rest mesh, the smallest hang angle at which the arm line (elbow to fingertip) clears
+    the body silhouette is found; when the actor's arm hangs closer on more than a tenth of the
+    stride, the whole arm chain is rotated outward about the shoulder by a constant offset, keeping
+    the actor's swing. Returns the offset in degrees per side.
+    """
+    up = Vector((0, 0, 1))
+    world = target.matrix_world
+    height = max((world @ bone.head_local).z for bone in target.data.bones) - min(
+        (world @ bone.head_local).z for bone in target.data.bones)
+    offsets = {}
+    for side in ("Left", "Right"):
+        upper, lower = mapping.get(side + "Arm"), mapping.get(side + "ForeArm")
+        if not upper or not lower:
+            continue
+        chain = {upper} | {bone.name for bone in target.data.bones[upper].children_recursive}
+        shoulder = world @ target.data.bones[upper].head_local
+        outward = shoulder - world @ target.data.bones[mapping["Hips"]].head_local
+        outward -= forward * outward.dot(forward)
+        outward.z = 0
+        outward.normalize()
+        arm_points, body = [], []
+        for obj in meshes:
+            groups = {group.index: group.name for group in obj.vertex_groups}
+            for vertex in obj.data.vertices:
+                weights = [(item.weight, groups.get(item.group)) for item in vertex.groups]
+                if not weights:
+                    continue
+                point = obj.matrix_world @ vertex.co
+                (arm_points if max(weights)[1] in chain else body).append(point)
+        if not arm_points or not body:
+            continue
+        reach = max((point - shoulder).length for point in arm_points)
+        margin, band = 0.02 * height, 0.012 * height
+        silhouette = [((point - shoulder).dot(outward), point.z) for point in body]
+
+        def clear(angle):
+            direction = outward * math.sin(angle) - up * math.cos(angle)
+            for fraction in (0.45, 0.55, 0.65, 0.75, 0.85, 0.95, 1.0):
+                point = shoulder + direction * reach * fraction
+                lateral = point - shoulder
+                if any(u > lateral.dot(outward) - margin for u, z in silhouette if abs(z - point.z) < band):
+                    return False
+            return True
+
+        needed = next((math.radians(degrees / 2) for degrees in range(0, 121) if clear(math.radians(degrees / 2))),
+                      math.radians(60))
+        hand_name = (target.data.bones[lower].children[0].name if target.data.bones[lower].children else None)
+        angles = []
+        for frame in frames:
+            scene.frame_set(frame)
+            head = world @ target.pose.bones[upper].head
+            wrist = world @ (target.pose.bones[hand_name].head if hand_name else target.pose.bones[lower].tail)
+            hang = wrist - head
+            angles.append(math.atan2(hang.dot(outward), -hang.z))
+        angles.sort()
+        offset = max(0.0, needed - angles[len(angles) // 10])
+        offsets[side] = round(math.degrees(offset), 1)
+        if offset < math.radians(0.5):
+            continue
+        sign = 1 if (Matrix.Rotation(offset, 3, forward) @ -up).dot(outward) > 0 else -1
+        rotation = Matrix.Rotation(sign * offset, 4, forward)
+        inverse = world.inverted()
+        for frame in frames:
+            scene.frame_set(frame)
+            pivot = world @ target.pose.bones[upper].head
+            swing = Matrix.Translation(pivot) @ rotation @ Matrix.Translation(-pivot)
+            # Capture both before changing either: the forearm inherits its parent's new rotation.
+            targets = [(name, swing @ (world @ target.pose.bones[name].matrix)) for name in (upper, lower)]
+            for name, matrix in targets:
+                bone = target.pose.bones[name]
+                bone.matrix = inverse @ matrix
+                bpy.context.view_layer.update()
+                bone.keyframe_insert("rotation_quaternion" if bone.rotation_mode == "QUATERNION" else "rotation_euler",
+                                     frame=frame)
+    return offsets
+
+
+def widen_stance(target, mapping, forward, frames, scene, floor=0.5):
+    """Keep each foot on its own side of the body, as a constant outward swing of the leg.
+
+    Mocap actors often walk with a foot reaching the midline (CMU 07_02's right ankle does), which
+    on a slimmer or stylized character reads as legs crossing on a catwalk line. Each ankle's
+    sideways distance from the pelvis centre is measured in units of the character's hip half-width;
+    when its 10th percentile over the stride is below `floor`, thigh and shin swing outward about
+    the hip by a constant angle, and the foot keeps its world orientation so soles stay flat.
+    Returns the swing in degrees per side.
+    """
+    world = target.matrix_world
+    inverse = world.inverted()
+    up = Vector((0, 0, 1))
+    swings = {}
+    for side in ("Left", "Right"):
+        thigh, shin, foot = (mapping.get(side + name) for name in ("UpLeg", "Leg", "Foot"))
+        if not (thigh and shin and foot):
+            continue
+        other = mapping["RightUpLeg" if side == "Left" else "LeftUpLeg"]
+        laterals, leg = [], (world @ target.data.bones[foot].head_local - world @ target.data.bones[thigh].head_local).length
+        for frame in frames:
+            scene.frame_set(frame)
+            mine, theirs = world @ target.pose.bones[thigh].head, world @ target.pose.bones[other].head
+            across = mine - theirs
+            across.z = 0
+            half = across.length / 2
+            ankle = world @ target.pose.bones[foot].head
+            laterals.append(((ankle - (mine + theirs) / 2).dot(across.normalized()) / half, half))
+        laterals.sort()
+        shortfall, half = laterals[len(laterals) // 10]
+        angle = max(0.0, (floor - shortfall) * half / leg)
+        swings[side] = round(math.degrees(angle), 1)
+        if angle < math.radians(0.5):
+            continue
+        outward = (world @ target.data.bones[thigh].head_local) - (world @ target.data.bones[other].head_local)
+        outward.z = 0
+        outward.normalize()
+        rotation_sign = 1 if (Matrix.Rotation(angle, 3, forward) @ -up).dot(outward) > 0 else -1
+        rotation = Matrix.Rotation(rotation_sign * angle, 4, forward)
+        for frame in frames:
+            scene.frame_set(frame)
+            pivot = world @ target.pose.bones[thigh].head
+            swing = Matrix.Translation(pivot) @ rotation @ Matrix.Translation(-pivot)
+            # Toes keep their local rotation and follow the foot; moving their head separately left an
+            # unkeyed location offset that carried across frames and twisted the toes sideways.
+            chain = [(name, world @ target.pose.bones[name].matrix) for name in (thigh, shin, foot)]
+            for name, matrix in chain:
+                if name in (thigh, shin):
+                    matrix = swing @ matrix
+                else:
+                    # Same orientation, carried to where the swung shin now puts it.
+                    matrix = Matrix.Translation((swing @ matrix.translation) - matrix.translation) @ matrix
+                bone = target.pose.bones[name]
+                bone.matrix = inverse @ matrix
+                bpy.context.view_layer.update()
+                bone.keyframe_insert("rotation_quaternion" if bone.rotation_mode == "QUATERNION" else "rotation_euler",
+                                     frame=frame)
+    return swings
+
+
+def relax_hands(target, mapping, frame):
+    """Curl each finger toward the palm, as a relaxed walking hand holds it.
+
+    Mocap wrists and fingers are not retargeted (CMU wrist data is noisy), so generated hands kept
+    their modelled pose: fingers straight and splayed. Each finger joint is rotated about the
+    knuckle line (index to little-finger bases) toward the palm, which faces the body midline at
+    rest; the thumb, whose base sits nearest the wrist, curls less. Returns the curled bone count.
+    """
+    world = target.matrix_world
+    hips = world @ target.data.bones[mapping["Hips"]].head_local
+    curled = 0
+    for side in ("Left", "Right"):
+        lower = mapping.get(side + "ForeArm")
+        if not lower or not target.data.bones[lower].children:
+            continue
+        hand = target.data.bones[lower].children[0]
+        fingers = [child for child in hand.children if child.name.startswith(side + "Finger")]
+        if not fingers:
+            continue
+        wrist = world @ hand.head_local
+        thumb = min(fingers, key=lambda bone: ((world @ bone.head_local) - wrist).length) if len(fingers) > 1 else None
+        tips = [world @ bone.tail_local for finger in fingers for bone in [finger, *finger.children_recursive]]
+        along = (sum(tips, Vector()) / len(tips) - wrist).normalized()
+        inward = hips - wrist
+        inward.z = 0
+        bases = [world @ bone.head_local for bone in fingers if bone is not thumb]
+        if len(bases) >= 2:
+            first, last = max(((a, b) for a in bases for b in bases), key=lambda pair: (pair[0] - pair[1]).length)
+            axis = (last - first).normalized()
+            palm = axis.cross(along).normalized()
+            if palm.dot(inward) < 0:
+                palm = -palm
+        else:
+            # Too few fingers for a knuckle line (SkinTokens sometimes predicts two per hand).
+            palm = (inward - along * inward.dot(along)).normalized()
+            axis = along.cross(palm).normalized()
+        for finger in fingers:
+            for depth, bone in enumerate([finger, *finger.children_recursive]):
+                angle = math.radians(15 if finger is thumb else (20, 30, 25)[min(depth, 2)])
+                vector = (world.to_3x3() @ (bone.tail_local - bone.head_local))
+                if (Matrix.Rotation(angle, 3, axis) @ vector - vector).dot(palm) < 0:
+                    angle = -angle
+                local_axis = ((world.to_3x3() @ bone.matrix_local.to_3x3()).inverted() @ axis).normalized()
+                pose = target.pose.bones[bone.name]
+                pose.rotation_mode = "QUATERNION"
+                pose.rotation_quaternion = Quaternion(local_axis, angle)
+                pose.keyframe_insert("rotation_quaternion", frame=frame)
+                curled += 1
+    return curled
 
 
 def bvh_fps(path):
@@ -146,6 +340,28 @@ def run(request):
         @ Matrix.Translation(-source_hips) @ source.matrix_world
     bpy.context.view_layer.update()
 
+    # Stride timing belongs to the clip: measure it on the actor's ankle, not on the character, whose
+    # foot motion depends on its own proportions and weights. Toes roll through stance and give no
+    # clean plants; without a LeftFoot joint, use the lowest mapped left joint.
+    left = [name for name in mapping if name.startswith("Left") and name in source.pose.bones]
+    foot = "LeftFoot" if "LeftFoot" in left else (
+        min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
+    cycle = gait_cycle(source, foot, start, end)
+    if cycle:
+        # Face the actor's walking direction (hip travel over the stride), not its rest pose: CMU 07_02
+        # walks about 30 degrees off its rest facing, so the pelvis (referenced to the stride's average
+        # posture) faced forward while legs and arms swung along the real heading, twisting the legs.
+        scene.frame_set(cycle[0])
+        first = (source.matrix_world @ source.pose.bones["Hips"].matrix).translation
+        scene.frame_set(cycle[1])
+        travel = (source.matrix_world @ source.pose.bones["Hips"].matrix).translation - first
+        travel.z = 0
+        if travel.length > 0.1 * scale * max(source_hips.z - lowest, 1e-6):
+            heading = travel.normalized().rotation_difference(target_forward).to_matrix().to_4x4()
+            source.matrix_world = Matrix.Translation(target_hips) @ heading @ Matrix.Translation(-target_hips) \
+                @ source.matrix_world
+            bpy.context.view_layer.update()
+
     # Per mapped bone: the rest alignment (swing only) and both rest orientations.
     pairs = []
     def first_mapped_ancestor(armature, name, names):
@@ -183,13 +399,6 @@ def run(request):
     order = {bone.name: len(bone.parent_recursive) for bone in target.data.bones}
     pairs.sort(key=lambda item: order[item[1]])
 
-    # Stride timing belongs to the clip: measure it on the actor's ankle, not on the character, whose
-    # foot motion depends on its own proportions and weights. Toes roll through stance and give no
-    # clean plants; without a LeftFoot joint, use the lowest mapped left joint.
-    left = [name for name in mapping if name.startswith("Left") and name in source.pose.bones]
-    foot = "LeftFoot" if "LeftFoot" in left else (
-        min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
-    cycle = gait_cycle(source, foot, start, end)
     if cycle:
         # Posture reference: the BVH zero pose is a synthetic straight-spined T-pose, so following the
         # change from it stamps the actor's habitual posture (CMU 08_01: neck ~9 degrees forward, lower
@@ -238,6 +447,10 @@ def run(request):
                 bone.keyframe_insert("location", frame=frame)
     for obj in source_objects:
         bpy.data.objects.remove(obj, do_unlink=True)
+    arm_offsets = clear_arms(target, [obj for obj in target_objects if obj.type == "MESH"], mapping,
+                             target_forward, range(start, end + 1), scene)
+    leg_swings = widen_stance(target, mapping, target_forward, range(start, end + 1), scene)
+    curled = relax_hands(target, mapping, start)
     scene.frame_start, scene.frame_end = start, end
     if cycle:
         scene["gait_cycle"] = list(cycle)
@@ -250,7 +463,9 @@ def run(request):
         "status": "complete", "frames": end - start + 1, "frame_start": start, "frame_end": end,
         "capture_fps": capture_fps, "gait_cycle": list(cycle) if cycle else None,
         "method": "limb rest-direction-aligned, torso stride-posture-referenced world rotation retarget", "scale": scale,
-        "in_place": bool(request.get("in_place", True)), "bone_mapping": mapping}, indent=2) + "\n")
+        "in_place": bool(request.get("in_place", True)), "arm_clearance_offset_degrees": arm_offsets,
+        "relaxed_finger_bones": curled, "stance_widening_degrees": leg_swings,
+        "bone_mapping": mapping}, indent=2) + "\n")
 
 
 def main():
