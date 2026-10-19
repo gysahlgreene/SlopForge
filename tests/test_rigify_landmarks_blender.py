@@ -91,7 +91,7 @@ BVH_ZERO_LINK = BVH.replace("OFFSET 9 0 0", "OFFSET 9 -5 0").replace("OFFSET -9 
     CHANNELS 3 Zrotation Xrotation Yrotation
     JOINT Spine
     {
-      OFFSET 0 30 0
+      OFFSET 0 30 30
       CHANNELS 3 Zrotation Xrotation Yrotation
       End Site
       {
@@ -191,7 +191,8 @@ class RigifyLandmarkTests(unittest.TestCase):
             self.assertAlmostEqual(angle(directions["1"]["left"], directions["2"]["left"]), 40, delta=3)
             self.assertLess(angle(directions["1"]["right"], directions["2"]["right"]), 1)
 
-            # CMU-style zero-length link (LowerBack on Hips): the rig's hips must stay upright, not flip.
+            # The clip's torso joints are placed differently (a zero-length LowerBack on Hips, then a joint
+            # 45 degrees off vertical, like CMU's clavicles); at zero rotation the rig's hips stay upright.
             (root / "zero.bvh").write_text(BVH_ZERO_LINK)
             zero = {**retarget, "motion": str(root / "zero.bvh"), "output_blend": str(root / "zero.blend"),
                     "report": str(root / "zero.json"),

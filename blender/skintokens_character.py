@@ -222,12 +222,40 @@ def setup_material(obj):
     material.node_tree.links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
 
 
+def same_uvs(source, target):
+    if len(source.data.loops) != len(target.data.loops) or not source.data.uv_layers or not target.data.uv_layers:
+        return False
+    uvs = []
+    for obj in (source, target):
+        values = [0.0] * (2 * len(obj.data.loops))
+        obj.data.uv_layers.active.data.foreach_get("uv", values)
+        uvs.append(values)
+    return max(abs(a - b) for a, b in zip(*uvs)) < 1e-4
+
+
 def transfer(source_meshes, meshes, output):
     bpy.context.scene.render.engine = "CYCLES"
-    coverage = {}
+    coverage, methods = {}, {}
     for target in meshes:
-        setup_material(target)
+        # SkinTokens --use_transfer keeps the source surface and UVs; reuse its maps as-is.
+        # A selected-to-active rebake misses rays on folds and pockets and leaves dark dots.
         center = target.matrix_world @ target.data.vertices[0].co
+        matches = [obj for obj in source_meshes if same_uvs(obj, target)]
+        if matches:
+            source = min(matches, key=lambda obj: ((obj.matrix_world @ obj.data.vertices[0].co) - center).length)
+            methods[target.name] = "reused_source_material"
+            indices = [0] * len(source.data.polygons)
+            source.data.polygons.foreach_get("material_index", indices)
+            target.data.materials.clear()
+            for material in source.data.materials:
+                target.data.materials.append(material)
+            target.data.polygons.foreach_set("material_index", indices)
+            for channel in CHANNELS:
+                if has_map(source, channel):
+                    coverage[channel] = coverage.get(channel, 0) + len(target.data.vertices)
+            continue
+        methods[target.name] = "selected_to_active_rebake"
+        setup_material(target)
         source = min(source_meshes, key=lambda obj: ((obj.matrix_world @ obj.data.vertices[0].co) - center).length)
         for channel in CHANNELS:
             if not has_map(source, channel):
@@ -248,7 +276,7 @@ def transfer(source_meshes, meshes, output):
             image.save()
             coverage[channel] = coverage.get(channel, 0) + len(target.data.vertices)
     vertex_count = sum(len(obj.data.vertices) for obj in meshes)
-    return {channel: count / vertex_count for channel, count in coverage.items()}
+    return {channel: count / vertex_count for channel, count in coverage.items()}, methods
 
 
 def points(meshes):
@@ -418,7 +446,7 @@ def run(request):
         raise ValueError(f"Unclassified geometry or missing skinned mesh: {unknown}")
     mapping = name_humanoid_bones(rig, meshes, semantic_bones(rig))
     output = Path(request["rigged_model"]).parent
-    coverage = transfer(source_meshes, meshes, output)
+    coverage, material_transfer = transfer(source_meshes, meshes, output)
     if coverage.get("base_color", 0) <= 0:
         raise ValueError("Base color transfer failed")
     for obj in source_meshes:
@@ -436,6 +464,7 @@ def run(request):
             "skinned_component_count": sum(components(obj) for obj in meshes),
             "helper_objects": helpers, "unclassified_objects": unknown,
             "bind_pose_count": len(rig.data.bones), "material_coverage": coverage,
+            "material_transfer": material_transfer,
             "semantic_mapping": mapping, "bone_names": sorted(rig.data.bones.keys()),
             "deformation_evidence": deformation,
             "contact_sheet_dimensions": dimensions, "pose_parameters": "fixed skintokens_character.py v1",

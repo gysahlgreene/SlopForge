@@ -6,9 +6,10 @@ request.json: {"rig": rig.fbx, "motion": clip.bvh, "output_blend": out.blend, "r
                "bone_mapping": {source: target}, "in_place": true}
 
 Rest poses of mocap (usually T-pose) and generated characters (A-pose) differ, so copying local
-rotations or pose transforms bends limbs into the body. Each target bone is first aligned to its
-source bone's rest direction (a swing rotation), then follows the source bone's world-space change
-from rest; limbs therefore point where the actor's limbs point. The source is turned to face the
+rotations or pose transforms bends limbs into the body. Each limb bone is first aligned to its
+source bone's rest direction (a swing rotation); every mapped bone then follows the source bone's
+world-space change from rest, so limbs point where the actor's limbs point while the torso and
+clavicles keep the character's own build. The source is turned to face the
 character and scaled to its hip height. With in_place, horizontal hip travel is removed so the
 character walks on the spot for review.
 """
@@ -40,6 +41,10 @@ CMU_TO_HUMANOID = {
     "LeftUpLeg": "LeftUpperLeg", "LeftLeg": "LeftLowerLeg", "LeftFoot": "LeftFoot", "LeftToeBase": "LeftToes",
     "RightUpLeg": "RightUpperLeg", "RightLeg": "RightLowerLeg", "RightFoot": "RightFoot", "RightToeBase": "RightToes",
 }
+
+
+# CMU limb names without their Left/Right prefix.
+LIMB_BONES = {"Arm", "ForeArm", "UpLeg", "Leg", "Foot"}
 
 
 def fail(message):
@@ -139,7 +144,7 @@ def run(request):
         @ Matrix.Translation(-source_hips) @ source.matrix_world
     bpy.context.view_layer.update()
 
-    # Per mapped bone: align the target rest direction to the source rest direction (swing only).
+    # Per mapped bone: the rest alignment (swing only) and both rest orientations.
     pairs = []
     def first_mapped_ancestor(armature, name, names):
         bone = armature.data.bones[name].parent
@@ -149,39 +154,29 @@ def run(request):
 
     def towards(armature, name, child):
         """Direction to the paired next joint; FBX/glTF bone tails are guesses, joints are not."""
-        head = armature.data.bones[name].head_local
-        vector = (armature.data.bones[child].head_local - head) if child else (
-            armature.data.bones[name].tail_local - head)
+        vector = armature.data.bones[child].head_local - armature.data.bones[name].head_local
         return (armature.matrix_world.to_3x3() @ vector).normalized()
 
     for source_name, target_name in mapping.items():
         source_rest = rest_world(source, source_name)
         target_rest = rest_world(target, target_name)
-        # Pair the same next joint on both skeletons; with several (hips) follow the spine upward.
-        def next_joint(name):
-            children = [other for other in mapping if first_mapped_ancestor(source, other, mapping) == name]
-            return max(children, key=lambda other: rest_world(source, other).translation.z) if children else None
-
-        # CMU's LowerBack starts exactly at Hips and Neck at Spine1: a zero-length link has no direction,
-        # so follow the chain to the first joint that is actually distinct (on both skeletons).
-        child = next_joint(source_name)
-        head = rest_world(source, source_name).translation
-        while child and (rest_world(source, child).translation - head).length < 1e-4:
-            child = next_joint(child)
-        source_child, target_child = child, mapping[child] if child else None
-        if child is None:
-            # Unmapped next joint (forearm -> wrist): use it when both skeletons have exactly one.
-            source_children = list(source.data.bones[source_name].children)
-            target_children = list(target.data.bones[target_name].children)
-            if len(source_children) == 1 and len(target_children) == 1:
-                source_child, target_child = source_children[0].name, target_children[0].name
-                child = source_child
-        source_direction = towards(source, source_name, source_child)
-        target_direction = towards(target, target_name, target_child)
-        # End bones (head, toes) have no next joint, and their file tails are guesses: apply only the
-        # source's change from rest, without a direction swing.
-        align = (target_direction.rotation_difference(source_direction).to_matrix() if child
-                 else Matrix.Identity(3))
+        # Limbs carry posture in their rest pose (A-pose arms, T-pose actor): swing the target onto the
+        # source's rest direction so limbs point where the actor's do. Torso, neck, clavicle and end bones
+        # differ only in where each skeleton puts its joints (CMU's clavicle rises from mid-chest, a
+        # SkinTokens clavicle falls from the neck), so they follow only the source's change from rest.
+        align = Matrix.Identity(3)
+        if source_name.removeprefix("Left").removeprefix("Right") in LIMB_BONES:
+            children = [other for other in mapping if first_mapped_ancestor(source, other, mapping) == source_name]
+            source_child, target_child = (children[0], mapping[children[0]]) if len(children) == 1 else (None, None)
+            if source_child is None:
+                # Unmapped next joint (forearm -> wrist): use it when both skeletons have exactly one.
+                source_children = list(source.data.bones[source_name].children)
+                target_children = list(target.data.bones[target_name].children)
+                if len(source_children) == 1 and len(target_children) == 1:
+                    source_child, target_child = source_children[0].name, target_children[0].name
+            if source_child:
+                align = towards(target, target_name, target_child).rotation_difference(
+                    towards(source, source_name, source_child)).to_matrix()
         pairs.append((source_name, target_name, source_rest.to_3x3(), target_rest.to_3x3(), align))
     order = {bone.name: len(bone.parent_recursive) for bone in target.data.bones}
     pairs.sort(key=lambda item: order[item[1]])
@@ -223,7 +218,7 @@ def run(request):
     Path(request["report"]).write_text(json.dumps({
         "status": "complete", "frames": end - start + 1, "frame_start": start, "frame_end": end,
         "capture_fps": capture_fps, "gait_cycle": list(cycle) if cycle else None,
-        "method": "rest-direction-aligned world rotation retarget", "scale": scale,
+        "method": "limb rest-direction-aligned world rotation retarget", "scale": scale,
         "in_place": bool(request.get("in_place", True)), "bone_mapping": mapping}, indent=2) + "\n")
 
 

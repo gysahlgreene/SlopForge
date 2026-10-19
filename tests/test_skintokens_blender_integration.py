@@ -37,6 +37,8 @@ class SkinTokensBlenderTests(unittest.TestCase):
             self.assertTrue(all(name.startswith("Icosphere") for name in report["helper_objects"]))
             self.assertGreaterEqual(report["skinned_component_count"], 2)
             self.assertGreater(report["material_coverage"]["base_color"], 0)
+            # The raw parts keep the source UVs, so the source maps are reused, not rebaked.
+            self.assertEqual(set(report["material_transfer"].values()), {"reused_source_material"})
             self.assertEqual(report["unweighted_vertices"], 0)
             mapping = report["semantic_mapping"]
             self.assertEqual(mapping["left_upper_arm"], "LeftUpperArm")
