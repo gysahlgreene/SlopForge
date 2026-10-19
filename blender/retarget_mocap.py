@@ -47,7 +47,11 @@ CMU_TO_HUMANOID = {
 
 
 # CMU limb names without their Left/Right prefix.
-LIMB_BONES = {"Arm", "ForeArm", "UpLeg", "Leg", "Foot"}
+LIMB_BONES = {"Arm", "ForeArm", "UpLeg", "Leg"}
+# Feet are referenced to the actor's flat (stance) foot, not its rest direction: skeletons put the toe
+# joint at different points (CMU: ball of the foot; SkinTokens: further forward and lower), so copying
+# the ankle-to-toe direction held generated feet 12-40 degrees toe-up and folded their boots.
+FOOT_BONES = {"Foot", "ToeBase"}
 
 
 def fail(message):
@@ -405,13 +409,33 @@ def run(request):
         # back arched) onto every character. Torso, neck, head and end bones follow the change from the
         # actor's average posture over one stride instead, keeping the character's own sculpted posture
         # and the actor's sway and bob.
-        torso = [index for index, pair in enumerate(pairs)
-                 if pair[0].removeprefix("Left").removeprefix("Right") not in LIMB_BONES]
+        # Feet: the same, averaged only over that side's stance (ankle in the lowest quarter of its
+        # height range), where the actor's foot is flat like the character's rest foot.
+        heights = {side: [] for side in ("Left", "Right")}
+        for frame in range(cycle[0], cycle[1]):
+            scene.frame_set(frame)
+            for side in heights:
+                if side + "Foot" in source.pose.bones:
+                    heights[side].append((source.matrix_world @ source.pose.bones[side + "Foot"].head).z)
+        stance = {}
+        for side, values in heights.items():
+            if values:
+                ordered = sorted(values)
+                limit = ordered[0] + 0.25 * (ordered[-1] - ordered[0])
+                stance[side] = {cycle[0] + index for index, value in enumerate(values) if value <= limit}
+        def part(name):
+            return name.removeprefix("Left").removeprefix("Right")
+        torso = [index for index, pair in enumerate(pairs) if part(pair[0]) not in LIMB_BONES]
         sums = {index: None for index in torso}
         for frame in range(cycle[0], cycle[1]):
             scene.frame_set(frame)
             for index in torso:
-                quaternion = (source.matrix_world @ source.pose.bones[pairs[index][0]].matrix).to_quaternion()
+                name = pairs[index][0]
+                if part(name) in FOOT_BONES:
+                    side = "Left" if name.startswith("Left") else "Right"
+                    if side in stance and frame not in stance[side]:
+                        continue
+                quaternion = (source.matrix_world @ source.pose.bones[name].matrix).to_quaternion()
                 if sums[index] is None:
                     sums[index] = quaternion
                 else:

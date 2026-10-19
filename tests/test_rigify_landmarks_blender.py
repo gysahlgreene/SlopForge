@@ -125,6 +125,59 @@ BVH_HEADING = BVH.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0.033333
               "0", "0", "0", "0", "0", f"{-30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}", "0",
               "0", "0", "0"]) + "\n" for f in range(61))
 
+# A walking clip with feet whose toe joint sits low and forward of the ankle (pitched about 45 degrees
+# down, unlike the rig's foot). Channels: Hips(6) then Z X Y per joint: LeftUpLeg LeftLeg LeftFoot
+# LeftToeBase RightUpLeg RightLeg RightFoot RightToeBase.
+def _leg(side, x):
+    return f"""  JOINT {side}UpLeg
+  {{
+    OFFSET {x} 0 0
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT {side}Leg
+    {{
+      OFFSET 0 -42 0
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      JOINT {side}Foot
+      {{
+        OFFSET 0 -42 0
+        CHANNELS 3 Zrotation Xrotation Yrotation
+        JOINT {side}ToeBase
+        {{
+          OFFSET 0 -6 6
+          CHANNELS 3 Zrotation Xrotation Yrotation
+          End Site
+          {{
+            OFFSET 0 0 4
+          }}
+        }}
+      }}
+    }}
+  }}
+"""
+BVH_FEET = ("HIERARCHY\nROOT Hips\n{\n  OFFSET 0 0 0\n  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation\n"
+            + _leg("Left", 9) + _leg("Right", -9) + "}\nMOTION\nFrames: 61\nFrame Time: 0.0333333\n" + "".join(
+    " ".join(["0", "90", "0", "0", "0", "0"]
+             + ["0", f"{30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}", "0"] + ["0"] * 9
+             + ["0", f"{-30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}", "0"] + ["0"] * 9) + "\n"
+    for f in range(61)))
+
+FOOT_PROBE = """import bpy, json, sys, math
+arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+W = arm.matrix_world
+rest = arm.data.bones["DEF-foot.L"]
+rest_direction = (W.to_3x3() @ (rest.tail_local - rest.head_local)).normalized()
+best = None
+for frame in range(1, 61):
+    bpy.context.scene.frame_set(frame)
+    thigh = arm.pose.bones["DEF-thigh.L"]
+    lean = abs((W @ thigh.tail - W @ thigh.head).normalized().y)
+    if best is None or lean < best[0]:
+        foot = arm.pose.bones["DEF-foot.L"]
+        best = (lean, math.degrees(rest_direction.angle((W @ foot.tail - W @ foot.head).normalized())))
+json.dump({"stance_foot_degrees": best[1]}, open(sys.argv[-1], "w"))
+"""
+
+
 HEADING_PROBE = """import bpy, json, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 W = arm.matrix_world
@@ -293,3 +346,19 @@ class RigifyLandmarkTests(unittest.TestCase):
             probe = json.loads((root / "heading_probe.json").read_text())
             self.assertLess(probe["sideways"], 0.2, probe)
             self.assertLess(probe["location_residue"], 1e-3, probe)
+
+            # A flat-footed actor leaves the rig's foot at its own rest angle in stance, even though the two
+            # skeletons place the toe joint differently.
+            (root / "feet.bvh").write_text(BVH_FEET)
+            feet = {**retarget, "motion": str(root / "feet.bvh"), "output_blend": str(root / "feet.blend"),
+                    "report": str(root / "feet.json"),
+                    "bone_mapping": {**retarget["bone_mapping"], "LeftFoot": "DEF-foot.L", "RightFoot": "DEF-foot.R",
+                                     "LeftToeBase": "DEF-toe.L", "RightToeBase": "DEF-toe.R"}}
+            (root / "feet_request.json").write_text(json.dumps(feet))
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "feet_request.json")],
+                           check=True, capture_output=True, text=True)
+            (root / "foot_probe.py").write_text(FOOT_PROBE)
+            subprocess.run([BLENDER, "--background", str(root / "feet.blend"), "--python", str(root / "foot_probe.py"),
+                            "--", str(root / "foot_probe.json")], check=True, capture_output=True, text=True)
+            self.assertLess(json.loads((root / "foot_probe.json").read_text())["stance_foot_degrees"], 6)
