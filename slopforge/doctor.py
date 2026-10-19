@@ -52,7 +52,8 @@ def run_doctor(project_root=None):
             report("PASS", "Style pack", f"{style['name']} v{style['version']}")
             types = load_taxonomy(root)
             report("PASS", "Asset taxonomy", f"{len(types)} types")
-            for role, key in (("Workflow", "image"), ("Model workflow", "model")):
+            for role, key in (("Workflow", "image"), ("Character concept workflow", "character_image"),
+                              ("Model workflow", "model")):
                 configured = config["asset_pipeline"]["workflows"].get(key)
                 if configured:
                     path = resolve_workflow(root, configured)

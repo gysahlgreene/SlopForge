@@ -164,8 +164,9 @@ def backend_provenance(health=None, *, queried=False):
 class ComfyUIClient:
     """HTTP boundary for local and remote ComfyUI instances."""
 
+    # "name" is ModelPatchLoader's model file (Z-Image Fun ControlNet patches).
     MODEL_INPUTS = {"ckpt_name", "unet_name", "vae_name", "clip_name", "clip_vision", "model_name",
-                    "bg_removal_name"}
+                    "bg_removal_name", "name"}
 
     def __init__(self, base_url, timeout=60):
         self.base_url = base_url.rstrip("/")
@@ -490,7 +491,7 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     node_inputs = workflow_node_inputs(config, "image", resolved.name)
     if node_inputs:
         command.extend(["--workflow-inputs", json.dumps(node_inputs)])
-    if conditioning and conditioning.get("strategy") == "reference":
+    if conditioning and conditioning.get("references"):
         references = [{**item, "path": str(root / item["path"]), "provenance_path": item["path"]}
                       for item in conditioning["references"]]
         command.extend(["--references", json.dumps(references),

@@ -1627,6 +1627,57 @@ avoid: [environment]
             self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child,
             {"asset_pipeline": {"defaults": {"image_candidates": 1}}})["reusable"])
 
+    def test_recipe_child_reuse_follows_the_pose_concept_route(self):
+        from slopforge.provenance import file_sha256
+        from slopforge.paths import resolve_workflow
+        from slopforge.pipelines.model import concept_route, prop_child_reuse_decision
+
+        config = {"asset_pipeline": {"defaults": {"image_candidates": 1},
+                                     "workflows": {"image": "image_text2img_api.json",
+                                                   "character_image": "image_character_pose_api.json"}}}
+        character = {"pose_control": {"image": "character_a_pose_openpose.png", "strength": 1.0}}
+        text_only = {"strategy": "text_only", "references": [], "workflow_inputs": []}
+        # Types without pose_control, and profiles without character_image, keep the plain route.
+        self.assertEqual(concept_route(config, {}, text_only), ("image_text2img_api.json", text_only))
+        plain = {"asset_pipeline": {"workflows": {"image": "image_text2img_api.json"}}}
+        self.assertEqual(concept_route(plain, character, text_only), ("image_text2img_api.json", text_only))
+        workflow, conditioning = concept_route(config, character, text_only)
+        self.assertEqual(workflow, "image_character_pose_api.json")
+        self.assertEqual(conditioning["workflow_inputs"][0]["image"], {"node": "pose_image", "input": "image"})
+
+        def identity_of(name):
+            return {"identifier": name, "sha256": file_sha256(resolve_workflow(self.root, name)),
+                    "configured_inputs": {}}
+        requested = {"strategy": "text_only", "references": [{"sha256": item.get("sha256"), "strength": item["strength"]}
+                                                             for item in conditioning["references"]]}
+        candidate = self._candidate(1, self.root / "concept.png")
+        execution = {"id": "execution:1", "status": "succeeded",
+                     "identity_inputs": {"brief": "Scout", "generation_prompt": "Scout",
+                                          "style": {"name": "plain", "version": 1},
+                                          "conditioning": json.loads(json.dumps(requested)),
+                                          "workflow": identity_of(workflow),
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "candidate_attempts": [{"seed": 1, "variation": None}]},
+                     "stages": [{"name": "concept_generation", "attempt": 1, "status": "succeeded",
+                                 "inputs": [], "settings": {"prompt": "Scout", "variation": None, "seed": 1},
+                                 "outputs": [candidate["artifact"]]}]}
+        candidate["execution_id"] = execution["id"]
+        self.asset["executions"] = [execution]
+        self.asset["candidates"]["items"] = [candidate]
+        child = {"description": "Scout", "generation_prompt": "Scout",
+                 "requested_style_identity": {"name": "plain", "version": 1},
+                 "requested_image_workflow": workflow, "requested_conditioning": requested}
+        decide = lambda: prop_child_reuse_decision(
+            self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child, config)
+        self.assertTrue(decide()["reusable"], decide())
+        # A concept made before pose control (plain workflow) is stale.
+        execution["identity_inputs"]["workflow"] = identity_of("image_text2img_api.json")
+        self.assertFalse(decide()["reusable"])
+        execution["identity_inputs"]["workflow"] = identity_of(workflow)
+        # So is one made with a different skeleton.
+        execution["identity_inputs"]["conditioning"]["references"][0]["sha256"] = "0" * 64
+        self.assertFalse(decide()["reusable"])
+
     def test_corrupt_worker_texture_prevents_mesh_execution_adoption(self):
         """Worker-owned maps are part of mesh execution integrity, even if GLB is intact."""
         from slopforge.pipelines.model import _adopt_stage

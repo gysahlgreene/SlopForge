@@ -504,7 +504,7 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
             [item.get("variation") for item in attempts] != variations):
         reasons.append("prop child candidate count or variations changed")
     pipeline = config.get("asset_pipeline", {})
-    workflow = pipeline.get("workflows", {}).get("image")
+    workflow = child.get("requested_image_workflow", pipeline.get("workflows", {}).get("image"))
     if workflow:
         workflow_path = resolve_workflow(project_root, workflow)
         expected_workflow = {"identifier": Path(workflow).name,
@@ -1236,6 +1236,29 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "failure": failure}
 
 
+def concept_route(config, asset_type, conditioning):
+    """Concept workflow and conditioning for an asset type; generation and reuse checks share it.
+
+    Asset types with pose_control use workflows.character_image when the profile configures it:
+    prompts alone did not hold the pose (hands on hips, arms against the body), a skeleton does.
+    The skeleton's hash joins the conditioning identity, so changing it invalidates old concepts.
+    """
+    workflows = config["asset_pipeline"]["workflows"]
+    pose = asset_type.get("pose_control")
+    if not pose or not workflows.get("character_image"):
+        return workflows.get("image"), conditioning
+    image = tool_root() / "workflows/inputs" / pose["image"]
+    if not image.is_file():
+        raise ValueError(f"pose_control image not found: {image}")
+    reference = {"path": str(image), "strength": float(pose.get("strength", 1.0)), "category": "pose_control",
+                 "source": f"workflows/inputs/{pose['image']}", "sha256": file_sha256(image)}
+    slot = {"image": {"node": "pose_image", "input": "image"},
+            "strength": {"node": "pose_control", "input": "strength"}}
+    return workflows["character_image"], {**conditioning,
+                                          "references": [reference] + conditioning["references"],
+                                          "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
+
+
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
              reference_paths=None, reference_categories=None, reference_entries=None, variations=None):
     root = Path(project_root).resolve()
@@ -1246,9 +1269,10 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     workflow = pipeline["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
+    workflow, conditioning = concept_route(config, asset_type, conditioning)
     workflow_path = resolve_workflow(root, workflow)
     prompt = generation_prompt or build_prompt(style, asset_type, description)
-    conditioning_args = {"conditioning": conditioning} if conditioning["strategy"] == "reference" else {}
+    conditioning_args = {"conditioning": conditioning} if conditioning["references"] else {}
 
     def backend(prompt_text, destination, seed, metadata):
         return generate_image(root, config, workflow_path, prompt_text, destination,
