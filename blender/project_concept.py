@@ -22,6 +22,7 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 MAX_ASPECT_ERROR = 0.05
+SMOOTHING_ROUNDS = 4
 
 
 def run(request):
@@ -63,6 +64,16 @@ def run(request):
         if normal.y < 0:
             hit = tree.ray_cast(point + normal * offset, Vector((0, -1, 0)))
             visible[index] = 0.0 if hit[0] is not None else 1.0
+    # Soften the per-vertex test over mesh neighbours so transitions do not follow triangle edges;
+    # only ever lower a value, so the projection never bleeds onto surfaces hidden from the front.
+    neighbours = [[] for _ in mesh.vertices]
+    for edge in mesh.edges:
+        a, b = edge.vertices
+        neighbours[a].append(b)
+        neighbours[b].append(a)
+    for _ in range(SMOOTHING_ROUNDS):
+        visible = [min(value, (value + sum(visible[other] for other in near)) / (1 + len(near)))
+                   for value, near in zip(visible, neighbours)]
     attribute = mesh.color_attributes.new("front_visible", "FLOAT_COLOR", "POINT")
     attribute.data.foreach_set("color", [value for item in visible for value in (item, item, item, 1.0)])
 

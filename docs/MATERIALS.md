@@ -49,9 +49,13 @@ result against that declaration before anyone reviews it.
    (`native_material/basecolor_voxel.png`; candidates record `basecolor_source` and the
    `concept_projection` report). The voxel bake turns eyes into slits; the projection carries the
    concept's eyes, brows, beard and print. A reconstruction whose proportions differ from the
-   concept by more than 5% is left unprojected (`status: skipped`). The projected colors include
-   the concept's soft studio shading, and features can sit a few concept pixels off the sculpted
-   forms, which shows in extreme close-ups.
+   concept by more than 5% is left unprojected (`status: skipped`; on 2026-10-19 the dwarf, whose
+   model came out wider than its slightly turned concept, at 7.8%). Visibility is softened over
+   mesh neighbours but only ever lowered, so nothing is painted onto surfaces hidden from the front.
+   The projected colors include the concept's soft studio shading, and features can sit a few
+   concept pixels off the sculpted forms: in close-ups a brow can cross a hair strand or a concept
+   strand can land on the forehead. A gate that kept the voxel color where it disagreed with a
+   blurred concept removed those strands but also the eyes the voxel bake had lost, so it was dropped.
 
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
