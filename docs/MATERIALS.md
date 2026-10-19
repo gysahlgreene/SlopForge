@@ -35,9 +35,12 @@ result against that declaration before anyone reviews it.
    unwraps UVs, and ComfyUI bakes base color, roughness and metallic maps onto those UVs.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
-4. **Normal map.** The H100 TRELLIS.2 workflows bake a tangent-space normal map from the
-   full-detail decoded mesh onto the reduced mesh with ComfyUI's `BakeNormalMapFromMesh`.
-   Other workflows still record `normal_source: neutral_placeholder`; `approve-texture`
+4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
+   (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto
+   the repaired, UV-mapped mesh (`normal_source: blender_mikktspace_bake`). Blender and Unity
+   shade with MikkTSpace tangents; ComfyUI's `BakeNormalMapFromMesh` uses Lengyel tangents, and
+   the mismatch showed as white speckle across characters (8.5% of normal texels strongly
+   tilted, against 1.1% for the Blender bake on the same input and seed). Other workflows still record `normal_source: neutral_placeholder`; `approve-texture`
    refuses a 1×1 placeholder normal unless `--allow-placeholder-normal` is passed.
 
 5. **Emission.** When a region is declared `emissive`, the material stage builds the
