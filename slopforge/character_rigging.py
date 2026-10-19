@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -13,164 +14,66 @@ from .paths import blender_executable, tool_root
 from .character_readiness import readiness_allows_rigging
 from .validation import validate_image
 
-SKINTOKENS_REVISION = "273b691d35989d71cd17ff2895fdc735097b92d1"
-SKINTOKENS_DEMO_SHA256 = "8e6d058225c39caad0fccf7c4d6942f8e7e32e3f57c5b14cdc60cf2d6cb5d316"
-SKINTOKENS_TOKENRIG_SHA256 = "bf27b72201c5fb23028a9f8a8e63b568462abfa2b4e4b15e50529cdbfc15a222"
-SKINTOKENS_PATCH_SHA256 = "e9bb33fd067461aa3f12621bfa32d66a8fc6489e6bfafbd4a2866bef9c29f796"
-_SKINTOKENS_VAE = "experiments/skin_vae_2_10_32768/last.ckpt"
-_SKINTOKENS_QWEN = "models/Qwen3-0.6B/config.json"
-_ATTENTION_BEFORE = b'attn_implementation="flash_attention_2"'
-_ATTENTION_AFTER = b'attn_implementation="sdpa"'
-# use_postprocess masks predicted weights by voxel reachability from each joint; without it, sampled
-# decoding sometimes weights a patch of trouser leg to a fingertip, which tears in animation.
-_SKINTOKENS_SETTINGS = {"top_k": 5, "top_p": 0.95, "temperature": 1.0,
-                        "repetition_penalty": 2.0, "num_beams": 10, "use_transfer": True,
-                        "use_postprocess": True}
-_SKINTOKENS_LAUNCHER = """
-import json, random, runpy, sys
-with open(sys.argv[1]) as stream:
-    request = json.load(stream)
-seed = request['seed']
-random.seed(seed)
-import numpy as np
-np.random.seed(seed % (2**32))
-import torch
-torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(seed)
-sys.argv = ['demo.py', '--input', request['source'], '--output', request['output'],
-            '--model_ckpt', request['checkpoint']]
-for key, value in request['settings'].items():
-    if value is True:
-        sys.argv.append('--' + key)
-    else:
-        sys.argv.extend(('--' + key, str(value)))
-runpy.run_path('demo.py', run_name='__main__')
-with open(request['result'], 'w') as stream:
-    json.dump({'status': 'complete'}, stream)
-"""
+from . import skintokens_runtime as runtime
+from .skintokens_runtime import SKINTOKENS_REVISION, SKINTOKENS_SETTINGS as _SKINTOKENS_SETTINGS
 
 
 def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return runtime.sha256(path)
+
+
+def _skintokens_host(config):
+    host = config.get("asset_pipeline", {}).get("tools", {}).get("skintokens_host")
+    return host if isinstance(host, str) and host else None
 
 
 def _skintokens_paths(config, project_root):
     tools = config.get("asset_pipeline", {}).get("tools", {})
     root = Path(project_root).resolve()
+    remote = _skintokens_host(config) is not None
     def path(key):
         value = tools.get(key)
         if not isinstance(value, str) or not value:
             return None
-        value = Path(value).expanduser()
-        return (root / value).resolve()
+        # Remote paths are the host's own absolute paths; never resolve them locally.
+        if remote and not value.startswith("/"):
+            raise ValueError(f"tools.{key} must be an absolute path on tools.skintokens_host")
+        return PurePosixPath(value) if remote else (root / Path(value).expanduser()).resolve()
     return tuple(path(key) for key in ("skintokens_python", "skintokens_checkout", "skintokens_checkpoint"))
 
 
-def _skintokens_revision(checkout):
-    result = subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"],
-                            capture_output=True, text=True, check=False)
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _skintokens_checkout_changes(checkout, checkpoint, source_hash):
-    result = subprocess.run(["git", "-C", str(checkout), "status", "--porcelain=v1", "-z",
-                             "--untracked-files=all"], capture_output=True, check=False)
-    if result.returncode != 0:
-        return True
-    allowed_untracked = {_SKINTOKENS_VAE, _SKINTOKENS_QWEN}
-    if checkpoint.is_relative_to(checkout):
-        allowed_untracked.add(checkpoint.relative_to(checkout).as_posix())
-    for item in result.stdout.split(b"\0"):
-        if not item:
-            continue
-        entry = item.decode("utf-8", "surrogateescape")
-        status, name = entry[:2], entry[3:]
-        if status == " M" and name == "src/model/tokenrig.py" and source_hash == SKINTOKENS_PATCH_SHA256:
-            continue
-        if status == "??" and (name in allowed_untracked or
-                               name.startswith("models/Qwen3-0.6B/") and
-                               Path(name).suffix in {".json", ".txt", ".md"}):
-            continue
-        return True
-    return False
+def _remote(config, action, payload):
+    """Run one skintokens_runtime action with the remote SkinTokens Python; returns its JSON."""
+    python = config["asset_pipeline"]["tools"].get("skintokens_python")
+    if not python:
+        return None
+    completed = subprocess.run(["ssh", "-o", "BatchMode=yes", _skintokens_host(config),
+                                shlex.join([python, "-", action, json.dumps(payload)])],
+                               input=Path(runtime.__file__).read_text(), capture_output=True, text=True,
+                               check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(f"SkinTokens {action} on {_skintokens_host(config)} failed: "
+                           + (completed.stderr.strip().splitlines() or ["no output"])[-1])
+    return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
 def skintokens_preflight(config, project_root):
-    """Inspect configured runtime without importing or changing upstream code."""
+    """Inspect the configured runtime (local, or on tools.skintokens_host) without changing it."""
     python, checkout, checkpoint = _skintokens_paths(config, project_root)
-    reasons = []
-    for key, path in zip(("skintokens_python", "skintokens_checkout", "skintokens_checkpoint"),
-                         (python, checkout, checkpoint)):
-        if path is None:
-            reasons.append(f"Set tools.{key}")
-    if reasons:
-        return {"status": "unavailable", "reasons": reasons}
-    if not python.is_file() or not os.access(python, os.X_OK):
-        reasons.append("skintokens_python must be an executable file")
-    if not checkout.is_dir() or not (checkout / ".git").exists():
-        reasons.append("skintokens_checkout must be a Git checkout")
-    if reasons:
-        return {"status": "unavailable", "reasons": reasons}
-    if _skintokens_revision(checkout) != SKINTOKENS_REVISION:
-        reasons.append("skintokens_checkout revision differs from audited revision")
-    demo = checkout / "demo.py"
-    if not demo.is_file() or _sha256(demo) != SKINTOKENS_DEMO_SHA256:
-        reasons.append("skintokens_checkout demo.py differs from audited source")
-    source = checkout / "src/model/tokenrig.py"
-    source_hash = _sha256(source) if source.is_file() else None
-    if source_hash not in (SKINTOKENS_TOKENRIG_SHA256, SKINTOKENS_PATCH_SHA256):
-        reasons.append("skintokens_checkout TokenRig source differs from audited source")
-    vae = checkout / _SKINTOKENS_VAE
-    if not vae.is_file() or vae.stat().st_size == 0:
-        reasons.append("SkinTokens FSQ-CVAE checkpoint is missing or empty")
-    qwen = checkout / _SKINTOKENS_QWEN
-    try:
-        qwen_config = json.loads(qwen.read_text())
-        if qwen_config.get("model_type") != "qwen3":
-            raise ValueError("unexpected model type")
-    except (OSError, ValueError, AttributeError):
-        reasons.append("SkinTokens Qwen3-0.6B local config is missing or invalid")
-    if not checkpoint.is_file() or checkpoint.stat().st_size == 0:
-        reasons.append("skintokens_checkpoint is missing or empty")
-    if _skintokens_checkout_changes(checkout, checkpoint, source_hash):
-        reasons.append("skintokens_checkout has unexpected modified or untracked files")
-    if reasons:
-        return {"status": "unverified", "reasons": reasons}
-    if source_hash == SKINTOKENS_TOKENRIG_SHA256:
-        return {"status": "setup_required", "reasons": ["Run character provider-setup skintokens"]}
-    return {"status": "ready", "reasons": [], "revision": SKINTOKENS_REVISION,
-            "checkpoint_sha256": _sha256(checkpoint), "checkpoint_id": checkpoint.name,
-            "compatibility_sha256": SKINTOKENS_PATCH_SHA256}
+    if _skintokens_host(config):
+        if python is None:
+            return runtime.preflight(None, checkout, checkpoint)
+        return _remote(config, "preflight", {"python": str(python), "checkout": str(checkout) if checkout else None,
+                                             "checkpoint": str(checkpoint) if checkpoint else None})
+    return runtime.preflight(python, checkout, checkpoint)
 
 
 def prepare_skintokens_runtime(config, project_root):
     """Apply the audited SDPA edit only on explicit setup invocation."""
     _, checkout, _ = _skintokens_paths(config, project_root)
-    if checkout is None or not (checkout / ".git").exists() or _skintokens_revision(checkout) != SKINTOKENS_REVISION:
-        raise ValueError("SkinTokens checkout revision is not the audited revision")
-    demo = checkout / "demo.py"
-    if not demo.is_file() or _sha256(demo) != SKINTOKENS_DEMO_SHA256:
-        raise ValueError("SkinTokens demo source differs from audited source")
-    source = checkout / "src/model/tokenrig.py"
-    if not source.is_file():
-        raise ValueError("SkinTokens TokenRig source is missing")
-    current = source.read_bytes()
-    digest = hashlib.sha256(current).hexdigest()
-    if digest == SKINTOKENS_PATCH_SHA256:
-        return {"status": "prepared", "revision": SKINTOKENS_REVISION, "compatibility_sha256": digest}
-    if digest != SKINTOKENS_TOKENRIG_SHA256 or current.count(_ATTENTION_BEFORE) != 1:
-        raise ValueError("SkinTokens TokenRig source differs from audited source")
-    patched = current.replace(_ATTENTION_BEFORE, _ATTENTION_AFTER)
-    patched_hash = hashlib.sha256(patched).hexdigest()
-    if patched_hash != SKINTOKENS_PATCH_SHA256:
-        raise ValueError("SkinTokens compatibility patch digest mismatch")
-    source.write_bytes(patched)
-    return {"status": "prepared", "revision": SKINTOKENS_REVISION, "compatibility_sha256": patched_hash}
+    if _skintokens_host(config):
+        return _remote(config, "prepare", {"checkout": str(checkout) if checkout else None})
+    return runtime.prepare(checkout)
 
 
 def run_skintokens_inference(config, source_model, output_model, *, seed):
@@ -193,25 +96,13 @@ def run_skintokens_inference(config, source_model, output_model, *, seed):
     output.parent.mkdir(parents=True, exist_ok=True)
     log = Path(root).resolve() / "ai/logs/skintokens" / (output.stem + ".log")
     log.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="slopforge-skintokens-") as directory:
-        request = Path(directory) / "request.json"
-        result = Path(directory) / "result.json"
-        request.write_text(json.dumps({"source": str(source), "output": str(output),
-                                       "checkpoint": str(checkpoint), "seed": seed,
-                                       "settings": _SKINTOKENS_SETTINGS, "result": str(result)}))
-        env = {**os.environ, "PYTHONHASHSEED": str(seed), "HF_HUB_OFFLINE": "1",
-               "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"}
-        with log.open("w") as stream:
-            completed = subprocess.run([str(python), "-c", _SKINTOKENS_LAUNCHER, str(request)],
-                                       cwd=checkout, env=env, stdout=stream, stderr=subprocess.STDOUT,
-                                       check=False)
-        if completed.returncode != 0 or not result.is_file():
-            raise RuntimeError("SkinTokens inference failed; inspect the project log")
-        try:
-            if json.loads(result.read_text()) != {"status": "complete"}:
-                raise ValueError("invalid result")
-        except (ValueError, json.JSONDecodeError) as exc:
-            raise RuntimeError("SkinTokens returned a malformed result") from exc
+    host = _skintokens_host(config)
+    if host:
+        complete = _remote_inference(config, host, python, checkout, checkpoint, source, output, seed, log)
+    else:
+        complete = runtime.launch(python, checkout, checkpoint, source, output, seed, log)
+    if not complete:
+        raise RuntimeError("SkinTokens inference failed; inspect the project log")
     if not output.is_file() or output.stat().st_size < 20:
         raise RuntimeError("SkinTokens output is missing or empty")
     try:
@@ -246,6 +137,33 @@ def run_skintokens_inference(config, source_model, output_model, *, seed):
             "checkpoint_id": report["checkpoint_id"], "checkpoint_sha256": report["checkpoint_sha256"],
             "compatibility_sha256": report["compatibility_sha256"], "seed": seed,
             "settings": dict(_SKINTOKENS_SETTINGS)}
+
+
+def _remote_inference(config, host, python, checkout, checkpoint, source, output, seed, log):
+    """Upload the source, run the shared launcher on the host, and fetch the output and log back."""
+    ssh = ["ssh", "-o", "BatchMode=yes", host]
+    made = subprocess.run(ssh + ["mktemp", "-d", "/tmp/slopforge-skintokens-XXXXXX"],
+                          capture_output=True, text=True, check=False)
+    if made.returncode != 0 or not made.stdout.strip():
+        raise RuntimeError(f"Could not create a SkinTokens work directory on {host}")
+    work = PurePosixPath(made.stdout.strip())
+    remote_source, remote_output, remote_log = (work / ("source" + source.suffix.lower()),
+                                                work / "output.glb", work / "skintokens.log")
+    try:
+        if subprocess.run(["scp", "-q", "-o", "BatchMode=yes", str(source), f"{host}:{remote_source}"],
+                          check=False).returncode != 0:
+            raise RuntimeError(f"Could not upload the SkinTokens source to {host}")
+        complete = _remote(config, "launch", {"python": str(python), "checkout": str(checkout),
+                                              "checkpoint": str(checkpoint), "source": str(remote_source),
+                                              "output": str(remote_output), "seed": seed,
+                                              "log": str(remote_log)})["complete"]
+        subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"{host}:{remote_log}", str(log)], check=False)
+        if complete and subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"{host}:{remote_output}",
+                                        str(output)], check=False).returncode != 0:
+            raise RuntimeError(f"Could not download the SkinTokens output from {host}")
+        return complete
+    finally:
+        subprocess.run(ssh + ["rm", "-rf", "--", str(work)], check=False)
 
 
 RECOMMENDED_POSES = ("t_pose", "raised_arms", "crouch", "leg_lift", "elbow_bend", "shoulder_rotation")
