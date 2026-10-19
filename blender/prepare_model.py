@@ -396,7 +396,23 @@ detail_source = None
 if mesh_only:
     remove_isolated_single_faces(obj.data)
     minimum, maximum = combined_bounds([obj])
-    if normal_output:
+    if normal_output and "--detail-mesh" in sys.argv:
+        # Full-detail remesh from the generator, in the same frame as this (reduced) mesh.
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=sys.argv[sys.argv.index("--detail-mesh") + 1])
+        details = [item for item in bpy.data.objects if item not in before and item.type == "MESH"]
+        if not details:
+            raise SystemExit("--detail-mesh contains no mesh")
+        bpy.ops.object.select_all(action="DESELECT")
+        for item in details:
+            item.select_set(True)
+        bpy.context.view_layer.objects.active = details[0]
+        if len(details) > 1:
+            bpy.ops.object.join()
+        detail_source = bpy.context.view_layer.objects.active
+        detail_source.select_set(False)
+        bpy.context.view_layer.objects.active = obj
+    elif normal_output:
         detail_source = obj.copy()
         detail_source.data = obj.data.copy()
         bpy.context.collection.objects.link(detail_source)

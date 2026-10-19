@@ -416,7 +416,7 @@ def main():
         if args.blender is None:
             raise ValueError("This model workflow requires --blender for mesh reduction and UV preparation")
         raw_workflow = {key: node for key, node in workflow.items()
-                        if not key.startswith("save") or key == "save_raw"}
+                        if not key.startswith("save") or key in {"save_raw", "save_detail"}}
         raw_identity, raw_bindings = _workflow_identity(source_workflow, raw_workflow,
                                                         comfy_image_name, source_content_hash)
         source_hash = workflow_sha256(args.workflow) if args.workflow else None
@@ -435,9 +435,14 @@ def main():
             if not raw:
                 raise ValueError("Model workflow did not produce its raw mesh")
         raw_path = dest.with_name(dest.stem + "_untextured.glb")
+        detail = find_glb(entry["outputs"].get("save_detail", {}))
+        detail_path = dest.with_name(dest.stem + "_detail.glb") if detail else None
+        baked_normal = dest.with_name(dest.stem + "_normal_mikktspace.png") if detail else None
         with _journal_stage(journal, "mesh_raw_acquisition", journal_attempt,
                             {"phase": "raw_shape"}) as stage:
             client.download_output(raw, raw_path)
+            if detail:
+                client.download_output(detail, detail_path)
             raw_refs = _journal_finish(journal, stage, [(raw_path, "mesh.raw")])
         prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
@@ -451,7 +456,12 @@ def main():
                             # The graph already ran a UDF remesh; Blender's voxel remesh would erase thin parts.
                             *(["--no-voxel-repair"] if "shape_remesh" in workflow and not args.require_manifold else []),
                             # Manifold types try a local repair first; voxel repair only runs if it fails.
-                            *(["--local-repair"] if args.require_manifold else [])],
+                            *(["--local-repair"] if args.require_manifold else []),
+                            # Normals are baked in Blender (MikkTSpace, as Blender and Unity shade) from the
+                            # full-detail remesh; ComfyUI's bake uses Lengyel tangents and speckles when shaded.
+                            *(["--detail-mesh", str(detail_path), "--normal-output", str(baked_normal),
+                               "--texture-size", str(workflow.get("maps", {}).get("inputs", {}).get("texture_size", 2048))]
+                              if detail else [])],
                            check=True, env=blender_environment())
             if not prepared.is_file():
                 raise RuntimeError("Blender did not produce the prepared mesh")
@@ -491,7 +501,9 @@ def main():
                         {"phase": "material_outputs"}, inputs=material_inputs) as stage:
         client.download_output(glb, dest)
         textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
-        textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
+        mikktspace = locals().get("baked_normal")
+        mikktspace = mikktspace if mikktspace is not None and Path(mikktspace).is_file() else None
+        textures = copy_generated_maps(entry["outputs"], dest.parent, client, baked_normal=mikktspace) if textured else {}
         conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
                               if "save_conditioning" in workflow else None)
         acquired = [(dest, "mesh.final")] + [(dest.parent / path, f"texture.{name}")
@@ -557,6 +569,7 @@ def main():
                                         "textured": textured, "textures": textures,
                                         "conditioning_image": conditioning_image,
                                         "normal_source": "workflow" if entry["outputs"].get("save_normal", {}).get("images") else
+                                                         "blender_mikktspace_bake" if mikktspace else
                                                          "neutral_placeholder",
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")
         temporary.replace(args.metadata)

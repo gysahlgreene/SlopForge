@@ -375,10 +375,6 @@
       "roughness": [
         "maps",
         2
-      ],
-      "normal_map": [
-        "normal_bake",
-        0
       ]
     }
   },
@@ -469,32 +465,6 @@
       "filename_prefix": "generated_models/conditioning"
     }
   },
-  "normal_bake": {
-    "class_type": "BakeNormalMapFromMesh",
-    "inputs": {
-      "low_poly": [
-        "smooth",
-        0
-      ],
-      "high_poly": [
-        "mesh",
-        0
-      ],
-      "resolution": 2048,
-      "cage_distance": 0.05,
-      "ignore_backfaces": true
-    }
-  },
-  "save_normal": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "normal_bake",
-        0
-      ],
-      "filename_prefix": "slopforge/mesh_pbr/save_normal"
-    }
-  },
   "shape_remesh": {
     "class_type": "RemeshMesh",
     "inputs": {
@@ -524,6 +494,16 @@
       ],
       "target_face_count": 30000,
       "placement_mode": "midpoint"
+    }
+  },
+  "save_detail": {
+    "class_type": "SaveGLB",
+    "inputs": {
+      "mesh": [
+        "shape_remesh",
+        0
+      ],
+      "filename_prefix": "slopforge/mesh_pbr/save_detail"
     }
   }
 }
