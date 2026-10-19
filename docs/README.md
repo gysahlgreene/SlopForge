@@ -23,6 +23,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Candidate review board](REVIEW-BOARD.md) and [quality tiers](QUALITY-TIERS.md)
 - [Recipes](RECIPES.md) and [environment kits](ENVIRONMENT-KITS.md)
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
+- [Template characters (experimental)](TEMPLATE-CHARACTERS.md): MakeHuman base, library garments coloured from a generated character
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
 - [Unity delivery](UNITY.md)
 
