@@ -84,6 +84,36 @@ Frame Time: 0.0333333
 0 90 0 0 0 0 0 -40 0 0 0 0 0 0 0 0 0 0
 """
 
+BVH_ZERO_LINK = BVH.replace("OFFSET 9 0 0", "OFFSET 9 -5 0").replace("OFFSET -9 0 0", "OFFSET -9 -5 0").replace(
+    """  JOINT RightUpLeg""", """  JOINT LowerBack
+  {
+    OFFSET 0 0 0
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    JOINT Spine
+    {
+      OFFSET 0 30 0
+      CHANNELS 3 Zrotation Xrotation Yrotation
+      End Site
+      {
+        OFFSET 0 30 0
+      }
+    }
+  }
+  JOINT RightUpLeg""").split("MOTION")[0] + """MOTION
+Frames: 2
+Frame Time: 0.0333333
+""" + " ".join(["0", "90"] + ["0"] * 22) + "\n" + " ".join(["0", "90", "0", "0", "0", "0", "0", "-40"] + ["0"] * 16) + "\n"
+# Channel order: Hips(6) LeftUpLeg(3) LeftLeg(3) LowerBack(3) Spine(3) RightUpLeg(3) RightLeg(3) = 24.
+
+
+HIPS_PROBE = """import bpy, json, sys
+arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+bpy.context.scene.frame_set(1)
+hips, spine = arm.pose.bones["DEF-spine"], arm.pose.bones["DEF-spine.001"]
+up = (arm.matrix_world @ spine.head - arm.matrix_world @ hips.head).normalized()
+json.dump({"hips_up_z": up.z}, open(sys.argv[-1], "w"))
+"""
+
 RETARGET_PROBE = """import bpy, json, math, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 def direction(name):
@@ -160,3 +190,17 @@ class RigifyLandmarkTests(unittest.TestCase):
                 return math.degrees(math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b))))))
             self.assertAlmostEqual(angle(directions["1"]["left"], directions["2"]["left"]), 40, delta=3)
             self.assertLess(angle(directions["1"]["right"], directions["2"]["right"]), 1)
+
+            # CMU-style zero-length link (LowerBack on Hips): the rig's hips must stay upright, not flip.
+            (root / "zero.bvh").write_text(BVH_ZERO_LINK)
+            zero = {**retarget, "motion": str(root / "zero.bvh"), "output_blend": str(root / "zero.blend"),
+                    "report": str(root / "zero.json"),
+                    "bone_mapping": {**retarget["bone_mapping"], "LowerBack": "DEF-spine.001", "Spine": "DEF-spine.002"}}
+            (root / "zero_request.json").write_text(json.dumps(zero))
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "zero_request.json")],
+                           check=True, capture_output=True, text=True)
+            (root / "hips_probe.py").write_text(HIPS_PROBE)
+            subprocess.run([BLENDER, "--background", str(root / "zero.blend"), "--python", str(root / "hips_probe.py"),
+                            "--", str(root / "hips.json")], check=True, capture_output=True, text=True)
+            self.assertGreater(json.loads((root / "hips.json").read_text())["hips_up_z"], 0.9)

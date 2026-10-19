@@ -32,6 +32,16 @@ CMU_TO_RIGIFY = {
 }
 
 
+# Unity Humanoid bone names, as written by the SkinTokens post-processor.
+CMU_TO_HUMANOID = {
+    "Hips": "Hips", "LowerBack": "Spine", "Spine": "Chest", "Spine1": "UpperChest", "Neck": "Neck", "Head": "Head",
+    "LeftShoulder": "LeftShoulder", "LeftArm": "LeftUpperArm", "LeftForeArm": "LeftLowerArm",
+    "RightShoulder": "RightShoulder", "RightArm": "RightUpperArm", "RightForeArm": "RightLowerArm",
+    "LeftUpLeg": "LeftUpperLeg", "LeftLeg": "LeftLowerLeg", "LeftFoot": "LeftFoot", "LeftToeBase": "LeftToes",
+    "RightUpLeg": "RightUpperLeg", "RightLeg": "RightLowerLeg", "RightFoot": "RightFoot", "RightToeBase": "RightToes",
+}
+
+
 def fail(message):
     raise RuntimeError(message)
 
@@ -79,7 +89,10 @@ def gait_cycle(armature, foot, start, end):
     for frame in range(start, end + 1):
         bpy.context.scene.frame_set(frame)
         heights.append((armature.matrix_world @ armature.pose.bones[foot].head).z)
-    low, high = min(heights), max(heights)
+    # Percentiles, not min/max: mocap clips often start with a calibration T-pose whose foot height
+    # is outside the walk's range and would push the plant threshold below every step.
+    ordered = sorted(heights)
+    low, high = ordered[len(ordered) // 10], ordered[len(ordered) * 9 // 10]
     threshold = low + 0.25 * (high - low)
     plants = [start + index for index in range(1, len(heights) - 1)
               if heights[index] <= threshold and heights[index - 1] > threshold]
@@ -103,7 +116,8 @@ def run(request):
     action = source.animation_data.action if source.animation_data else None
     if action is None:
         fail("Motion source has no animation action")
-    mapping = request.get("bone_mapping") or CMU_TO_RIGIFY
+    mapping = request.get("bone_mapping") or max(
+        (CMU_TO_RIGIFY, CMU_TO_HUMANOID), key=lambda table: sum(name in target.data.bones for name in table.values()))
     mapping = {s: t for s, t in mapping.items() if s in source.data.bones and t in target.data.bones}
     for needed in ("Hips", "LeftUpLeg", "RightUpLeg"):
         if needed not in mapping:
@@ -127,12 +141,47 @@ def run(request):
 
     # Per mapped bone: align the target rest direction to the source rest direction (swing only).
     pairs = []
+    def first_mapped_ancestor(armature, name, names):
+        bone = armature.data.bones[name].parent
+        while bone is not None and bone.name not in names:
+            bone = bone.parent
+        return bone.name if bone else None
+
+    def towards(armature, name, child):
+        """Direction to the paired next joint; FBX/glTF bone tails are guesses, joints are not."""
+        head = armature.data.bones[name].head_local
+        vector = (armature.data.bones[child].head_local - head) if child else (
+            armature.data.bones[name].tail_local - head)
+        return (armature.matrix_world.to_3x3() @ vector).normalized()
+
     for source_name, target_name in mapping.items():
         source_rest = rest_world(source, source_name)
         target_rest = rest_world(target, target_name)
-        source_direction = (source_rest.to_3x3() @ Vector((0, 1, 0))).normalized()
-        target_direction = (target_rest.to_3x3() @ Vector((0, 1, 0))).normalized()
-        align = target_direction.rotation_difference(source_direction).to_matrix()
+        # Pair the same next joint on both skeletons; with several (hips) follow the spine upward.
+        def next_joint(name):
+            children = [other for other in mapping if first_mapped_ancestor(source, other, mapping) == name]
+            return max(children, key=lambda other: rest_world(source, other).translation.z) if children else None
+
+        # CMU's LowerBack starts exactly at Hips and Neck at Spine1: a zero-length link has no direction,
+        # so follow the chain to the first joint that is actually distinct (on both skeletons).
+        child = next_joint(source_name)
+        head = rest_world(source, source_name).translation
+        while child and (rest_world(source, child).translation - head).length < 1e-4:
+            child = next_joint(child)
+        source_child, target_child = child, mapping[child] if child else None
+        if child is None:
+            # Unmapped next joint (forearm -> wrist): use it when both skeletons have exactly one.
+            source_children = list(source.data.bones[source_name].children)
+            target_children = list(target.data.bones[target_name].children)
+            if len(source_children) == 1 and len(target_children) == 1:
+                source_child, target_child = source_children[0].name, target_children[0].name
+                child = source_child
+        source_direction = towards(source, source_name, source_child)
+        target_direction = towards(target, target_name, target_child)
+        # End bones (head, toes) have no next joint, and their file tails are guesses: apply only the
+        # source's change from rest, without a direction swing.
+        align = (target_direction.rotation_difference(source_direction).to_matrix() if child
+                 else Matrix.Identity(3))
         pairs.append((source_name, target_name, source_rest.to_3x3(), target_rest.to_3x3(), align))
     order = {bone.name: len(bone.parent_recursive) for bone in target.data.bones}
     pairs.sort(key=lambda item: order[item[1]])
