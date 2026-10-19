@@ -1555,6 +1555,21 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     return validation
 
 
+def model_route(config, asset_type):
+    """Config whose model workflow is the asset type's own graph when the profile provides it.
+
+    Characters use workflows.character_model (sharp-feature remesh, inner shells dropped before QEM
+    decimation). Swapping it in once, before any model work, keeps generation, provenance and reuse
+    checks on the same workflow.
+    """
+    pipeline = config["asset_pipeline"]
+    key = asset_type.get("model_workflow")
+    if not key or not pipeline["workflows"].get(key):
+        return config
+    return {**config, "asset_pipeline": {**pipeline, "workflows": {**pipeline["workflows"],
+                                                                     "model": pipeline["workflows"][key]}}}
+
+
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
             material_prompt=None, material_count=None, quality_tier=None, resume=False):
     root = Path(project_root).resolve()
@@ -1565,6 +1580,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     candidate_quality = (candidate.get("generator") or {}).get("quality", {}).get("tier")
     config = select_quality_tier(config, quality_tier or candidate_quality or
                                  config["asset_pipeline"].get("selected_quality_tier", "normal"))
+    pipeline = config["asset_pipeline"]
+    config = model_route(config, asset_type)
     pipeline = config["asset_pipeline"]
     if pipeline["workflows"].get("model") and material_prompt:
         raise ValueError("The mesh-texturing workflow uses the selected concept's material design. Put the intended materials in --image-prompt; --material-prompt is for surface swatches.")

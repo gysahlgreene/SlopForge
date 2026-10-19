@@ -1627,6 +1627,17 @@ avoid: [environment]
             self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child,
             {"asset_pipeline": {"defaults": {"image_candidates": 1}}})["reusable"])
 
+    def test_character_model_route_swaps_only_with_a_configured_workflow(self):
+        from slopforge.pipelines.model import model_route
+
+        config = {"asset_pipeline": {"workflows": {"model": "base.json", "character_model": "character.json"}}}
+        routed = model_route(config, {"model_workflow": "character_model"})
+        self.assertEqual(routed["asset_pipeline"]["workflows"]["model"], "character.json")
+        self.assertEqual(config["asset_pipeline"]["workflows"]["model"], "base.json")
+        self.assertIs(model_route(config, {}), config)
+        plain = {"asset_pipeline": {"workflows": {"model": "base.json"}}}
+        self.assertIs(model_route(plain, {"model_workflow": "character_model"}), plain)
+
     def test_recipe_child_reuse_follows_the_pose_concept_route(self):
         from slopforge.provenance import file_sha256
         from slopforge.paths import resolve_workflow
