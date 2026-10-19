@@ -46,6 +46,18 @@ CMU_TO_HUMANOID = {
 }
 
 
+# Unreal-style game-engine skeleton names (MakeHuman/MPFB "game_engine" rig, UE mannequin).
+CMU_TO_GAME_ENGINE = {
+    "Hips": "pelvis", "LowerBack": "spine_01", "Spine": "spine_02", "Spine1": "spine_03", "Neck": "neck_01", "Head": "head",
+    "LeftShoulder": "clavicle_l", "LeftArm": "upperarm_l", "LeftForeArm": "lowerarm_l",
+    "RightShoulder": "clavicle_r", "RightArm": "upperarm_r", "RightForeArm": "lowerarm_r",
+    "LeftUpLeg": "thigh_l", "LeftLeg": "calf_l", "LeftFoot": "foot_l", "LeftToeBase": "ball_l",
+    "RightUpLeg": "thigh_r", "RightLeg": "calf_r", "RightFoot": "foot_r", "RightToeBase": "ball_r",
+}
+
+
+MAX_ARM_CLEARANCE_DEGREES = 15
+
 # CMU limb names without their Left/Right prefix.
 LIMB_BONES = {"Arm", "ForeArm", "UpLeg", "Leg"}
 # Feet are referenced to the actor's flat (stance) foot, not its rest direction: skeletons put the toe
@@ -143,7 +155,9 @@ def clear_arms(target, meshes, mapping, forward, frames, scene):
             hang = wrist - head
             angles.append(math.atan2(hang.dot(outward), -hang.z))
         angles.sort()
-        offset = max(0.0, needed - angles[len(angles) // 10])
+        # Capped: bulky clothes (jacket pockets) would otherwise hold the arms out like wings; a
+        # little cloth contact reads better than a stiff, spread pose.
+        offset = min(max(0.0, needed - angles[len(angles) // 10]), math.radians(MAX_ARM_CLEARANCE_DEGREES))
         offsets[side] = round(math.degrees(offset), 1)
         if offset < math.radians(0.5):
             continue
@@ -241,7 +255,8 @@ def relax_hands(target, mapping, frame):
         if not lower or not target.data.bones[lower].children:
             continue
         hand = target.data.bones[lower].children[0]
-        fingers = [child for child in hand.children if child.name.startswith(side + "Finger")]
+        fingers = [child for child in hand.children
+                   if any(key in child.name.lower() for key in ("finger", "thumb", "index", "middle", "ring", "pinky"))]
         if not fingers:
             continue
         wrist = world @ hand.head_local
@@ -309,8 +324,13 @@ def run(request):
     for path in (rig_path, motion_path):
         if not path.is_file() or not path.stat().st_size:
             fail(f"Missing or empty input: {path}")
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    target_objects = imported(lambda: bpy.ops.import_scene.fbx(filepath=str(rig_path)))
+    if rig_path.suffix.lower() == ".blend":
+        # A .blend keeps node materials that an FBX round trip loses (template characters).
+        bpy.ops.wm.open_mainfile(filepath=str(rig_path))
+        target_objects = list(bpy.data.objects)
+    else:
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        target_objects = imported(lambda: bpy.ops.import_scene.fbx(filepath=str(rig_path)))
     target = armature_of(target_objects, "Character rig")
     if motion_path.suffix.lower() == ".bvh":
         source_objects = imported(lambda: bpy.ops.import_anim.bvh(filepath=str(motion_path), rotate_mode="NATIVE",
@@ -322,7 +342,8 @@ def run(request):
     if action is None:
         fail("Motion source has no animation action")
     mapping = request.get("bone_mapping") or max(
-        (CMU_TO_RIGIFY, CMU_TO_HUMANOID), key=lambda table: sum(name in target.data.bones for name in table.values()))
+        (CMU_TO_RIGIFY, CMU_TO_HUMANOID, CMU_TO_GAME_ENGINE),
+        key=lambda table: sum(name in target.data.bones for name in table.values()))
     mapping = {s: t for s, t in mapping.items() if s in source.data.bones and t in target.data.bones}
     for needed in ("Hips", "LeftUpLeg", "RightUpLeg"):
         if needed not in mapping:
