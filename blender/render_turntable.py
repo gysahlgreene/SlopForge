@@ -94,7 +94,10 @@ def main():
     scene.view_settings.view_transform = "AgX"
     frames_dir.mkdir(parents=True, exist_ok=True)
     if animate:
-        cycle = scene.get("gait_cycle") or (scene.frame_start, scene.frame_end)
+        cycle = scene.get("gait_cycle")
+        if not cycle:
+            # The whole clip would include mocap calibration poses (a T-pose on frame 1).
+            raise SystemExit(f"{source} has no gait_cycle; retarget a walking clip with retarget_mocap.py")
         capture_fps = float(scene.get("capture_fps") or scene.render.fps)
         cycle_length = cycle[1] - cycle[0]
         # Whole strides per turn so the GIF loops on both rotation and gait; ~real-time at 80 ms/frame.

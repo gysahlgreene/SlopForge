@@ -106,6 +106,12 @@ Frame Time: 0.0333333
 # Channel order: Hips(6) LeftUpLeg(3) LeftLeg(3) LowerBack(3) Spine(3) RightUpLeg(3) RightLeg(3) = 24.
 
 
+# 61 frames of a left hip swinging +-30 degrees (period 20): the knee dips twice per swing period.
+BVH_WALK = BVH.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0.0333333\n" + "".join(
+    " ".join(["0", "90", "0", "0", "0", "0", "0", f"{30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}"]
+             + ["0"] * 10) + "\n" for f in range(61))
+
+
 HIPS_PROBE = """import bpy, json, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 bpy.context.scene.frame_set(1)
@@ -205,3 +211,15 @@ class RigifyLandmarkTests(unittest.TestCase):
             subprocess.run([BLENDER, "--background", str(root / "zero.blend"), "--python", str(root / "hips_probe.py"),
                             "--", str(root / "hips.json")], check=True, capture_output=True, text=True)
             self.assertGreater(json.loads((root / "hips.json").read_text())["hips_up_z"], 0.9)
+
+            # Stride timing comes from the clip's own foot, so a looping cycle is found for any rig.
+            (root / "walk.bvh").write_text(BVH_WALK)
+            walk = {**retarget, "motion": str(root / "walk.bvh"), "output_blend": str(root / "walk2.blend"),
+                    "report": str(root / "walk2.json")}
+            (root / "walk_request.json").write_text(json.dumps(walk))
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "walk_request.json")],
+                           check=True, capture_output=True, text=True)
+            cycle = json.loads((root / "walk2.json").read_text())["gait_cycle"]
+            self.assertIsNotNone(cycle)
+            self.assertIn(cycle[1] - cycle[0], (10, 20))

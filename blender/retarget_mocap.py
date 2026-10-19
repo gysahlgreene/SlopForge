@@ -204,10 +204,16 @@ def run(request):
                                  frame=frame)
             if source_name == "Hips":
                 bone.keyframe_insert("location", frame=frame)
+    # Stride timing belongs to the clip: measure it on the actor's ankle, not on the character, whose
+    # foot motion depends on its own proportions and weights. Toes roll through stance and give no
+    # clean plants; without a LeftFoot joint, use the lowest mapped left joint.
+    left = [name for name in mapping if name.startswith("Left") and name in source.pose.bones]
+    foot = "LeftFoot" if "LeftFoot" in left else (
+        min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
+    cycle = gait_cycle(source, foot, start, end)
     for obj in source_objects:
         bpy.data.objects.remove(obj, do_unlink=True)
     scene.frame_start, scene.frame_end = start, end
-    cycle = gait_cycle(target, mapping.get("LeftFoot"), start, end)
     if cycle:
         scene["gait_cycle"] = list(cycle)
     capture_fps = bvh_fps(motion_path)
