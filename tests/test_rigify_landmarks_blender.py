@@ -112,6 +112,23 @@ BVH_WALK = BVH.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0.0333333\n
              + ["0"] * 10) + "\n" for f in range(61))
 
 
+# A walking clip (swinging left hip) whose actor holds a constant 20 degree forward lean in the lower
+# back; channel order as BVH_ZERO_LINK (LeftUpLeg X at 7, LowerBack X at 13).
+BVH_LEAN = BVH_ZERO_LINK.split("MOTION")[0] + "MOTION\nFrames: 61\nFrame Time: 0.0333333\n" + "".join(
+    " ".join(["0", "90", "0", "0", "0", "0", "0", f"{30 * __import__('math').sin(2 * __import__('math').pi * f / 20):.3f}",
+              "0", "0", "0", "0", "0", "20"] + ["0"] * 10) + "\n" for f in range(61))
+
+SPINE_PROBE = """import bpy, json, sys
+arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
+rest = arm.data.bones["DEF-spine.001"]
+rest_direction = (arm.matrix_world.to_3x3() @ (rest.tail_local - rest.head_local)).normalized()
+bpy.context.scene.frame_set(30)
+bone = arm.pose.bones["DEF-spine.001"]
+direction = (arm.matrix_world @ bone.tail - arm.matrix_world @ bone.head).normalized()
+json.dump({"lean_degrees": __import__("math").degrees(rest_direction.angle(direction))}, open(sys.argv[-1], "w"))
+"""
+
+
 HIPS_PROBE = """import bpy, json, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 bpy.context.scene.frame_set(1)
@@ -223,3 +240,17 @@ class RigifyLandmarkTests(unittest.TestCase):
             cycle = json.loads((root / "walk2.json").read_text())["gait_cycle"]
             self.assertIsNotNone(cycle)
             self.assertIn(cycle[1] - cycle[0], (10, 20))
+
+            # The actor's habitual posture (a constant lean) is not stamped onto the character's spine.
+            (root / "lean.bvh").write_text(BVH_LEAN)
+            lean = {**zero, "motion": str(root / "lean.bvh"), "output_blend": str(root / "lean.blend"),
+                    "report": str(root / "lean.json")}
+            (root / "lean_request.json").write_text(json.dumps(lean))
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "lean_request.json")],
+                           check=True, capture_output=True, text=True)
+            self.assertIsNotNone(json.loads((root / "lean.json").read_text())["gait_cycle"])
+            (root / "spine_probe.py").write_text(SPINE_PROBE)
+            subprocess.run([BLENDER, "--background", str(root / "lean.blend"), "--python", str(root / "spine_probe.py"),
+                            "--", str(root / "spine.json")], check=True, capture_output=True, text=True)
+            self.assertLess(json.loads((root / "spine.json").read_text())["lean_degrees"], 3)

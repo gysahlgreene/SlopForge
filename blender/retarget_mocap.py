@@ -8,8 +8,10 @@ request.json: {"rig": rig.fbx, "motion": clip.bvh, "output_blend": out.blend, "r
 Rest poses of mocap (usually T-pose) and generated characters (A-pose) differ, so copying local
 rotations or pose transforms bends limbs into the body. Each limb bone is first aligned to its
 source bone's rest direction (a swing rotation); every mapped bone then follows the source bone's
-world-space change from rest, so limbs point where the actor's limbs point while the torso and
-clavicles keep the character's own build. The source is turned to face the
+world-space change from a reference, so limbs point where the actor's limbs point while the torso and
+clavicles keep the character's own build. Limbs are referenced to the actor's rest (T-pose); torso,
+neck, head and end bones to the actor's average posture over one detected stride, so the actor's
+habitual posture is not stamped onto the character. The source is turned to face the
 character and scaled to its hip height. With in_place, horizontal hip travel is removed so the
 character walks on the spot for review.
 """
@@ -19,7 +21,7 @@ import traceback
 from pathlib import Path
 
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 
 # Hands follow the forearms: CMU wrist data is noisy and turned palms outward on retargeted characters.
@@ -181,6 +183,36 @@ def run(request):
     order = {bone.name: len(bone.parent_recursive) for bone in target.data.bones}
     pairs.sort(key=lambda item: order[item[1]])
 
+    # Stride timing belongs to the clip: measure it on the actor's ankle, not on the character, whose
+    # foot motion depends on its own proportions and weights. Toes roll through stance and give no
+    # clean plants; without a LeftFoot joint, use the lowest mapped left joint.
+    left = [name for name in mapping if name.startswith("Left") and name in source.pose.bones]
+    foot = "LeftFoot" if "LeftFoot" in left else (
+        min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
+    cycle = gait_cycle(source, foot, start, end)
+    if cycle:
+        # Posture reference: the BVH zero pose is a synthetic straight-spined T-pose, so following the
+        # change from it stamps the actor's habitual posture (CMU 08_01: neck ~9 degrees forward, lower
+        # back arched) onto every character. Torso, neck, head and end bones follow the change from the
+        # actor's average posture over one stride instead, keeping the character's own sculpted posture
+        # and the actor's sway and bob.
+        torso = [index for index, pair in enumerate(pairs)
+                 if pair[0].removeprefix("Left").removeprefix("Right") not in LIMB_BONES]
+        sums = {index: None for index in torso}
+        for frame in range(cycle[0], cycle[1]):
+            scene.frame_set(frame)
+            for index in torso:
+                quaternion = (source.matrix_world @ source.pose.bones[pairs[index][0]].matrix).to_quaternion()
+                if sums[index] is None:
+                    sums[index] = quaternion
+                else:
+                    if sums[index].dot(quaternion) < 0:
+                        quaternion.negate()
+                    sums[index] = Quaternion([a + b for a, b in zip(sums[index], quaternion)])
+        for index in torso:
+            name, target_name, _, target_rest_3x3, align = pairs[index]
+            pairs[index] = (name, target_name, sums[index].normalized().to_matrix(), target_rest_3x3, align)
+
     rest_hips_world = (source.matrix_world @ source.pose.bones["Hips"].matrix).translation.copy()
     target_object_inverse = target.matrix_world.inverted()
     for frame in range(start, end + 1):
@@ -204,13 +236,6 @@ def run(request):
                                  frame=frame)
             if source_name == "Hips":
                 bone.keyframe_insert("location", frame=frame)
-    # Stride timing belongs to the clip: measure it on the actor's ankle, not on the character, whose
-    # foot motion depends on its own proportions and weights. Toes roll through stance and give no
-    # clean plants; without a LeftFoot joint, use the lowest mapped left joint.
-    left = [name for name in mapping if name.startswith("Left") and name in source.pose.bones]
-    foot = "LeftFoot" if "LeftFoot" in left else (
-        min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
-    cycle = gait_cycle(source, foot, start, end)
     for obj in source_objects:
         bpy.data.objects.remove(obj, do_unlink=True)
     scene.frame_start, scene.frame_end = start, end
@@ -224,7 +249,7 @@ def run(request):
     Path(request["report"]).write_text(json.dumps({
         "status": "complete", "frames": end - start + 1, "frame_start": start, "frame_end": end,
         "capture_fps": capture_fps, "gait_cycle": list(cycle) if cycle else None,
-        "method": "limb rest-direction-aligned world rotation retarget", "scale": scale,
+        "method": "limb rest-direction-aligned, torso stride-posture-referenced world rotation retarget", "scale": scale,
         "in_place": bool(request.get("in_place", True)), "bone_mapping": mapping}, indent=2) + "\n")
 
 
