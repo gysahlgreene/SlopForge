@@ -164,6 +164,12 @@ class CharacterRiggingTests(unittest.TestCase):
             approve_deformation(self.root, self.manifest, "character:pilot", confirmed=True)
         self.assertEqual(character["artifacts"]["rig"]["approval"]["status"], "pending")
 
+    def test_skintokens_masks_weights_by_voxel_reachability(self):
+        from slopforge.character_rigging import _SKINTOKENS_SETTINGS
+        # Without the postprocess, a sampled run weighted ~1,000 trouser vertices to a fingertip.
+        self.assertIs(_SKINTOKENS_SETTINGS["use_postprocess"], True)
+        self.assertIs(_SKINTOKENS_SETTINGS["use_transfer"], True)
+
     def test_skintokens_registers_only_postprocessed_fbx(self):
         config = {"asset_pipeline": {"character_rigging_provider": "skintokens",
                  "output_root": "Assets/Generated", "tools": {}}}

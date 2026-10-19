@@ -21,8 +21,11 @@ _SKINTOKENS_VAE = "experiments/skin_vae_2_10_32768/last.ckpt"
 _SKINTOKENS_QWEN = "models/Qwen3-0.6B/config.json"
 _ATTENTION_BEFORE = b'attn_implementation="flash_attention_2"'
 _ATTENTION_AFTER = b'attn_implementation="sdpa"'
+# use_postprocess masks predicted weights by voxel reachability from each joint; without it, sampled
+# decoding sometimes weights a patch of trouser leg to a fingertip, which tears in animation.
 _SKINTOKENS_SETTINGS = {"top_k": 5, "top_p": 0.95, "temperature": 1.0,
-                        "repetition_penalty": 2.0, "num_beams": 10, "use_transfer": True}
+                        "repetition_penalty": 2.0, "num_beams": 10, "use_transfer": True,
+                        "use_postprocess": True}
 _SKINTOKENS_LAUNCHER = """
 import json, random, runpy, sys
 with open(sys.argv[1]) as stream:
