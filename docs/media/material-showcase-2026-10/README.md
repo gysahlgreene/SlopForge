@@ -89,5 +89,6 @@ parts and emitter detection.
   reported in validation, not removed.
 - **Unseen faces:** single-image conditioning guesses the hidden sides; the relay back still
   repeats front detail.
+- **Partial metal (found 2026-10-20):** the jug's glaze has no fully metallic texels, but its metallic map averages 0.41–0.59, so "stays non-metallic" above holds only for full metal; see the [props provisional evidence](../props-provisional-2026-10/README.md).
 - **Emitter detection:** the relay lens was not found as an emitter. TRELLIS.2 bakes a dark
   albedo, so colour matching only finds distinct emitters.
