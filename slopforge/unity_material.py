@@ -65,7 +65,8 @@ def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)
     return sum(total.histogram()[128:]) / (base.width * base.height)
 
 
-def build_unity_material(project_root, fbx, material, maps):
+def build_unity_material(project_root, fbx, material, maps, render=None):
+    """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG."""
     root = Path(project_root).resolve()
     cli = unity_cli(root)
 
@@ -158,6 +159,43 @@ public static class {class_name}
         if (!assigned.IsKeywordEnabled("_EMISSION"))
             throw new Exception("Unity disabled emission on the generated material; its emission map would not render");
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
+        {f"RenderViews(imported, {quote(str(Path(render).resolve()))});" if render else ""}
+    }}
+
+    static void RenderViews(GameObject model, string path)
+    {{
+        UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+            UnityEditor.SceneManagement.NewSceneSetup.DefaultGameObjects, UnityEditor.SceneManagement.NewSceneMode.Single);
+        DynamicGI.UpdateEnvironment();
+        var instance = (GameObject)PrefabUtility.InstantiatePrefab(model);
+        var renderers = instance.GetComponentsInChildren<Renderer>();
+        var bounds = renderers[0].bounds;
+        foreach (var renderer in renderers) bounds.Encapsulate(renderer.bounds);
+        var camera = Camera.main;
+        var light = UnityEngine.Object.FindAnyObjectByType<Light>();
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = new Color(0.32f, 0.33f, 0.35f);
+        camera.fieldOfView = 30f;
+        var distance = bounds.extents.magnitude / Mathf.Sin(camera.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.05f;
+        camera.nearClipPlane = distance * 0.01f;
+        camera.farClipPlane = distance * 4f;
+        const int size = 768;
+        var target = new RenderTexture(size, size, 24);
+        camera.targetTexture = target;
+        var strip = new Texture2D(size * 4, size, TextureFormat.RGB24, false);
+        for (var view = 0; view < 4; view++)
+        {{
+            var rotation = Quaternion.Euler(20f, 35f + 90f * view, 0f);
+            camera.transform.SetPositionAndRotation(bounds.center - rotation * Vector3.forward * distance, rotation);
+            light.transform.rotation = rotation * Quaternion.Euler(25f, -35f, 0f);
+            camera.Render();
+            RenderTexture.active = target;
+            strip.ReadPixels(new Rect(0, 0, size, size), size * view, 0);
+            RenderTexture.active = null;
+        }}
+        strip.Apply();
+        File.WriteAllBytes(path, strip.EncodeToPNG());
+        Debug.Log("SLOPFORGE_UNITY_RENDER " + path);
     }}
 
     static bool IsUniversalPipeline(Type type)

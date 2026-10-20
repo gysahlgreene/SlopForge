@@ -20,7 +20,7 @@ from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check"}
 
 
 def parser():
@@ -96,6 +96,9 @@ def parser():
     approve_texture.add_argument("--force", action="store_true")
     approve_texture.add_argument("--allow-placeholder-normal", action="store_true",
                                  help="waive the 1x1 placeholder normal-map check")
+    unity_preview = sub.add_parser("unity-preview", help="Import and render a material candidate in Unity without approving it")
+    unity_preview.add_argument("name")
+    unity_preview.add_argument("candidate", type=int)
     inspect = sub.add_parser("inspect", help="Show manifest and validation details for an asset")
     inspect.add_argument("name")
     sub.add_parser("doctor", help="Diagnose local dependencies and the selected project")
@@ -783,7 +786,7 @@ def _run(args):
         print(f"Rejected {args.name} candidate {args.candidate}.")
         return 0
 
-    if args.command in {"retexture", "approve-texture"}:
+    if args.command in {"retexture", "approve-texture", "unity-preview"}:
         record = find_asset(manifest, args.name)
         asset_type = "prop" if record.get("type") == "model" else record.get("type")
         recipe = types[canonical_type(asset_type, types)]
@@ -803,6 +806,12 @@ def _run(args):
                 print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item.get('path'))} ({item['status']})")
             if not any(item["status"] == "candidate" for item in generated):
                 raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
+        elif args.command == "unity-preview":
+            try:
+                result = model.unity_preview(root, config, manifest, key, args.candidate, asset_type=recipe)
+            finally:
+                save_manifest(manifest_path, manifest)
+            print(json.dumps(result, indent=2))
         else:
             result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
                                            asset_type=recipe,

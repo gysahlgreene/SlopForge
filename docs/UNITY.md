@@ -13,6 +13,8 @@ The Unity Editor may be closed during generation. Open the project afterward to 
 
 Texture approval creates a Unity Lit material for the Built-in Render Pipeline or URP. HDRP and custom render pipelines currently stop with an explicit unsupported-pipeline error rather than receiving a mismatched shader.
 
+To check a material candidate in Unity before anyone approves it, run `slopforge --project <project> unity-preview <name> <material-number>`. It copies the candidate's FBX and maps to `<output_root>/CandidatePreviews/<name>/material_NN/`, imports them with the same Lit material assignment check as approval, and saves a four-view render from the active pipeline to the candidate's `unity_preview.png`. The result and the hashes of its inputs are recorded as `unity_preview` on the candidate; the candidate's status, approval and the asset's published outputs are not changed. This is an editor batch render, not a Play-mode or in-scene check.
+
 3D model outputs are arranged under `Models/<name>/` or `Characters/<name>/`: `Source/` holds the concept, cutout, white-background Hunyuan input, and source GLB; `Materials/` holds base color, normal, roughness, metallic, and emission maps; the folder root holds preview Blend and FBX. The pipeline retains source files for provenance and debugging.
 
 Use `slopforge --project /path/to/project assets` and `inspect <name>` to query the manifest without requiring Unity to be open.

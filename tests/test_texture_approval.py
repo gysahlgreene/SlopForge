@@ -236,3 +236,73 @@ class PlaceholderNormalGateTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "placeholder normal"):
                     model.approve_texture(root, config, manifest, "prop:relic", 1)
             self.assertEqual(manifest["assets"]["prop:relic"].get("executions", []), [])
+
+
+class UnityPreviewTests(unittest.TestCase):
+    def _candidate(self, root, config):
+        from PIL import Image
+        paths = model.material_candidate_paths(root, config, "relic", 1)
+        outputs = {}
+        for name in ("fbx", "basecolor", "normal", "emission", "metallic", "roughness"):
+            paths[name].parent.mkdir(parents=True, exist_ok=True)
+            if name in ("metallic", "roughness"):
+                Image.new("L", (4, 4), 200).save(paths[name])
+            else:
+                paths[name].write_bytes(name.encode())
+            outputs[name] = paths[name].relative_to(root).as_posix()
+        return {"number": 1, "status": "candidate", "outputs": outputs}
+
+    def test_preview_imports_a_copy_and_leaves_approval_untouched(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            (root / "ProjectSettings").mkdir()
+            (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+            init_project(root)
+            config = load_project(root)
+            candidate = self._candidate(root, config)
+            asset = {"name": "relic", "status": "awaiting_texture_approval",
+                     "material_candidates": {"selected": None, "items": [candidate]}}
+            manifest = {"assets": {"prop:relic": asset}}
+            calls = []
+
+            def unity(_root, fbx, material, maps, render=None):
+                calls.append((fbx, maps))
+                Path(render).write_bytes(b"png")
+
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=unity):
+                record = model.unity_preview(root, config, manifest, "prop:relic", 1)
+
+            fbx, maps = calls[0]
+            self.assertIn("CandidatePreviews", fbx.parts)
+            self.assertEqual(fbx.read_bytes(), b"fbx")
+            self.assertTrue(maps["metallic_gloss"].is_file())
+            self.assertEqual(record["status"], "imported")
+            self.assertEqual(record["unity_version"], "6000.6.3f1")
+            self.assertTrue(record["render"].endswith("material_01/unity_preview.png"))
+            self.assertEqual(candidate["unity_preview"], record)
+            self.assertEqual((candidate["status"], candidate.get("approval")), ("candidate", None))
+            self.assertEqual((asset["status"], asset["material_candidates"]["selected"]),
+                             ("awaiting_texture_approval", None))
+            self.assertFalse(model.model_paths(root, config, "relic")["fbx"].exists())
+
+    def test_failed_import_is_recorded_and_raised(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            (root / "ProjectSettings").mkdir()
+            (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+            init_project(root)
+            config = load_project(root)
+            candidate = self._candidate(root, config)
+            manifest = {"assets": {"prop:relic": {"name": "relic", "material_candidates": {"items": [candidate]}}}}
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=RuntimeError("no material")):
+                with self.assertRaises(RuntimeError):
+                    model.unity_preview(root, config, manifest, "prop:relic", 1)
+            self.assertEqual(candidate["unity_preview"]["status"], "failed")
+            self.assertEqual(candidate["unity_preview"]["error"], "no material")
+            candidate["status"] = "failed"
+            with self.assertRaises(ValueError):
+                model.unity_preview(root, config, manifest, "prop:relic", 1)

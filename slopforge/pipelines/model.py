@@ -1602,6 +1602,53 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     return validation
 
 
+def unity_preview(project_root, config, manifest, key, number, *, asset_type="prop"):
+    """Import a material candidate into Unity and render it, without approving or publishing it."""
+    root = Path(project_root).resolve()
+    asset = manifest["assets"][key]
+    candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
+                      if item["number"] == number), None)
+    if candidate is None or candidate.get("status") != "candidate":
+        raise ValueError(f"Material candidate {number} is not valid for {asset['name']}")
+    unity_cli(root)
+    name = asset["name"]
+    outputs = candidate.get("outputs", {})
+    sources = {item: root / outputs[item] for item in ("fbx", "basecolor", "normal", "emission", "metallic", "roughness")
+               if item in outputs}
+    missing = [item for item in ("fbx", "basecolor", "normal", "emission", "metallic", "roughness")
+               if item not in sources or not sources[item].is_file()]
+    if missing:
+        raise ValueError(f"Material candidate {number} is missing {', '.join(missing)}")
+    candidate_dir = material_candidate_paths(root, config, name, number, asset_type)["directory"]
+    # Outside the delivery folder, so a preview is never mistaken for a published asset.
+    directory = root / config["asset_pipeline"]["output_root"] / "CandidatePreviews" / name / f"material_{number:02d}"
+    (directory / "Materials").mkdir(parents=True, exist_ok=True)
+    fbx = directory / f"{name}.fbx"
+    shutil.copy2(sources["fbx"], fbx)
+    maps = {}
+    for item in ("basecolor", "normal", "emission"):
+        maps[item] = directory / "Materials" / f"{name}_{item}.png"
+        shutil.copy2(sources[item], maps[item])
+    maps["metallic_gloss"] = directory / "Materials" / f"{name}_metallic_gloss.png"
+    make_metallic_gloss(sources["metallic"], sources["roughness"], maps["metallic_gloss"])
+    material = directory / "Materials" / f"{name}_preview_PBR.mat"
+    render = candidate_dir / "unity_preview.png"
+    record = {"status": "failed", "at": datetime.now(timezone.utc).isoformat(),
+              "unity_version": (root / "ProjectSettings/ProjectVersion.txt").read_text().splitlines()[0].split(":")[-1].strip(),
+              "inputs": {item: {"path": path.relative_to(root).as_posix(), "sha256": file_sha256(path)}
+                         for item, path in sources.items()}}
+    candidate["unity_preview"] = record
+    try:
+        build_unity_material(root, fbx, material, maps, render=render)
+    except (Exception, KeyboardInterrupt) as exc:
+        record["error"] = str(exc) or type(exc).__name__
+        raise
+    record.update({"status": "imported", "fbx": fbx.relative_to(root).as_posix(),
+                   "material": material.relative_to(root).as_posix(),
+                   "render": render.relative_to(root).as_posix() if render.is_file() else None})
+    return record
+
+
 def _published_artifacts(root, paths, candidate, execution_id):
     candidate_refs = candidate.get("artifacts", [])
     mesh_ref = next((item for item in candidate.get("upstream_artifacts", []) if item["type"].startswith("mesh.")), None)
