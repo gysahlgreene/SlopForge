@@ -439,6 +439,34 @@ avoid: [environment]
                                    self.manifest, "prop:relay", generation_prompt="A silver relay")
         self.assertNotEqual(first, self.record["executions"][-1]["identity_sha256"])
 
+    def test_concept_aspect_sets_the_canvas_and_is_part_of_the_concept_identity(self):
+        from slopforge.config import workflow_node_inputs
+        used = []
+        def backend(_root, config, _workflow, _prompt, destination, _prefix, _seed, metadata, **_kwargs):
+            used.append(workflow_node_inputs(config, "image", "image_text2img_api.json"))
+            Image.new("RGB", (512, 512), "teal").save(destination)
+            metadata.write_text(json.dumps({"workflow": "image.json"}))
+        with patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay")
+            square = self.record["executions"][-1]
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay", aspect="portrait")
+            portrait = self.record["executions"][-1]
+        self.assertEqual(used, [{}, {"57:13": {"width": 896, "height": 1152}}])
+        self.assertNotIn("57:13", square["identity_inputs"]["workflow"]["configured_inputs"])
+        self.assertEqual(portrait["identity_inputs"]["workflow"]["configured_inputs"]["57:13"],
+                         {"width": 896, "height": 1152})
+        self.assertNotEqual(square["identity_sha256"], portrait["identity_sha256"])
+        self.assertEqual(workflow_node_inputs(self.config, "image", "image_text2img_api.json"), {})
+
+    def test_concept_aspect_is_refused_for_character_concepts(self):
+        with self.assertRaisesRegex(ValueError, "aspect"):
+            generate_prop_concepts(self.root, self.config, {**self.asset_type, "prompt_mode": "character"}, self.style,
+                                   "pilot", "Pilot", 1, self.manifest, "prop:relay", generation_prompt="A pilot",
+                                   aspect="portrait")
+
     def test_concept_attempt_state_is_persisted_before_boundary_and_failure(self):
         save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
         def backend(*_args, **_kwargs):

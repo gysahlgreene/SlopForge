@@ -692,6 +692,17 @@ class SlopForgeTests(unittest.TestCase):
             parse_args([])
         self.assertNotIn("asset_type", error.getvalue())
 
+    def test_generate_passes_concept_aspect_for_3d_types_only(self):
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate, \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "crate", "A tall crate",
+                                       "--aspect", "portrait"]), 0)
+        self.assertEqual(generate.call_args.kwargs["aspect"], "portrait")
+        with redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
+                                       "--aspect", "portrait"]), 1)
+        self.assertIn("--aspect applies to 3D asset types", error.getvalue())
+
     def test_doctor_uses_project_root_environment(self):
         with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \
                 patch("slopforge.doctor.run_doctor", return_value=0) as run_doctor:

@@ -1323,8 +1323,34 @@ def concept_route(config, asset_type, conditioning):
                                           "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
 
 
+# Concept canvases (Z-Image buckets). On 2026-10-20 a "taller than wide" crate brief drew 0 of 6 crates taller than
+# wide on the square canvas and 6 of 6 on portrait with the proportion stated first (docs/media/concept-adherence-2026-10).
+CONCEPT_ASPECTS = {"square": (1024, 1024), "portrait": (896, 1152), "landscape": (1152, 896)}
+
+
+def _with_concept_aspect(config, asset_type, workflow_path, aspect):
+    """Config whose concept workflow renders on this canvas, set like a quality tier's node inputs so the
+    concept identity records it; later stages keep the unchanged config."""
+    if aspect not in CONCEPT_ASPECTS:
+        raise ValueError(f"Concept aspect must be one of {', '.join(CONCEPT_ASPECTS)}, got {aspect!r}")
+    if asset_type.get("prompt_mode") == "character":
+        raise ValueError("--aspect applies to prop concepts; character concepts follow their pose skeleton's canvas")
+    graph = json.loads(workflow_path.read_text())
+    latent = next((node_id for node_id, node in graph.items() if "Latent" in node.get("class_type", "")
+                   and {"width", "height"} <= node.get("inputs", {}).keys()), None)
+    if latent is None:
+        raise ValueError(f"Concept workflow {workflow_path.name} has no latent image size for --aspect to set")
+    width, height = CONCEPT_ASPECTS[aspect]
+    result = copy.deepcopy(config)
+    by_workflow = (result["asset_pipeline"].setdefault("quality_settings", {}).setdefault("workflow_inputs", {})
+                   .setdefault("image", {}))
+    inputs = by_workflow.setdefault(workflow_path.name, copy.deepcopy(by_workflow.get("*", {})))
+    inputs[latent] = {**inputs.get(latent, {}), "width": width, "height": height}
+    return result
+
+
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
-             reference_paths=None, reference_categories=None, reference_entries=None, variations=None):
+             reference_paths=None, reference_categories=None, reference_entries=None, variations=None, aspect=None):
     root = Path(project_root).resolve()
     conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
@@ -1335,6 +1361,9 @@ def generate(project_root, config, asset_type, style, name, description, count, 
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
     workflow, conditioning = concept_route(config, asset_type, conditioning)
     workflow_path = resolve_workflow(root, workflow)
+    if aspect:
+        config = _with_concept_aspect(config, asset_type, workflow_path, aspect)
+        pipeline = config["asset_pipeline"]
     prompt = generation_prompt or build_prompt(style, asset_type, description)
     conditioning_args = {"conditioning": conditioning} if conditioning["references"] else {}
 

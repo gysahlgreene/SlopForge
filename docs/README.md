@@ -31,6 +31,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Character styles](media/character-styles-2026-10/README.md): four generated characters in four art styles, rigged automatically and walking, with how they were made and limits.
 - [Structure showcase](media/structure-showcase-2026-10/README.md): six generated structures and a real-scale modular stone kit, with turntables, maps, conditions and limits.
 - [Props provisional evidence](media/props-provisional-2026-10/README.md): three briefs, two independent H100 runs each, through Unity URP import, under a declared qualification record; Experimental, owner review pending.
+- [Concept adherence](media/concept-adherence-2026-10/README.md): fixed-seed concept tests of what makes concepts follow a brief (part sentences, `--aspect`, camera wording); the jug's profile view is unsolved.
 - [Material showcase](media/material-showcase-2026-10/README.md): five props of different materials generated from briefs, with maps, renders, conditions and limits.
 - [Texture mask recovery](media/texture-mask-recovery-2026-10/README.md): controlled failure, correction, fresh case and repeat; remaining appearance limitations.
 - [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity walk playback, motion measurements, and current rig limitations.
