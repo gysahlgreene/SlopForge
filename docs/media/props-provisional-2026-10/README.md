@@ -6,8 +6,11 @@ each. The runs used the H100 final tier and went through to a Unity 6000.6.3f1 /
 (criterion version 1), which was committed before the first run.
 
 All six runs reached a Unity import with no edits to any generated asset. Four of the six
-pass every technical criterion in the record. Both lantern runs miss their declared
-emissive region, so this set is **Experimental**, not Provisional. Visual approval is the
+pass every technical criterion in the record, but only A2 passes every stage. By the
+record's concept-selection criteria, A1 (no concept shows the brief's straps) and both jug
+runs (no concept is in three-quarter view) are concept-stage failures; this was corrected
+after post-merge review. Both lantern runs miss their declared emissive region, so this set
+is **Experimental**, not Provisional. Visual approval is the
 owner's decision and has not been given.
 
 ## Results by gate
@@ -16,11 +19,11 @@ Structural, technical, Unity and visual results are kept separate.
 
 | Run | Concept (of 6) | Geometry and mesh/UV | Materials | Review renders | Unity import | Criterion v1 |
 | --- | --- | --- | --- | --- | --- | --- |
-| A1 crate | 05 | Pass: 29,912 tris, 8 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | Pass |
-| B1 jug | 05 | Pass: 29,562 tris, 3 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | Pass |
+| A1 crate | 05; **Fail**: no concept shows straps | Pass: 29,912 tris, 8 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | **Fail** (concept) |
+| B1 jug | 05; **Fail**: no three-quarter view | Pass: 29,562 tris, 3 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | **Fail** (concept) |
 | C1 lantern | 03 | Pass: 29,892 tris, 9 components | **Fail**: declared emissive region not found | 4 views + turntable | Imported, Lit material assigned, URP render | **Fail** |
 | A2 crate | 04 | Pass: 29,977 tris, 17 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | Pass |
-| B2 jug | 05 | Pass: 29,684 tris, 4 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | Pass |
+| B2 jug | 05; **Fail**: no three-quarter view | Pass: 29,684 tris, 4 components | Pass | 4 views + turntable | Imported, Lit material assigned, URP render | **Fail** (concept) |
 | C2 lantern | 02 | Pass: 27,589 tris, 25 components | **Fail**: declared emissive region not found | 4 views + turntable | Imported, Lit material assigned, URP render | **Fail**; one environment failure, resumed |
 
 - **Structural.** All six pass the pipeline's mesh validation, with warnings. Every run has:
@@ -40,7 +43,7 @@ Structural, technical, Unity and visual results are kept separate.
 - **Unity.**
   - `unity-preview` imported each candidate into a fresh copy of the URP blank project and
     assigned a URP Lit material with base, normal, metallic-gloss and emission maps. The
-    assignment check passed in all six, at about 26–29 s each.
+    assignment check passed in all six. Import times were not recorded.
   - It also saved a four-view render in the editor's batch mode.
   - Not run: Play mode, an in-scene check, and `approve-texture` publication.
 - **Environment.** Before C2's `approve`, the H100's ComfyUI service had stopped, because
@@ -84,15 +87,17 @@ baseline.
 - The jug concepts are closer to side views than three-quarter views.
 
 **Crate**
-- Planks, riveted brackets and straps, and the open interior are reconstructed.
+- Planks, riveted brackets and the open interior are reconstructed; straps only in A2,
+  because A1's concept has none.
 - The wood is paler and blotchier than the concept's warm grain.
 - On A2, the side straps partly carry wood colour.
 
 **Jug**
 - The silhouette, an open handle, the cork and the twine are reconstructed in both runs.
 - The glaze reads darker navy than the concept's cobalt.
-- The jug is declared non-metal, yet its metallic map averages 0.30 (B1) and 0.48 (B2).
-  The baseline jug's candidates averaged 0.41–0.59.
+- The jug is declared non-metal, yet its metallic map averaged 0.30 (B1) and 0.48 (B2),
+  and the baseline jug's candidates 0.41–0.59, when measured during the runs. These means
+  are not in `runs.json`, which records only the fully metallic fraction (issue #61).
 - The mismatch gate counts only fully metallic texels, so partial metal on glossy
   non-metal passes it. This also corrects the showcase's claim that the glaze "stays
   non-metallic".

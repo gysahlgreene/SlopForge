@@ -504,6 +504,29 @@ class DeclaredMaterialTests(unittest.TestCase):
             Image.new("RGB", (256, 256), (186, 184, 180)).save(root / "pale.png")
             self.assertEqual(derive_emission(root / "pale.png", root / "pale_emission.png"), 0)
 
+    def test_pale_emitter_covering_most_of_the_map_is_still_found(self):
+        from slopforge.unity_material import derive_emission
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # A paper lampshade: the emitter is most of the map, so the map's median is the paper itself.
+            base = Image.new("RGB", (256, 256), (40, 32, 28))
+            base.paste((230, 230, 228), (20, 20, 236, 236))
+            base.save(root / "basecolor.png")
+            self.assertGreater(derive_emission(root / "basecolor.png", root / "emission.png"), 0.5)
+
+    def test_one_found_emitter_does_not_hide_another_missing_one(self):
+        from slopforge.unity_material import derive_emission
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # An amber lens is present; the declared pale window panels are not.
+            base = Image.new("RGB", (256, 256), (90, 80, 70))
+            base.paste((224, 160, 48), (40, 40, 130, 130))
+            base.save(root / "basecolor.png")
+            targets = [(None, (255, 178, 102)), ((224, 160, 48), (224, 160, 48))]
+            self.assertEqual(derive_emission(root / "basecolor.png", root / "emission.png", targets), 0)
+            with Image.open(root / "emission.png") as emission:
+                self.assertGreater(max(emission.getpixel((85, 85))), 150)  # the found lens still glows
+
     def test_declared_emitter_missing_from_base_color_is_a_retryable_candidate_failure(self):
         from slopforge.failures import should_retry
         materials = [{"region": "body", "class": "nonmetal", "description": ""},
