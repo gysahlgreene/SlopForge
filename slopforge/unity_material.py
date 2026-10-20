@@ -46,7 +46,9 @@ def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)
             r, g, b = base.split()
             low = ImageChops.darker(ImageChops.darker(r, g), b)
             high = ImageChops.lighter(ImageChops.lighter(r, g), b)
-            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= 225 else 0),
+            # TRELLIS.2 bakes pale paper as flat near-neutral albedo at ~191-203 or ~253 depending on seed;
+            # grey and cream stone stay below 190 (docs/MATERIALS.md, Emission).
+            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= 190 else 0),
                                        ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
         else:
             distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))

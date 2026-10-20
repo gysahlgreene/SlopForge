@@ -61,7 +61,8 @@ result against that declaration before anyone reviews it.
 
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
-   colour, and undeclared-colour emitters use large near-white regions (pale paper or glass).
+   colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
+   every channel at least 190 and channels within 25 of each other).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
@@ -81,7 +82,7 @@ Material-map checks run on every native candidate and are recorded in its valida
 | --- | --- |
 | Metallic map ≥ 50% fully metallic while the brief declares no metal | Candidate fails (`material_mismatch`); revise the concept so non-metals read as matte |
 | Metallic map ≥ 90% fully metallic with no metal declared or no declarations | Warning |
-| Emissive region declared but no near-white region found | Warning |
+| Emissive region declared but no matching pale or declared-colour region found | Warning |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
 
@@ -93,9 +94,14 @@ and none are declared yet.
 
 - **Glowing parts:** image-to-3D reconstructs glowing or translucent regions as empty space.
   Concepts must show emissive parts unlit as opaque surfaces; then they reconstruct as solid
-  panels. Finding them again in the base color is only reliable for distinct colours
-  (`emissive#rrggbb`) or genuinely pale regions: TRELLIS.2 bakes a dark albedo, so off-white
-  paper next to light stone may not be found and the asset stays unlit (warned).
+  panels. The concept model often draws paper panels lit anyway (all 12 concepts of the
+  2026-10-20 lantern runs); TRELLIS.2 still bakes them as flat near-neutral albedo, at about
+  191-203 or about 253 depending on the seed. The pale cut-off was 225 until 2026-10-20, which
+  missed the lower cluster in both lantern runs; at 190 it finds every pale panel on record
+  (1.8-2.4% of the map) while speckled grey granite and the cream stone seen so far stay
+  below it. Limits: a pale emitter on a pale body (pale marble, white cloth or plate armour,
+  all measured above 190) cannot be separated by colour and would glow too; some seeds bake no pale
+  panel at all (3 of 8 lantern candidates on 2026-10-18), and those stay unlit with the warning.
 - **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the
   declared-material check catches this, and matte wording in the concept prevents it.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
