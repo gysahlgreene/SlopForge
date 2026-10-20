@@ -6,7 +6,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .character_readiness import _character_asset, _project_file, _sha256_file, readiness_allows_rigging
+from .character_readiness import _character_asset, _project_file, readiness_allows_rigging
+from .provenance import file_sha256
 from .manifest import register_artifact, set_artifact_approval
 from .paths import blender_executable, tool_root
 
@@ -73,7 +74,7 @@ def normalize_character(project_root, config, manifest, character_selector, *, s
     _, source = _project_file(root, artifact.get("path"), "Normalization source")
     if not source.is_file() or not source.stat().st_size:
         raise FileNotFoundError(f"Normalization source is missing or empty: {artifact.get('path')}")
-    source_hash = _sha256_file(source)
+    source_hash = file_sha256(source)
     readiness = character["animation_readiness"]
     if (readiness.get("source_output") != source_output
             or readiness.get("source") != {"artifact_id": artifact.get("id"),
@@ -104,7 +105,7 @@ def normalize_character(project_root, config, manifest, character_selector, *, s
             report = json.loads(raw_report.read_text())
         _require_successful_report(report, directory)
         report.update({"source": {"artifact_id": artifact.get("id"), "path": artifact["path"], "sha256": source_hash},
-                       "normalized": {"path": output.relative_to(root).as_posix(), "sha256": _sha256_file(output)},
+                       "normalized": {"path": output.relative_to(root).as_posix(), "sha256": file_sha256(output)},
                        "report_path": report_path.relative_to(root).as_posix(),
                        "approval": {"status": "pending"}})
         report_path.write_text(json.dumps(report, indent=2) + "\n")
@@ -138,7 +139,7 @@ def approve_character_normalization(project_root, manifest, character_selector, 
     _require_successful_report(report, report_path.parent)
     artifact = character["artifacts"]["normalized_model"]
     _, output = _project_file(root, artifact.get("path"), "Normalized model")
-    if not output.is_file() or _sha256_file(output) != report.get("normalized", {}).get("sha256"):
+    if not output.is_file() or file_sha256(output) != report.get("normalized", {}).get("sha256"):
         raise ValueError("Normalized model is missing or changed")
     approval = set_artifact_approval(manifest, character["id"], "normalized_model", "approved", approved_by=approved_by)
     artifact["status"] = "ready"

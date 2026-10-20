@@ -1,19 +1,12 @@
-import hashlib
 import re
 from pathlib import Path
 
 import yaml
 
+from .provenance import file_sha256
+
 
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _library_path(root, selector):
@@ -96,7 +89,7 @@ def resolve_library(project_root, selector, manifest=None):
         expected = entry.get("sha256")
         if expected is not None and (not isinstance(expected, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", expected)):
             raise ValueError(f"Reference library entry {entry['id']!r} has an invalid sha256")
-        actual = _sha256(resolved_path) if resolved_path.is_file() else None
+        actual = file_sha256(resolved_path) if resolved_path.is_file() else None
         status = "missing" if actual is None else "changed" if expected and actual.lower() != expected.lower() else "ready"
         strength = entry.get("strength")
         if strength is not None and (not isinstance(strength, (int, float)) or not 0 <= strength <= 1):

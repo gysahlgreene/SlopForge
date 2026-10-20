@@ -1,5 +1,4 @@
 """Deterministic mesh checks that gate character rigging, not deformation quality."""
-import hashlib
 import json
 import math
 import subprocess
@@ -8,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from .paths import blender_executable, tool_root
+from .provenance import file_sha256
 
 
 def _character_asset(manifest, selector):
@@ -33,14 +33,6 @@ def _project_file(root, relative, label):
     if not resolved.is_relative_to(root):
         raise ValueError(f"{label} must stay inside the project")
     return path.as_posix(), resolved
-
-
-def _sha256_file(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _finite_number(value):
@@ -212,7 +204,7 @@ def run_character_readiness(project_root, config, manifest, character_selector, 
     _, source = _project_file(root, artifact.get("path"), "Readiness source model")
     if not source.is_file() or source.stat().st_size == 0:
         raise ValueError(f"Readiness source model is missing or empty: {artifact.get('path')}")
-    source_hash = _sha256_file(source)
+    source_hash = file_sha256(source)
 
     pipeline = config["asset_pipeline"]
     face_budget = pipeline.get("model_budgets", {}).get("character_faces", 60000)
@@ -231,7 +223,7 @@ def run_character_readiness(project_root, config, manifest, character_selector, 
         if not raw_report.is_file():
             raise RuntimeError("Blender completed without creating a character-readiness report")
         inspection = json.loads(raw_report.read_text())
-    if not source.is_file() or _sha256_file(source) != source_hash:
+    if not source.is_file() or file_sha256(source) != source_hash:
         raise RuntimeError("Readiness source changed during inspection; rerun character readiness")
     readiness = classify_character_readiness(inspection)
     readiness["source_output"] = source_output

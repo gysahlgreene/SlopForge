@@ -664,6 +664,14 @@ avoid: [environment]
         with self.assertRaisesRegex(ValueError, "action contradicts"):
             self._mesh_history(decision)
 
+    def test_retry_decision_with_non_canonical_scope_hash_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "A" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "candidate_quality", "used": 1,
+                    "limit": 2, "action": "next_candidate", "next_seed_index": 1}
+        with self.assertRaisesRegex(ValueError, "Retry decision is malformed"):
+            self._mesh_history(decision)
+
     def test_incomplete_non_quality_stop_decision_blocks_resume(self):
         decision = {"scope": "mesh", "scope_sha256": "a" * 64,
                     "stage": "mesh_workflow_execution", "stage_id": "stage-1",

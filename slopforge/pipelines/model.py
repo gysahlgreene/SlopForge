@@ -1,5 +1,4 @@
 import json
-import hashlib
 import copy
 import os
 import secrets
@@ -20,20 +19,12 @@ from ..manifest import (save_manifest, load_manifest, start_execution, start_sta
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
-from .reuse import artifact_integrity, stage_reuse_decision
+from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
-from ..validation import (apply_concept_silhouette, is_placeholder_normal, measure_material_maps, summarize_validation,
+from ..validation import (apply_concept_silhouette, is_placeholder_normal, measure_material_maps,
                           validate_image, validate_model_outputs)
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _artifact_ref(root, path, artifact_id, kind, stage, attempt, derived_from=()):
@@ -329,8 +320,7 @@ def _mesh_slot_history(asset, execution_id, scope_sha256, budget):
                         "Cannot resume: legacy mesh attempt has no retry-slot accounting; "
                         "start a fresh execution to avoid exceeding the candidate budget")
                 continue
-            if (not isinstance(slot, dict) or not isinstance(slot.get("scope_sha256"), str) or
-                    len(slot["scope_sha256"]) != 64 or
+            if (not isinstance(slot, dict) or not _valid_sha256(slot.get("scope_sha256")) or
                     type(slot.get("seed_index")) is not int or slot["seed_index"] < 0 or
                     not isinstance(slot.get("origin_execution_id"), str) or
                     not slot["origin_execution_id"]):
@@ -359,9 +349,7 @@ def _mesh_slot_history(asset, execution_id, scope_sha256, budget):
             action = decision.get("action")
             next_seed = decision.get("next_seed_index")
             if (decision.get("scope") != "mesh" or
-                    not isinstance(decision.get("scope_sha256"), str) or
-                    len(decision["scope_sha256"]) != 64 or
-                    any(char not in "0123456789abcdef" for char in decision["scope_sha256"].lower()) or
+                    not _valid_sha256(decision.get("scope_sha256")) or
                     decision.get("stage") != "mesh_workflow_execution" or
                     not isinstance(decision.get("stage_id"), str) or not decision["stage_id"] or
                     type(decision.get("attempt")) is not int or decision["attempt"] < 1 or
@@ -422,22 +410,18 @@ def _stage_record_shape(stage):
     for reference in stage["inputs"]:
         if (not isinstance(reference, dict) or
                 not isinstance(reference.get("id"), str) or not reference["id"] or
-                not isinstance(reference.get("sha256"), str) or len(reference["sha256"]) != 64 or
-                any(c not in "0123456789abcdef" for c in reference["sha256"])):
+                not _valid_sha256(reference.get("sha256"))):
             return False
     for reference in stage["outputs"]:
         parents = reference.get("derived_from") if isinstance(reference, dict) else None
         if (not isinstance(reference, dict) or
                 any(not isinstance(reference.get(field), str) or not reference[field]
                     for field in ("id", "type", "path", "sha256", "stage")) or
-                len(reference["sha256"]) != 64 or
-                any(c not in "0123456789abcdef" for c in reference["sha256"]) or
+                not _valid_sha256(reference["sha256"]) or
                 type(reference.get("attempt")) is not int or
                 reference["attempt"] < 1 or not isinstance(parents, list) or
                 not all(isinstance(parent, dict) and isinstance(parent.get("artifact_id"), str)
-                        and parent["artifact_id"] and isinstance(parent.get("sha256"), str)
-                        and len(parent["sha256"]) == 64
-                        and all(c in "0123456789abcdef" for c in parent["sha256"])
+                        and parent["artifact_id"] and _valid_sha256(parent.get("sha256"))
                         for parent in parents)):
             return False
     return True
@@ -631,9 +615,7 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     if (any(not isinstance(execution["id"], str) or not execution["id"] for execution in executions)
             or any(not isinstance(stage["name"], str) or type(stage["attempt"]) is not int
                    or stage["attempt"] < 1 for stage in stages)
-            or any(not isinstance(item["id"], str) or not item["id"]
-                   or not isinstance(item["sha256"], str) or len(item["sha256"]) != 64
-                   or any(c not in "0123456789abcdef" for c in item["sha256"])
+            or any(not isinstance(item["id"], str) or not item["id"] or not _valid_sha256(item["sha256"])
                    for _, item in artifacts)
             or any(field == "outputs" and (
                        not isinstance(item["type"], str) or not item["type"]
@@ -642,8 +624,7 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
                        or type(item["attempt"]) is not int or item["attempt"] < 1)
                    for field, item in artifacts)
             or any(not isinstance(parent["artifact_id"], str) or not parent["artifact_id"]
-                   or not isinstance(parent["sha256"], str) or len(parent["sha256"]) != 64
-                   or any(c not in "0123456789abcdef" for c in parent["sha256"])
+                   or not _valid_sha256(parent["sha256"])
                    for parent in parents)):
         return malformed
     execution_ids = [execution["id"] for execution in executions]
@@ -683,9 +664,7 @@ def processed_mesh_reuse_decision(project_root, asset, source_mesh, processing_s
     if not isinstance(source_record, dict):
         return malformed
     if (not isinstance(source_mesh, dict) or not isinstance(source_mesh.get("id"), str)
-            or not source_mesh["id"] or not isinstance(source_mesh.get("sha256"), str)
-            or len(source_mesh["sha256"]) != 64
-            or any(c not in "0123456789abcdef" for c in source_mesh["sha256"])):
+            or not source_mesh["id"] or not _valid_sha256(source_mesh.get("sha256"))):
         return {"reusable": False, "reasons": ["source mesh identity is malformed"]}
     processed_path = source_record.get("processed_mesh")
     if not isinstance(processed_path, str) or not processed_path:
@@ -1628,7 +1607,6 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     attempts = int(pipeline["defaults"].get("model_candidates", 1))
     if material_count < 1 or attempts < 1:
         raise ValueError("Material and model candidate budgets must be at least 1")
-    next_attempt = max((int(item.get("number", 0)) for item in asset.get("model_attempts", [])), default=0) + 1
     mesh_seeds = [secrets.randbits(32) for _ in range(attempts)]
     material_seeds = [] if workflow else [secrets.randbits(32) for _ in range(attempts * material_count)]
     concept_path = root / candidate["path"]
@@ -1683,9 +1661,6 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             raise ValueError("Cannot resume: material seeds are missing or the candidate budget changed")
         material_seeds = old_material_seeds
         prior = copy.deepcopy(prior)
-        old_attempts = [stage["attempt"] for stage in prior["stages"] if stage["name"] == "mesh_workflow_execution"]
-        if old_attempts:
-            next_attempt = min(old_attempts)
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     try:
         python = python_executable(root, config)
@@ -2143,8 +2118,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             attempt_reports.append({"number": attempt_number, "source": source_mesh.relative_to(root).as_posix(),
                                     "seed": mesh_seed,
                                     "generation": model_metadata.relative_to(root).as_posix(),
-                                    "source_sha256": _sha256(source_mesh),
-                                    "input_sha256": _sha256(paths["cutout"] if workflow else paths["input_3d"]),
+                                    "source_sha256": file_sha256(source_mesh),
+                                    "input_sha256": file_sha256(paths["cutout"] if workflow else paths["input_3d"]),
                                     "status": "qualified" if viable else "rejected",
                                     "failure": failure,
                                     "execution_id": execution["id"], "stage_attempt": attempt_number,

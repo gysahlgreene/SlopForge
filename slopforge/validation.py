@@ -189,15 +189,6 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
     }
 
 
-def summarize_validation(result):
-    lines = [f"Validation: {result['status'].replace('_', ' ')}"]
-    lines.extend(f"FAIL: {item}" for item in result.get("errors", []))
-    lines.extend(f"WARN: {item}" for item in result.get("warnings", []))
-    if not result.get("errors") and not result.get("warnings"):
-        lines.append("PASS: all configured checks ran")
-    return "\n".join(lines)
-
-
 # A sampled reconstruction can come out turned sideways (aspect error 0.69 on one realistic character)
 # or with limbs missing, while good ones fit the front concept within about 0.035 and wide, stocky
 # builds within 0.09.
