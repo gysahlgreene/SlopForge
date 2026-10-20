@@ -48,11 +48,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 
 Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk are solid; the models are not yet game quality: forms are lumpy, faces soft and fingers fused, the limits of current open single-image 3D generation. Experimental and unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
 
-| Rigged humanoid walking in Unity |
-| :---: |
-| ![Humanoid test 1 walking in Unity](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/Unity-Walk-Cycle.gif) |
-
-Humanoid test 1 has a valid Unity Humanoid Avatar and plays a retargeted walk clip; Unity measured movement on all 49,886 imported vertices. This confirms playback, not deformation quality. [Evidence and limits →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [Diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)
+Unity playback is shown separately: an earlier test character has a valid Unity Humanoid Avatar and plays a retargeted walk ([Unity evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)).
 
 Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
 
