@@ -218,7 +218,9 @@ def inspect(source, face_budget):
         filepath = Path(bpy.path.abspath(image.filepath))
         if not image.packed_file and not filepath.is_file():
             missing_textures.append(str(filepath))
-    scales_applied = all(all(abs(value - 1.0) < 1e-4 for value in obj.scale) and all(abs(value) < 1e-4 for value in obj.rotation_euler) for obj in objects)
+    # World matrix: glTF imports use quaternion rotation, and parents can rotate or scale a mesh too.
+    scales_applied = all(rotation.angle < 1e-4 and all(abs(value - 1.0) < 1e-4 for value in scale)
+                         for _, rotation, scale in (obj.matrix_world.decompose() for obj in objects))
     component_sizes = [connected_components(obj.data) for obj in objects]
     components = sum(len(sizes) for sizes in component_sizes)
     component_records = [part for obj in objects for part in component_details(obj)]

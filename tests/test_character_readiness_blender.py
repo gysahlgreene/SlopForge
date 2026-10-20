@@ -74,6 +74,29 @@ bpy.ops.wm.save_as_mainfile(filepath=str(root/"source.blend"))
             # The saved source bytes are still the only input file; inspection writes only report.json.
             self.assertEqual(hashlib.sha256((root / "source.blend").read_bytes()).hexdigest(), source_hash)
 
+    def test_rotated_glb_mesh_is_not_reported_as_transform_applied(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "rotated.py"
+            fixture.write_text('''import bpy, math, sys
+from pathlib import Path
+root = Path(sys.argv[-1])
+for name, angle in (("plain", 0), ("rotated", 90)):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.mesh.primitive_cube_add(size=1, rotation=(0, 0, math.radians(angle)))
+    bpy.ops.export_scene.gltf(filepath=str(root / (name + ".glb")), export_format="GLB")
+''')
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(root)], check=True, capture_output=True, text=True)
+            applied = {}
+            for name in ("plain", "rotated"):
+                report = root / f"{name}.json"
+                subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                str(ROOT / "blender/inspect_model.py"), "--", str(root / f"{name}.glb"),
+                                str(report), "1000"], check=True, capture_output=True, text=True)
+                applied[name] = json.loads(report.read_text())["measured"]["transforms_applied"]
+            self.assertEqual(applied, {"plain": True, "rotated": False})
+
     def test_topology_diagnostic_edges_map_to_seam_vertex_indices(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

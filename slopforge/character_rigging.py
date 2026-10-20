@@ -144,9 +144,11 @@ def _remote_inference(config, host, python, checkout, checkpoint, source, output
     ssh = ["ssh", "-o", "BatchMode=yes", host]
     made = subprocess.run(ssh + ["mktemp", "-d", "/tmp/slopforge-skintokens-XXXXXX"],
                           capture_output=True, text=True, check=False)
-    if made.returncode != 0 or not made.stdout.strip():
+    # Shell start-up files may print first; cleanup runs `rm -rf` on this path, so accept only mktemp's line.
+    work = (made.stdout.strip().splitlines() or [""])[-1].strip()
+    if made.returncode != 0 or not re.fullmatch(r"/tmp/slopforge-skintokens-[A-Za-z0-9]+", work):
         raise RuntimeError(f"Could not create a SkinTokens work directory on {host}")
-    work = PurePosixPath(made.stdout.strip())
+    work = PurePosixPath(work)
     remote_source, remote_output, remote_log = (work / ("source" + source.suffix.lower()),
                                                 work / "output.glb", work / "skintokens.log")
     try:
@@ -166,6 +168,9 @@ def _remote_inference(config, host, python, checkout, checkpoint, source, output
         subprocess.run(ssh + ["rm", "-rf", "--", str(work)], check=False)
 
 
+_UNITY_BODY_BONES = {"Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
+                     *(side + part for side in ("Left", "Right")
+                       for part in ("Shoulder", "UpperArm", "LowerArm", "Hand", "UpperLeg", "LowerLeg", "Foot", "Toes"))}
 RECOMMENDED_POSES = ("t_pose", "raised_arms", "crouch", "leg_lift", "elbow_bend", "shoulder_rotation")
 SKINTOKENS_POSES = ("neutral",) + RECOMMENDED_POSES
 _POSE_ID = re.compile(r"[a-z][a-z0-9_]*\Z")
@@ -341,7 +346,7 @@ def skintokens_character(project_root, config, manifest, character_selector, *, 
             "evidence": {pose: str(path) for pose, path in evidence.items()}}))
         command = [blender_executable(config, root), "--background", "--factory-startup", "--python",
                    str(tool_root() / "blender/skintokens_character.py"), "--", str(request_path)]
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=False)  # a failed run still writes its errors to the report
     if not report_path.is_file():
         raise RuntimeError("SkinTokens Blender postprocessing produced no report")
     report = json.loads(report_path.read_text())
@@ -358,6 +363,8 @@ def skintokens_character(project_root, config, manifest, character_selector, *, 
               "source_output": source_output, "rigged_model": rigged.relative_to(root).as_posix(),
               "evidence": {pose: path.relative_to(root).as_posix() for pose, path in evidence.items()},
               "skeleton_mapping": report.get("semantic_mapping", {}),
+              # The post-processor already renames the body chain to Unity's humanoid bone names.
+              "unity_humanoid_mapping": {name: name for name in report.get("bone_names", []) if name in _UNITY_BODY_BONES},
               "deformation_evidence": report.get("deformation_evidence", {}),
               "structural_report": structural, "postprocess_report": report_path.relative_to(root).as_posix(),
               "contact_sheet": contact.relative_to(root).as_posix()}

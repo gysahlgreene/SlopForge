@@ -1,5 +1,6 @@
 """Opt-in real Blender retarget smoke: SLOPFORGE_RUN_BLENDER_ANIMATION=1 pytest this file."""
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,33 @@ from slopforge.config import load_project
 from slopforge.initializer import init_project
 from slopforge.manifest import load_manifest, new_record, register_artifact, save_manifest
 from slopforge.paths import blender_executable
+
+
+ROOT = Path(__file__).resolve().parents[1]
+BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
+ACTION_PROBE = '''import bpy, sys
+sys.path.insert(0, sys.argv[-1])
+from retarget_character_animation import source_action
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.object.armature_add()
+rig = bpy.context.object
+rig.keyframe_insert("location", frame=1)
+keyed = rig.animation_data.action
+rig.animation_data.action = None
+bpy.data.actions.new("unkeyed")
+assert source_action(rig) == keyed
+print("SELECTED", keyed.name)
+'''
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class RetargetActionSelectionTests(unittest.TestCase):
+    def test_unassigned_keyed_action_is_selected_with_the_current_blender_api(self):
+        result = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-exit-code", "1",
+                                 "--python-expr", ACTION_PROBE, "--", str(ROOT / "blender")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+        self.assertIn("SELECTED", result.stdout)
 
 
 @unittest.skipUnless(os.environ.get("SLOPFORGE_RUN_BLENDER_ANIMATION") == "1",
