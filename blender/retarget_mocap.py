@@ -56,6 +56,17 @@ CMU_TO_GAME_ENGINE = {
 }
 
 
+# Motion-source aliases: game-authored clips use these skeletons instead of CMU names.
+GAME_ENGINE_TO_CMU = {target: source for source, target in CMU_TO_GAME_ENGINE.items()} | {"Head": "Head"}
+RIGIFY_DEF_TO_CMU = {
+    "DEF-hips": "Hips", "DEF-spine.001": "LowerBack", "DEF-spine.002": "Spine", "DEF-spine.003": "Spine1",
+    "DEF-neck": "Neck", "DEF-head": "Head", "DEF-shoulder.L": "LeftShoulder", "DEF-upper_arm.L": "LeftArm",
+    "DEF-forearm.L": "LeftForeArm", "DEF-hand.L": "LeftHand", "DEF-shoulder.R": "RightShoulder",
+    "DEF-upper_arm.R": "RightArm", "DEF-forearm.R": "RightForeArm", "DEF-hand.R": "RightHand",
+    "DEF-thigh.L": "LeftUpLeg", "DEF-shin.L": "LeftLeg", "DEF-foot.L": "LeftFoot", "DEF-toe.L": "LeftToeBase",
+    "DEF-thigh.R": "RightUpLeg", "DEF-shin.R": "RightLeg", "DEF-foot.R": "RightFoot", "DEF-toe.R": "RightToeBase",
+}
+
 MAX_ARM_CLEARANCE_DEGREES = 15
 
 # CMU limb names without their Left/Right prefix.
@@ -293,7 +304,7 @@ def relax_hands(target, mapping, frame):
 
 def bvh_fps(path):
     if path.suffix.lower() != ".bvh":
-        return None
+        return bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
     for line in path.read_text(errors="ignore").splitlines():
         if line.strip().lower().startswith("frame time:"):
             seconds = float(line.split(":", 1)[1])
@@ -335,12 +346,31 @@ def run(request):
     if motion_path.suffix.lower() == ".bvh":
         source_objects = imported(lambda: bpy.ops.import_anim.bvh(filepath=str(motion_path), rotate_mode="NATIVE",
                                                                   axis_forward="-Z", axis_up="Y"))
+    elif motion_path.suffix.lower() in (".glb", ".gltf"):
+        source_objects = imported(lambda: bpy.ops.import_scene.gltf(filepath=str(motion_path)))
     else:
         source_objects = imported(lambda: bpy.ops.import_scene.fbx(filepath=str(motion_path)))
     source = armature_of(source_objects, "Motion source")
+    if request.get("clip"):
+        # Animation libraries (e.g. Quaternius UAL, CC0) hold many clips in one file.
+        clip = bpy.data.actions.get(request["clip"])
+        if clip is None:
+            fail(f"Motion source has no clip {request['clip']!r}; available: {sorted(a.name for a in bpy.data.actions)}")
+        source.animation_data_create().action = clip
+        if hasattr(source.animation_data, "action_slot") and clip.slots:
+            source.animation_data.action_slot = clip.slots[0]
     action = source.animation_data.action if source.animation_data else None
     if action is None:
         fail("Motion source has no animation action")
+    # Game skeletons (Unreal-style or Rigify DEF-) are renamed to the CMU names the mappings use.
+    for table in (GAME_ENGINE_TO_CMU, RIGIFY_DEF_TO_CMU):
+        hips = next(name for name, cmu in table.items() if cmu == "Hips")
+        if hips in source.data.bones and sum(name in source.data.bones for name in table) >= 4:
+            for old_name, new_name in table.items():
+                bone = source.data.bones.get(old_name)
+                if bone is not None:
+                    bone.name = new_name
+            break
     mapping = request.get("bone_mapping") or max(
         (CMU_TO_RIGIFY, CMU_TO_HUMANOID, CMU_TO_GAME_ENGINE),
         key=lambda table: sum(name in target.data.bones for name in table.values()))
@@ -372,6 +402,8 @@ def run(request):
     foot = "LeftFoot" if "LeftFoot" in left else (
         min(left, key=lambda name: rest_world(source, name).translation.z) if left else None)
     cycle = gait_cycle(source, foot, start, end)
+    if cycle is None and (request.get("loop") or str(request.get("clip", "")).endswith("_Loop")):
+        cycle = (start, end)  # a library loop clip is one whole cycle
     if cycle:
         # Face the actor's walking direction (hip travel over the stride), not its rest pose: CMU 07_02
         # walks about 30 degrees off its rest facing, so the pelvis (referenced to the stride's average

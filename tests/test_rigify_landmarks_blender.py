@@ -178,6 +178,20 @@ json.dump({"stance_foot_degrees": best[1]}, open(sys.argv[-1], "w"))
 """
 
 
+# Converts the walking BVH into a game-library style GLB: Unreal-style bone names, one named clip.
+TO_GAME_GLB = """import bpy, sys
+bvh, out = sys.argv[-2], sys.argv[-1]
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_anim.bvh(filepath=bvh, rotate_mode="NATIVE", axis_forward="-Z", axis_up="Y")
+arm = bpy.context.object
+for old, new in {"Hips": "pelvis", "LeftUpLeg": "thigh_l", "LeftLeg": "calf_l", "RightUpLeg": "thigh_r",
+                 "RightLeg": "calf_r"}.items():
+    arm.data.bones[old].name = new
+arm.animation_data.action.name = "Walk_Loop"
+bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_animations=True)
+"""
+
+
 HEADING_PROBE = """import bpy, json, sys
 arm = next(o for o in bpy.data.objects if o.type == "ARMATURE")
 W = arm.matrix_world
@@ -362,3 +376,22 @@ class RigifyLandmarkTests(unittest.TestCase):
             subprocess.run([BLENDER, "--background", str(root / "feet.blend"), "--python", str(root / "foot_probe.py"),
                             "--", str(root / "foot_probe.json")], check=True, capture_output=True, text=True)
             self.assertLess(json.loads((root / "foot_probe.json").read_text())["stance_foot_degrees"], 6)
+
+            # A named loop clip from a game-library GLB with Unreal-style names (e.g. Quaternius UAL, CC0).
+            (root / "to_game.py").write_text(TO_GAME_GLB)
+            subprocess.run([BLENDER, "--background", "--python", str(root / "to_game.py"), "--",
+                            str(root / "walk.bvh"), str(root / "library.glb")], check=True, capture_output=True, text=True)
+            library = {**retarget, "motion": str(root / "library.glb"), "clip": "Walk_Loop",
+                       "output_blend": str(root / "library.blend"), "report": str(root / "library.json")}
+            (root / "library_request.json").write_text(json.dumps(library))
+            run = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                  str(ROOT / "blender/retarget_mocap.py"), "--", str(root / "library_request.json")],
+                                 capture_output=True, text=True)
+            report = json.loads((root / "library.json").read_text())
+            self.assertEqual(report["status"], "complete", report.get("error"))
+            self.assertIsNotNone(report["gait_cycle"])
+            (root / "library_probe.py").write_text(RETARGET_PROBE.replace("for frame in (1, 2):", "for frame in (1, 6):"))
+            subprocess.run([BLENDER, "--background", str(root / "library.blend"), "--python", str(root / "library_probe.py"),
+                            "--", str(root / "library_dirs.json")], check=True, capture_output=True, text=True)
+            moved = json.loads((root / "library_dirs.json").read_text())
+            self.assertGreater(angle(moved["1"]["left"], moved["6"]["left"]), 10)
