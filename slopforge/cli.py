@@ -43,6 +43,8 @@ def parser():
     generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
     generate.add_argument("--material", action="append", default=[], dest="materials",
                           help="Declare a material region: 'region=nonmetal|metal|emissive[: description]' (repeatable)")
+    generate.add_argument("--aspect", choices=("square", "portrait", "landscape"),
+                          help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for wider")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -846,6 +848,8 @@ def _run(args):
     materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
     if materials and recipe["pipeline"] != "model":
         raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
+    if getattr(args, "aspect", None) and recipe["pipeline"] != "model":
+        raise ValueError(f"--aspect applies to 3D asset types; {asset_type} is an image asset type")
     if args.image_prompt:
         rules = reconstruction_rules(recipe, materials)
         prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")
@@ -891,7 +895,7 @@ def _run(args):
                                     count, manifest, key, generation_prompt=prompt_text,
                                     reference_paths=getattr(args, "reference_paths", None),
                                     reference_categories=getattr(args, "reference_categories", None),
-                                    reference_entries=reference_entries))
+                                    reference_entries=reference_entries, aspect=getattr(args, "aspect", None)))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"
