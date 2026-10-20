@@ -40,6 +40,8 @@ DEFAULTS = {
 def _merge(base, update):
     result = dict(base)
     for key, value in update.items():
+        if value is None and isinstance(result.get(key), dict):
+            continue  # a YAML section whose entries are all commented out keeps its defaults
         result[key] = _merge(result[key], value) if isinstance(value, dict) and isinstance(result.get(key), dict) else value
     return result
 
@@ -95,7 +97,7 @@ def load_project(project_root):
         raise ValueError("asset_pipeline.active_style must be a simple style-pack name")
     result = dict(data)
     result["project"] = project
-    result["asset_pipeline"] = _merge(DEFAULTS, pipeline)
+    result["asset_pipeline"] = _merge(copy.deepcopy(DEFAULTS), pipeline)
     result["_project_root"] = root
     tools = result["asset_pipeline"]["tools"]
     env_url = os.environ.get("COMFYUI_URL")

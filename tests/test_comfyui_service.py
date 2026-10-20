@@ -320,10 +320,24 @@ with patch.object(client, 'validate_workflow'), patch.object(client, 'json', sid
             "service unavailable", category="environment", operation="http_get",
             evidence={"endpoint": "/history/prompt-42"}))
         with self.assertRaises(ComfyUIError) as raised:
-            client.wait_for_completion("prompt-42", timeout=2)
+            client.wait_for_completion("prompt-42", timeout=0.2, poll_interval=0.01)
         self.assertEqual(raised.exception.category, "environment")
         self.assertTrue(raised.exception.evidence["outcome_unknown"])
         self.assertEqual(raised.exception.evidence["prompt_id"], "prompt-42")
+        self.assertGreater(client.history.call_count, 1)
+
+    def test_history_transport_blip_keeps_waiting_for_the_remote_job(self):
+        client = ComfyUIClient("http://remote:8188")
+        done = {"status": {"completed": True}, "outputs": {"9": {"images": []}}}
+        client.history = Mock(side_effect=[
+            ComfyUIError("connection reset", category="environment", operation="http_get"), None, done])
+        self.assertEqual(client.wait_for_completion("prompt-42", timeout=5, poll_interval=0.01), done)
+
+    def test_completed_job_without_outputs_returns_instead_of_waiting_for_timeout(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(return_value={"status": {"completed": True}, "outputs": {}})
+        self.assertEqual(client.wait_for_completion("prompt-42", timeout=1, poll_interval=0.01)["outputs"], {})
+        self.assertEqual(client.history.call_count, 1)
 
     def test_history_wait_interrupt_retains_unknown_prompt_outcome(self):
         client = ComfyUIClient("http://remote:8188")

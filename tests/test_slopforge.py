@@ -153,6 +153,18 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("Cancelled", error.getvalue())
         self.assertNotIn("Traceback", error.getvalue())
 
+    def test_make_material_approval_operation_reaches_approve_texture(self):
+        from slopforge import cli
+        manifest_path = self.root / "ai/assets/manifest.json"
+        save_manifest(manifest_path, {"schema_version": 4, "assets": {
+            "prop:relic": new_record("prop", "relic", "Stone relic", load_style(self.root), {"strategy": "text_only"})}})
+        with patch("slopforge.pipelines.model.approve_texture", return_value={"status": "passed"}) as approve_texture, \
+                redirect_stdout(StringIO()):
+            result = cli._run(cli._make_operation("approve-texture", self.root, "plain", name="relic",
+                                                  candidate=1, force=False))
+        self.assertEqual(result, 0)
+        self.assertFalse(approve_texture.call_args.kwargs["allow_placeholder_normal"])
+
     def test_cli_reports_structured_stage_failure_and_returns_nonzero(self):
         from slopforge.failures import StageFailure
         from slopforge.style import load_style
@@ -184,6 +196,29 @@ class SlopForgeTests(unittest.TestCase):
         style = load_style(self.root, config)
         self.assertEqual(config["asset_pipeline"]["active_style"], "plain")
         self.assertEqual(style["identity"]["genre"], "fantasy")
+
+    def test_config_keeps_defaults_for_empty_sections_without_mutating_them(self):
+        from slopforge.config import DEFAULTS
+        config_path = self.root / "ai/project.yaml"
+        config_path.write_text(config_path.read_text() + "  tools:\n  #  blender: /opt/blender\n")
+        with patch.dict(os.environ, {"BLENDER_BIN": "/env/blender"}):
+            config = load_project(self.root)
+        self.assertEqual(config["asset_pipeline"]["tools"]["comfy_url"], "http://127.0.0.1:8188")
+        self.assertEqual(config["asset_pipeline"]["tools"]["blender"], "/env/blender")
+        self.assertIsNone(DEFAULTS["tools"]["blender"])
+
+    def test_installed_package_ships_every_runtime_data_file(self):
+        try:
+            import tomllib
+        except ImportError:
+            self.skipTest("tomllib needs Python 3.11")
+        root = Path(__file__).resolve().parents[1]
+        data_files = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["data-files"]
+        shipped = {path for patterns in data_files.values() for pattern in patterns for path in root.glob(pattern)}
+        for directory in ("workflows", "processing", "blender", "templates"):
+            for path in (root / directory).rglob("*"):
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                    self.assertTrue(path in shipped, f"{path.relative_to(root)} is loaded via tool_root() but not packaged")
 
     def test_taxonomy_supports_model_alias_and_safe_output_paths(self):
         types = load_taxonomy(self.root)
@@ -627,6 +662,17 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual((material.name, material.material_prompt, material.count), ("terminal", "blue steel", 3))
         approved = parse_args(["approve-texture", "terminal", "4"])
         self.assertEqual((approved.name, approved.candidate), ("terminal", 4))
+        joined = parse_args(["--project=/tmp/game", "doctor"])
+        self.assertEqual((joined.command, joined.project), ("doctor", "/tmp/game"))
+        with redirect_stderr(StringIO()) as error, self.assertRaises(SystemExit):
+            parse_args([])
+        self.assertNotIn("asset_type", error.getvalue())
+
+    def test_doctor_uses_project_root_environment(self):
+        with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \
+                patch("slopforge.doctor.run_doctor", return_value=0) as run_doctor:
+            self.assertEqual(cli_main(["doctor"]), 0)
+        self.assertEqual(run_doctor.call_args.args[0], self.root.resolve())
 
     def test_agent_image_prompt_is_sent_verbatim_and_keeps_asset_brief(self):
         authored_prompt = "A hand-painted brass key, three-quarter view, deep teal enamel accents."

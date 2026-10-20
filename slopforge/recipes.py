@@ -152,12 +152,24 @@ def _image(root, config, style, asset_type, child, manifest, key):
                           generation_prompt=child.get("generation_prompt"), reference_entries=references)
 
 
+def _child_prompt(style, asset_type, child):
+    """The concept prompt a model child is generated with, and expected again on resume."""
+    materials = [parse_material_spec(spec) for spec in child.get("materials", [])]
+    if child.get("generation_prompt"):
+        rules = reconstruction_rules(asset_type, materials)
+        return child["generation_prompt"] + ("\n\n" + rules if rules else "")
+    if all(key in style for key in ("identity", "palette", "materials", "shape_language",
+                                    "surface_language", "lighting", "asset_rules")):
+        return build_prompt(style, asset_type, child["description"], materials=materials)
+    return None
+
+
 def _model(root, config, style, asset_type, child, manifest, key):
     count = child.get("count", config["asset_pipeline"]["defaults"]["image_candidates"])
     references = resolve_library(root, child["reference_library"], manifest)["entries"] if child.get("reference_library") else None
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
-                          generation_prompt=child.get("generation_prompt"), reference_entries=references,
+                          generation_prompt=_child_prompt(style, asset_type, child), reference_entries=references,
                           variations=child.get("variations"))
 
 
@@ -711,16 +723,7 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             child_config = select_quality_tier(config, tier)
             requested_child = dict(child)
             requested_child["requested_style_identity"] = style_identity(style)
-            child_materials = [parse_material_spec(spec) for spec in child.get("materials", [])]
-            requested_prompt = child.get("generation_prompt")
-            if requested_prompt:
-                rules = reconstruction_rules(asset_types[child["type"]], child_materials)
-                requested_prompt += "\n\n" + rules if rules else ""
-            elif all(key in style for key in ("identity", "palette", "materials", "shape_language",
-                                              "surface_language", "lighting", "asset_rules")):
-                requested_prompt = build_prompt(style, asset_types[child["type"]], child["description"],
-                                                materials=child_materials)
-            requested_child["requested_generation_prompt"] = requested_prompt
+            requested_child["requested_generation_prompt"] = _child_prompt(style, asset_types[child["type"]], child)
             reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
                                  if child.get("reference_library") else None)
             conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)

@@ -51,7 +51,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 
 SlopForge detects loopback URLs as `local` and other hosts as `remote`. Override detection with `SLOPFORGE_COMFYUI_BACKEND=local|remote`, or set `asset_pipeline.tools.comfy_backend` to `auto`, `local`, or `remote`. Neither backend selection nor host name selects a model profile.
 
-ComfyUI's HTTP API handles health and node discovery, image and mesh uploads, prompt submission, history polling, and output downloads. `/view` serves generated GLB and other binary files as well as images. Blender and SlopForge processing remain on the machine running SlopForge. No SSH setup or local `COMFYUI_HOME` is needed.
+ComfyUI's HTTP API handles health and node discovery, image and mesh uploads, prompt submission, history polling, and output downloads. A history poll that fails to reach the service (connection reset, timeout) is retried with backoff (doubling from the poll interval, at most 30 s) until the job's deadline, because the remote job keeps running; only a failure that persists to the deadline stops the worker with an unknown remote outcome. A job reported as completed returns at once, and the worker then reports a missing image or GLB. `/view` serves generated GLB and other binary files as well as images. Blender and SlopForge processing remain on the machine running SlopForge. No SSH setup or local `COMFYUI_HOME` is needed.
 
 The image workflow runner can bind approved reference files to configured graph inputs and return image results. Reference images can guide 3D concepts and material inputs when the selected workflow supports those inputs. Conditioning is an execution capability; it does not guarantee visual consistency or a usable 3D model.
 
