@@ -107,6 +107,11 @@ result against that declaration before anyone reviews it.
    `material_maps.metallic.generator_mean` next to the final `mean`. A brief that declares a
    metal region keeps the generator's map (`metallic_source: generator`), because nothing maps
    a declaration to texels; so does a brief with no declarations, as with emission.
+   Verified on 2026-10-20 (H100, `final`, two fresh jug runs and one crate run). Both jug
+   maps were zero, from generator means of 0.47 and 0.22. One jug was re-rendered with only
+   the generator's map restored: its glaze measured median RGB 4,38,67, against 10,62,101
+   with the zero map. The crate kept its generator map (mean 0.04), with metallic texels on
+   the grey iron brackets.
 
 8. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from

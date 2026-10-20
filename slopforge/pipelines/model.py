@@ -1193,7 +1193,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if asset_type.get("concept_projection"):
         validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
-    if declares_metal:  # the brief explains a metallic map
+    if declares_metal or generator_metallic is not None:  # the brief explains the metallic map
         maps["warnings"] = [item for item in maps["warnings"] if not item.startswith("metallic map is")]
     if generator_metallic is not None:
         maps["maps"]["metallic"]["generator_mean"] = round(generator_metallic, 4)

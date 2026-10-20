@@ -463,6 +463,7 @@ class DeclaredMaterialTests(unittest.TestCase):
                                             value, Image.new("RGB", (64, 64), (29, 46, 75)))
                 self.assertEqual(candidate["status"], "candidate")
                 self.assertEqual(candidate["metallic_source"], "declared_nonmetal")
+                self.assertFalse([item for item in candidate["validation"]["warnings"] if "metallic" in item])
                 with Image.open(root / candidate["outputs"]["metallic"]) as metallic:
                     self.assertEqual(metallic.convert("L").getextrema(), (0, 0))
                 with Image.open(root / candidate["outputs"]["metallic_gloss"]) as packed:
