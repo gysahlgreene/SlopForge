@@ -139,7 +139,8 @@ def _workflow_identity(source, effective, images, prepared_name=None, prepared_h
         inputs = node.get("inputs", {})
         if node.get("class_type") == "LoadImage" and inputs.get("image") in images:
             uploaded[f"{node_id}.image"] = images[inputs["image"]]
-        elif node.get("class_type") == "LoadMesh" and prepared_name and inputs.get("model_file") == prepared_name:
+        # Bound by uploaded name, not loader class: the bundled graphs load it with Load3DAdvanced.
+        elif prepared_name and inputs.get("model_file") == prepared_name:
             uploaded[f"{node_id}.model_file"] = prepared_hash
     return canonical_workflow_identity(source or effective, effective, uploaded), uploaded
 
