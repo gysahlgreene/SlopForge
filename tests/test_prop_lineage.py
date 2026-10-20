@@ -467,6 +467,41 @@ avoid: [environment]
                                    "pilot", "Pilot", 1, self.manifest, "prop:relay", generation_prompt="A pilot",
                                    aspect="portrait")
 
+    def test_declared_emitter_absent_from_concept_stops_before_mesh_inference(self):
+        from slopforge.failures import StageFailure
+        self._concept_candidates()
+        for pipeline in (self.config["asset_pipeline"], self.config["_quality_base_pipeline"]):
+            pipeline["workflows"]["model"] = "trellis2_image_to_model_api.json"
+        self.record["materials"] = [{"region": "lens", "class": "emissive", "color": "#e0a030",
+                                     "description": "amber glass"}]
+        calls = []
+        with self.assertRaisesRegex(StageFailure, "lens"):
+            self._approve(lambda *_args, **_kwargs: calls.append(1))  # the harness cutout is plain grey
+        self.assertEqual(calls, [])
+        execution = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])[
+            "assets"]["prop:relay"]["executions"][-1]
+        self.assertEqual((execution["failure"]["category"], execution["failure"]["operation"]),
+                         ("configuration", "emitter_preflight"))
+
+    def test_emitter_preflight_reads_only_the_object_not_the_removed_background(self):
+        from slopforge.failures import StageFailure
+        from slopforge.pipelines.model import check_emitters_in_concept
+        with tempfile.TemporaryDirectory() as temporary:
+            cutout = Path(temporary) / "cutout.png"
+            # rembg keeps the light-grey backdrop colour under transparent pixels.
+            image = Image.new("RGBA", (256, 256), (215, 215, 215, 0))
+            image.paste((70, 70, 80, 255), (60, 60, 196, 196))
+            image.save(cutout)
+            paper = [{"region": "panels", "class": "emissive", "description": "paper"}]
+            with self.assertRaisesRegex(StageFailure, "panels"):
+                check_emitters_in_concept(paper, cutout)
+            image.paste((224, 160, 48, 255), (100, 100, 140, 140))
+            image.paste((232, 230, 226, 255), (150, 70, 190, 110))
+            image.save(cutout)
+            check_emitters_in_concept(paper + [{"region": "lens", "class": "emissive", "color": "#e0a030",
+                                                "description": ""}], cutout)
+            check_emitters_in_concept([{"region": "body", "class": "nonmetal", "description": ""}], cutout)
+
     def test_concept_attempt_state_is_persisted_before_boundary_and_failure(self):
         save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
         def backend(*_args, **_kwargs):
