@@ -16,6 +16,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "nonmanifold_budget",
     "boundary_budget",
     "concept_silhouette",
+    "emitter_missing",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -367,6 +368,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "nonmanifold_budget": ("nonmanifold_edge_count", "max_nonmanifold_edges"),
         "boundary_budget": ("boundary_edge_count", "max_boundary_edges"),
         "concept_silhouette": ("concept_aspect_error", "max_concept_aspect_error"),
+        "emitter_missing": ("emissive_fraction", "min_emissive_fraction"),
     }
 
     for code in codes:
@@ -392,7 +394,8 @@ def candidate_quality_rejection(validation: dict) -> bool:
         try:
             if not math.isfinite(metric_value):
                 return False
-            if metric_value <= threshold:
+            # A min_ limit rejects below it; every other limit is a maximum.
+            if metric_value >= threshold if limit_key.startswith("min_") else metric_value <= threshold:
                 return False
         except OverflowError:
             return False

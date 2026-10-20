@@ -23,8 +23,8 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
-from ..validation import (apply_concept_silhouette, is_placeholder_normal, measure_material_maps,
-                          validate_image, validate_model_outputs)
+from ..validation import (apply_concept_silhouette, apply_declared_emitter, is_placeholder_normal,
+                          measure_material_maps, validate_image, validate_model_outputs)
 
 
 def _artifact_ref(root, path, artifact_id, kind, stage, attempt, derived_from=()):
@@ -1199,13 +1199,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation["failure_codes"] = [*validation.get("failure_codes", []), "material_mismatch"]
         validation["status"] = "failed"
     if emissive_fraction is not None:
-        validation.setdefault("measured", {})["emissive_fraction"] = round(emissive_fraction, 4)
-        if emissive_fraction == 0:
-            validation["warnings"] = [*validation.get("warnings", []),
-                "brief declares an emissive region but no matching region was found in base color; "
-                "declare its colour with emissive#rrggbb or show it as a pale opaque surface"]
-            if validation["status"] == "passed":
-                validation["status"] = "passed_with_warnings"
+        validation = apply_declared_emitter(validation, emissive_fraction)
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
