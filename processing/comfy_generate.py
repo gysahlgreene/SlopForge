@@ -117,9 +117,11 @@ def main():
     pos_id = None
     neg_id = None
 
+    # Image-edit graphs (view generation) take their prompt in TextEncodeQwenImageEditPlus.prompt.
+    prompt_inputs = {"CLIPTextEncode": "text", "TextEncodeQwenImageEditPlus": "prompt"}
     clip_nodes = []
     for node_id, node in workflow.items():
-        if node.get("class_type") == "CLIPTextEncode":
+        if node.get("class_type") in prompt_inputs:
             clip_nodes.append(node_id)
 
     if len(clip_nodes) >= 1:
@@ -131,10 +133,10 @@ def main():
         print("Could not find a CLIPTextEncode node for positive prompt.", file=sys.stderr)
         sys.exit(1)
 
-    workflow[pos_id]["inputs"]["text"] = args.prompt
+    workflow[pos_id]["inputs"][prompt_inputs[workflow[pos_id]["class_type"]]] = args.prompt
 
     if neg_id is not None:
-        workflow[neg_id]["inputs"]["text"] = args.negative
+        workflow[neg_id]["inputs"][prompt_inputs[workflow[neg_id]["class_type"]]] = args.negative
 
     save_id = find_save_node(workflow)
     if save_id is None:

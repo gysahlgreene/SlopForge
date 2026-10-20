@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 from slopforge.config import load_project
+from slopforge.failures import StageFailure
 from slopforge.manifest import load_manifest, new_record, save_manifest
 from slopforge.pipelines.model import approve, material_candidate_paths
 from slopforge.provenance import file_sha256
@@ -1202,7 +1203,9 @@ avoid: [environment]
         concept = self.root / "concept.png"
         Image.new("RGB", (512, 512), "red").save(concept)
         self.asset["candidates"] = {"selected": None, "items": [self._candidate(1, concept)]}
-        self.calls = {name: 0 for name in ("prepare", "mesh", "material", "maps", "assembly")}
+        self.calls = {name: 0 for name in ("prepare", "mesh", "material", "maps", "assembly", "views", "frame")}
+        self.mesh_views = None
+        self.view_agreement = []  # mirrored-silhouette overlap per framing call; empty means views agree
         self.fail_once = None
         self.fail_times = {}
         self.interrupt_once = None
@@ -1358,6 +1361,13 @@ avoid: [environment]
             self._maybe_fail("prepare")
             Image.new("RGBA", (32, 32), "white").save(command[command.index("--cutout") + 1])
             Image.new("RGB", (32, 32), "white").save(command[command.index("--output") + 1])
+        elif "prepare_views.py" in command[1]:
+            self._maybe_fail("frame")
+            directory = Path(command[command.index("--output-dir") + 1])
+            for slot in [item.removeprefix("--view=").split("=")[0] for item in command if item.startswith("--view=")]:
+                Image.new("RGB", (32, 32), "black").save(directory / f"view_{slot}.png")
+            agreement = self.view_agreement.pop(0) if self.view_agreement else 0.97
+            Path(command[command.index("--report") + 1]).write_text(json.dumps({"mirror_iou": {"front_back": agreement}}))
         elif "make_pbr_maps.py" in command[1]:
             self._maybe_fail("maps")
             for name in ("normal", "roughness", "metallic", "emission"):
@@ -1365,6 +1375,7 @@ avoid: [environment]
 
     def _mesh(self, _root, _config, _image, _name, destination, metadata, seed, _budget=None, **_kwargs):
         self._maybe_fail("mesh")
+        self.mesh_views = _kwargs.get("views")
         destination.write_bytes(b"mesh")
         info = {"workflow": "model.json", "seed": seed, "model": "mesh"}
         if _config["asset_pipeline"]["workflows"].get("model"):
@@ -1377,7 +1388,7 @@ avoid: [environment]
         metadata.write_text(json.dumps(info))
 
     def _material(self, _root, _config, _workflow, _prompt, destination, _prefix, seed, metadata, **_kwargs):
-        self._maybe_fail("material")
+        self._maybe_fail("views" if destination.name.startswith("view_") else "material")
         Image.new("RGB", (32, 32), "blue").save(destination)
         metadata.write_text(json.dumps({"workflow": "image.json", "seed": seed}))
 
@@ -1485,6 +1496,136 @@ avoid: [environment]
         workflow.write_text(json.dumps({"1": {"class_type": "Example", "inputs": {"resolution": 256}}}))
         self._approve(resume=True)
         self.assertEqual(self.calls["mesh"], 2)
+
+    def _use_multiview(self, views=True):
+        workflows = self.root / "ai/workflows"
+        workflows.mkdir(exist_ok=True)
+        (workflows / "multiview.json").write_text(json.dumps({
+            f"view_{slot}": {"class_type": "LoadImage", "inputs": {"image": "example.png"}} for slot in ("front", "back")}))
+        (workflows / "views.json").write_text(json.dumps({"image": {"class_type": "LoadImage", "inputs": {"image": "a.png"}}}))
+        for pipeline in (self.config["asset_pipeline"], self.config["_quality_base_pipeline"]):
+            pipeline["workflows"]["model"] = "multiview.json"
+            if views:
+                pipeline["workflows"]["views"] = "views.json"
+
+    def test_single_view_model_keeps_its_conditioning_identity(self):
+        self._approve()
+        execution = self.asset["executions"][-1]
+        stage = next(item for item in execution["stages"] if item["name"] == "conditioning_preparation")
+        self.assertNotIn("views", execution["identity_inputs"])
+        self.assertEqual(stage["settings"], {"strategy": "text_only", "tool": "prepare_3d_input.py"})
+        self.assertIsNone(self.mesh_views)
+
+    def test_multiview_model_conditions_on_hashed_views_of_the_approved_concept(self):
+        from slopforge.pipelines.model import VIEW_PROMPTS
+        self._use_multiview()
+        self._approve()
+        execution = self.asset["executions"][-1]
+        stage = next(item for item in execution["stages"] if item["name"] == "conditioning_preparation")
+        outputs = {item["type"]: item for item in stage["outputs"]}
+        self.assertEqual(set(outputs), {"image.cutout", "image.3d_input", "image.view_raw.front", "image.view_raw.back",
+                                        "image.view.front", "image.view.back"})
+        self.assertTrue(all(artifact_integrity(self.root, item)[0] for item in stage["outputs"]))
+        approved = self.asset["source"]["concept_artifact"]
+        # Stage reuse requires every output to derive from the stage input, the approved concept.
+        self.assertTrue(all(item["derived_from"] == [{"artifact_id": approved["id"], "sha256": approved["sha256"]}]
+                            for item in stage["outputs"]))
+        self.assertEqual(stage["settings"]["views"]["prompts"]["front"], VIEW_PROMPTS["front"])
+        self.assertEqual(stage["settings"]["views"]["min_mirror_iou"], 0.9)
+        self.assertEqual(stage["settings"]["views"]["seed"], execution["identity_inputs"]["views"]["seed"])
+        self.assertEqual(self.mesh_views, {slot: self.root.resolve() / outputs[f"image.view.{slot}"]["path"]
+                                           for slot in ("front", "back")})
+        mesh = next(item for item in execution["stages"] if item["name"] == "mesh_workflow_execution")
+        self.assertTrue({outputs["image.view.front"]["id"], outputs["image.view.back"]["id"]} <=
+                        {item["id"] for item in mesh["inputs"]})
+        self.assertEqual((self.calls["views"], self.calls["frame"]), (2, 1))
+
+    def test_multiview_resume_reuses_views_with_their_recorded_seed(self):
+        self._use_multiview()
+        self._approve()
+        seed = self.asset["executions"][-1]["identity_inputs"]["views"]["seed"]
+        inference = ("prepare", "views", "frame", "mesh")
+        before = {name: self.calls[name] for name in inference}
+        self._mark_interrupted()
+        self._approve(resume=True)
+        # Native material assembly is local and reruns on resume for every mesh-texturing workflow.
+        self.assertEqual({name: self.calls[name] for name in inference}, before)
+        self.assertEqual(self.asset["executions"][-1]["identity_inputs"]["views"]["seed"], seed)
+
+    def test_tampered_view_regenerates_views_and_geometry_on_resume(self):
+        self._use_multiview()
+        self._approve()
+        stage = next(item for item in self.asset["executions"][-1]["stages"]
+                     if item["name"] == "conditioning_preparation")
+        back = next(item for item in stage["outputs"] if item["type"] == "image.view.back")
+        Image.new("RGB", (32, 32), "white").save(self.root / back["path"])
+        self._mark_interrupted()
+        self._approve(resume=True)
+        self.assertEqual((self.calls["views"], self.calls["mesh"]), (4, 2))
+        decision = next(item for item in self.asset["executions"][-1]["reuse_decisions"]
+                        if item["stage"] == "conditioning_preparation")
+        self.assertFalse(decision["reusable"])
+
+    def test_disagreeing_views_are_regenerated_with_the_next_seeds_and_kept(self):
+        self._use_multiview()
+        self.view_agreement = [0.73]
+        self._approve()
+        stage = next(item for item in self.asset["executions"][-1]["stages"]
+                     if item["name"] == "conditioning_preparation")
+        attempts = stage["provenance"]["view_attempts"]
+        self.assertEqual([(item["attempt"], item["mirror_iou"]["front_back"]) for item in attempts],
+                         [(1, 0.73), (2, 0.97)])
+        self.assertEqual(attempts[1]["seed"], attempts[0]["seed"] + 10)
+        self.assertTrue((self.root / attempts[0]["directory"] / "view_back.png").is_file())
+        used = {item["path"] for item in stage["outputs"] if item["type"].startswith("image.view")}
+        self.assertTrue(all(path.startswith(attempts[1]["directory"] + "/") for path in used))
+        self.assertEqual((self.calls["views"], self.calls["frame"], self.calls["mesh"]), (4, 2, 1))
+
+    def test_views_that_never_agree_stop_before_mesh_inference(self):
+        self._use_multiview()
+        self.view_agreement = [0.7, 0.8, 0.75]
+        with self.assertRaisesRegex(StageFailure, "disagree in all 3 attempts"):
+            self._approve()
+        self.assertEqual((self.calls["frame"], self.calls["mesh"]), (3, 0))
+        stage = next(item for item in self.asset["executions"][-1]["stages"]
+                     if item["name"] == "conditioning_preparation")
+        self.assertEqual(stage["status"], "failed")
+        self.assertEqual(stage["failure"]["category"], "candidate_quality")
+        self.assertEqual(len(stage["failure"]["evidence"]["attempts"]), 3)
+
+    def test_unseen_view_prompts_carry_the_approved_concept_prompt(self):
+        from slopforge.pipelines.model import VIEW_PROMPTS
+        self._use_multiview()
+        self.asset["candidates"]["items"][0]["prompt"] = "A copper relay with a plain flat back"
+        self._approve()
+        prompts = self.asset["executions"][-1]["identity_inputs"]["views"]["prompts"]
+        self.assertEqual(prompts["front"], VIEW_PROMPTS["front"])
+        self.assertTrue(prompts["back"].startswith(VIEW_PROMPTS["back"]))
+        self.assertTrue(prompts["back"].endswith("A copper relay with a plain flat back"))
+
+    def test_views_workflow_change_regenerates_views_and_geometry(self):
+        self._use_multiview()
+        self._approve()
+        self._mark_interrupted()
+        (self.root / "ai/workflows/views.json").write_text(
+            json.dumps({"image": {"class_type": "LoadImage", "inputs": {"image": "b.png"}}}))
+        self._approve(resume=True)
+        self.assertEqual((self.calls["views"], self.calls["mesh"]), (4, 2))
+
+    def test_multiview_model_without_views_workflow_stops_before_any_stage(self):
+        self._use_multiview(views=False)
+        with self.assertRaisesRegex(ValueError, "workflows.views"):
+            self._approve()
+        self.assertEqual(sum(self.calls.values()), 0)
+        self.assertFalse(self.asset.get("executions"))
+
+    def test_multiview_model_without_an_opposite_view_pair_stops_before_any_stage(self):
+        self._use_multiview()
+        (self.root / "ai/workflows/multiview.json").write_text(json.dumps({
+            f"view_{slot}": {"class_type": "LoadImage", "inputs": {"image": "example.png"}} for slot in ("front", "left")}))
+        with self.assertRaisesRegex(ValueError, "opposite"):
+            self._approve()
+        self.assertEqual(sum(self.calls.values()), 0)
 
     def test_processing_settings_change_invalidates_assembly_only(self):
         self._approve()

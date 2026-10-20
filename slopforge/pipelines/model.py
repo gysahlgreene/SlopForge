@@ -1225,6 +1225,87 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "failure": failure}
 
 
+# Views workflow prompts per Pixal3D multi-view slot (2026-10-20, relay and crate on the H100). Pixal3D's
+# orbit sits at eye level: the angle LoRA's "eye-level" kept the concept's raised camera and tilted the
+# reconstruction, while "low-angle" from the raised three-quarter concept gave a level front. Its side views
+# stopped 45-60 degrees short, so the sides use a plain instruction; Pixal3D's left slot is the object's
+# left side, which a viewer at the front sees on the right.
+_SIDE_VIEW = ("Move the camera 90 degrees to the {turn} around the object and look straight at the side that was "
+              "on the {turn} of the image: an exact side profile view at the same eye level and distance; same "
+              "object, same materials, plain light-grey background.")
+VIEW_PROMPTS = {"front": "<sks> front view low-angle shot medium shot",
+                "left": _SIDE_VIEW.format(turn="right"),
+                "back": "<sks> back view eye-level shot medium shot",
+                "right": _SIDE_VIEW.format(turn="left")}
+
+
+def model_view_slots(root, workflow):
+    """Multi-view slots a model graph conditions on: its LoadImage nodes named view_<slot>."""
+    graph = json.loads(resolve_workflow(root, workflow).read_text())
+    return [slot for slot in VIEW_PROMPTS if graph.get(f"view_{slot}", {}).get("class_type") == "LoadImage"]
+
+
+# On an eye-level orbit opposite views have mirrored silhouettes. On 2026-10-20 sets that reconstructed
+# cleanly scored at least 0.956 per pair; a three-quarter front, short side turns and a depth that drifted
+# between sides scored 0.71-0.81 and gave tilted, doubled or tapered meshes.
+VIEW_MIN_MIRROR_IOU = 0.9
+VIEW_ATTEMPTS = 3
+
+
+def _generate_views(root, config, python, concept, directory, slots, settings, execution_id, concept_artifact):
+    """Conditioning views from the approved concept, as hashed artifacts of the conditioning stage.
+
+    The front is generated from the concept; the other slots from that eye-level front, the LoRA's
+    reference pose (from the three-quarter concept the back came out about 30 degrees off), with the
+    concept prompt so unseen sides follow the brief instead of the editor's guess. A set whose opposite
+    views disagree is regenerated with the next seeds and kept on disk. Like the cutout, every output
+    derives from the stage input, the approved concept; reuse requires that. Returns (refs, attempts).
+    """
+    workflow = config["asset_pipeline"]["workflows"]["views"]
+    order = ["front"] + [item for item in slots if item != "front"]
+    attempts = []
+    for attempt in range(1, settings["attempts"] + 1):
+        folder = directory / f"attempt_{attempt}"
+        folder.mkdir(parents=True, exist_ok=True)
+        raw = {}
+        for index, slot in enumerate(order):
+            raw[slot] = folder / f"view_{slot}_raw.png"
+            generate_image(root, config, workflow, settings["prompts"][slot], raw[slot],
+                           f"slopforge/views/{execution_id}/{attempt}/{slot}",
+                           settings["seed"] + 10 * (attempt - 1) + index, raw[slot].with_suffix(".json"),
+                           conditioning={"references": [{"path": Path(concept if slot == "front" else raw["front"])
+                                                         .relative_to(root).as_posix(), "strength": 1.0}],
+                                         "workflow_inputs": [{"image": {"node": "image", "input": "image"}}]})
+        subprocess.run([python, str(tool_root() / "processing/prepare_views.py"), "--output-dir", str(folder),
+                        "--report", str(folder / "views.json"), *[f"--view={slot}={raw[slot]}" for slot in slots]],
+                       check=True)
+        agreement = json.loads((folder / "views.json").read_text())["mirror_iou"]
+        attempts.append({"attempt": attempt, "seed": settings["seed"] + 10 * (attempt - 1),
+                         "directory": folder.relative_to(root).as_posix(), "mirror_iou": agreement})
+        if all(value >= settings["min_mirror_iou"] for value in agreement.values()):
+            break
+    else:
+        raise StageFailure(
+            "candidate_quality", f"Generated views disagree in all {len(attempts)} attempts (mirrored silhouette "
+            f"overlap below {settings['min_mirror_iou']}): " + "; ".join(
+                f"attempt {item['attempt']}: {item['mirror_iou']}" for item in attempts),
+            operation="view_generation", stage="conditioning_preparation",
+            remedy="inspect the retained views; describe each side of the object in --image-prompt or choose "
+                   "another concept, then approve again", evidence={"attempts": attempts})
+    refs = []
+    for slot in order:
+        refs.append(_artifact_ref(root, raw[slot], f"view-raw-{slot}:{execution_id}", f"image.view_raw.{slot}",
+                                  "conditioning_preparation", 1, [concept_artifact]))
+    for slot in slots:
+        path = folder / f"view_{slot}.png"
+        check = validate_image(path, expected_format="PNG", report_path=path.relative_to(root))
+        if check["status"] == "failed":
+            raise ValueError(f"Prepared {slot} view validation failed: {check['errors']}")
+        refs.append(_artifact_ref(root, path, f"view-{slot}:{execution_id}", f"image.view.{slot}",
+                                  "conditioning_preparation", 1, [concept_artifact]))
+    return refs, attempts
+
+
 def concept_route(config, asset_type, conditioning):
     """Concept workflow and conditioning for an asset type; generation and reuse checks share it.
 
@@ -1639,10 +1720,21 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     conditioning = resolve_conditioning(root, config, style)
     ensure_supported(conditioning)
     workflow = pipeline["workflows"].get("model")
+    view_slots = []
     if workflow:
         problems = workflow_mask_errors(json.loads(resolve_workflow(root, workflow).read_text()))
         if problems:
             raise ValueError("Invalid model workflow mask wiring: " + "; ".join(problems))
+        view_slots = model_view_slots(root, workflow)
+        if view_slots and "front" not in view_slots:  # the other views are generated from the front
+            raise ValueError(f"Model workflow {Path(workflow).name} has view inputs but no view_front node")
+        if view_slots and "back" not in view_slots and not {"left", "right"} <= set(view_slots):
+            # View agreement is measured on opposite pairs; without one, any set would pass unchecked.
+            raise ValueError(f"Model workflow {Path(workflow).name} needs an opposite view pair "
+                             "(view_front and view_back, or view_left and view_right)")
+        if view_slots and not pipeline["workflows"].get("views"):
+            raise ValueError(f"Model workflow {Path(workflow).name} conditions on {', '.join(view_slots)} views; "
+                             "set asset_pipeline.workflows.views (for example image_views_qwen_edit_api.json)")
     paths = model_paths(root, config, asset["name"], asset_type)
     existing = [path for name, path in paths.items() if name != "directory" and path.exists()]
     if existing and not (resume or force or config["asset_pipeline"].get("overwrite_existing")):
@@ -1656,6 +1748,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         raise ValueError("Material and model candidate budgets must be at least 1")
     mesh_seeds = [secrets.randbits(32) for _ in range(attempts)]
     material_seeds = [] if workflow else [secrets.randbits(32) for _ in range(attempts * material_count)]
+    view_seed = secrets.randbits(32) if view_slots else None
     concept_path = root / candidate["path"]
     candidate_artifact = candidate.get("artifact")
     if candidate_artifact is None:
@@ -1707,6 +1800,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         if not workflow and (not isinstance(old_material_seeds, list) or len(old_material_seeds) != attempts * material_count):
             raise ValueError("Cannot resume: material seeds are missing or the candidate budget changed")
         material_seeds = old_material_seeds
+        if view_slots:
+            view_seed = prior["identity_inputs"].get("views", {}).get("seed")
+            if type(view_seed) is not int:
+                raise ValueError("Cannot resume: the multi-view seed is missing; approve without --resume")
         prior = copy.deepcopy(prior)
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     try:
@@ -1744,6 +1841,16 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         "material_prompt": material_prompt, "material_count": material_count,
         "material_seeds": material_seeds,
         "material_scale": pipeline.get("material_scale", 3.0),
+        **({"views": {"workflow": {"identifier": Path(pipeline["workflows"]["views"]).name,
+                                   "sha256": file_sha256(resolve_workflow(root, pipeline["workflows"]["views"])),
+                                   "configured_inputs": workflow_node_inputs(
+                                       config, "image", Path(pipeline["workflows"]["views"]).name)},
+                      "slots": view_slots, "seed": view_seed, "attempts": VIEW_ATTEMPTS,
+                      "min_mirror_iou": VIEW_MIN_MIRROR_IOU,
+                      "prompts": {slot: VIEW_PROMPTS[slot] if slot == "front" else
+                                  f"{VIEW_PROMPTS[slot]}\nThe object, as designed from every side:\n"
+                                  f"{candidate.get('prompt') or candidate.get('description', asset['description'])}"
+                                  for slot in view_slots}}} if view_slots else {}),
     }, parent_execution_id=prior["id"] if prior else candidate.get("execution_id"))
     pipeline = config["asset_pipeline"]
     _persist_reload(root, pipeline, manifest)
@@ -1792,6 +1899,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         context = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                    "execution_id": execution["id"], "reuse_execution": prior}
         conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
+        if view_slots:
+            conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
         conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
                                          [selected_artifact], conditioning_settings)
         if conditioning_refs is None:
@@ -1820,8 +1929,17 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                              "image.cutout", "conditioning_preparation", 1, [selected_artifact]),
                                  _artifact_ref(root, paths["input_3d"], f"3d-input:{execution['id']}",
                                              "image.3d_input", "conditioning_preparation", 1, [selected_artifact])]
+            if view_slots:
+                print("3D stage: generating object views for multi-view conditioning...", flush=True)
+                view_refs, view_attempts = _generate_views(
+                    root, config, python, paths["concept"],
+                    root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"views_{execution['id']}",
+                    view_slots, conditioning_settings["views"], execution["id"], selected_artifact)
+                conditioning_refs += view_refs
             _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1,
                                                       stage_id=stage["id"])
+            if view_slots:
+                conditioning_stage["provenance"]["view_attempts"] = view_attempts
             finish_stage(conditioning_stage, "succeeded", conditioning_refs)
             _persist_reload(root, pipeline, manifest)
         else:
@@ -1947,10 +2065,13 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     config["_journal_context"] = journal_context
                     if workflow:
                         budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+                        views = {item["type"].removeprefix("image.view."): root / item["path"]
+                                 for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
                                        require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
-                                       project_concept=asset_type.get("concept_projection") == "front")
+                                       project_concept=asset_type.get("concept_projection") == "front",
+                                       **({"views": views} if views else {}))
                     else:
                         generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
                     config.pop("_journal_context", None)
