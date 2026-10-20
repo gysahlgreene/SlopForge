@@ -10,10 +10,40 @@ SlopForge stores API-format ComfyUI graphs in `workflows/`; a project override i
 | `trellis2_image_to_model_h100_api.json` | Image-to-3D mesh-aware PBR | TRELLIS.2 BF16, DINOv3 ViT-L, shape and texture VAEs | H100 profile; earlier runs reached 512³ and 1024³. Shape/material quality remains asset-dependent. |
 | `trellis2_image_to_model_h100_final_api.json` | Higher-resolution image-to-3D mesh-aware PBR | Same BF16 model set | Graph is prepared and passes capability checks; no 1536³ inference is claimed. |
 | `pixal3d_image_to_model_h100_api.json` | Camera-conditioned image-to-3D mesh-aware PBR | Pixal3D BF16, DINOv3+NAF, TRELLIS.2 shape and texture VAEs | H100 inference completed at 1536 cascade and 4096 texture size. Output quality remains asset-dependent; inspect geometry, texture coverage, and topology before use. |
+| `image_views_qwen_edit_api.json` | Front, side and back views of an approved concept for multi-view conditioning (`workflows.views`) | Qwen-Image-Edit-2511 fp8mixed, Qwen2.5-VL-7B fp8, Qwen VAE, fal multiple-angles LoRA | Experimental. Live H100 inference on two props (2026-10-20); see [multi-view conditioning](#multi-view-conditioning-props). |
+| `pixal3d_multiview_image_to_model_h100_api.json` | Four-view image-to-3D mesh-aware PBR (`h100_multiview` props) | Pixal3D multi-view BF16, DINOv3+NAF, TRELLIS.2 shape and texture VAEs | Experimental. Same structure as the H100 TRELLIS.2 prop graph (GPU UDF remesh 384, Blender UVs and normal bake); live H100 inference on two props (2026-10-20). |
 
 The Z-Image graph uses ComfyUI core nodes. TRELLIS graphs use ComfyUI's TRELLIS.2 node set (`Trellis2*`, `VaeDecode*`, `BakeTextureFromVoxel`, `ApplyTextureToMesh`, `SaveGLB`, and related nodes). Pixal3D adds `Pixal3DConditioning` and uses ComfyUI's mesh remeshing and UV unwrap nodes. On 2026-10-04 the four TRELLIS API graph files passed `ComfyUIClient.validate_workflow()` against the live H100 `/object_info` response; Pixal3D ran successfully on the H100 on 2026-10-08.
 
 The model and node versions installed in a ComfyUI service can differ from these workflows. Check upstream model and custom-node requirements before running a graph.
+
+## Multi-view conditioning (props)
+
+Single-image conditioning guesses the sides a concept does not show. The opt-in `h100_multiview` compute
+profile instead conditions Pixal3D on four generated views of the approved concept. A model graph opts in by
+naming `LoadImage` nodes `view_front`, `view_left`, `view_back` and `view_right` (Pixal3D's slots: left is the
+object's own left); `approve` then requires `workflows.views` and stops before any stage if it is missing.
+
+1. `conditioning_preparation` generates an eye-level front from the concept, then the other slots from that
+   front with the concept prompt appended, so unseen sides follow the brief (prompts in
+   `slopforge/pipelines/model.py`, `VIEW_PROMPTS`).
+2. `processing/prepare_views.py` cuts the views out, brings them to one object height and one scale, and
+   measures how far each opposite pair's silhouettes mirror each other. A set below 0.9 for either pair is
+   regenerated with the next seeds, up to three sets. If none agrees, approval stops before mesh inference with
+   a `candidate_quality` failure; every set stays under `views_<execution>/attempt_<n>` and the stage
+   provenance lists each set's seed and overlap (`view_attempts`).
+3. The mesh stage uploads the framed views to the `view_<slot>` nodes and records their hashes among the
+   workflow's uploaded inputs.
+
+Raw and framed views are `image.view_raw.<slot>` and `image.view.<slot>` outputs of `conditioning_preparation`,
+derived from the approved concept like the cutout. The views workflow hash, prompts, seed, threshold and attempt
+budget are part of the stage settings, so changing any of them, or altering a view file, regenerates the views
+and the mesh on resume; an unchanged resume reuses them. Graphs without view nodes, including the character
+graphs, keep single-image conditioning and their previous stage identity.
+
+On 2026-10-20 the showcase power relay lost its copied back details but gained an invented vent, and no crate
+view set passed the check; see the [multi-view report](media/multiview-props-2026-10/README.md). The route stays
+experimental and is not a default profile.
 
 ## Requirement sidecars
 

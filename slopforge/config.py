@@ -30,7 +30,10 @@ DEFAULTS = {
                           "shape_upsample_stage": {"target_resolution": 1536},
                           "maps": {"texture_size": 4096}},
                       "trellis2_image_to_model_h100_final_api.json": {"crop": {"pad_factor": 1.1}},
-                      "pixal3d_image_to_model_h100_api.json": {"crop": {"pad_factor": 1.1}}}}},
+                      "pixal3d_image_to_model_h100_api.json": {"crop": {"pad_factor": 1.1}},
+                      "pixal3d_multiview_image_to_model_h100_api.json": {
+                          "shape_upsample_stage": {"target_resolution": 1536},
+                          "maps": {"texture_size": 4096}}}}},
     },
     "conditioning": {"strategy": "text_only", "max_references": 3, "strength": 0.65, "workflow_inputs": []},
     "overwrite_existing": False,

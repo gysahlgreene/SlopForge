@@ -101,7 +101,11 @@ and none are declared yet.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
   on metal parts. Treat Mac metallic output as unreliable until it is checked on a metal asset.
 - **Hidden faces:** single-image conditioning guesses faces the concept does not show and can copy
-  front details onto them; describe the back and sides in the concept prompt.
+  front details onto them (the showcase relay's plain back got a copper disc and lens); describe the back
+  and sides in the concept prompt. The experimental `h100_multiview` profile generates side and back views
+  from the approved concept and its prompt and reconstructs from all four; on one relay run the copied disc
+  was gone, but the generated back invented a vent, the plate colour faded, and the crate's views never
+  agreed well enough to run. See [multi-view conditioning](WORKFLOWS.md#multi-view-conditioning-props).
 - **Thin parts:** hollow rings, wires and paper-thin parts reconstruct as torn sheets; the
   reconstruction rules ask for chunky thick-walled forms.
 - **Mesh repair:** Blender's voxel remesh needs closed volumes and erased thin open parts

@@ -132,12 +132,13 @@ def _journal_finish(context, stage, outputs):
     return refs
 
 
-def _workflow_identity(source, effective, source_name, source_hash, prepared_name=None, prepared_hash=None):
+def _workflow_identity(source, effective, images, prepared_name=None, prepared_hash=None):
+    """images maps each uploaded image name (source concept and any views) to its content hash."""
     uploaded = {}
     for node_id, node in effective.items():
         inputs = node.get("inputs", {})
-        if node.get("class_type") == "LoadImage" and inputs.get("image") == source_name:
-            uploaded[f"{node_id}.image"] = source_hash
+        if node.get("class_type") == "LoadImage" and inputs.get("image") in images:
+            uploaded[f"{node_id}.image"] = images[inputs["image"]]
         elif node.get("class_type") == "LoadMesh" and prepared_name and inputs.get("model_file") == prepared_name:
             uploaded[f"{node_id}.model_file"] = prepared_hash
     return canonical_workflow_identity(source or effective, effective, uploaded), uploaded
@@ -254,13 +255,24 @@ def make_workflow(image_name, asset_name, checkpoint=CHECKPOINT, seed=None):
     }
 
 
-def load_model_workflow(path, image_name, asset_name, seed, face_budget):
+VIEW_SLOTS = ("front", "left", "back", "right")
+
+
+def load_model_workflow(path, image_name, asset_name, seed, face_budget, views=None):
+    """views maps a multi-view slot to its uploaded image; LoadImage nodes named view_<slot> take it."""
     workflow = json.loads(Path(path).read_text())
+    views = views or {}
     sampler_index = 0
     for node_id, node in workflow.items():
         inputs = node.setdefault("inputs", {})
         kind = node.get("class_type")
-        if kind == "LoadImage":
+        if kind == "LoadImage" and node_id.startswith("view_"):
+            slot = node_id.removeprefix("view_")
+            if slot not in views:
+                raise ValueError(f"Model workflow {Path(path).name} needs a {slot} view (node {node_id}); "
+                                 "configure workflows.views so conditioning preparation generates it")
+            inputs["image"] = views[slot]
+        elif kind == "LoadImage":
             inputs["image"] = image_name
         elif kind == "KSampler":
             inputs["seed"] = (seed + sampler_index) % (2**64)
@@ -378,6 +390,8 @@ def main():
                         help="Project the front concept onto camera-facing base color (character concepts)")
     parser.add_argument("--require-manifold", action="store_true",
                         help="Make the mesh manifold (characters must be closed to rig): local repair, voxel repair as fallback")
+    parser.add_argument("--view", action="append", default=[], metavar="SLOT=PATH",
+                        help="Framed view for a multi-view workflow slot (front, left, back, right)")
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
@@ -387,6 +401,12 @@ def main():
         parser.error("--face-budget must be positive")
     if args.voxel_resolution <= 0:
         parser.error("--voxel-resolution must be positive")
+    view_paths = {}
+    for spec in args.view:
+        slot, separator, path = spec.partition("=")
+        if not separator or slot not in VIEW_SLOTS or slot in view_paths or not Path(path).is_file():
+            parser.error(f"--view must be a unique SLOT=PATH of an existing image with SLOT in {VIEW_SLOTS}, got {spec!r}")
+        view_paths[slot] = Path(path).resolve()
 
     src = Path(args.image).expanduser().resolve()
 
@@ -421,15 +441,21 @@ def main():
 
     uploaded = client.upload_input(src, "ai3d")
     comfy_image_name = f"{uploaded.get('subfolder', 'ai3d')}/{uploaded['name']}"
+    source_content_hash = file_sha256(src)
+    image_hashes = {comfy_image_name: source_content_hash}
+    comfy_views = {}
+    for slot, path in view_paths.items():
+        uploaded_view = client.upload_input(path, "ai3d")
+        comfy_views[slot] = f"{uploaded_view.get('subfolder', 'ai3d')}/{uploaded_view['name']}"
+        image_hashes[comfy_views[slot]] = file_sha256(path)
 
     seed = args.seed if args.seed is not None else int(time.time_ns() % 9223372036854775807)
-    workflow = (load_model_workflow(args.workflow, comfy_image_name, name, seed, args.face_budget)
+    workflow = (load_model_workflow(args.workflow, comfy_image_name, name, seed, args.face_budget, comfy_views)
                 if args.workflow else make_workflow(comfy_image_name, name, args.checkpoint, seed))
     if args.workflow_inputs:
         apply_workflow_inputs(workflow, json.loads(args.workflow_inputs))
     if "normal_bake" in workflow and "maps" in workflow:  # keep the normal bake at the color bake's tier resolution
         workflow["normal_bake"]["inputs"]["resolution"] = workflow["maps"]["inputs"]["texture_size"]
-    source_content_hash = file_sha256(src)
     dest = Path(args.dest).expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shape_prompt_id = None
@@ -440,8 +466,7 @@ def main():
             raise ValueError("This model workflow requires --blender for mesh reduction and UV preparation")
         raw_workflow = {key: node for key, node in workflow.items()
                         if not key.startswith("save") or key in {"save_raw", "save_detail"}}
-        raw_identity, raw_bindings = _workflow_identity(source_workflow, raw_workflow,
-                                                        comfy_image_name, source_content_hash)
+        raw_identity, raw_bindings = _workflow_identity(source_workflow, raw_workflow, image_hashes)
         source_hash = workflow_sha256(args.workflow) if args.workflow else None
         raw_provenance = {
             "workflow_source_sha256": ({"status": "known", "value": source_hash} if source_hash else
@@ -502,8 +527,8 @@ def main():
     material_inputs = prepared_refs if "prepared_refs" in locals() else (journal or {}).get("upstream_artifacts", [])
     prepared_name = (f"{prepared_upload.get('subfolder', '3d')}/{prepared_upload['name']}"
                      if "prepared_upload" in locals() else None)
-    identity, uploaded_inputs = _workflow_identity(source_workflow, workflow, comfy_image_name,
-        source_content_hash, prepared_name, prepared_content_hash if "prepared_content_hash" in locals() else None)
+    identity, uploaded_inputs = _workflow_identity(source_workflow, workflow, image_hashes,
+        prepared_name, prepared_content_hash if "prepared_content_hash" in locals() else None)
     source_hash = workflow_sha256(args.workflow) if args.workflow else None
     material_provenance = {
         "workflow_source_sha256": ({"status": "known", "value": source_hash} if source_hash else
@@ -587,7 +612,9 @@ def main():
                                             "workflow_inputs": json.loads(args.workflow_inputs) if args.workflow_inputs else {},
                                             "seed": seed, "face_budget": args.face_budget,
                                             "voxel_resolution": args.voxel_resolution,
-                                            "source_image_sha256": source_content_hash},
+                                            "source_image_sha256": source_content_hash,
+                                            **({"view_sha256": {slot: image_hashes[name] for slot, name in comfy_views.items()}}
+                                               if comfy_views else {})},
                                         "backend": backend_provenance(health, queried=True),
                                         "provenance": {"model_weights": backend_provenance(health, queried=True)["model_weights"],
                                             "custom_node_revisions": backend_provenance(health, queried=True)["custom_node_revisions"]},

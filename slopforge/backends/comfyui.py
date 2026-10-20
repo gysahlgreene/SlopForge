@@ -166,7 +166,7 @@ class ComfyUIClient:
 
     # "name" is ModelPatchLoader's model file (Z-Image Fun ControlNet patches).
     MODEL_INPUTS = {"ckpt_name", "unet_name", "vae_name", "clip_name", "clip_vision", "model_name",
-                    "bg_removal_name", "name"}
+                    "bg_removal_name", "name", "lora_name"}
 
     def __init__(self, base_url, timeout=60):
         self.base_url = base_url.rstrip("/")
@@ -563,7 +563,8 @@ def _build_failure_from_report(report_path, default_category="unknown"):
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
-                  voxel_resolution=None, journal_context=None, require_manifold=False, project_concept=False):
+                  voxel_resolution=None, journal_context=None, require_manifold=False, project_concept=False,
+                  views=None):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
@@ -587,6 +588,8 @@ def generate_model(project_root, config, image, name, destination, metadata, see
             command.append("--require-manifold")
         if project_concept:
             command.append("--project-concept")
+        for slot, path in (views or {}).items():
+            command.extend(["--view", f"{slot}={path}"])
     quality = config["asset_pipeline"].get("quality_settings", {})
     command.extend(["--quality", json.dumps({"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                                                "settings": quality})])
