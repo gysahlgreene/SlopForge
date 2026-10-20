@@ -22,7 +22,9 @@ The model and node versions installed in a ComfyUI service can differ from these
 Single-image conditioning guesses the sides a concept does not show. The opt-in `h100_multiview` compute
 profile instead conditions Pixal3D on four generated views of the approved concept. A model graph opts in by
 naming `LoadImage` nodes `view_front`, `view_left`, `view_back` and `view_right` (Pixal3D's slots: left is the
-object's own left); `approve` then requires `workflows.views` and stops before any stage if it is missing.
+object's own left); `approve` then requires `workflows.views`, a `view_front` node and at least one opposite
+pair (front and back, or left and right, so the views' agreement can be measured), and stops before any stage
+if one is missing.
 
 1. `conditioning_preparation` generates an eye-level front from the concept, then the other slots from that
    front with the concept prompt appended, so unseen sides follow the brief (prompts in

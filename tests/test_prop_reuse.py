@@ -1619,6 +1619,14 @@ avoid: [environment]
         self.assertEqual(sum(self.calls.values()), 0)
         self.assertFalse(self.asset.get("executions"))
 
+    def test_multiview_model_without_an_opposite_view_pair_stops_before_any_stage(self):
+        self._use_multiview()
+        (self.root / "ai/workflows/multiview.json").write_text(json.dumps({
+            f"view_{slot}": {"class_type": "LoadImage", "inputs": {"image": "example.png"}} for slot in ("front", "left")}))
+        with self.assertRaisesRegex(ValueError, "opposite"):
+            self._approve()
+        self.assertEqual(sum(self.calls.values()), 0)
+
     def test_processing_settings_change_invalidates_assembly_only(self):
         self._approve()
         self._mark_interrupted()

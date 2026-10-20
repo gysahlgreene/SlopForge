@@ -1681,6 +1681,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         view_slots = model_view_slots(root, workflow)
         if view_slots and "front" not in view_slots:  # the other views are generated from the front
             raise ValueError(f"Model workflow {Path(workflow).name} has view inputs but no view_front node")
+        if view_slots and "back" not in view_slots and not {"left", "right"} <= set(view_slots):
+            # View agreement is measured on opposite pairs; without one, any set would pass unchecked.
+            raise ValueError(f"Model workflow {Path(workflow).name} needs an opposite view pair "
+                             "(view_front and view_back, or view_left and view_right)")
         if view_slots and not pipeline["workflows"].get("views"):
             raise ValueError(f"Model workflow {Path(workflow).name} conditions on {', '.join(view_slots)} views; "
                              "set asset_pipeline.workflows.views (for example image_views_qwen_edit_api.json)")
