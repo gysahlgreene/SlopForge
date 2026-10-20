@@ -38,8 +38,23 @@ concept (library cuts, fewer gear details) and slimmer than its burly build.
    `processing/template_face_warp.py` warps a refined concept face onto it with MediaPipe landmarks,
    `face_bake.py` bakes it into the skin texture (visibility from the front, MPFB helper geometry excluded)
    and tints the rest of the skin to match; `apply_face.py` applies it and can tint hair and eyes.
+   `trim` shortens hair or beard cards by pulling each vertex toward the nearest skin point (the
+   licence-clean beards are all long).
 4. `accessories.py` adds procedural knee pads conformed to the trousers and rigidly bound to the shins.
 5. Retarget a `.blend` rig directly with `blender/retarget_mocap.py` (FBX loses MPFB node materials).
+
+## Licences
+
+Only CC0 and CC-BY assets are allowed (owner decision 2026-10-20). `make_human.py` runs
+`blender/template_character/asset_license.py` on every asset before building: an asset's own `# license`
+header wins over its pack (packs named `_cc0` contain AGPL-3.0 items, including a beard, gloves and a
+hairstyle used in early prototypes), header-less assets need a declared pack licence, and CC-BY assets
+need an author (from the header or declared). It writes `<output>.attribution.json` for credits.
+
+Library garments can carry real-world branding: the CC-BY EMT jacket's texture and normal map show a
+real organisation's emblem. Recolouring clamps luminance detail (`detail_range`, default 0.8 to 1.15) so
+printed logos and reflective stripes do not survive, but emblems embossed in a normal map still show;
+such garments are excluded rather than repaired.
 
 ## Lessons
 

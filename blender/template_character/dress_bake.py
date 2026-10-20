@@ -260,8 +260,12 @@ for garment in garments:
             # Medians keep a texture's pure hue; its grey highlights had muted it on the source model.
             saturation = a.get("saturation", {}).get(garment.name, 1.0)
             target_rgb = target_rgb.mean() + saturation * (target_rgb - target_rgb.mean())
-            lmean = max(lum[sel].mean(), 1e-3)
-            flat[sel, :3] = (lum[sel] / lmean)[:, None] * target_rgb
+            lmean = max(float(np.median(lum[sel])), 1e-3)
+            # Clamp detail: fabric weave and folds are subtle; printed logos, insignia and reflective
+            # stripes are high-contrast and must not survive (one library jacket carried a real
+            # organisation's emblem).
+            lo, hi = a.get("detail_range", (0.8, 1.15))
+            flat[sel, :3] = np.clip(lum[sel] / lmean, lo, hi)[:, None] * target_rgb
         default = a.get("tints", {}).get(garment.name)
         missing = (islands < 0) | ~np.isin(islands, list(island_colors))
         if default is not None:
@@ -343,6 +347,30 @@ if a.get("tuck"):
     gone = [f for f in mesh.faces if all((suit.matrix_world @ v.co).z < top for v in f.verts)]
     bmesh.ops.delete(mesh, geom=gone, context="FACES"); mesh.to_mesh(suit.data); mesh.free()
     report["tucked_faces"] = len(gone)
+# Trim hair/beard cards: pull each vertex toward the nearest skin point (licence-clean beards are long).
+if a.get("trim"):
+    from mathutils.bvhtree import BVHTree
+    for m in masks:
+        m.show_viewport = False
+    dg = bpy.context.evaluated_depsgraph_get()
+    skin = body.evaluated_get(dg).to_mesh()
+    skin_tree = BVHTree.FromPolygons([body.matrix_world @ v.co for v in skin.vertices], [p.vertices[:] for p in skin.polygons])
+    body.evaluated_get(dg).to_mesh_clear()
+    for m in masks:
+        m.show_viewport = True
+    for name, keep in a["trim"].items():
+        obj = bpy.data.objects[name]
+        if obj.data.shape_keys:
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
+        inverse = obj.matrix_world.inverted()
+        for v in obj.data.vertices:
+            p = obj.matrix_world @ v.co
+            nearest = skin_tree.find_nearest(p)[0]
+            if nearest is not None:
+                v.co = inverse @ (nearest + (p - nearest) * keep)
+        report.setdefault("trimmed", {})[name] = keep
+
 for name, tint in a.get("recolor", {}).items():
     # Hair cards: rebuild a clean material (strand texture x tint, matte, normal map, alpha) instead of
     # MPFB's legacy chain, which rendered fine grey strand textures as glossy black.
