@@ -67,6 +67,7 @@ def measure_material_maps(paths, near_black_level=8):
         if key == "metallic":
             metal = sum(min(pixel) >= 230 for pixel in pixels) / len(pixels)
             maps[key]["near_full_metal_fraction"] = round(metal, 4)
+            maps[key]["mean"] = round(sum(pixel[0] for pixel in pixels) / len(pixels) / 255, 4)
             if metal >= 0.9:
                 # TRELLIS.2 can decode glossy non-metal concepts as fully metallic (issue #43); confirm the asset is metal.
                 warnings.append(f"metallic map is {metal:.0%} fully metallic; confirm the asset is metal "

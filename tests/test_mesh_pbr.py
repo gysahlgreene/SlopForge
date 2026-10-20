@@ -454,13 +454,35 @@ class DeclaredMaterialTests(unittest.TestCase):
                                               asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
                                               lineage=lineage)
 
-    def test_full_metal_map_fails_when_brief_declares_only_non_metal(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            candidate = self._candidate(Path(temporary), [{"region": "body", "class": "nonmetal", "description": "stone"}],
-                                        255, Image.new("RGB", (64, 64), (90, 90, 90)))
-            self.assertEqual(candidate["status"], "failed")
-            self.assertIn("material_mismatch", candidate["validation"]["failure_codes"])
-            self.assertEqual(candidate["failure"]["category"], "processing_validation")
+    def test_partial_metal_map_is_zeroed_when_brief_declares_no_metal(self):
+        # 2026-10-20 glazed jug: TRELLIS.2 decoded the declared non-metal glaze at metallic ~0.38-0.60.
+        for value in (100, 255):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                candidate = self._candidate(root, [{"region": "jug", "class": "nonmetal", "description": "glaze"}],
+                                            value, Image.new("RGB", (64, 64), (29, 46, 75)))
+                self.assertEqual(candidate["status"], "candidate")
+                self.assertEqual(candidate["metallic_source"], "declared_nonmetal")
+                with Image.open(root / candidate["outputs"]["metallic"]) as metallic:
+                    self.assertEqual(metallic.convert("L").getextrema(), (0, 0))
+                with Image.open(root / candidate["outputs"]["metallic_gloss"]) as packed:
+                    self.assertEqual(packed.getchannel("R").getextrema(), (0, 0))
+                with Image.open(root / "source/metallic.png") as raw:  # generator output is kept
+                    self.assertEqual(raw.getpixel((0, 0)), (value,) * 3)
+                metallic = candidate["validation"]["measured"]["material_maps"]["metallic"]
+                self.assertEqual(metallic["mean"], 0)
+                self.assertAlmostEqual(metallic["generator_mean"], value / 255, places=3)
+
+    def test_mixed_and_undeclared_briefs_keep_the_generated_metallic_map(self):
+        for materials in ([{"region": "planks", "class": "nonmetal", "description": "oak"},
+                           {"region": "brackets", "class": "metal", "description": "iron"}], []):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                candidate = self._candidate(root, materials, 128, Image.new("RGB", (64, 64), (90, 70, 50)))
+                self.assertEqual(candidate["status"], "candidate")
+                self.assertEqual(candidate["metallic_source"], "generator")
+                self.assertAlmostEqual(candidate["validation"]["measured"]["material_maps"]["metallic"]["mean"],
+                                       128 / 255, places=3)
 
     def test_declared_metal_brief_accepts_full_metal_map_without_warning(self):
         with tempfile.TemporaryDirectory() as temporary:
