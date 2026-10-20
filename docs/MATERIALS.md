@@ -62,7 +62,7 @@ result against that declaration before anyone reviews it.
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
-   every channel at least 190 and channels within 25 of each other).
+   every channel at least 150 and at least 1.3 times the map's median, channels within 25 of each other).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
@@ -94,14 +94,16 @@ and none are declared yet.
 
 - **Glowing parts:** image-to-3D reconstructs glowing or translucent regions as empty space.
   Concepts must show emissive parts unlit as opaque surfaces; then they reconstruct as solid
-  panels. The concept model often draws paper panels lit anyway (all 12 concepts of the
-  2026-10-20 lantern runs); TRELLIS.2 still bakes them as flat near-neutral albedo, at about
-  191-203 or about 253 depending on the seed. The pale cut-off was 225 until 2026-10-20, which
-  missed the lower cluster in both lantern runs; at 190 it finds every pale panel on record
-  (1.8-2.4% of the map) while speckled grey granite and the cream stone seen so far stay
-  below it. Limits: a pale emitter on a pale body (pale marble, white cloth or plate armour,
-  all measured above 190) cannot be separated by colour and would glow too; some seeds bake no pale
-  panel at all (3 of 8 lantern candidates on 2026-10-18), and those stay unlit with the warning.
+  panels. The concept model often draws paper panels lit anyway (all 18 concepts of the
+  2026-10-20 lantern runs). TRELLIS.2 still bakes them pale and near-neutral, but how pale depends
+  on the seed: flat at about 200 or 253, or mottled rice paper at 157-173, on granite with a
+  median of 105-128. A fixed cut-off (225, then briefly 190) missed whichever cluster lay below it.
+  The cut-off is now 150 and 1.3 times the map's median: it finds the panels in all six pale
+  reconstructions on record (0.9-3.3% of the map) and keeps speckled granite out. Limits: on
+  mottled panels the fleck filter drops some panes, so a few window panes can stay dark; a body
+  as pale as its emitter (pale marble, white cloth or plate armour) cannot be separated by colour,
+  and then nothing glows; some seeds bake no pale panel at all (3 of 6 lantern candidates on
+  2026-10-18), and those stay unlit with the warning.
 - **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the
   declared-material check catches this, and matte wording in the concept prevents it.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including

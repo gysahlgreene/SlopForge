@@ -471,15 +471,15 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertGreater(max(emission.getpixel((80, 90))), 150)
                 self.assertEqual(emission.getpixel((210, 200)), (0, 0, 0))
 
-    def test_pale_emitter_found_at_trellis_paper_albedo_not_in_grey_stone(self):
+    def test_pale_emitter_found_at_trellis_paper_albedo_but_pale_body_does_not_glow(self):
         from slopforge.unity_material import derive_emission
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            # Paper panels as TRELLIS.2 baked them in the 2026-10-20 lantern runs (C2 palest 191, C1 201),
-            # beside the brightest grey/cream stone seen without an emitter.
-            base = Image.new("RGB", (256, 256), (186, 184, 180))
-            base.paste((196, 192, 191), (20, 20, 80, 80))
-            base.paste((201, 202, 202), (120, 20, 180, 80))
+            # Paper panels as TRELLIS.2 baked them in the 2026-10-20 lantern runs (201 flat, 157-173 mottled)
+            # on granite with a median near 105.
+            base = Image.new("RGB", (256, 256), (105, 105, 102))
+            base.paste((201, 202, 202), (20, 20, 80, 80))
+            base.paste((166, 165, 164), (120, 20, 180, 80))
             base.save(root / "basecolor.png")
             fraction = derive_emission(root / "basecolor.png", root / "emission.png")
             with Image.open(root / "emission.png") as emission:
@@ -487,6 +487,9 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertGreater(max(emission.getpixel((150, 50))), 150)
                 self.assertEqual(emission.getpixel((128, 200)), (0, 0, 0))
             self.assertAlmostEqual(fraction, 2 * 60 * 60 / 256 ** 2, delta=0.01)
+            # A body as pale as the paper cannot be told apart from it; it must not glow as a whole.
+            Image.new("RGB", (256, 256), (186, 184, 180)).save(root / "pale.png")
+            self.assertEqual(derive_emission(root / "pale.png", root / "pale_emission.png"), 0)
 
     def test_declared_emissive_colour_matches_coloured_lens_and_glows_in_that_colour(self):
         from slopforge.style import parse_material_spec
