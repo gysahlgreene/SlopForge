@@ -23,13 +23,12 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Candidate review board](REVIEW-BOARD.md) and [quality tiers](QUALITY-TIERS.md)
 - [Recipes](RECIPES.md) and [environment kits](ENVIRONMENT-KITS.md)
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
-- [Template characters (experimental)](TEMPLATE-CHARACTERS.md): MakeHuman base, library garments coloured from a generated character
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
 - [Unity delivery](UNITY.md)
 
 ## Examples and qualification evidence
 
-- [Character rigging](media/character-rigging-2026-10/README.md): three generated characters rigged automatically and walking, with measured before/after deformation and limits.
+- [Character styles](media/character-styles-2026-10/README.md): four generated characters in four art styles, rigged automatically and walking, with how they were made and limits.
 - [Structure showcase](media/structure-showcase-2026-10/README.md): six generated structures and a real-scale modular stone kit, with turntables, maps, conditions and limits.
 - [Material showcase](media/material-showcase-2026-10/README.md): five props of different materials generated from briefs, with maps, renders, conditions and limits.
 - [Texture mask recovery](media/texture-mask-recovery-2026-10/README.md): controlled failure, correction, fresh case and repeat; remaining appearance limitations.
