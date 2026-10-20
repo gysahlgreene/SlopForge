@@ -109,9 +109,9 @@ Project settings live in `ai/project.yaml`. Environment overrides are:
 | `SLOPFORGE_COMPUTE_PROFILE` | Compute/workflow profile from `asset_pipeline.compute_profiles` |
 | `COMFYUI_HOME` | Optional legacy install hint; not required for generation |
 | `BLENDER_BIN` | Blender executable |
-| `SLOPFORGE_PYTHON` | Python used by helper scripts |
+| `SLOPFORGE_PYTHON` | Python used by helper scripts; a configured path that does not exist stops generation with an error instead of using another interpreter |
 | `SLOPFORGE_PROJECT_ROOT` | Default project for asset commands; `doctor` discovers from the current directory or accepts `--project` |
 
-Run `slopforge --project PATH doctor` for a read-only diagnostic. It reports the ComfyUI URL, backend, selected profile, reachable service/version/device, workflow node classes, model choices, and local Blender setup. It does not perform inference or modify the machine.
+Run `slopforge --project PATH doctor` for a read-only diagnostic. It reports the ComfyUI URL, backend, selected profile, reachable service/version/device, workflow node classes and model choices for the image, character concept, model and character model workflows, local Blender setup, and SkinTokens readiness (a SkinTokens preflight error is a warning, not a crash). It does not perform inference or modify the machine.
 
 For errors, check in this order: `doctor`; ComfyUI is running at the configured URL; model files are in the listed folders; the project workflow override is compatible; Blender is executable; then inspect the failed candidate and manifest warning. See [Architecture](ARCHITECTURE.md), [Unity](UNITY.md), and [Agent integration](AGENT-INTEGRATION.md) for details.

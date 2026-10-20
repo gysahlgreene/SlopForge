@@ -53,7 +53,7 @@ def run_doctor(project_root=None):
             types = load_taxonomy(root)
             report("PASS", "Asset taxonomy", f"{len(types)} types")
             for role, key in (("Workflow", "image"), ("Character concept workflow", "character_image"),
-                              ("Model workflow", "model")):
+                              ("Model workflow", "model"), ("Character model workflow", "character_model")):
                 configured = config["asset_pipeline"]["workflows"].get(key)
                 if configured:
                     path = resolve_workflow(root, configured)
@@ -177,7 +177,11 @@ def run_doctor(project_root=None):
         report("WARN", "Blender", str(exc))
     if config is not None:
         from .character_rigging import skintokens_preflight
-        skin = skintokens_preflight(config, root)
-        report("OK" if skin["status"] == "ready" else "WARN", "SkinTokens",
-               skin["status"] + (": " + "; ".join(skin["reasons"]) if skin["reasons"] else ""))
+        try:
+            skin = skintokens_preflight(config, root)
+        except Exception as exc:
+            report("WARN", "SkinTokens", f"preflight failed: {exc}")
+        else:
+            report("OK" if skin["status"] == "ready" else "WARN", "SkinTokens",
+                   skin["status"] + (": " + "; ".join(skin["reasons"]) if skin["reasons"] else ""))
     return 1 if failures else 0

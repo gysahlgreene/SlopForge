@@ -116,7 +116,10 @@ class CharacterNormalizationTests(unittest.TestCase):
                 self.assertEqual(self.character["artifacts"]["normalized_model"]["approval"]["status"], "pending")
 
     def test_success_stays_pending_until_explicit_approval(self):
+        commands = []
+
         def blender(command, **_):
+            commands.append(command)
             request = json.loads(Path(command[-1]).read_text())
             Path(request["output"]).parent.mkdir(parents=True, exist_ok=True)
             Path(request["output"]).write_bytes(b"normalized")
@@ -126,6 +129,8 @@ class CharacterNormalizationTests(unittest.TestCase):
         with patch("slopforge.character_normalization.blender_executable", return_value="blender"), \
              patch("slopforge.character_normalization.subprocess.run", side_effect=blender):
             result = normalize_character(self.root, self.config, self.manifest, "pilot")
+        # A script exception must fail the Blender process, not exit 0 without outputs.
+        self.assertIn(["--python-exit-code", "1"], [commands[0][i:i + 2] for i in range(len(commands[0]))])
         artifact = self.character["artifacts"]["normalized_model"]
         self.assertEqual(artifact["approval"]["status"], "pending")
         self.assertEqual(result["source"]["sha256"], hashlib.sha256(self.source.read_bytes()).hexdigest())

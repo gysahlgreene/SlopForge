@@ -1938,6 +1938,47 @@ avoid: [environment]
                                              {"candidate_execution_ids": ["single-id"]},
                                              child, {"asset_pipeline": {"defaults": {"image_candidates": 1}}})
         self.assertTrue(decision["reusable"])
+
+    def test_prop_child_reuse_with_variation_and_unknown_prompt_is_rejected_not_raised(self):
+        from slopforge.pipelines.model import prop_child_reuse_decision
+
+        path = self.root / "concept.png"
+        path.write_bytes(b"concept")
+        artifact = {"id": "c:1", "type": "image.concept", "path": "concept.png",
+                    "sha256": file_sha256(path), "stage": "concept_generation",
+                    "attempt": 1, "derived_from": []}
+        variation = {"finish": "brass"}
+        stage = {"name": "concept_generation", "attempt": 1, "status": "succeeded", "inputs": [],
+                 "settings": {"prompt": "b\nDESIGN VARIATION:\n- finish: brass", "variation": variation, "seed": 1},
+                 "outputs": [artifact]}
+        execution = {"id": "single-id", "status": "succeeded",
+                     "identity_inputs": {"asset_type": "prop", "brief": "b", "generation_prompt": "b",
+                                          "candidate_attempts": [{"seed": 1, "variation": variation}],
+                                          "style": {"name": "default", "version": 1},
+                                          "conditioning": {"strategy": "text_only", "references": []},
+                                          "quality": {"tier": "normal", "settings": {}},
+                                          "workflow": {"identifier": "i.json", "sha256": None,
+                                                       "configured_inputs": {}}},
+                     "stages": [stage]}
+        asset = {"type": "prop", "description": "b",
+                 "candidates": {"items": [{"number": 1, "status": "candidate", "path": "concept.png",
+                                            "execution_id": "single-id", "artifact": artifact}]},
+                 "executions": [execution]}
+        child = {"id": "t", "type": "prop", "description": "b", "generation_prompt": "b",
+                 "variations": [variation],
+                 "requested_style_identity": {"name": "default", "version": 1},
+                 "requested_conditioning": {"strategy": "text_only", "references": []}}
+        config = {"asset_pipeline": {"defaults": {"image_candidates": 1}}}
+        decide = lambda: prop_child_reuse_decision(
+            self.root, asset, {"candidate_execution_ids": ["single-id"]}, child, config)
+        self.assertTrue(decide()["reusable"])
+
+        del child["generation_prompt"]
+        decision = decide()
+        self.assertFalse(decision["reusable"])
+        self.assertIn("prop child requested prompt is unknown", decision["reasons"])
+
+
 class RemainingProcessedMeshMalformedProvenanceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

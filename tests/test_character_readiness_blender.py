@@ -74,6 +74,39 @@ bpy.ops.wm.save_as_mainfile(filepath=str(root/"source.blend"))
             # The saved source bytes are still the only input file; inspection writes only report.json.
             self.assertEqual(hashlib.sha256((root / "source.blend").read_bytes()).hexdigest(), source_hash)
 
+    def test_topology_diagnostics_scale_to_many_open_edges(self):
+        # 6000 separate triangles give 18000 boundary edges; a per-edge scan of every vertex took ~30 s.
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary) / "islands.py"
+            fixture.write_text(f'''import bpy, json, sys, time
+sys.path.insert(0, {str(ROOT / "blender")!r})
+bpy.ops.wm.read_factory_settings(use_empty=True)
+vertices, faces = [], []
+for i in range(6000):
+    x, y = (i % 100) * 2.0, (i // 100) * 2.0
+    vertices += [(x, y, 0), (x + 1, y, 0), (x, y + 1, 0)]
+    faces.append((3 * i, 3 * i + 1, 3 * i + 2))
+mesh = bpy.data.meshes.new("Islands"); mesh.from_pydata(vertices, [], faces); mesh.update()
+obj = bpy.data.objects.new("Islands", mesh); bpy.context.collection.objects.link(obj)
+from inspect_model import topology_diagnostics
+start = time.perf_counter()
+diagnostics = topology_diagnostics(obj, 1e-5)
+elapsed = time.perf_counter() - start
+print("RESULT " + json.dumps({{"elapsed": elapsed, "count": len(diagnostics),
+    "misattributed": sum(not set(item["source_vertex_indices"]) <= {{3 * item["component_index"] + k for k in range(3)}}
+                         for item in diagnostics),
+    "endpoints": [item["endpoint_vertex_indices"] for item in diagnostics[:3]]}}))
+''')
+            completed = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-exit-code", "1",
+                                        "--python", str(fixture)], capture_output=True, text=True, timeout=300)
+            self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+            result = json.loads(next(line for line in completed.stdout.splitlines()
+                                     if line.startswith("RESULT "))[len("RESULT "):])
+            self.assertEqual(result["count"], 18000)
+            self.assertEqual(result["misattributed"], 0)
+            self.assertEqual(sorted(result["endpoints"]), [[[0], [1]], [[0], [2]], [[2], [1]]])
+            self.assertLess(result["elapsed"], 10, result)
+
     def test_rotated_glb_mesh_is_not_reported_as_transform_applied(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -236,6 +269,57 @@ for obj in meshes:
             checked = subprocess.run([BLENDER, "--background", "--python", str(check), "--",
                                       str(root / "normalized.glb")], capture_output=True, text=True)
             self.assertEqual(checked.returncode, 0, checked.stdout[-1000:] + checked.stderr[-1000:])
+
+    def test_normalization_shares_face_budget_sizes_bakes_and_keeps_empty_slots(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "fixture.py"
+            fixture.write_text('''import bpy, sys
+from pathlib import Path
+root = Path(sys.argv[sys.argv.index("--") + 1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+image = bpy.data.images.new("PackedColor", width=48, height=48)
+image.pixels = [0.8, 0.2, 0.1, 1.0] * (48 * 48)
+image.pack()
+material = bpy.data.materials.new("Paint")
+material.use_nodes = True
+node = material.node_tree.nodes.new("ShaderNodeTexImage")
+node.image = image
+bsdf = material.node_tree.nodes.get("Principled BSDF")
+material.node_tree.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
+material.node_tree.links.new(node.outputs["Color"], bsdf.inputs["Roughness"])
+for name, radius, x in (("Body", 1.0, -1.0), ("Head", 0.25, 1.5)):
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, location=(x, 0, 0))
+    obj = bpy.context.object
+    obj.name = name
+    obj.data.materials.append(material)
+    if name == "Body":
+        obj.data.materials.append(None)
+        for polygon in list(obj.data.polygons)[::2]:
+            polygon.material_index = 1
+bpy.ops.object.select_all(action="SELECT")
+bpy.ops.export_scene.gltf(filepath=str(root / "source.glb"), export_format="GLB", use_selection=True)
+''')
+            created = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                                      "--", str(root)], capture_output=True, text=True)
+            self.assertEqual(created.returncode, 0, created.stderr)
+            request = root / "request.json"
+            request.write_text(json.dumps({"source": str(root / "source.glb"), "output": str(root / "normalized.glb"),
+                                           "report": str(root / "report.json"), "face_budget": 4000}))
+            result = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-exit-code", "1",
+                                     "--python", str(ROOT / "blender/normalize_character.py"), "--", str(request)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            report = json.loads((root / "report.json").read_text())
+            parts = {part["source"]: part for part in report["components"]}
+            self.assertEqual(parts["Body"]["source_materials"], ["Paint", None])
+            self.assertEqual(report["channels"]["roughness"], "baked")
+            # One voxel size for the whole character: a quarter-size part gets about 1/16 of the faces.
+            self.assertLess(parts["Head"]["output_faces"] * 4, parts["Body"]["output_faces"], parts)
+            for part in parts.values():
+                for texture in part["textures"].values():
+                    self.assertEqual(Image.open(root / texture).size, (48, 48))
 
     def test_glb_fixtures_report_pass_review_and_fail_without_repairing_meshes(self):
         with tempfile.TemporaryDirectory() as temporary:

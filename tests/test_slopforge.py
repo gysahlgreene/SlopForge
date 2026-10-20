@@ -289,6 +289,24 @@ class SlopForgeTests(unittest.TestCase):
         approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 1)
         self.assertEqual(manifest["assets"]["concept:potion"]["generator"], generated[0]["generator"])
 
+    def test_interrupted_image_run_keeps_earlier_candidates_on_disk(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["concept"]
+        manifest = {"schema_version": 4, "assets": {"concept:potion": new_record("concept", "potion", "Potion", style, {"strategy": "text_only"})}}
+
+        def backend(_prompt, destination, seed, metadata):
+            if destination.name == "candidate_02.png":
+                raise KeyboardInterrupt
+            Image.new("RGB", (16, 16), "red").save(destination)
+
+        with self.assertRaises(KeyboardInterrupt):
+            generate_candidates(self.root, config, recipe, style, "potion", "Potion", 3,
+                                manifest, "concept:potion", backend)
+        saved = load_manifest(self.root / config["asset_pipeline"]["manifest"])
+        items = saved["assets"]["concept:potion"]["candidates"]["items"]
+        self.assertEqual([(item["number"], item["status"]) for item in items], [(1, "candidate"), (2, "failed")])
+
     def test_cli_auto_approval_keeps_first_candidate_provenance(self):
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
             Image.new("RGB", (16, 16), "red").save(destination)
@@ -382,6 +400,12 @@ class SlopForgeTests(unittest.TestCase):
         with patch("sys.argv", argv):
             make_pbr_maps()
         self.assertTrue(any(pixel != (0, 0, 0) for pixel in Image.open(outputs["emission"]).getdata()))
+
+        # Emission keywords match whole words: "led" must not light up "sealed".
+        argv[argv.index("--prompt") + 1] = "sealed blue stone"
+        with patch("sys.argv", argv):
+            make_pbr_maps()
+        self.assertEqual(set(Image.open(outputs["emission"]).getdata()), {(0, 0, 0)})
 
     def test_model_approval_rejects_changed_style_before_processing(self):
         config = load_project(self.root)
@@ -804,6 +828,24 @@ class SlopForgeTests(unittest.TestCase):
         manifest = load_manifest(self.root / "ai/assets/manifest.json")
         self.assertEqual(len(manifest["assets"]["concept:quick"]["candidates"]["items"]), 1)
         self.assertEqual(len(manifest["assets"]["concept:many"]["candidates"]["items"]), 2)
+
+    def test_generate_model_type_uses_image_budget_for_concepts(self):
+        import yaml
+        config_path = self.root / "ai/project.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["asset_pipeline"]["quality_tier"] = "normal"
+        config["asset_pipeline"]["defaults"] = {"image_candidates": 5, "model_candidates": 2}
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+        with patch("slopforge.cli.model.generate", return_value=[]) as generate, redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "relic", "Relic"]), 0)
+        self.assertEqual(generate.call_args.args[6], 5)
+
+    def test_missing_configured_asset_python_stops_with_actionable_error(self):
+        import sys
+        from slopforge.backends.comfyui import python_executable
+        with self.assertRaisesRegex(FileNotFoundError, "asset_python.*SLOPFORGE_PYTHON"):
+            python_executable(self.root, {"asset_pipeline": {"tools": {"asset_python": "missing/python"}}})
+        self.assertEqual(python_executable(self.root, {"asset_pipeline": {"tools": {}}}), sys.executable)
 
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)

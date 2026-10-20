@@ -6,6 +6,7 @@ from pathlib import Path
 
 import bmesh
 import bpy
+from mathutils import Vector
 
 
 def active_only(obj):
@@ -42,11 +43,9 @@ def bake(source, target, image, channel):
     else:
         # Copy materials so temporary emission wiring cannot change the source.
         originals = list(source.data.materials)
-        copies = []
+        copies = [material.copy() if material else None for material in originals]
         try:
-            for material in originals:
-                duplicate = material.copy()
-                copies.append(duplicate)
+            for duplicate in filter(None, copies):
                 tree = duplicate.node_tree
                 principled = next(node for node in tree.nodes if node.type == "BSDF_PRINCIPLED")
                 output = next(node for node in tree.nodes if node.type == "OUTPUT_MATERIAL")
@@ -58,12 +57,13 @@ def bake(source, target, image, channel):
                     emission.inputs["Color"].default_value = (socket.default_value,) * 3 + (1,)
                 tree.links.new(emission.outputs[0], output.inputs["Surface"])
             for index, duplicate in enumerate(copies):
-                source.data.materials[index] = duplicate
+                if duplicate:
+                    source.data.materials[index] = duplicate
             bpy.ops.object.bake(type="EMIT")
         finally:
             for index, material in enumerate(originals):
                 source.data.materials[index] = material
-            for duplicate in copies:
+            for duplicate in filter(None, copies):
                 bpy.data.materials.remove(duplicate)
     image.update()
     if not any(image.pixels[index] > 0.001 for index in range(3, len(image.pixels), 4)):
@@ -91,20 +91,25 @@ def main(request_path):
     channel_results = {key: "absent" for key in ("base_color", "roughness", "metallic", "normal")}
     targets = []
     warnings = []
-    for index, source in enumerate(sources):
+    for source in sources:
         if not source.data.polygons:
             raise ValueError(f"Source component {source.name} has no faces")
         active_only(source)
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    corners = [source.matrix_world @ Vector(corner) for source in sources for corner in source.bound_box]
+    extent = max(max(corner[axis] for corner in corners) - min(corner[axis] for corner in corners)
+                 for axis in range(3))
+    face_budget = request.get("face_budget", 60000)
+    # One voxel size from the combined bounds shares the budget across parts instead of granting each part all of it.
+    # GLB export triangulates remesh quads, so size against half the triangle face budget.
+    voxel_size = max(extent, 0.001) / ((face_budget / 2) ** 0.5) * 1.25
+    for index, source in enumerate(sources):
         target = source.copy()
         target.data = source.data.copy()
         bpy.context.collection.objects.link(target)
         target.name = f"Normalized_{source.name}"
         active_only(target)
-        dimensions = [max(value, 0.001) for value in source.dimensions]
-        face_budget = request.get("face_budget", 60000)
-        # GLB export triangulates remesh quads, so size against half the triangle face budget.
-        target.data.remesh_voxel_size = max(dimensions) / ((face_budget / 2) ** 0.5) * 1.25
+        target.data.remesh_voxel_size = voxel_size
         bpy.ops.object.voxel_remesh()
         mesh = bmesh.new()
         mesh.from_mesh(target.data)
@@ -129,7 +134,7 @@ def main(request_path):
             face_counts[polygon.material_index] = face_counts.get(polygon.material_index, 0) + 1
         component = {"source": source.name, "output": target.name,
                      "source_vertices": len(source.data.vertices), "source_faces": len(source.data.polygons),
-                     "source_materials": [mat.name for mat in source.data.materials],
+                     "source_materials": [mat.name if mat else None for mat in source.data.materials],
                      "source_material_assignments": [
                          {"slot": slot, "material": source.data.materials[slot].name
                           if slot < len(source.data.materials) and source.data.materials[slot] else None,
@@ -137,10 +142,13 @@ def main(request_path):
                          for slot, count in sorted(face_counts.items())],
                      "output_vertices": len(target.data.vertices), "output_faces": len(target.data.polygons),
                      "textures": {}}
+        source_images = [node.image for mat in source.data.materials if mat and mat.use_nodes
+                         for node in mat.node_tree.nodes if node.type == "TEX_IMAGE" and node.image]
+        resolution = max((max(image.size) for image in source_images), default=0) or 1024
         for channel in channel_results:
             if channel != "base_color" and not has_map(source, channel):
                 continue
-            image = bpy.data.images.new(f"{target.name}_{channel}", width=256, height=256, alpha=True)
+            image = bpy.data.images.new(f"{target.name}_{channel}", width=resolution, height=resolution, alpha=True)
             if channel != "base_color":
                 image.colorspace_settings.name = "Non-Color"
             texture = material.node_tree.nodes.new("ShaderNodeTexImage")

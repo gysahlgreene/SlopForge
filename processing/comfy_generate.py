@@ -180,8 +180,9 @@ def main():
         sys.exit(1)
 
     extensions = (".png", ".jpg", ".jpeg", ".webp")
+    # Preview nodes return "temp" images; only a SaveImage result is the generated asset.
     outputs = [item for item in client.list_outputs(history)
-               if item["filename"].lower().endswith(extensions)]
+               if item["type"] == "output" and item["filename"].lower().endswith(extensions)]
 
     if not outputs:
         print("No image outputs found in ComfyUI output.", file=sys.stderr)

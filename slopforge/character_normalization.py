@@ -97,7 +97,7 @@ def normalize_character(project_root, config, manifest, character_selector, *, s
             request.write_text(json.dumps({"source": str(source), "output": str(output),
                                            "report": str(raw_report),
                                            "face_budget": config["asset_pipeline"].get("model_budgets", {}).get("character_faces", 60000)}))
-            subprocess.run([blender_executable(config, root), "--background", "--factory-startup",
+            subprocess.run([blender_executable(config, root), "--background", "--factory-startup", "--python-exit-code", "1",
                             "--python", str(tool_root() / "blender/normalize_character.py"),
                             "--", str(request)], check=True)
             if not output.is_file() or not output.stat().st_size or not raw_report.is_file():

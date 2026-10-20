@@ -846,8 +846,8 @@ def _run(args):
         print(prompt_text)
         return 0
 
-    count_key = "image_candidates" if recipe["pipeline"] == "image" else "model_candidates"
-    count = args.count or pipeline["defaults"][count_key]
+    # Model types generate concept images here; model_candidates bounds mesh attempts at approval.
+    count = args.count or pipeline["defaults"]["image_candidates"]
     key = _asset_key(manifest, asset_type, args.name)
     if key in manifest["assets"]:
         record = manifest["assets"][key]

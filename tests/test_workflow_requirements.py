@@ -230,6 +230,18 @@ class WorkflowRequirementsTests(unittest.TestCase):
         self.assertIn("FAIL Model workflow model choices", output.getvalue())
         self.assertIn("hunyuan3d-dit-v2_fp16.safetensors", output.getvalue())
 
+    def test_doctor_checks_character_model_workflow_and_survives_skintokens_errors(self):
+        root, output = self.make_project_with_override()
+        config = root / "ai/project.yaml"
+        config.write_text(config.read_text().replace("{image: sample.json}",
+                                                     "{image: sample.json, character_model: sample.json}"))
+        with redirect_stdout(output), patch("slopforge.doctor.ComfyUIClient.health", side_effect=OSError("offline")), \
+                patch("slopforge.character_rigging.skintokens_preflight", side_effect=RuntimeError("broken checkout")):
+            result = run_doctor(root)
+        self.assertEqual(result, 0, output.getvalue())
+        self.assertIn("Character model workflow requirements", output.getvalue())
+        self.assertIn("WARN SkinTokens — preflight failed: broken checkout", output.getvalue())
+
     def make_project_with_override(self):
         root = Path(self.temp.name) / "project"
         (root / "Assets").mkdir(parents=True)

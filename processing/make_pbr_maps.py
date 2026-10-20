@@ -28,11 +28,6 @@ EMISSION_WORDS = {"emissive", "emission", "glowing", "glow", "luminous", "led"}
 NONMETAL_WORDS = (SMOOTH_WORDS | ROUGH_WORDS) - METAL_WORDS
 
 
-def contains_any(text, words):
-    text = text.lower()
-    return any(word in text for word in words)
-
-
 def first_material_word(text, words):
     matches = [(match.start(), word) for word in words
                if (match := re.search(rf"\b{re.escape(word)}\b", text))]
@@ -132,7 +127,7 @@ def main():
 
     # ---------- EMISSION ----------
 
-    if contains_any(prompt, EMISSION_WORDS):
+    if first_material_word(prompt, EMISSION_WORDS)[0] is not None:
         hsv = np.asarray(image.convert("HSV")).astype(np.float32)
         saturation = hsv[:, :, 1] / 255.0
         value = hsv[:, :, 2] / 255.0
