@@ -48,6 +48,14 @@ asset_pipeline:
         model: pixal3d_image_to_model_h100_api.json
         character_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
+    # h100_multiview: props condition Pixal3D on generated front, side and back views of the
+    # approved concept instead of guessing unseen sides from it (see docs/WORKFLOWS.md).
+    h100_multiview:
+      workflows:
+        model: pixal3d_multiview_image_to_model_h100_api.json
+        views: image_views_qwen_edit_api.json
+        character_image: image_character_pose_api.json
+        character_model: trellis2_image_to_model_h100_character_api.json
 
   # Quality is independent of compute_profile and COMFYUI_URL.
   quality_tier: final
@@ -73,6 +81,9 @@ asset_pipeline:
             crop: {pad_factor: 1.1}
           pixal3d_image_to_model_h100_api.json:
             crop: {pad_factor: 1.1}
+          pixal3d_multiview_image_to_model_h100_api.json:
+            shape_upsample_stage: {target_resolution: 1536}
+            maps: {texture_size: 4096}
       # Optionally map workflow basenames to API node/input overrides.
       # workflow_inputs:
       #   image:

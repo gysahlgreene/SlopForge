@@ -1,0 +1,97 @@
+schema_version: 1
+id: image.views.qwen_edit
+version: 1
+capabilities:
+- image_to_views
+workflow_sha256: 63ae8f991e7e7bbe8340f9cf851fd5fc21c9a45038c6fac5fc945f0db94509a7
+nodes:
+- class: CFGNorm
+  source: ComfyUI core
+  revision: unknown
+- class: CLIPLoader
+  source: ComfyUI core
+  revision: unknown
+- class: FluxKontextImageScale
+  source: ComfyUI core
+  revision: unknown
+- class: FluxKontextMultiReferenceLatentMethod
+  source: ComfyUI core
+  revision: unknown
+- class: KSampler
+  source: ComfyUI core
+  revision: unknown
+- class: LoadImage
+  source: ComfyUI core
+  revision: unknown
+- class: LoraLoaderModelOnly
+  source: ComfyUI core
+  revision: unknown
+- class: ModelSamplingAuraFlow
+  source: ComfyUI core
+  revision: unknown
+- class: SaveImage
+  source: ComfyUI core
+  revision: unknown
+- class: TextEncodeQwenImageEditPlus
+  source: ComfyUI core
+  revision: unknown
+- class: UNETLoader
+  source: ComfyUI core
+  revision: unknown
+- class: VAEDecode
+  source: ComfyUI core
+  revision: unknown
+- class: VAEEncode
+  source: ComfyUI core
+  revision: unknown
+- class: VAELoader
+  source: ComfyUI core
+  revision: unknown
+models:
+- name: qwen-image-edit-2511-multiple-angles-lora.safetensors
+  source: https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA
+  license: apache-2.0
+  license_source: https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA
+  sha256: 42426ded4e25fd22879d9e198b857556445ef4ca56e8da3246d0345155bb6765
+  install_path: models/loras
+- name: qwen_2.5_vl_7b_fp8_scaled.safetensors
+  source: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/tree/main/split_files/text_encoders
+  license: apache-2.0
+  license_source: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI
+  sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4
+  install_path: models/text_encoders
+- name: qwen_image_edit_2511_fp8mixed.safetensors
+  source: https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/tree/main/split_files/diffusion_models
+  license: apache-2.0
+  license_source: https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI
+  sha256: c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e
+  install_path: models/diffusion_models
+- name: qwen_image_vae.safetensors
+  source: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/tree/main/split_files/vae
+  license: apache-2.0
+  license_source: https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI
+  sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
+  install_path: models/vae
+inputs:
+- name: image
+  type: image
+- name: prompt
+  type: text
+- name: seed
+  type: integer
+outputs:
+- name: view
+  type: image/png
+profiles:
+- h100_multiview
+estimated_resource_class: large_gpu
+tested_on:
+- profile: h100_multiview
+  backend: comfyui
+  date: '2026-10-20'
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms for the exact installed weights.
+limitations:
+- Node revisions are not exposed by the ComfyUI API and remain unverified.
+- 'Generated views follow the brief and concept but are not exact renders: side views can drift in depth between
+  left and right, and hidden details are still the image model''s design; review them before trusting the mesh.'
