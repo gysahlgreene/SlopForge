@@ -64,9 +64,11 @@ result against that declaration before anyone reviews it.
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
-   every channel at least 150 and at least 1.3 times the map's median, channels within 25 of each other).
+   every channel at least 150 and at least 1.3 times the map's median, capped at 225 so a paper lampshade that
+   is most of the map is still found; channels within 25 of each other).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. A candidate
-   whose base color has no matching region fails with `emitter_missing`, a retryable quality code, so the next
+   whose base color is missing any one declared emitter fails with `emitter_missing` (`emissive_fraction` is the
+   smallest declared emitter's share of the map, so a found lens cannot hide missing panels), a retryable quality code, so the next
    mesh seed is tried within the tier's attempt budget. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
@@ -119,6 +121,8 @@ and none are declared yet.
   - on mottled panels the fleck filter drops some panes, so a few panes can stay dark;
   - a body as pale as its emitter (pale marble, white cloth or plate armour) cannot be separated
     by colour, so every seed fails `emitter_missing`; declare the emitter's colour instead;
+  - the other way round, a large pale near-neutral part that is not an emitter (a light stone cap,
+    white trim) on a darker body can glow when the brief declares an undeclared-colour emitter;
   - removing "light box" and "unlit in daylight" from the brief made no clear difference (3 of 12
     concepts lit or partly lit either way).
 - **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the

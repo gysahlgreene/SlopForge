@@ -1642,6 +1642,9 @@ def unity_preview(project_root, config, manifest, key, number, *, asset_type="pr
         build_unity_material(root, fbx, material, maps, render=render)
     except (Exception, KeyboardInterrupt) as exc:
         record["error"] = str(exc) or type(exc).__name__
+        # Unreferenced copies under Assets/ would be imported again on the next Unity start.
+        shutil.rmtree(directory, ignore_errors=True)
+        directory.with_name(directory.name + ".meta").unlink(missing_ok=True)
         raise
     record.update({"status": "imported", "fbx": fbx.relative_to(root).as_posix(),
                    "material": material.relative_to(root).as_posix(),

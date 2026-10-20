@@ -252,6 +252,31 @@ class UnityPreviewTests(unittest.TestCase):
             outputs[name] = paths[name].relative_to(root).as_posix()
         return {"number": 1, "status": "candidate", "outputs": outputs}
 
+    def test_failed_preview_removes_its_copies_from_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            (root / "ProjectSettings").mkdir()
+            (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+            init_project(root)
+            config = load_project(root)
+            candidate = self._candidate(root, config)
+            manifest = {"assets": {"prop:relic": {"name": "relic", "material_candidates": {"items": [candidate]}}}}
+            copied = []
+
+            def unity(_root, fbx, material, maps, render=None):
+                copied.append(fbx.parent)
+                fbx.parent.with_name(fbx.parent.name + ".meta").write_text("Unity folder meta")
+                raise RuntimeError("Unsupported render pipeline")
+
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=unity):
+                with self.assertRaisesRegex(RuntimeError, "Unsupported render pipeline"):
+                    model.unity_preview(root, config, manifest, "prop:relic", 1)
+            self.assertFalse(copied[0].exists())
+            self.assertFalse(copied[0].with_name(copied[0].name + ".meta").exists())
+            self.assertEqual(candidate["unity_preview"]["status"], "failed")
+
     def test_preview_imports_a_copy_and_leaves_approval_untouched(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
