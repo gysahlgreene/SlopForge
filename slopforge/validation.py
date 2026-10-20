@@ -215,3 +215,21 @@ def apply_concept_silhouette(validation, projection, limit=MAX_CONCEPT_ASPECT_ER
         validation["failure_codes"] = [*validation.get("failure_codes", []), "concept_silhouette"]
         validation["status"] = "failed"
     return validation
+
+
+MIN_EMISSIVE_FRACTION = 0.0001  # the smallest fraction the report records (4 decimals): any emitter found
+
+
+def apply_declared_emitter(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
+    """Fail a candidate whose base color has no region for the brief's declared emitter (retryable quality code)."""
+    measured = round(fraction, 4)
+    validation.setdefault("measured", {})["emissive_fraction"] = measured
+    validation.setdefault("limits", {})["min_emissive_fraction"] = minimum
+    if measured < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            "brief declares an emissive region but no matching region was found in base color, so another seed "
+            "is tried; if every seed misses it, choose a concept that shows the region as a flat opaque surface "
+            "or declare its colour with emissive#rrggbb"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "emitter_missing"]
+        validation["status"] = "failed"
+    return validation

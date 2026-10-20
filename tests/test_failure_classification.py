@@ -395,6 +395,16 @@ class TestCandidateQualityRejection(unittest.TestCase):
         self.assertNotEqual(report(0.03)["status"], "failed")
         self.assertNotIn("concept_silhouette", report(0.03).get("failure_codes", []))
 
+    def test_missing_declared_emitter_is_a_retryable_quality_rejection_only_below_its_minimum(self):
+        from slopforge.validation import apply_declared_emitter
+        missing = apply_declared_emitter(_quality_report(1, 50) | {"status": "passed", "errors": [],
+                                                                  "failure_codes": []}, 0.0)
+        self.assertEqual(missing["failure_codes"], ["emitter_missing"])
+        self.assertTrue(candidate_quality_rejection(missing))
+        found = json.loads(json.dumps(missing))
+        found["measured"]["emissive_fraction"] = 0.0065  # a report whose code contradicts its measurement
+        self.assertFalse(candidate_quality_rejection(found))
+
     def test_skipped_concept_projection_is_recorded_as_a_warning(self):
         from slopforge.validation import apply_concept_silhouette
 

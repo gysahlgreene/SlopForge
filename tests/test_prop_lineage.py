@@ -283,6 +283,31 @@ avoid: [environment]
             self.assertIn("concept-candidate:2", parents)
             self.assertTrue(any(parent.startswith("mesh:") for parent in parents))
 
+    def test_native_candidate_without_its_declared_emitter_tries_the_next_mesh_seed(self):
+        from slopforge.validation import apply_declared_emitter
+        self._concept_candidates()
+        seeds = []
+        def generator(_root, _config, _image, _name, dest, metadata, seed):
+            seeds.append(seed)
+            dest.write_bytes(f"textured mesh {seed}".encode())
+            metadata.write_text(json.dumps({"workflow": "trellis", "seed": seed, "textured": True,
+                "textures": {name: f"native_material/{name}.png" for name in
+                             ("basecolor", "normal", "roughness", "metallic")}}))
+        def native(root, config, _context, asset_type, asset, number, mesh_info, lineage=None):
+            result = self._materializer(root, config, asset_type, asset, number, "mesh PBR", Path("unused"), lineage)
+            validation = apply_declared_emitter(self._topology_rejection() | {
+                "status": "passed", "errors": [], "failure_codes": []}, 0.0 if number == 1 else 0.0065)
+            failed = validation["status"] == "failed"
+            result.update(kind="mesh_pbr", status="failed" if failed else "candidate", validation=validation)
+            return result
+        self._approve(generator, native_materializer=native)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual(len(set(seeds)), 2)
+        self.assertEqual([(item["number"], item["status"]) for item in record["material_candidates"]["items"]],
+                         [(1, "failed"), (2, "candidate")])
+        decision = record["executions"][-1]["retry_decisions"][0]
+        self.assertEqual((decision["category"], decision["action"]), ("candidate_quality", "next_candidate"))
+
     def test_native_assembly_failure_is_recorded_on_the_assembly_stage(self):
         from slopforge.pipelines.model import _lineage_start
         self._concept_candidates()

@@ -491,6 +491,27 @@ class DeclaredMaterialTests(unittest.TestCase):
             Image.new("RGB", (256, 256), (186, 184, 180)).save(root / "pale.png")
             self.assertEqual(derive_emission(root / "pale.png", root / "pale_emission.png"), 0)
 
+    def test_declared_emitter_missing_from_base_color_is_a_retryable_candidate_failure(self):
+        from slopforge.failures import should_retry
+        materials = [{"region": "body", "class": "nonmetal", "description": ""},
+                     {"region": "panels", "class": "emissive", "description": ""}]
+        with tempfile.TemporaryDirectory() as temporary:
+            # 2026-10-20 C3: windows rebuilt as slats with warm slivers of paper, so no pale panel was baked.
+            base = Image.new("RGB", (256, 256), (120, 120, 118))
+            base.paste((185, 164, 151), (40, 40, 120, 140))
+            candidate = self._candidate(Path(temporary), materials, 0, base)
+        self.assertEqual(candidate["status"], "failed")
+        self.assertEqual(candidate["validation"]["failure_codes"], ["emitter_missing"])
+        self.assertEqual(candidate["validation"]["measured"]["emissive_fraction"], 0)
+        self.assertEqual(candidate["failure"]["category"], "candidate_quality")
+        self.assertTrue(should_retry(candidate["failure"], used=1, limit=3))
+        self.assertFalse(should_retry(candidate["failure"], used=3, limit=3))
+        with tempfile.TemporaryDirectory() as temporary:
+            base.paste((230, 230, 228), (40, 40, 120, 140))
+            found = self._candidate(Path(temporary), materials, 0, base)
+        self.assertEqual(found["status"], "candidate")
+        self.assertNotIn("emitter_missing", found["validation"].get("failure_codes", []))
+
     def test_unity_material_marks_itself_emissive_so_urp_keeps_the_emission_keyword(self):
         from slopforge.unity_material import build_unity_material
         with tempfile.TemporaryDirectory() as temporary:
@@ -528,7 +549,8 @@ class DeclaredMaterialTests(unittest.TestCase):
         rules = reconstruction_rules({"pipeline": "model"}, materials)
         self.assertIn("no dramatic shadows or baked highlights", rules)
         self.assertIn("- body: weathered granite; matte non-metallic surface", rules)
-        self.assertIn("- windows: shown switched off as an opaque solid surface", rules)
+        self.assertIn("- windows: a solid opaque surface with a dull matte finish", rules)
+        self.assertNotRegex(rules.lower(), r"glow|lit\b|switched|light source")  # glow words drew it lit
         self.assertEqual(reconstruction_rules({"pipeline": "image"}, materials), "")
         self.assertIn("clear gap between each hand and the hips",
                       reconstruction_rules({"pipeline": "model", "prompt_mode": "character"}))
