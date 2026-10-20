@@ -1040,27 +1040,30 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         map_settings = {"map_prompt": prompt,
                         "tool_sha256": file_sha256(tool_root() / "processing/make_pbr_maps.py")}
         map_attempt = previous_attempts.get("material_map_acquisition", previous["number"]) if previous else number
+        map_keys = ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")
+        # The swatch bake overwrites the maps it is given, so the map stage's tiles live apart from them.
+        tiles = {key: paths["directory"] / "Tiles" / paths[key].name for key in map_keys}
         map_refs = _adopt_stage(lineage, "material_map_acquisition", map_attempt, surface_ref, map_settings)
         if map_refs is not None:
             candidate["stage_attempts"]["material_map_acquisition"] = map_attempt
             candidate["artifacts"].extend(map_refs)
-            for key, artifact_type in _MATERIAL_ARTIFACT_TYPES.items():
-                reference = next((item for item in map_refs if item["type"] == artifact_type), None)
+            for key in map_keys:
+                reference = next((item for item in map_refs if item["type"] == _MATERIAL_ARTIFACT_TYPES[key]), None)
                 if reference:
-                    paths[key] = root / reference["path"]
+                    tiles[key] = root / reference["path"]
         else:
             _lineage_start(lineage, "material_map_acquisition", number, (), map_settings, parents=surface_ref)
             map_started = bool(lineage)
+            tiles["basecolor"].parent.mkdir(parents=True, exist_ok=True)
             subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["surface"]),
                             "--prompt", prompt,
-                            "--normal", str(paths["normal"]), "--roughness", str(paths["roughness"]),
-                            "--metallic", str(paths["metallic"]), "--emission", str(paths["emission"])], check=True)
-            shutil.copy2(paths["surface"], paths["basecolor"])
-            make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
+                            "--normal", str(tiles["normal"]), "--roughness", str(tiles["roughness"]),
+                            "--metallic", str(tiles["metallic"]), "--emission", str(tiles["emission"])], check=True)
+            shutil.copy2(paths["surface"], tiles["basecolor"])
+            make_metallic_gloss(tiles["metallic"], tiles["roughness"], tiles["metallic_gloss"])
         if map_started:
             map_refs = _lineage_finish(lineage, "material_map_acquisition", number,
-                [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
-                 ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")])
+                [(tiles[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in map_keys])
             candidate["artifacts"].extend(map_refs)
             map_started = False
             candidate["stage_attempts"]["material_map_acquisition"] = number
@@ -1078,7 +1081,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             candidate["stage_attempts"]["material_assembly_export"] = assembly_attempt
             candidate["outputs"] = copy.deepcopy((previous or {}).get("outputs", {}))
             for key, artifact_type in _MATERIAL_ARTIFACT_TYPES.items():
-                reference = next((item for item in [*material_refs, *map_refs, *assembly_refs]
+                reference = next((item for item in [*assembly_refs, *map_refs, *material_refs]
                                   if item["type"] == artifact_type), None)
                 if reference:
                     candidate["outputs"][key] = reference["path"]
@@ -1093,6 +1096,9 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         _lineage_start(lineage, "material_assembly_export", number, (),
                        assembly_settings, parents=assembly_inputs)
         assembly_started = bool(lineage)
+        for key in map_keys:
+            if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
+                shutil.copy2(tiles[key], paths[key])
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
                       face_budget, surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
@@ -1100,6 +1106,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
                       target_size=asset.get("target_size"))
+        make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1118,7 +1125,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         if assembly_started:
             assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
                                 ("fbx", "blend", "preview_front", "preview_side", "preview_rear",
-                                 "preview_three_quarter", "validation")]
+                                 "preview_three_quarter", "validation", *map_keys)]
             if mesh_path.is_file():
                 assembly_outputs.append((mesh_path, "mesh.processed"))
             candidate["artifacts"].extend(_lineage_finish(lineage, "material_assembly_export", number,
@@ -1413,6 +1420,11 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                       if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Material candidate {number} is not valid for {asset['name']}")
+    generator = asset.setdefault("generator", {})
+    if not isinstance(generator.setdefault("workflow", {}), dict) or not isinstance(generator.setdefault("seed", {}), dict):
+        # `generate` replaces the record with concept-stage provenance; this material belongs to the earlier mesh.
+        raise ValueError(f"Concept candidates for {asset['name']} were regenerated after material {number} was made; "
+                         "approve a concept again before publishing a material")
     try:
         unity_cli(root)
     except StageFailure as exc:
@@ -1494,6 +1506,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
+            outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
+            published = _published_artifacts(root, paths, candidate, execution["id"])
         except (Exception, KeyboardInterrupt) as exc:
             rollback_failure = None
             try:
@@ -1520,13 +1534,21 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     candidate["approval"] = "approved"
     asset["material_candidates"]["selected"] = number
     asset["material_prompt"] = candidate["prompt"]
-    asset["generator"]["material"] = candidate.get("generator")
-    asset["generator"]["workflow"]["material"] = (candidate.get("generator") or {}).get("workflow")
-    asset["generator"]["seed"]["material"] = candidate.get("seed")
-    asset["outputs"] = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
+    generator["material"] = candidate.get("generator")
+    generator["workflow"]["material"] = (candidate.get("generator") or {}).get("workflow")
+    generator["seed"]["material"] = candidate.get("seed")
+    asset["outputs"] = outputs
     asset["validation"] = validation
     asset["status"] = "ready"
     asset["updated_at"] = datetime.now(timezone.utc).isoformat()
+    finish_stage(publication_stage, "succeeded", published)
+    finish_execution(execution, "succeeded")
+    asset["published_artifacts"] = published
+    save_manifest(root / pipeline["manifest"], manifest)
+    return validation
+
+
+def _published_artifacts(root, paths, candidate, execution_id):
     candidate_refs = candidate.get("artifacts", [])
     mesh_ref = next((item for item in candidate.get("upstream_artifacts", []) if item["type"].startswith("mesh.")), None)
     by_type = {}
@@ -1549,13 +1571,9 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
         if key_name == "validation":
             parents = candidate_refs
         if path.is_file():
-            published.append(_artifact_ref(root, path, f"{execution['id']}:published:{key_name}", kind,
+            published.append(_artifact_ref(root, path, f"{execution_id}:published:{key_name}", kind,
                                            "final_publication", 1, parents))
-    finish_stage(publication_stage, "succeeded", published)
-    finish_execution(execution, "succeeded")
-    asset["published_artifacts"] = published
-    save_manifest(root / pipeline["manifest"], manifest)
-    return validation
+    return published
 
 
 def model_route(config, asset_type):
@@ -1709,6 +1727,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     _persist_reload(root, pipeline, manifest)
     asset = manifest["assets"][key]
     execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
+    candidate = next(item for item in asset["candidates"]["items"] if item["number"] == number)
     try:
         paths["concept"].parent.mkdir(parents=True, exist_ok=True)
         paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
@@ -1826,7 +1845,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             attempt_plan = [(next_attempt + offset, offset) for offset in range(attempts)]
         fresh_attempt_offset = 0
         budget_used = 0
-        accounting_execution_id = prior["id"] if prior else execution["id"]
+        accounting_execution_id = execution["id"]  # the parent chain reaches the prior run
         for planned_attempt, offset in attempt_plan:
             attempt_number = planned_attempt if planned_attempt is not None else fresh_mesh_attempt + fresh_attempt_offset
             mesh_seed = mesh_seeds[offset]
@@ -2053,7 +2072,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     asset = manifest["assets"][key]
                     execution, _ = _execution_stage(asset, context["execution_id"],
                         "mesh_workflow_execution", attempt_number, stage_id=mesh_stage_id)
-                    local_stage_ids = set(context.get("_stage_handles", {}).values())
+                    local_stage_ids = {*context.get("_stage_handles", {}).values(),
+                                       *lineage.get("_stage_handles", {}).values()}
                     running = [stage for stage in execution.get("stages", [])
                                if stage.get("status") == "running" and stage.get("id") in local_stage_ids]
                     if running:
@@ -2151,6 +2171,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         previous = asset.get("material_candidates", {}).get("items", [])
         asset["material_candidates"] = {"items": previous + material_candidates, "selected": None}
         if not viable:
+            # Keep the failed candidates: the error handler reloads the manifest from disk.
+            _persist_reload(root, pipeline, manifest)
+            asset = manifest["assets"][key]
             failures = [error for item in material_candidates for error in item.get("validation", {}).get("errors", [])]
             attempted = max(budget_used, sum(item.get("execution_id") == execution["id"]
                                              for item in attempt_reports))

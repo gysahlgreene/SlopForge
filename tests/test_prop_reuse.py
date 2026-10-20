@@ -13,6 +13,7 @@ from slopforge.pipelines.model import approve, material_candidate_paths
 from slopforge.provenance import file_sha256
 from slopforge.style import load_style
 from slopforge.taxonomy import load_taxonomy
+from slopforge.validation import validate_model_outputs
 
 from slopforge.pipelines.reuse import artifact_integrity, earliest_stale_stage, stage_reuse_decision
 
@@ -1205,6 +1206,7 @@ avoid: [environment]
         self.fail_once = None
         self.fail_times = {}
         self.interrupt_once = None
+        self.validation = {"status": "passed", "errors": [], "warnings": [], "measured": {}}
 
     def _candidate(self, number, path):
         return {"number": number, "status": "candidate", "path": path.relative_to(self.root).as_posix(),
@@ -1379,8 +1381,11 @@ avoid: [environment]
         Image.new("RGB", (32, 32), "blue").save(destination)
         metadata.write_text(json.dumps({"workflow": "image.json", "seed": seed}))
 
-    def _assembly(self, _root, _config, _source, fbx, blend, _textures, _budget, **kwargs):
+    def _assembly(self, _root, _config, _source, fbx, blend, textures, _budget, **kwargs):
         self._maybe_fail("assembly")
+        if kwargs.get("surface_source"):  # like prepare_model, the swatch bake overwrites the maps it is given
+            for path in textures:
+                Image.new("RGB", (32, 32), (90, 90, 90)).save(path)
         for path in (fbx, blend, kwargs["stage_mesh"]):
             path.write_bytes(b"assembled")
         kwargs["preview_dir"].mkdir(parents=True, exist_ok=True)
@@ -1396,7 +1401,7 @@ avoid: [environment]
             stack.enter_context(patch("slopforge.pipelines.model.blender_executable", return_value="blender"))
             stack.enter_context(patch("slopforge.pipelines.model.inspect_model", return_value={}))
             stack.enter_context(patch("slopforge.pipelines.model.validate_model_outputs",
-                                      return_value={"status": "passed", "errors": [], "warnings": [], "measured": {}}))
+                                      return_value=self.validation))
             return approve(self.root, self.config, self.asset_type, self.style, self.manifest,
                            "prop:relay", 1, resume=resume, material_prompt=material_prompt,
                            material_count=1, quality_tier="normal")
@@ -1414,6 +1419,22 @@ avoid: [environment]
         self._approve(resume=True)
         self.assertEqual(self.calls, before)
         self.assertTrue(self.asset["executions"][-1]["reuse_decisions"])
+
+    def test_swatch_bake_keeps_map_evidence_and_packs_metallic_gloss_from_baked_maps(self):
+        from slopforge.unity_material import make_metallic_gloss
+        self._approve()
+        candidate = self.asset["material_candidates"]["items"][-1]
+        baked = {key: self.root / candidate["outputs"][key] for key in ("metallic", "roughness", "metallic_gloss")}
+        expected = self.root / "expected_metallic_gloss.png"
+        make_metallic_gloss(baked["metallic"], baked["roughness"], expected)
+        self.assertEqual(Image.open(baked["metallic_gloss"]).tobytes(), Image.open(expected).tobytes())
+        stages = {stage["name"]: stage for stage in self.asset["executions"][-1]["stages"]}
+        for name in ("material_map_acquisition", "material_assembly_export"):
+            self.assertTrue(all(artifact_integrity(self.root, item)[0] for item in stages[name]["outputs"]), name)
+        self.assertEqual(
+            {item["path"] for item in stages["material_assembly_export"]["outputs"] if item["type"].startswith("texture.")},
+            {candidate["outputs"][key] for key in ("basecolor", "normal", "roughness", "metallic", "metallic_gloss",
+                                                   "emission")})
 
     def test_material_map_acquisition_records_all_six_producer_outputs(self):
         self._approve()
@@ -1538,6 +1559,28 @@ avoid: [environment]
         self.assertEqual(self.calls["mesh"], 2)
         self._approve(resume=True)
         self.assertEqual(self.calls["mesh"], 2)
+
+    def test_resumed_quality_rejections_count_attempts_made_in_the_resumed_run(self):
+        self.config["asset_pipeline"]["defaults"]["model_candidates"] = 3
+        self.config["_quality_base_pipeline"]["defaults"]["model_candidates"] = 3
+        self.fail_once = "material"
+        with self.assertRaises(ValueError):
+            self._approve()
+        self.validation = validate_model_outputs({}, inspection={
+            "status": "passed", "errors": [], "warnings": [],
+            "measured": {"mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1],
+                         "uv_layers": 1, "material_count": 1, "image_texture_count": 4,
+                         "component_count": 60, "nonmanifold_edge_count": 5,
+                         "transforms_applied": True, "missing_textures": []}},
+            max_components=50, max_nonmanifold_edges=None, max_boundary_edges=None)
+        with self.assertRaisesRegex(ValueError, "No qualified model"):
+            self._approve(resume=True)
+        decisions = self.asset["executions"][-1]["retry_decisions"]
+        self.assertEqual([(item["used"], item["action"]) for item in decisions],
+                         [(1, "next_candidate"), (2, "next_candidate"), (3, "exhausted")])
+        self.assertEqual(self.calls["mesh"], 3)
+        with self.assertRaisesRegex(ValueError, "No qualified model"):
+            self._approve(resume=True)
 
     def test_prior_succeeded_status_does_not_override_fingerprint_mismatch(self):
         self._approve()

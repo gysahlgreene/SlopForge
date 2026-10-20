@@ -35,7 +35,7 @@ class TextureApprovalRollbackTests(unittest.TestCase):
             self.assertEqual(asset.get("executions", []), [])
 
     def test_failed_publication_preserves_previous_outputs_and_source(self):
-        for previously_approved, failure_stage in product((False, True), ("copy", "material", "interrupt", "backup")):
+        for previously_approved, failure_stage in product((False, True), ("copy", "material", "interrupt", "backup", "lineage")):
             with self.subTest(previously_approved=previously_approved, failure_stage=failure_stage), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 (root / 'Assets').mkdir()
@@ -97,10 +97,18 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                         raise RuntimeError("publication backup failed")
                     return copy2(source_path, destination, *args, **kwargs)
 
+                artifact_ref = model._artifact_ref
+                def fail_lineage(*args, **kwargs):
+                    if failure_stage == "lineage":
+                        raise RuntimeError("publication lineage failed")
+                    return artifact_ref(*args, **kwargs)
+
                 with patch('slopforge.pipelines.model.os.replace', side_effect=fail_copy), \
                         patch('slopforge.pipelines.model.shutil.copy2', side_effect=fail_backup), \
                         patch('slopforge.pipelines.model.unity_cli', return_value='unity'), \
-                        patch('slopforge.pipelines.model.build_unity_material', side_effect=fail_material):
+                        patch('slopforge.pipelines.model._artifact_ref', side_effect=fail_lineage), \
+                        patch('slopforge.pipelines.model.build_unity_material',
+                              side_effect=fail_material if failure_stage != "lineage" else None):
                     with self.assertRaises((RuntimeError, KeyboardInterrupt)):
                         model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
                 self.assertEqual(asset["status"], before_status)
@@ -118,6 +126,18 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                         self.assertEqual(path.read_bytes(), originals[path])
                     else:
                         self.assertFalse(path.exists(), str(path))
+
+    def test_regenerated_concepts_block_publication_before_files_change(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, manifest = PlaceholderNormalGateTests()._setup(root)
+            asset = manifest["assets"]["prop:relic"]
+            asset["generator"] = {"workflow": "image_text2img_api.json"}  # what `generate` leaves behind
+            with patch("slopforge.pipelines.model.unity_cli"):
+                with self.assertRaisesRegex(ValueError, "approve a concept"):
+                    model.approve_texture(root, config, manifest, "prop:relic", 1, allow_placeholder_normal=True)
+            self.assertEqual(asset.get("executions", []), [])
+            self.assertFalse(model.model_paths(root, config, "relic")["fbx"].exists())
 
     def test_backup_rollback_failure_records_terminal_failure(self):
         """When restoring a backup after publication failure fails, the

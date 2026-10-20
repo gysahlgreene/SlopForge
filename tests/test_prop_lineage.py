@@ -144,6 +144,15 @@ avoid: [environment]
         self.assertEqual(record["model_attempts"][-1]["execution_id"], execution["id"])
         self.assertEqual(execution["retry_decisions"][-1]["action"], "next_candidate")
 
+    def test_approved_concept_candidate_is_saved_as_approved(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual(record["candidates"]["selected"], 2)
+        self.assertEqual([item.get("approval") for item in record["candidates"]["items"]], [None, "approved"])
+
     def test_topology_rejections_exhaust_configured_mesh_budget(self):
         self._concept_candidates()
         self.config["asset_pipeline"]["defaults"]["model_candidates"] = 3
@@ -173,6 +182,9 @@ avoid: [environment]
             "assets"]["prop:relay"]["executions"][-1]
         self.assertEqual([item["action"] for item in execution["retry_decisions"]],
                          ["next_candidate", "next_candidate", "exhausted"])
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual([(item["number"], item["status"]) for item in record["material_candidates"]["items"]],
+                         [(1, "failed"), (2, "failed"), (3, "failed")])
 
     def test_conditioning_artifacts_link_to_approved_concept_content(self):
         self._concept_candidates()
@@ -270,6 +282,26 @@ avoid: [environment]
             parents = {item["artifact_id"] for item in artifact["derived_from"]}
             self.assertIn("concept-candidate:2", parents)
             self.assertTrue(any(parent.startswith("mesh:") for parent in parents))
+
+    def test_native_assembly_failure_is_recorded_on_the_assembly_stage(self):
+        from slopforge.pipelines.model import _lineage_start
+        self._concept_candidates()
+        def generator(_root, _config, _image, _name, dest, metadata, seed):
+            dest.write_bytes(b"textured mesh")
+            metadata.write_text(json.dumps({"workflow": "trellis", "seed": seed, "textured": True,
+                "textures": {name: f"native_material/{name}.png" for name in
+                             ("basecolor", "normal", "roughness", "metallic")}}))
+        def native(_root, _config, _context, _asset_type, _asset, number, _mesh_info, lineage=None):
+            _lineage_start(lineage, "material_assembly_export", number, (), {"preserve_uvs": True})
+            raise RuntimeError("blender assembly failed")
+        with self.assertRaisesRegex(ValueError, "No qualified model"):
+            self._approve(generator, native_materializer=native)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        assembly = next(stage for stage in record["executions"][-1]["stages"]
+                        if stage["name"] == "material_assembly_export")
+        self.assertEqual(assembly["status"], "failed")
+        self.assertEqual(assembly["failure"]["stage_id"], assembly["id"])
+        self.assertEqual(record["model_attempts"][-1]["failure"]["stage"], "material_assembly_export")
 
     def test_final_exports_and_previews_link_to_selected_material_candidate(self):
         self._concept_candidates()
