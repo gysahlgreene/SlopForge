@@ -65,6 +65,16 @@ class MeshPBRTests(unittest.TestCase):
 
                     self.assertEqual(reuse, [proven])
 
+    def test_material_identity_binds_prepared_mesh_content_of_bundled_graph(self):
+        graph = json.loads((Path(__file__).resolve().parents[1] / "workflows" /
+                            "trellis2_image_to_model_h100_api.json").read_text())
+        graph["prepared_mesh"]["inputs"]["model_file"] = "3d/prepared.glb"
+        identities = [comfy_generate_3d._workflow_identity(graph, graph, "ai3d/concept.png", "a" * 64,
+                                                           "3d/prepared.glb", digest)
+                      for digest in ("b" * 64, "c" * 64)]
+        self.assertEqual(identities[0][1]["prepared_mesh.model_file"], "b" * 64)
+        self.assertNotEqual(identities[0][0]["effective_sha256"], identities[1][0]["effective_sha256"])
+
     def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -72,7 +82,8 @@ class MeshPBRTests(unittest.TestCase):
             image.write_bytes(b"concept")
             workflow_path = root / "trellis.json"
             workflow_path.write_text(json.dumps({
-                "prepared_mesh": {"class_type": "LoadMesh", "inputs": {"model_file": "old.glb"}},
+                "prepared_mesh": {"class_type": "Load3DAdvanced", "inputs": {"model_file": "none", "viewport_state": {},
+                                                                             "width": 1024, "height": 1024}},
                 "save_raw": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "raw"}},
                 "save": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "final"}},
                 "save_basecolor": {"class_type": "SaveImage", "inputs": {"filename_prefix": "base"}},
@@ -137,6 +148,8 @@ class MeshPBRTests(unittest.TestCase):
             self.assertEqual(saved["provenance"]["model_weights"]["status"], "unavailable")
             self.assertEqual(saved["provenance"]["custom_node_revisions"]["status"], "unavailable")
             self.assertEqual(len(client.queued_facts), 2)
+            prepared_digest = __import__("hashlib").sha256(b"prepared").hexdigest()
+            self.assertEqual(saved["effective_bindings"]["uploaded_inputs"]["prepared_mesh.model_file"], prepared_digest)
             self.assertTrue(all(fact and fact["status"] == "known" and len(fact["value"]) == 64
                                 for fact in client.queued_facts))
             output_digests = {item["path"]: item["sha256"] for item in saved["outputs"]}
