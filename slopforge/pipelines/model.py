@@ -23,7 +23,7 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
-from ..validation import (apply_concept_silhouette, apply_declared_emitter, is_placeholder_normal,
+from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_silhouette, apply_declared_emitter, is_placeholder_normal,
                           measure_material_maps, validate_image, validate_model_outputs)
 
 
@@ -1152,11 +1152,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     shutil.copy2(paths["basecolor"], paths["surface"])
     declared = asset.get("materials") or []
     emissive_fraction = None
-    emissive = [item for item in declared if item.get("class") == "emissive"]
-    if emissive:
-        rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-        targets = {(rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
-                   for item in emissive}
+    targets = set(_emitter_targets(declared).values())
+    if targets:
         emissive_fraction = derive_emission(paths["basecolor"], paths["emission"], sorted(targets, key=str))
     else:
         with Image.open(paths["basecolor"]) as image:
@@ -1321,6 +1318,39 @@ def concept_route(config, asset_type, conditioning):
     return workflows["character_image"], {**conditioning,
                                           "references": [reference] + conditioning["references"],
                                           "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
+
+
+def _emitter_targets(materials):
+    """Declared emissive regions as derive_emission targets: region -> (match_rgb or None for pale, glow_rgb)."""
+    rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
+    return {item["region"]: (rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
+            for item in materials or [] if item.get("class") == "emissive"}
+
+
+def check_emitters_in_concept(materials, cutout):
+    """Stop before mesh inference when a declared emitter is not visible in the approved concept.
+
+    The texture bake follows the concept, so every seed would fail emitter_missing and spend the whole mesh
+    budget (issue #62). The cutout goes onto black first: background removal keeps the backdrop colour under
+    transparent pixels, which the pale-emitter rule would otherwise find.
+    """
+    targets = _emitter_targets(materials)
+    if not targets:
+        return
+    with Image.open(cutout) as image:
+        image = image.convert("RGBA")
+        flat = Image.alpha_composite(Image.new("RGBA", image.size, (0, 0, 0, 255)), image).convert("RGB")
+    with tempfile.TemporaryDirectory() as temporary:
+        source = Path(temporary) / "concept.png"
+        flat.save(source)
+        missing = [region for region, target in targets.items()
+                   if derive_emission(source, Path(temporary) / "emission.png", [target]) < MIN_EMISSIVE_FRACTION]
+    if missing:
+        raise StageFailure(
+            "configuration", f"Declared emissive region(s) {', '.join(missing)} are not visible in the approved concept, "
+            "so the texture bake cannot contain them", operation="emitter_preflight",
+            remedy="check each emissive#rrggbb colour against the concept, or approve a concept that shows the emitter "
+                   "as a flat opaque surface")
 
 
 # Concept canvases (Z-Image buckets). On 2026-10-20 a "taller than wide" crate brief drew 0 of 6 crates taller than
@@ -1978,6 +2008,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             asset, execution["id"], "conditioning_preparation", 1, stage_id=conditioning_id)
 
         workflow = pipeline["workflows"].get("model")
+        if workflow:  # declared emitters only drive the mesh-aware material stage
+            check_emitters_in_concept(asset.get("materials"), paths["cutout"])
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
         material_candidates = []
         viable = []

@@ -69,7 +69,10 @@ result against that declaration before anyone reviews it.
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. A candidate
    whose base color is missing any one declared emitter fails with `emitter_missing` (`emissive_fraction` is the
    smallest declared emitter's share of the map, so a found lens cannot hide missing panels), a retryable quality code, so the next
-   mesh seed is tried within the tier's attempt budget. Without an emissive
+   mesh seed is tried within the tier's attempt budget. Before any mesh inference, `approve` applies the same rule
+   to the approved concept's cutout (flattened onto black) and stops with a `configuration` failure
+   (`emitter_preflight`) when a declared emitter is not visible there, because the bake follows the concept and
+   every seed would miss it. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
    `sealed` or `ledge` does not count. In Unity the Lit material is marked emissive
