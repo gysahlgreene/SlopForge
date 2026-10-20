@@ -484,6 +484,41 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertGreater(max(emission.getpixel((80, 90))), 150)
                 self.assertEqual(emission.getpixel((210, 200)), (0, 0, 0))
 
+    def test_pale_emitter_found_at_trellis_paper_albedo_but_pale_body_does_not_glow(self):
+        from slopforge.unity_material import derive_emission
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # Paper panels as TRELLIS.2 baked them in the 2026-10-20 lantern runs (201 flat, 157-173 mottled)
+            # on granite with a median near 105.
+            base = Image.new("RGB", (256, 256), (105, 105, 102))
+            base.paste((201, 202, 202), (20, 20, 80, 80))
+            base.paste((166, 165, 164), (120, 20, 180, 80))
+            base.save(root / "basecolor.png")
+            fraction = derive_emission(root / "basecolor.png", root / "emission.png")
+            with Image.open(root / "emission.png") as emission:
+                self.assertGreater(max(emission.getpixel((50, 50))), 150)
+                self.assertGreater(max(emission.getpixel((150, 50))), 150)
+                self.assertEqual(emission.getpixel((128, 200)), (0, 0, 0))
+            self.assertAlmostEqual(fraction, 2 * 60 * 60 / 256 ** 2, delta=0.01)
+            # A body as pale as the paper cannot be told apart from it; it must not glow as a whole.
+            Image.new("RGB", (256, 256), (186, 184, 180)).save(root / "pale.png")
+            self.assertEqual(derive_emission(root / "pale.png", root / "pale_emission.png"), 0)
+
+    def test_unity_material_marks_itself_emissive_so_urp_keeps_the_emission_keyword(self):
+        from slopforge.unity_material import build_unity_material
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            maps = {name: root / f"Assets/{name}.png" for name in ("basecolor", "normal", "metallic_gloss", "emission")}
+            scripts = []
+            with patch("slopforge.unity_material.unity_cli", return_value="unity"), \
+                    patch("slopforge.unity_material.subprocess.run", side_effect=lambda *_args, **_kwargs: scripts.extend(
+                        path.read_text() for path in (root / "Assets/Editor").glob("*.cs"))):
+                build_unity_material(root, root / "Assets/lantern.fbx", root / "Assets/lantern.mat", maps)
+        # URP's validation sets _EMISSION from the GI flags, which default to EmissiveIsBlack.
+        self.assertLess(scripts[0].index("MaterialGlobalIlluminationFlags.BakedEmissive"),
+                        scripts[0].index("AssetDatabase.SaveAssets()"))
+        self.assertIn('!assigned.IsKeywordEnabled("_EMISSION")', scripts[0])
+
     def test_declared_emissive_colour_matches_coloured_lens_and_glows_in_that_colour(self):
         from slopforge.style import parse_material_spec
         with tempfile.TemporaryDirectory() as temporary:

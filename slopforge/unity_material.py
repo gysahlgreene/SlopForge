@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import uuid
+from itertools import accumulate
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
@@ -33,8 +34,8 @@ def make_metallic_gloss(metallic_path, roughness_path, destination):
 def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)),)):
     """Emission for declared glowing regions, found in the generated base color map.
 
-    Each target is (match_rgb, glow_rgb). match_rgb None means large near-white regions (pale
-    emitters such as paper); otherwise texels within a small colour distance of match_rgb.
+    Each target is (match_rgb, glow_rgb). match_rgb None means large pale near-neutral regions clearly
+    paler than most of the map (paper); otherwise texels within a small colour distance of match_rgb.
     A morphological opening drops small flecks. Returns the emissive fraction of the map.
     """
     with Image.open(basecolor_path) as image:
@@ -46,7 +47,11 @@ def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)
             r, g, b = base.split()
             low = ImageChops.darker(ImageChops.darker(r, g), b)
             high = ImageChops.lighter(ImageChops.lighter(r, g), b)
-            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= 225 else 0),
+            # TRELLIS.2 bakes pale paper anywhere from ~157 to ~254 depending on the seed; 1.3x the map's
+            # median keeps a body as pale as the paper from glowing with it (docs/MATERIALS.md, Known limits).
+            counts = list(accumulate(low.histogram()))
+            cut = max(150, 1.3 * next(v for v, count in enumerate(counts) if 2 * count >= counts[-1]))
+            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= cut else 0),
                                        ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
         else:
             distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
@@ -133,6 +138,8 @@ public static class {class_name}
         mat.EnableKeyword("_NORMALMAP");
         mat.EnableKeyword("_METALLICGLOSSMAP");
         mat.EnableKeyword("_METALLICSPECGLOSSMAP");
+        // URP's material validation sets _EMISSION from these flags; a new material starts EmissiveIsBlack.
+        mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
         mat.EnableKeyword("_EMISSION");
         EditorUtility.SetDirty(mat);
         AssetDatabase.SaveAssets();
@@ -148,6 +155,8 @@ public static class {class_name}
         if (assigned == null || GetTexture(assigned, "_BaseMap", "_MainTex") == null ||
             GetTexture(assigned, "_BumpMap") == null || GetTexture(assigned, "_MetallicGlossMap") == null)
             throw new Exception("Unity did not import the FBX with the generated PBR material assigned");
+        if (!assigned.IsKeywordEnabled("_EMISSION"))
+            throw new Exception("Unity disabled emission on the generated material; its emission map would not render");
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
     }}
 

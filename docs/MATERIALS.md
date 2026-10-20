@@ -61,11 +61,16 @@ result against that declaration before anyone reviews it.
 
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
-   colour, and undeclared-colour emitters use large near-white regions (pale paper or glass).
+   colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
+   every channel at least 150 and at least 1.3 times the map's median, channels within 25 of each other).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
-   `sealed` or `ledge` does not count.
+   `sealed` or `ledge` does not count. In Unity the Lit material is marked emissive
+   (`globalIlluminationFlags = BakedEmissive`) as well as given the `_EMISSION` keyword: URP's
+   material validation derives the keyword from those flags, and a new material starts as
+   `EmissiveIsBlack`, so until 2026-10-20 URP silently dropped it and emitters that glowed in
+   Blender stayed dark in Unity. The import now fails if Unity still disables `_EMISSION`.
 
 7. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
@@ -81,7 +86,7 @@ Material-map checks run on every native candidate and are recorded in its valida
 | --- | --- |
 | Metallic map ≥ 50% fully metallic while the brief declares no metal | Candidate fails (`material_mismatch`); revise the concept so non-metals read as matte |
 | Metallic map ≥ 90% fully metallic with no metal declared or no declarations | Warning |
-| Emissive region declared but no near-white region found | Warning |
+| Emissive region declared but no matching pale or declared-colour region found | Warning |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
 
@@ -93,9 +98,21 @@ and none are declared yet.
 
 - **Glowing parts:** image-to-3D reconstructs glowing or translucent regions as empty space.
   Concepts must show emissive parts unlit as opaque surfaces; then they reconstruct as solid
-  panels. Finding them again in the base color is only reliable for distinct colours
-  (`emissive#rrggbb`) or genuinely pale regions: TRELLIS.2 bakes a dark albedo, so off-white
-  paper next to light stone may not be found and the asset stays unlit (warned).
+  panels. The concept model draws paper panels lit anyway (all 30 concepts of the 2026-10-20
+  lantern runs). TRELLIS.2 usually still bakes them pale and near-neutral, but how pale depends
+  on the seed: flat at about 200 or 253, or mottled rice paper at 157-173, on granite with a
+  median of 105-128. A fixed cut-off (225, then briefly 190) missed whichever cluster lay below it.
+  The cut-off is now 150 and 1.3 times the map's median: it finds the panels in all seven pale
+  reconstructions on record (0.6-3.3% of the map) and keeps speckled granite out. Limits:
+  - on mottled panels the fleck filter drops some panes, so a few panes can stay dark;
+  - a body as pale as its emitter (pale marble, white cloth or plate armour) cannot be separated
+    by colour, and then nothing glows;
+  - some seeds bake no usable pale panel: 3 of 6 lantern candidates on 2026-10-18 had none, and
+    on 2026-10-20 one rebuilt each window as dense slats with thin warm slivers of paper
+    (185, 164, 151; saturation 34, above the 25 limit), so the glow colour of the lit concept
+    reached the albedo. Those stay unlit with the warning. Colour matching on the baked albedo has
+    now needed two cut-off changes for one brief, so the next step is a different approach, not a
+    third cut-off: see [current state](../CURRENT_STATE.md).
 - **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the
   declared-material check catches this, and matte wording in the concept prevents it.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
