@@ -138,6 +138,8 @@ public static class {class_name}
         mat.EnableKeyword("_NORMALMAP");
         mat.EnableKeyword("_METALLICGLOSSMAP");
         mat.EnableKeyword("_METALLICSPECGLOSSMAP");
+        // URP's material validation sets _EMISSION from these flags; a new material starts EmissiveIsBlack.
+        mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
         mat.EnableKeyword("_EMISSION");
         EditorUtility.SetDirty(mat);
         AssetDatabase.SaveAssets();
@@ -153,6 +155,8 @@ public static class {class_name}
         if (assigned == null || GetTexture(assigned, "_BaseMap", "_MainTex") == null ||
             GetTexture(assigned, "_BumpMap") == null || GetTexture(assigned, "_MetallicGlossMap") == null)
             throw new Exception("Unity did not import the FBX with the generated PBR material assigned");
+        if (!assigned.IsKeywordEnabled("_EMISSION"))
+            throw new Exception("Unity disabled emission on the generated material; its emission map would not render");
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
     }}
 

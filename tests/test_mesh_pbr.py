@@ -491,6 +491,21 @@ class DeclaredMaterialTests(unittest.TestCase):
             Image.new("RGB", (256, 256), (186, 184, 180)).save(root / "pale.png")
             self.assertEqual(derive_emission(root / "pale.png", root / "pale_emission.png"), 0)
 
+    def test_unity_material_marks_itself_emissive_so_urp_keeps_the_emission_keyword(self):
+        from slopforge.unity_material import build_unity_material
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            maps = {name: root / f"Assets/{name}.png" for name in ("basecolor", "normal", "metallic_gloss", "emission")}
+            scripts = []
+            with patch("slopforge.unity_material.unity_cli", return_value="unity"), \
+                    patch("slopforge.unity_material.subprocess.run", side_effect=lambda *_args, **_kwargs: scripts.extend(
+                        path.read_text() for path in (root / "Assets/Editor").glob("*.cs"))):
+                build_unity_material(root, root / "Assets/lantern.fbx", root / "Assets/lantern.mat", maps)
+        # URP's validation sets _EMISSION from the GI flags, which default to EmissiveIsBlack.
+        self.assertLess(scripts[0].index("MaterialGlobalIlluminationFlags.BakedEmissive"),
+                        scripts[0].index("AssetDatabase.SaveAssets()"))
+        self.assertIn('!assigned.IsKeywordEnabled("_EMISSION")', scripts[0])
+
     def test_declared_emissive_colour_matches_coloured_lens_and_glows_in_that_colour(self):
         from slopforge.style import parse_material_spec
         with tempfile.TemporaryDirectory() as temporary:
