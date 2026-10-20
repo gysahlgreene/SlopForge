@@ -180,7 +180,7 @@ def _resolve_interrupted_prior(asset, execution, root, pipeline, manifest):
         stage for stage in execution.get("stages", [])
         if isinstance(stage, dict) and stage.get("status") == "running"
     ]
-    if not unresolved:
+    if not unresolved and execution.get("status") != "running":
         return None
 
     mesh_stages = {"mesh_workflow_execution"}
@@ -247,7 +247,7 @@ def _resolve_interrupted_prior(asset, execution, root, pipeline, manifest):
         "unknown_original_termination_cause": True,
     }
     exec_failure["message"] = (
-        f"Prior execution had unresolved stage(s) on restart; inferred interruption."
+        "Prior execution was still running on restart; inferred interruption."
     )
     exec_failure["remedy"] = (
         "inspect the service state after restart and verify inference outcomes "
@@ -548,7 +548,7 @@ def prop_child_reuse_decision(project_root, asset, child_stage, child, config):
             reasons.append("candidate variation identity is malformed")
             continue
         expected_stage_prompt = expected_prompt
-        if variation:
+        if variation and isinstance(expected_prompt, str):
             expected_stage_prompt += "\nDESIGN VARIATION:\n" + "\n".join(
                 f"- {key}: {value}" for key, value in variation.items())
         if (type(attempt_identity.get("seed")) is not int or

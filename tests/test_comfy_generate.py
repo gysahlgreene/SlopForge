@@ -56,3 +56,28 @@ def test_effective_workflow_hash_is_after_all_image_bindings(monkeypatch):
         assert saved["effective_bindings"]["uploaded_inputs"]["4.image"] == __import__("hashlib").sha256(b"reference bytes").hexdigest()
         assert "random-upload.png" not in json.dumps(saved["effective_bindings"])
         assert saved["outputs"][0]["sha256"] == __import__("hashlib").sha256(b"generated image").hexdigest()
+
+
+def test_downloads_saved_output_not_a_preview(monkeypatch, tmp_path):
+    workflow_path = tmp_path / "workflow.json"
+    workflow_path.write_text(json.dumps({
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "old"}},
+        "2": {"class_type": "SaveImage", "inputs": {"filename_prefix": "old"}},
+    }))
+    downloaded = []
+
+    class Client:
+        def queue_workflow(self, _workflow): return "prompt-1"
+        def wait_for_completion(self, _prompt, timeout): return {"outputs": {}}
+        def list_outputs(self, _history):
+            return [{"filename": "preview.png", "subfolder": "", "type": "temp"},
+                    {"filename": "saved.png", "subfolder": "", "type": "output"}]
+        def download_output(self, item, path):
+            downloaded.append(item["filename"])
+            Path(path).write_bytes(b"image")
+
+    monkeypatch.setattr(comfy_generate, "ComfyUIClient", lambda _url: Client())
+    monkeypatch.setattr(sys, "argv", ["comfy_generate.py", "--workflow", str(workflow_path),
+                                      "--prompt", "p", "--dest", str(tmp_path / "result.png")])
+    comfy_generate.main()
+    assert downloaded == ["saved.png"]

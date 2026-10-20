@@ -141,8 +141,8 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             record["failure"] = failure
         add_candidate(manifest, key, record)
         results.append(record)
-        if execution:
-            save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        # Persist each candidate so an interrupted run keeps the ones already generated.
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         if interrupted:
             if execution:
                 if asset_type.get("name") == "prop":

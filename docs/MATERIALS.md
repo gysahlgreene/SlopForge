@@ -50,7 +50,9 @@ result against that declaration before anyone reviews it.
    `concept_projection` report). The voxel bake turns eyes into slits; the projection carries the
    concept's eyes, brows, beard and print. A reconstruction whose proportions differ from the
    concept by more than 5% is left unprojected (`status: skipped`; on 2026-10-19 the dwarf, whose
-   model came out wider than its slightly turned concept, at 7.8%). Visibility is softened over
+   model came out wider than its slightly turned concept, at 7.8%). A skipped projection adds a
+   validation warning, so the candidate is `passed_with_warnings` and review sees that its base
+   color is the voxel bake only. Visibility is softened over
    mesh neighbours but only ever lowered, so nothing is painted onto surfaces hidden from the front.
    The projected colors include the concept's soft studio shading, and features can sit a few
    concept pixels off the sculpted forms: in close-ups a brow can cross a hair strand or a concept
@@ -61,7 +63,9 @@ result against that declaration before anyone reviews it.
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large near-white regions (pale paper or glass).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
-   declaration the emission map is black.
+   declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
+   only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
+   `sealed` or `ledge` does not count.
 
 7. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from

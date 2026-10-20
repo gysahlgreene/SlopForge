@@ -197,6 +197,12 @@ MAX_CONCEPT_ASPECT_ERROR = 0.15
 
 def apply_concept_silhouette(validation, projection, limit=MAX_CONCEPT_ASPECT_ERROR):
     """Fail a candidate whose front silhouette does not match its concept (retryable quality code)."""
+    if (projection or {}).get("status") == "skipped":
+        validation["warnings"] = [*validation.get("warnings", []),
+            f"front concept projection skipped: {projection.get('reason', 'no reason recorded')}; "
+            "the base color is the voxel bake only, so inspect face and fine detail"]
+        if validation.get("status") == "passed":
+            validation["status"] = "passed_with_warnings"
     error = (projection or {}).get("aspect_error")
     if isinstance(error, bool) or not isinstance(error, (int, float)) or not math.isfinite(error):
         return validation

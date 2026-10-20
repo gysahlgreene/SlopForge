@@ -424,7 +424,10 @@ def python_executable(project_root, config):
     path = Path(configured).expanduser()
     if not path.is_absolute():
         path = Path(project_root) / path
-    return str(path) if path.is_file() else sys.executable
+    if not path.is_file():
+        raise FileNotFoundError(f"Configured helper Python not found: {path}; fix asset_pipeline.tools.asset_python "
+                                "or SLOPFORGE_PYTHON, or unset both to use the running interpreter")
+    return str(path)
 
 
 def comfy_environment(config, project_root=None):
