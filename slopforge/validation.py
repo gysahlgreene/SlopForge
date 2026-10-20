@@ -196,3 +196,25 @@ def summarize_validation(result):
     if not result.get("errors") and not result.get("warnings"):
         lines.append("PASS: all configured checks ran")
     return "\n".join(lines)
+
+
+# A sampled reconstruction can come out turned sideways (aspect error 0.69 on one realistic character)
+# or with limbs missing, while good ones fit the front concept within about 0.035 and wide, stocky
+# builds within 0.09.
+MAX_CONCEPT_ASPECT_ERROR = 0.15
+
+
+def apply_concept_silhouette(validation, projection, limit=MAX_CONCEPT_ASPECT_ERROR):
+    """Fail a candidate whose front silhouette does not match its concept (retryable quality code)."""
+    error = (projection or {}).get("aspect_error")
+    if isinstance(error, bool) or not isinstance(error, (int, float)) or not math.isfinite(error):
+        return validation
+    validation.setdefault("measured", {})["concept_aspect_error"] = error
+    validation.setdefault("limits", {})["max_concept_aspect_error"] = limit
+    if error > limit:
+        validation["errors"] = [*validation.get("errors", []),
+            f"reconstruction front silhouette differs from the concept by {error:.0%} (limit {limit:.0%}); "
+            "the model is turned or missing parts, so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "concept_silhouette"]
+        validation["status"] = "failed"
+    return validation

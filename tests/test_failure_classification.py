@@ -377,6 +377,24 @@ class TestCandidateQualityRejection(unittest.TestCase):
         report = _quality_report(60, 50)
         self.assertTrue(candidate_quality_rejection(report))
 
+    def test_concept_silhouette_mismatch_is_a_retryable_quality_rejection(self):
+        from slopforge.validation import apply_concept_silhouette
+
+        def report(error):
+            return apply_concept_silhouette(validate_model_outputs(
+                {}, inspection={"status": "passed", "errors": [], "warnings": [],
+                                "measured": {"mesh_objects": 1, "vertex_count": 24, "face_count": 8,
+                                             "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
+                                             "image_texture_count": 4, "component_count": 1,
+                                             "nonmanifold_edge_count": 0, "transforms_applied": True,
+                                             "missing_textures": []}}), {"aspect_error": error})
+
+        turned = report(0.69)  # a reconstruction that came out facing sideways
+        self.assertEqual(turned["failure_codes"], ["concept_silhouette"])
+        self.assertTrue(candidate_quality_rejection(turned))
+        self.assertNotEqual(report(0.03)["status"], "failed")
+        self.assertNotIn("concept_silhouette", report(0.03).get("failure_codes", []))
+
     def test_nonmanifold_budget_exceeds_limit(self):
         report = validate_model_outputs(
             {},

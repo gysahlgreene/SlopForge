@@ -11,7 +11,7 @@ code inventories. This ordering replaces the earlier humanoid-preview-first sequ
 | M1 Props | Next category gate; five-prop material showcase (owner-rated ~60% of target), repeatability unestablished | Representative static prop production through separate visual, structural, technical, style, performance and Unity gates under declared criteria |
 | M2 Modular environments | After props; six-structure showcase and a real-scale five-module kit (corner defect, no Unity evidence) | Reviewed modules assemble at declared scale/pivots, meet connection/repetition needs and project budgets, and work together in Unity |
 | M3 Weapons/mechanical assets | After environments | Reviewed shapes/materials, moving-part hierarchy/pivots and functional motion where required, with project/runtime checks |
-| M4 Humanoids | After mechanical assets; historical asset-specific checks exist | Representative source acceptance, rig readiness, deformation, compatible animation and Unity playback under declared criteria |
+| M4 Humanoids | After mechanical assets; historical asset-specific checks plus three automatically rigged generated characters (deformation unapproved, no Unity evidence for them) | Representative source acceptance, rig readiness, deformation, compatible animation and Unity playback under declared criteria |
 | M5 Creatures/Generic rigs | After humanoids | Category-appropriate skeletons, deformation, animation compatibility and Generic runtime playback under declared criteria |
 | M6 Broader automation | After category reliability | Reduced intervention across evidenced stages while preserving provenance, recovery, requirements and human review authority |
 

@@ -36,12 +36,18 @@ asset_pipeline:
     mac:
       workflows:
         model: trellis2_image_to_model_api.json
+    # character_image: pose-conditioned concepts for asset types with pose_control (needs the
+    # Z-Image Fun ControlNet Union patch; see docs/CHARACTER-RIGGING.md).
     h100:
       workflows:
         model: trellis2_image_to_model_h100_api.json
+        character_image: image_character_pose_api.json
+        character_model: trellis2_image_to_model_h100_character_api.json
     h100_final:
       workflows:
         model: pixal3d_image_to_model_h100_api.json
+        character_image: image_character_pose_api.json
+        character_model: trellis2_image_to_model_h100_character_api.json
 
   # Quality is independent of compute_profile and COMFYUI_URL.
   quality_tier: final
@@ -56,6 +62,10 @@ asset_pipeline:
           trellis2_image_to_model_api.json:
             crop: {pad_factor: 1.1}
           trellis2_image_to_model_h100_api.json:
+            crop: {pad_factor: 1.1}
+            shape_upsample_stage: {target_resolution: 1536}
+            maps: {texture_size: 4096}
+          trellis2_image_to_model_h100_character_api.json:
             crop: {pad_factor: 1.1}
             shape_upsample_stage: {target_resolution: 1536}
             maps: {texture_size: 4096}

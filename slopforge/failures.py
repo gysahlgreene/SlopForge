@@ -15,6 +15,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "component_budget",
     "nonmanifold_budget",
     "boundary_budget",
+    "concept_silhouette",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -378,6 +379,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "component_budget": ("component_count", "max_components"),
         "nonmanifold_budget": ("nonmanifold_edge_count", "max_nonmanifold_edges"),
         "boundary_budget": ("boundary_edge_count", "max_boundary_edges"),
+        "concept_silhouette": ("concept_aspect_error", "max_concept_aspect_error"),
     }
 
     for code in codes:

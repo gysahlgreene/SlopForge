@@ -1,0 +1,95 @@
+schema_version: 1
+id: image.character_pose_concept
+version: 1
+capabilities:
+- text_to_image
+- pose_control
+workflow_sha256: 4aaaabfb3ec6851d4b8ee497c07294335a725c395b352fe03f959304cdb0e42d
+nodes:
+- class: CLIPLoader
+  source: ComfyUI core
+  revision: unknown
+- class: CLIPTextEncode
+  source: ComfyUI core
+  revision: unknown
+- class: ConditioningZeroOut
+  source: ComfyUI core
+  revision: unknown
+- class: EmptySD3LatentImage
+  source: ComfyUI core
+  revision: unknown
+- class: KSampler
+  source: ComfyUI core
+  revision: unknown
+- class: LoadImage
+  source: ComfyUI core
+  revision: unknown
+- class: ModelPatchLoader
+  source: ComfyUI core
+  revision: unknown
+- class: ModelSamplingAuraFlow
+  source: ComfyUI core
+  revision: unknown
+- class: SaveImage
+  source: ComfyUI core
+  revision: unknown
+- class: UNETLoader
+  source: ComfyUI core
+  revision: unknown
+- class: VAEDecode
+  source: ComfyUI core
+  revision: unknown
+- class: ZImageFunControlnet
+  source: ComfyUI core
+  revision: unknown
+- class: VAELoader
+  source: ComfyUI core
+  revision: unknown
+models:
+- name: Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors
+  source: https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1/blob/5155fc56d17821007d6f62ac192c09e0f0e72016/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors
+  license: apache-2.0
+  license_source: https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1
+  sha256: d1251cc7bc3486bc61d25c3be498ef394c31c85ddf4ee9137d2e933411f4a689
+  install_path: models/model_patches
+- name: ae.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/vae
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+- name: qwen_3_4b.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/text_encoders
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+- name: z_image_turbo_bf16.safetensors
+  source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/diffusion_models
+  license: unverified
+  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  sha256: unknown
+inputs:
+- name: prompt
+  type: text
+- name: seed
+  type: integer
+- name: pose_image
+  type: image/png
+outputs:
+- name: image
+  type: image/png
+profiles:
+- h100
+- h100_final
+estimated_resource_class: standard_gpu
+tested_on:
+- profile: h100
+  backend: comfyui
+  date: '2026-10-19'
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms
+  for the exact installed weights.
+limitations:
+- Holds human-proportioned characters to the skeleton's A-pose; a stocky dwarf brief kept its
+  arms near the body at every strength tried (0.65-1.6) and with a stocky or T-pose skeleton.
+- Node revisions and model file hashes are not exposed by the ComfyUI API and remain
+  unverified.

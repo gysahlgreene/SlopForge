@@ -7,6 +7,15 @@ max_components: 64
 max_nonmanifold_edges: 0
 max_boundary_edges: 0
 prompt_mode: character
+# Used when the compute profile configures workflows.character_image: an OpenPose A-pose skeleton
+# (arms 45 degrees down, hands clear of the hips) conditions every concept.
+# Front A-pose concepts are projected onto camera-facing base color (sharper faces and print).
+# Used when the compute profile configures workflows.character_model.
+model_workflow: character_model
+concept_projection: front
+pose_control:
+  image: character_a_pose_openpose.png
+  strength: 1.0
 requirements:
   - one full-body humanoid character on a plain background
   - a distinctive identity, silhouette, outfit, and material palette suited to the asset description

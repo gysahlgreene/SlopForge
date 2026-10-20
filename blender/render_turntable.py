@@ -1,10 +1,11 @@
 """Render a lit turntable of a prepared asset .blend for review and showcase.
 
-Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512]
+Usage: blender --background --python render_turntable.py -- <asset.blend> <frames_dir> [--frames 48] [--size 512] [--animate]
 
 The asset rotates once about its vertical axis under fixed key, fill and rim lights so
 highlights travel across its materials. Frames are written as frame_###.png; the scene in
-the source .blend is not saved.
+the source .blend is not saved. With --animate, a .blend whose armature carries a retargeted
+clip (see retarget_mocap.py) plays its gait cycle at capture speed, looping, while the view turns.
 """
 import math
 import sys
@@ -22,7 +23,7 @@ def parse():
     for key in options:
         if key in args:
             options[key] = int(args[args.index(key) + 1])
-    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"]
+    return Path(args[0]).resolve(), Path(args[1]).resolve(), options["--frames"], options["--size"], "--animate" in args
 
 
 def area_light(name, location, target, energy, size):
@@ -34,7 +35,7 @@ def area_light(name, location, target, energy, size):
 
 
 def main():
-    source, frames_dir, frames, size = parse()
+    source, frames_dir, frames, size, animate = parse()
     bpy.ops.wm.open_mainfile(filepath=str(source))
     scene = bpy.context.scene
     for obj in list(scene.objects):
@@ -52,8 +53,8 @@ def main():
     pivot = bpy.data.objects.new("TurntablePivot", None)
     pivot.location = (center.x, center.y, low.z)
     scene.collection.objects.link(pivot)
-    for obj in meshes:
-        if obj.parent is None:
+    for obj in scene.objects:
+        if obj.parent is None and obj.type in {"MESH", "ARMATURE"} and obj is not pivot:
             obj.parent = pivot
             obj.matrix_parent_inverse = pivot.matrix_world.inverted()
 
@@ -78,7 +79,7 @@ def main():
 
     camera = bpy.data.objects.new("TurntableCamera", bpy.data.cameras.new("TurntableCamera"))
     camera.data.lens = 70
-    distance = radius * 2.7
+    distance = radius * (2.3 if animate else 2.7)  # tall animated characters need a closer frame
     elevation = 0.8 if extent.z < 0.35 * max(extent.x, extent.y) else 0.32  # look down at flat props
     camera.location = center + Vector((0, -distance * math.cos(elevation), distance * math.sin(elevation)))
     camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
@@ -92,8 +93,31 @@ def main():
     scene.render.film_transparent = False
     scene.view_settings.view_transform = "AgX"
     frames_dir.mkdir(parents=True, exist_ok=True)
+    if animate:
+        cycle = scene.get("gait_cycle")
+        if not cycle:
+            # The whole clip would include mocap calibration poses (a T-pose on frame 1).
+            raise SystemExit(f"{source} has no gait_cycle; retarget a walking clip with retarget_mocap.py")
+        capture_fps = float(scene.get("capture_fps") or scene.render.fps)
+        cycle_length = cycle[1] - cycle[0]
+        # Whole strides per turn so the GIF loops on both rotation and gait; ~real-time at 80 ms/frame.
+        strides = max(1, round(frames * 0.08 * capture_fps / cycle_length))
+        step = strides * cycle_length / frames
     for frame in range(frames):
         pivot.rotation_euler = (0, 0, 2 * math.pi * frame / frames)
+        if animate:
+            source_frame = cycle[0] + (frame * step) % cycle_length
+            scene.frame_set(int(source_frame), subframe=source_frame % 1)
+            # Plant the lowest foot: measure the posed mesh and lower the whole character onto the floor.
+            pivot.location.z = low.z
+            bpy.context.view_layer.update()
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            lowest = min(min((obj.matrix_world @ vertex.co).z
+                             for vertex in obj.evaluated_get(depsgraph).to_mesh().vertices) for obj in meshes)
+            for obj in meshes:
+                obj.evaluated_get(depsgraph).to_mesh_clear()
+            pivot.location.z = low.z - (lowest - low.z)
+            bpy.context.view_layer.update()
         scene.render.filepath = str(frames_dir / f"frame_{frame:03d}.png")
         bpy.ops.render.render(write_still=True)
 

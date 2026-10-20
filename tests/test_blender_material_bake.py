@@ -398,3 +398,59 @@ json.dump(list(obj.dimensions), open(sys.argv[-1], 'w'))
             self.assertAlmostEqual(x, 3.0, places=3)  # the 1.0-long side was turned onto X
             self.assertAlmostEqual(z, 3.0, places=3)
             self.assertLess(y, 1.0)  # free thickness keeps a proportional size
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderLocalRepairTests(unittest.TestCase):
+    def test_local_repair_closes_holes_without_remeshing_detail(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, out = root / "holed.glb", root / "prepared.glb"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=0.5, location=(0, 0, 0.5))
+obj = bpy.context.object
+bm = bmesh.new(); bm.from_mesh(obj.data); bm.faces.ensure_lookup_table()
+bmesh.ops.delete(bm, geom=[bm.faces[i] for i in (100, 101, 102, 900, 901)], context="FACES")  # open holes
+bm.to_mesh(obj.data); bm.free()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(out),
+                                     str(root / "prepared.blend"), "--mesh-only", "--face-budget", "100000",
+                                     "--voxel-resolution", "32", "--local-repair"],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn("Local manifold repair left boundary=0 non_manifold=0", result.stdout)
+            faces = int(result.stdout.split("Input faces: ")[1].split()[0])
+            self.assertGreater(faces, 3500)  # a 32-voxel remesh would leave a few hundred faces
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderEnclosedShellTests(unittest.TestCase):
+    def test_local_repair_removes_hidden_inner_shell_and_keeps_outer_parts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb = root / "shells.glb"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=0.5, location=(0, 0, 0.5))
+bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=0.46, location=(0, 0, 0.5))  # inner shell
+bpy.ops.mesh.primitive_cube_add(size=0.1, location=(0.7, 0, 0.5))  # separate outside part
+bpy.ops.object.select_all(action="SELECT")
+bpy.ops.object.join()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "out.glb"),
+                                     str(root / "out.blend"), "--mesh-only", "--face-budget", "100000",
+                                     "--voxel-resolution", "32", "--local-repair"],
+                                    check=True, capture_output=True, text=True)
+            self.assertIn("Removed enclosed inner-shell vertices: 1106", result.stdout)
+            faces = int(result.stdout.split("Input faces: ")[1].split()[0])
+            self.assertEqual(faces, 48 * 24 * 2 - 2 * 48 + 12)  # outer sphere triangulated + cube

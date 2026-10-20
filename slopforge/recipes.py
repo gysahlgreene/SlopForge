@@ -724,6 +724,8 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
             reference_entries = (resolve_library(root, child["reference_library"], manifest)["entries"]
                                  if child.get("reference_library") else None)
             conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)
+            workflow, conditioning = model.concept_route(child_config, asset_types[child["type"]], conditioning)
+            requested_child["requested_image_workflow"] = workflow
             requested_child["requested_conditioning"] = {
                 "strategy": conditioning["strategy"],
                 "references": [{"sha256": item.get("sha256"), "strength": item.get("strength")}

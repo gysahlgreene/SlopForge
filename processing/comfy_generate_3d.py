@@ -298,6 +298,27 @@ def copy_generated_maps(outputs, destination, client=None, *, baked_normal=None)
     return textures
 
 
+def project_concept(args, dest, textures):
+    """Project the front concept onto the base color; the voxel bake is kept beside it."""
+    basecolor = dest.parent / textures["basecolor"]
+    voxel = basecolor.with_name("basecolor_voxel.png")
+    shutil.copy2(basecolor, voxel)
+    request = dest.parent / "concept_projection_request.json"
+    report = dest.parent / "concept_projection.json"
+    request.write_text(json.dumps({"model": str(dest), "basecolor": str(voxel), "concept": str(args.image),
+                                   "output": str(basecolor), "report": str(report)}))
+    result = subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python",
+                             str(Path(__file__).resolve().parents[1] / "blender/project_concept.py"), "--", str(request)],
+                            capture_output=True, text=True)
+    if result.returncode != 0 or not report.is_file():
+        raise ValueError("Concept projection failed: " + (result.stdout + result.stderr)[-2000:])
+    projection = json.loads(report.read_text())
+    if projection["status"] == "skipped":
+        shutil.copy2(voxel, basecolor)
+    print(f"Concept projection {projection['status']}: aspect error {projection.get('aspect_error')}")
+    return {**projection, "voxel_basecolor": voxel.relative_to(dest.parent).as_posix()}
+
+
 def copy_conditioning_image(outputs, destination, client):
     images = outputs.get("save_conditioning", {}).get("images", [])
     if not images:
@@ -353,6 +374,10 @@ def main():
     parser.add_argument("--voxel-resolution", type=int, default=256,
                         help="Voxel remesh resolution used before reducing a generated shape")
     parser.add_argument("--blender", type=Path)
+    parser.add_argument("--project-concept", action="store_true",
+                        help="Project the front concept onto camera-facing base color (character concepts)")
+    parser.add_argument("--require-manifold", action="store_true",
+                        help="Make the mesh manifold (characters must be closed to rig): local repair, voxel repair as fallback")
     parser.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     parser.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
     parser.add_argument("--journal-context", help="Optional prop manifest journal context JSON")
@@ -414,7 +439,7 @@ def main():
         if args.blender is None:
             raise ValueError("This model workflow requires --blender for mesh reduction and UV preparation")
         raw_workflow = {key: node for key, node in workflow.items()
-                        if not key.startswith("save") or key == "save_raw"}
+                        if not key.startswith("save") or key in {"save_raw", "save_detail"}}
         raw_identity, raw_bindings = _workflow_identity(source_workflow, raw_workflow,
                                                         comfy_image_name, source_content_hash)
         source_hash = workflow_sha256(args.workflow) if args.workflow else None
@@ -433,9 +458,14 @@ def main():
             if not raw:
                 raise ValueError("Model workflow did not produce its raw mesh")
         raw_path = dest.with_name(dest.stem + "_untextured.glb")
+        detail = find_glb(entry["outputs"].get("save_detail", {}))
+        detail_path = dest.with_name(dest.stem + "_detail.glb") if detail else None
+        baked_normal = dest.with_name(dest.stem + "_normal_mikktspace.png") if detail else None
         with _journal_stage(journal, "mesh_raw_acquisition", journal_attempt,
                             {"phase": "raw_shape"}) as stage:
             client.download_output(raw, raw_path)
+            if detail:
+                client.download_output(detail, detail_path)
             raw_refs = _journal_finish(journal, stage, [(raw_path, "mesh.raw")])
         prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
@@ -447,7 +477,14 @@ def main():
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
                             "--voxel-resolution", str(args.voxel_resolution), "--mesh-only",
                             # The graph already ran a UDF remesh; Blender's voxel remesh would erase thin parts.
-                            *(["--no-voxel-repair"] if "shape_remesh" in workflow else [])],
+                            *(["--no-voxel-repair"] if "shape_remesh" in workflow and not args.require_manifold else []),
+                            # Manifold types try a local repair first; voxel repair only runs if it fails.
+                            *(["--local-repair"] if args.require_manifold else []),
+                            # Normals are baked in Blender (MikkTSpace, as Blender and Unity shade) from the
+                            # full-detail remesh; ComfyUI's bake uses Lengyel tangents and speckles when shaded.
+                            *(["--detail-mesh", str(detail_path), "--normal-output", str(baked_normal),
+                               "--texture-size", str(workflow.get("maps", {}).get("inputs", {}).get("texture_size", 2048))]
+                              if detail else [])],
                            check=True, env=blender_environment())
             if not prepared.is_file():
                 raise RuntimeError("Blender did not produce the prepared mesh")
@@ -487,7 +524,12 @@ def main():
                         {"phase": "material_outputs"}, inputs=material_inputs) as stage:
         client.download_output(glb, dest)
         textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
-        textures = copy_generated_maps(entry["outputs"], dest.parent, client) if textured else {}
+        mikktspace = locals().get("baked_normal")
+        mikktspace = mikktspace if mikktspace is not None and Path(mikktspace).is_file() else None
+        textures = copy_generated_maps(entry["outputs"], dest.parent, client, baked_normal=mikktspace) if textured else {}
+        projection = None
+        if args.project_concept and textures:
+            projection = project_concept(args, dest, textures)
         conditioning_image = (copy_conditioning_image(entry["outputs"], dest.parent, client)
                               if "save_conditioning" in workflow else None)
         acquired = [(dest, "mesh.final")] + [(dest.parent / path, f"texture.{name}")
@@ -514,6 +556,10 @@ def main():
         if conditioning_image:
             target = dest.parent / conditioning_image
             output_records.append({"path": conditioning_image, "sha256": file_sha256(target), "kind": "conditioning_image"})
+        if projection and projection.get("voxel_basecolor"):
+            output_records.append({"path": projection["voxel_basecolor"],
+                                   "sha256": file_sha256(dest.parent / projection["voxel_basecolor"]),
+                                   "kind": "texture.basecolor_voxel"})
         remesh = next((node["inputs"] for node in workflow.values()
                        if node.get("class_type") == "RemeshMesh"), None)
         unwrap = next((node["inputs"] for node in workflow.values()
@@ -552,7 +598,12 @@ def main():
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
                                         "conditioning_image": conditioning_image,
+                                        "basecolor_source": ("voxel_with_front_concept_projection"
+                                                             if projection and projection["status"] == "projected"
+                                                             else "voxel") if textures else None,
+                                        "concept_projection": projection,
                                         "normal_source": "workflow" if entry["outputs"].get("save_normal", {}).get("images") else
+                                                         "blender_mikktspace_bake" if mikktspace else
                                                          "neutral_placeholder",
                                         "quality": json.loads(args.quality) if args.quality else None}, indent=2) + "\n")
         temporary.replace(args.metadata)

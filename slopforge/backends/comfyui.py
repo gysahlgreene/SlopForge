@@ -164,8 +164,9 @@ def backend_provenance(health=None, *, queried=False):
 class ComfyUIClient:
     """HTTP boundary for local and remote ComfyUI instances."""
 
+    # "name" is ModelPatchLoader's model file (Z-Image Fun ControlNet patches).
     MODEL_INPUTS = {"ckpt_name", "unet_name", "vae_name", "clip_name", "clip_vision", "model_name",
-                    "bg_removal_name"}
+                    "bg_removal_name", "name"}
 
     def __init__(self, base_url, timeout=60):
         self.base_url = base_url.rstrip("/")
@@ -490,7 +491,7 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     node_inputs = workflow_node_inputs(config, "image", resolved.name)
     if node_inputs:
         command.extend(["--workflow-inputs", json.dumps(node_inputs)])
-    if conditioning and conditioning.get("strategy") == "reference":
+    if conditioning and conditioning.get("references"):
         references = [{**item, "path": str(root / item["path"]), "provenance_path": item["path"]}
                       for item in conditioning["references"]]
         command.extend(["--references", json.dumps(references),
@@ -550,7 +551,7 @@ def _build_failure_from_report(report_path, default_category="unknown"):
 
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
-                  voxel_resolution=None, journal_context=None):
+                  voxel_resolution=None, journal_context=None, require_manifold=False, project_concept=False):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
@@ -570,6 +571,10 @@ def generate_model(project_root, config, image, name, destination, metadata, see
                         "--blender", blender_executable(config, root)])
         if voxel_resolution is not None:
             command.extend(["--voxel-resolution", str(voxel_resolution)])
+        if require_manifold:
+            command.append("--require-manifold")
+        if project_concept:
+            command.append("--project-concept")
     quality = config["asset_pipeline"].get("quality_settings", {})
     command.extend(["--quality", json.dumps({"tier": config["asset_pipeline"].get("selected_quality_tier", "normal"),
                                                "settings": quality})])

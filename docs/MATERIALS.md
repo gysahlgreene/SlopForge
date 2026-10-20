@@ -35,18 +35,35 @@ result against that declaration before anyone reviews it.
    unwraps UVs, and ComfyUI bakes base color, roughness and metallic maps onto those UVs.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
-4. **Normal map.** The H100 TRELLIS.2 workflows bake a tangent-space normal map from the
-   full-detail decoded mesh onto the reduced mesh with ComfyUI's `BakeNormalMapFromMesh`.
-   Other workflows still record `normal_source: neutral_placeholder`; `approve-texture`
+4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
+   (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto
+   the repaired, UV-mapped mesh (`normal_source: blender_mikktspace_bake`). Blender and Unity
+   shade with MikkTSpace tangents; ComfyUI's `BakeNormalMapFromMesh` uses Lengyel tangents, and
+   the mismatch showed as white speckle across characters (8.5% of normal texels strongly
+   tilted, against 1.1% for the Blender bake on the same input and seed). Other workflows still record `normal_source: neutral_placeholder`; `approve-texture`
    refuses a 1×1 placeholder normal unless `--allow-placeholder-normal` is passed.
 
-5. **Emission.** When a region is declared `emissive`, the material stage builds the
+5. **Concept projection (characters).** Asset types with `concept_projection: front` (the
+   `character` type) project their front A-pose concept orthographically onto the base color of
+   surfaces that face the camera and are not hidden from it, keeping the voxel bake elsewhere
+   (`native_material/basecolor_voxel.png`; candidates record `basecolor_source` and the
+   `concept_projection` report). The voxel bake turns eyes into slits; the projection carries the
+   concept's eyes, brows, beard and print. A reconstruction whose proportions differ from the
+   concept by more than 5% is left unprojected (`status: skipped`; on 2026-10-19 the dwarf, whose
+   model came out wider than its slightly turned concept, at 7.8%). Visibility is softened over
+   mesh neighbours but only ever lowered, so nothing is painted onto surfaces hidden from the front.
+   The projected colors include the concept's soft studio shading, and features can sit a few
+   concept pixels off the sculpted forms: in close-ups a brow can cross a hair strand or a concept
+   strand can land on the forehead. A gate that kept the voxel color where it disagreed with a
+   blurred concept removed those strands but also the eyes the voxel bake had lost, so it was dropped.
+
+6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large near-white regions (pale paper or glass).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
    declaration the emission map is black.
 
-6. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
+7. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
    run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from slopforge import character_rigging as rigging
+from slopforge import skintokens_runtime as runtime
 from slopforge.character_rigging import run_skintokens_inference, skintokens_preflight, prepare_skintokens_runtime
 from slopforge.doctor import run_doctor
 
@@ -71,16 +72,16 @@ def test_setup_is_revision_guarded_and_idempotent(tmp_path, monkeypatch):
     (checkout / ".git").mkdir()
     demo = checkout / "demo.py"
     demo.write_text("pass\n")
-    monkeypatch.setattr(rigging, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
     original = b'attn_implementation="flash_attention_2"'
     source.write_bytes(original)
-    monkeypatch.setattr(rigging, "SKINTOKENS_TOKENRIG_SHA256", hashlib.sha256(original).hexdigest())
-    monkeypatch.setattr(rigging, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(b'attn_implementation="sdpa"').hexdigest())
-    monkeypatch.setattr(rigging, "_skintokens_revision", lambda _: "wrong")
+    monkeypatch.setattr(runtime, "SKINTOKENS_TOKENRIG_SHA256", hashlib.sha256(original).hexdigest())
+    monkeypatch.setattr(runtime, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(b'attn_implementation="sdpa"').hexdigest())
+    monkeypatch.setattr(runtime, "revision", lambda _: "wrong")
     with pytest.raises(ValueError, match="revision"):
         prepare_skintokens_runtime(config(checkout=checkout), tmp_path)
     assert source.read_bytes() == original
-    monkeypatch.setattr(rigging, "_skintokens_revision", lambda _: rigging.SKINTOKENS_REVISION)
+    monkeypatch.setattr(runtime, "revision", lambda _: runtime.SKINTOKENS_REVISION)
     assert prepare_skintokens_runtime(config(checkout=checkout), tmp_path)["status"] == "prepared"
     assert prepare_skintokens_runtime(config(checkout=checkout), tmp_path)["status"] == "prepared"
     assert source.read_bytes() == b'attn_implementation="sdpa"'
@@ -102,10 +103,10 @@ def test_pinned_preflight_hashes_checkpoint_and_runner_records_seed(tmp_path, mo
     qwen = checkout / "models/Qwen3-0.6B/config.json"
     qwen.parent.mkdir(parents=True)
     qwen.write_text('{"model_type":"qwen3"}')
-    monkeypatch.setattr(rigging, "_skintokens_revision", lambda _: rigging.SKINTOKENS_REVISION)
-    monkeypatch.setattr(rigging, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
-    monkeypatch.setattr(rigging, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(tokenrig.read_bytes()).hexdigest())
-    monkeypatch.setattr(rigging, "_skintokens_checkout_changes", lambda *_: False)
+    monkeypatch.setattr(runtime, "revision", lambda _: runtime.SKINTOKENS_REVISION)
+    monkeypatch.setattr(runtime, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(tokenrig.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "checkout_changes", lambda *_: False)
     settings = config(sys.executable, checkout, checkpoint)
     settings["_project_root"] = tmp_path
     report = skintokens_preflight(settings, tmp_path)
@@ -146,9 +147,9 @@ def test_preflight_requires_all_local_model_dependencies(tmp_path, monkeypatch):
     source.write_text('attn_implementation="sdpa"')
     checkpoint = tmp_path / "weights.ckpt"
     checkpoint.write_bytes(b"weights")
-    monkeypatch.setattr(rigging, "_skintokens_revision", lambda _: rigging.SKINTOKENS_REVISION)
-    monkeypatch.setattr(rigging, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
-    monkeypatch.setattr(rigging, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(source.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "revision", lambda _: runtime.SKINTOKENS_REVISION)
+    monkeypatch.setattr(runtime, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(source.read_bytes()).hexdigest())
     report = skintokens_preflight(config(sys.executable, checkout, checkpoint), tmp_path)
     assert report["status"] == "unverified"
     assert "FSQ" in " ".join(report["reasons"])
@@ -211,9 +212,9 @@ def test_preflight_rejects_unexpected_dirty_checkout(tmp_path, monkeypatch):
     qwen.write_text('{"model_type":"qwen3"}')
     checkpoint = tmp_path / "weights.ckpt"
     checkpoint.write_bytes(b"weights")
-    monkeypatch.setattr(rigging, "_skintokens_revision", lambda _: rigging.SKINTOKENS_REVISION)
-    monkeypatch.setattr(rigging, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
-    monkeypatch.setattr(rigging, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(tokenrig.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "revision", lambda _: runtime.SKINTOKENS_REVISION)
+    monkeypatch.setattr(runtime, "SKINTOKENS_DEMO_SHA256", hashlib.sha256(demo.read_bytes()).hexdigest())
+    monkeypatch.setattr(runtime, "SKINTOKENS_PATCH_SHA256", hashlib.sha256(tokenrig.read_bytes()).hexdigest())
     settings = config(sys.executable, checkout, checkpoint)
     assert skintokens_preflight(settings, tmp_path)["status"] == "ready"
     (checkout / "src/other.py").write_text("changed\n")
@@ -237,3 +238,44 @@ def test_external_skintokens_candidate():
         pytest.skip("blocked: " + "; ".join(report["reasons"]))
     result = run_skintokens_inference(settings, source, output, seed=17)
     assert result["status"] == "complete"
+
+
+def test_remote_host_runs_the_shared_runtime_over_ssh(tmp_path, monkeypatch):
+    settings = {"asset_pipeline": {"tools": {"skintokens_host": "gpu-box",
+                                             "skintokens_python": "/opt/st/.venv/bin/python",
+                                             "skintokens_checkout": "/opt/st",
+                                             "skintokens_checkpoint": "/opt/st/weights.ckpt"}},
+                "_project_root": tmp_path}
+    calls = []
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if argv[0] == "ssh" and "mktemp" in argv:
+            return SimpleNamespace(returncode=0, stdout="/tmp/slopforge-skintokens-abc\n", stderr="")
+        if argv[0] == "ssh" and " - " in argv[-1]:
+            # The audited runtime module is streamed to the remote SkinTokens Python.
+            assert kwargs["input"] == Path(runtime.__file__).read_text()
+            assert argv[-1].startswith("/opt/st/.venv/bin/python - ")
+            action = argv[-1].split()[2]
+            reply = ({"status": "ready", "reasons": [], "revision": runtime.SKINTOKENS_REVISION,
+                      "checkpoint_sha256": "c" * 64, "checkpoint_id": "weights.ckpt",
+                      "compatibility_sha256": runtime.SKINTOKENS_PATCH_SHA256}
+                     if action == "preflight" else {"complete": True})
+            return SimpleNamespace(returncode=0, stdout=json.dumps(reply) + "\n", stderr="")
+        if argv[0] == "scp" and argv[-1] == str(tmp_path / "out.glb"):
+            Path(argv[-1]).write_bytes(_glb())
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    monkeypatch.setattr(rigging.subprocess, "run", fake_run)
+    source = tmp_path / "source.fbx"
+    source.write_bytes(b"input")
+    result = run_skintokens_inference(settings, source, tmp_path / "out.glb", seed=17)
+    assert result["checkpoint_sha256"] == "c" * 64 and result["seed"] == 17
+    launch = next(argv for argv in calls if argv[0] == "ssh" and " launch " in argv[-1])
+    payload = json.loads(launch[-1].split(" launch ", 1)[1].strip("'"))
+    assert payload["source"] == "/tmp/slopforge-skintokens-abc/source.fbx" and payload["seed"] == 17
+    assert ["scp", "-q", "-o", "BatchMode=yes", str(source), "gpu-box:/tmp/slopforge-skintokens-abc/source.fbx"] in calls
+    assert calls[-1][-4:] == ["rm", "-rf", "--", "/tmp/slopforge-skintokens-abc"]
+    assert str(tmp_path) not in json.dumps(result)
+
+    settings["asset_pipeline"]["tools"]["skintokens_checkout"] = "~/st"
+    with pytest.raises(ValueError, match="absolute path"):
+        skintokens_preflight(settings, tmp_path)

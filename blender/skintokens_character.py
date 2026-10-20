@@ -104,6 +104,22 @@ def semantic_bones(rig):
                         side + "_thigh": thigh.name, side + "_shin": shin.name})
     if len(set(mapping.values())) != len(mapping):
         raise ValueError("Semantic bones overlap")
+    # Sides above assume the character faces +Y. Read the real facing from heel-to-toe direction:
+    # generated characters face -Y, which puts their left side on +X.
+    forward = Vector((0.0, 0.0, 0.0))
+    for side in ("left", "right"):
+        feet = list(rig.data.bones[mapping[side + "_shin"]].children)
+        if len(feet) == 1:
+            forward += feet[0].tail_local - feet[0].head_local
+            for toe in feet[0].children:
+                forward += toe.tail_local - toe.head_local
+    forward.z = 0.0
+    if forward.length > height * 0.01:
+        left_direction = Vector((0.0, 0.0, 1.0)).cross(forward)
+        left_bone = rig.data.bones[mapping["left_thigh"]]
+        if (left_bone.head_local.x - hips.head_local.x) * left_direction.x < 0:
+            mapping = {(("right" + key[4:]) if key.startswith("left") else ("left" + key[5:]) if key.startswith("right")
+                        else key): value for key, value in mapping.items()}
     return mapping
 
 
@@ -187,6 +203,87 @@ def weight_metrics(meshes, rig):
             "max_influences": max(counts, default=0)}
 
 
+def prune_distant_influences(meshes, rig, max_steps=5):
+    """Remove weights that jump across the skeleton, then renormalise.
+
+    Sampled SkinTokens weights can tie a thigh holster the hanging hand touched to a fingertip
+    (11 bones apart); it tears when the arm lifts. Armpit and cape blends stay within 4 steps.
+    First, a patch of vertices dominated by one bone whose every mesh neighbour is dominated by a
+    bone more than max_steps away takes its neighbours' mean weights (a real hand borders the
+    forearm). Then each vertex drops influences more than max_steps from its dominant bone.
+    Returns (relabelled vertices, pruned influences).
+    """
+    chains = {bone.name: [bone.name] + [parent.name for parent in bone.parent_recursive] for bone in rig.data.bones}
+
+    def steps(a, b):
+        common = next(name for name in chains[a] if name in chains[b])
+        return chains[a].index(common) + chains[b].index(common)
+
+    relabelled = pruned = 0
+    for obj in meshes:
+        groups = {group.index: group for group in obj.vertex_groups if group.name in chains}
+
+        def weights_of(vertex):
+            return {groups[item.group].name: item.weight for item in vertex.groups
+                    if item.group in groups and item.weight > 0}
+
+        def assign(vertex, weights):
+            total = sum(weights.values())
+            for group in groups.values():
+                group.remove([vertex.index])
+            for name, weight in weights.items():
+                obj.vertex_groups[name].add([vertex.index], weight / total, "REPLACE")
+
+        vertices = obj.data.vertices
+        current = [weights_of(vertex) for vertex in vertices]
+        dominant = [max(weights, key=weights.get) if weights else None for weights in current]
+        neighbours = [[] for _ in vertices]
+        for edge in obj.data.edges:
+            a, b = edge.vertices
+            neighbours[a].append(b)
+            neighbours[b].append(a)
+        seen, islands = [False] * len(vertices), []
+        for start in range(len(vertices)):
+            if seen[start] or dominant[start] is None:
+                continue
+            island, stack = [], [start]
+            seen[start] = True
+            while stack:
+                index = stack.pop()
+                island.append(index)
+                for other in neighbours[index]:
+                    if not seen[other] and dominant[other] == dominant[start]:
+                        seen[other] = True
+                        stack.append(other)
+            islands.append(island)
+        # Smallest first, so the patch is relabelled and the body around it then borders its own bone.
+        for island in sorted(islands, key=len):
+            bone = dominant[island[0]]
+            border = {other for index in island for other in neighbours[index]
+                      if dominant[other] not in (None, bone)}
+            if border and all(steps(bone, dominant[other]) > max_steps for other in border):
+                mean = {}
+                for other in border:
+                    for name, weight in current[other].items():
+                        mean[name] = mean.get(name, 0) + weight
+                mean = dict(sorted(mean.items(), key=lambda item: -item[1])[:4])
+                for index in island:
+                    assign(vertices[index], mean)
+                    current[index], dominant[index] = mean, max(mean, key=mean.get)
+                relabelled += len(island)
+        for vertex in vertices:
+            weights = [(item.weight, item.group) for item in vertex.groups if item.group in groups and item.weight > 0]
+            if len(weights) < 2:
+                continue
+            top = groups[max(weights)[1]].name
+            keep = {groups[index].name: weight for weight, index in weights
+                    if steps(top, groups[index].name) <= max_steps}
+            if len(keep) < len(weights):
+                pruned += len(weights) - len(keep)
+                assign(vertex, keep)
+    return relabelled, pruned
+
+
 def setup_material(obj):
     material = bpy.data.materials.new(obj.name + "_rebaked")
     material.use_nodes = True
@@ -206,12 +303,40 @@ def setup_material(obj):
     material.node_tree.links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
 
 
+def same_uvs(source, target):
+    if len(source.data.loops) != len(target.data.loops) or not source.data.uv_layers or not target.data.uv_layers:
+        return False
+    uvs = []
+    for obj in (source, target):
+        values = [0.0] * (2 * len(obj.data.loops))
+        obj.data.uv_layers.active.data.foreach_get("uv", values)
+        uvs.append(values)
+    return max(abs(a - b) for a, b in zip(*uvs)) < 1e-4
+
+
 def transfer(source_meshes, meshes, output):
     bpy.context.scene.render.engine = "CYCLES"
-    coverage = {}
+    coverage, methods = {}, {}
     for target in meshes:
-        setup_material(target)
+        # SkinTokens --use_transfer keeps the source surface and UVs; reuse its maps as-is.
+        # A selected-to-active rebake misses rays on folds and pockets and leaves dark dots.
         center = target.matrix_world @ target.data.vertices[0].co
+        matches = [obj for obj in source_meshes if same_uvs(obj, target)]
+        if matches:
+            source = min(matches, key=lambda obj: ((obj.matrix_world @ obj.data.vertices[0].co) - center).length)
+            methods[target.name] = "reused_source_material"
+            indices = [0] * len(source.data.polygons)
+            source.data.polygons.foreach_get("material_index", indices)
+            target.data.materials.clear()
+            for material in source.data.materials:
+                target.data.materials.append(material)
+            target.data.polygons.foreach_set("material_index", indices)
+            for channel in CHANNELS:
+                if has_map(source, channel):
+                    coverage[channel] = coverage.get(channel, 0) + len(target.data.vertices)
+            continue
+        methods[target.name] = "selected_to_active_rebake"
+        setup_material(target)
         source = min(source_meshes, key=lambda obj: ((obj.matrix_world @ obj.data.vertices[0].co) - center).length)
         for channel in CHANNELS:
             if not has_map(source, channel):
@@ -232,7 +357,7 @@ def transfer(source_meshes, meshes, output):
             image.save()
             coverage[channel] = coverage.get(channel, 0) + len(target.data.vertices)
     vertex_count = sum(len(obj.data.vertices) for obj in meshes)
-    return {channel: count / vertex_count for channel, count in coverage.items()}
+    return {channel: count / vertex_count for channel, count in coverage.items()}, methods
 
 
 def points(meshes):
@@ -267,8 +392,18 @@ def pose(rig, mapping, name):
         bone = rig.pose.bones[mapping[semantic]]
         bone.rotation_quaternion = Quaternion(Vector(axis), math.radians(degrees))
     if name == "t_pose":
-        rotate_world("left_upper_arm", (0, 1, 0), 25)
-        rotate_world("right_upper_arm", (0, 1, 0), -25)
+        # A real T-pose: swing each upper arm until it is horizontal, whatever its rest angle.
+        for semantic in ("left_upper_arm", "right_upper_arm"):
+            bone = rig.pose.bones[mapping[semantic]]
+            bpy.context.view_layer.update()
+            # glTF/FBX do not store bone tails; aim at the elbow (forearm head), not the guessed tail.
+            elbow = rig.pose.bones[mapping[semantic.replace("upper_arm", "forearm")]].head
+            direction = (rig.matrix_world.to_3x3() @ (elbow - bone.head)).normalized()
+            level = Vector((direction.x, direction.y, 0.0)).normalized()
+            world_swing = direction.rotation_difference(level)
+            armature_axis = rig.matrix_world.to_3x3().inverted() @ world_swing.axis
+            local_axis = bone.bone.matrix_local.to_3x3().inverted() @ armature_axis
+            bone.rotation_quaternion = Quaternion(local_axis.normalized(), world_swing.angle)
     elif name == "raised_arms":
         rotate_world("left_upper_arm", (0, 1, 0), 65, toward_height=True)
         rotate_world("right_upper_arm", (0, 1, 0), 65, toward_height=True)
@@ -391,8 +526,9 @@ def run(request):
     if unknown or not meshes:
         raise ValueError(f"Unclassified geometry or missing skinned mesh: {unknown}")
     mapping = name_humanoid_bones(rig, meshes, semantic_bones(rig))
+    relabelled_vertices, pruned_influences = prune_distant_influences(meshes, rig)
     output = Path(request["rigged_model"]).parent
-    coverage = transfer(source_meshes, meshes, output)
+    coverage, material_transfer = transfer(source_meshes, meshes, output)
     if coverage.get("base_color", 0) <= 0:
         raise ValueError("Base color transfer failed")
     for obj in source_meshes:
@@ -410,6 +546,9 @@ def run(request):
             "skinned_component_count": sum(components(obj) for obj in meshes),
             "helper_objects": helpers, "unclassified_objects": unknown,
             "bind_pose_count": len(rig.data.bones), "material_coverage": coverage,
+            "material_transfer": material_transfer,
+            "relabelled_isolated_vertices": relabelled_vertices,
+            "pruned_distant_influences": pruned_influences,
             "semantic_mapping": mapping, "bone_names": sorted(rig.data.bones.keys()),
             "deformation_evidence": deformation,
             "contact_sheet_dimensions": dimensions, "pose_parameters": "fixed skintokens_character.py v1",
@@ -488,6 +627,10 @@ def make_fixture(request):
         obj.parent = rig
         obj.modifiers.new("Skin", "ARMATURE").object = rig
         obj.data.materials.clear()
+    # Sampled-weight leaks: one leg vertex also follows a left fingertip, another follows only it.
+    leg = bpy.data.objects["LegL"]
+    leg.vertex_groups.new(name="bone_19").add([0, 1], 0.4, "REPLACE")
+    leg.vertex_groups["bone_10"].remove([1])
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.02, location=(0, 0, 2))
     bpy.context.object.name = "Icosphere"
     bpy.ops.export_scene.gltf(filepath=request["raw"], export_format="GLB")

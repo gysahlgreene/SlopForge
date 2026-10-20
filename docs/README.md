@@ -28,6 +28,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 
 ## Examples and qualification evidence
 
+- [Character styles](media/character-styles-2026-10/README.md): four generated characters in four art styles, rigged automatically and walking, with how they were made and limits.
 - [Structure showcase](media/structure-showcase-2026-10/README.md): six generated structures and a real-scale modular stone kit, with turntables, maps, conditions and limits.
 - [Material showcase](media/material-showcase-2026-10/README.md): five props of different materials generated from briefs, with maps, renders, conditions and limits.
 - [Texture mask recovery](media/texture-mask-recovery-2026-10/README.md): controlled failure, correction, fresh case and repeat; remaining appearance limitations.
