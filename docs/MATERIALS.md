@@ -26,7 +26,9 @@ result against that declaration before anyone reviews it.
 2. **Concept.** SlopForge appends reconstruction rules and the declared regions to every
    3D concept prompt, including agent-authored and recipe prompts: complete centred
    object, soft even studio lighting with no baked highlights, distinct material regions,
-   matte non-metals, and emissive regions shown switched off as opaque surfaces.
+   matte non-metals, and emissive regions described only by their unlit look: "a solid opaque
+   surface with a dull matte finish in its own flat daytime colour". The rule does not name the
+   glow; when it said "switched off, not glowing", every lantern concept drew the panels lit.
 
 3. **Geometry and maps.** The TRELLIS.2 workflow generates the shape and a voxel texture
    field. On the H100 profile the raw shape (often tens of millions of faces in open,
@@ -63,7 +65,9 @@ result against that declaration before anyone reviews it.
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
    every channel at least 150 and at least 1.3 times the map's median, channels within 25 of each other).
-   Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. Without an emissive
+   Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. A candidate
+   whose base color has no matching region fails with `emitter_missing`, a retryable quality code, so the next
+   mesh seed is tried within the tier's attempt budget. Without an emissive
    declaration the emission map is black. The surface-swatch route (`processing/make_pbr_maps.py`) enables emission
    only when the material prompt contains one of the whole words emissive, emission, glowing, glow, luminous or LED;
    `sealed` or `ledge` does not count. In Unity the Lit material is marked emissive
@@ -86,33 +90,37 @@ Material-map checks run on every native candidate and are recorded in its valida
 | --- | --- |
 | Metallic map ≥ 50% fully metallic while the brief declares no metal | Candidate fails (`material_mismatch`); revise the concept so non-metals read as matte |
 | Metallic map ≥ 90% fully metallic with no metal declared or no declarations | Warning |
-| Emissive region declared but no matching pale or declared-colour region found | Warning |
+| Emissive region declared but no matching pale or declared-colour region found (`emissive_fraction` 0) | Candidate fails (`emitter_missing`); the next mesh seed is tried within the budget |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
 
-Thresholds other than the declared-material mismatch are informational: the
+Thresholds other than the declared-material checks are informational: the
 [quality contract](QUALITY_CONTRACT.md) requires project-declared acceptance thresholds,
 and none are declared yet.
 
 ## Known limits
 
-- **Glowing parts:** image-to-3D reconstructs glowing or translucent regions as empty space.
-  Concepts must show emissive parts unlit as opaque surfaces; then they reconstruct as solid
-  panels. The concept model draws paper panels lit anyway (all 30 concepts of the 2026-10-20
-  lantern runs). TRELLIS.2 usually still bakes them pale and near-neutral, but how pale depends
-  on the seed: flat at about 200 or 253, or mottled rice paper at 157-173, on granite with a
-  median of 105-128. A fixed cut-off (225, then briefly 190) missed whichever cluster lay below it.
-  The cut-off is now 150 and 1.3 times the map's median: it finds the panels in all seven pale
-  reconstructions on record (0.6-3.3% of the map) and keeps speckled granite out. Limits:
+- **Glowing parts:** image-to-3D reconstructs glowing or translucent regions as empty space, and
+  a glow drawn in the concept bakes into the albedo at a seed-dependent level. Concepts must show
+  emissive parts unlit as opaque surfaces. Until 2026-10-20 the concept rule named the glow ("shown
+  switched off ..., not glowing"), and all 30 lantern concepts drew the paper panels lit. TRELLIS.2
+  then baked them flat at about 200 or 253, mottled at 157-173, or not at all (dense slats with warm
+  slivers of paper, or empty cavities): 4 of 11 lantern candidates on record had no findable panel.
+  Two cut-off changes (225, then 150 and 1.3 times the map's median) fixed the pale levels but not
+  the misses. Controlled tests (fixed seeds, private evidence) showed the rule wording was the lever:
+  describing only the unlit look drew 9 of 12 lantern concepts unlit instead of 0 of 12, and kept
+  a coloured amber lens amber and solid. With the same mesh seed, an unlit concept never baked a
+  smaller panel than its lit counterpart (5 pairs: 0 → 0.7%, 0.07 → 1.35%, 0.94 → 2.41%, 1.71 → 1.71%,
+  1.34 → 1.53% of the map). A seed that still bakes no panel now fails `emitter_missing` and the next
+  seed is tried. Three fresh lantern runs on the new rule each found the panels on the first mesh
+  attempt, and they glow in Blender and the Unity URP preview. Limits:
+  - about a quarter of lantern concepts are still drawn lit or partly lit; concept selection does
+    not check this;
   - on mottled panels the fleck filter drops some panes, so a few panes can stay dark;
   - a body as pale as its emitter (pale marble, white cloth or plate armour) cannot be separated
-    by colour, and then nothing glows;
-  - some seeds bake no usable pale panel: 3 of 6 lantern candidates on 2026-10-18 had none, and
-    on 2026-10-20 one rebuilt each window as dense slats with thin warm slivers of paper
-    (185, 164, 151; saturation 34, above the 25 limit), so the glow colour of the lit concept
-    reached the albedo. Those stay unlit with the warning. Colour matching on the baked albedo has
-    now needed two cut-off changes for one brief, so the next step is a different approach, not a
-    third cut-off: see [current state](../CURRENT_STATE.md).
+    by colour, so every seed fails `emitter_missing`; declare the emitter's colour instead;
+  - removing "light box" and "unlit in daylight" from the brief made no clear difference (3 of 12
+    concepts lit or partly lit either way).
 - **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the
   declared-material check catches this, and matte wording in the concept prevents it.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
