@@ -153,6 +153,18 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("Cancelled", error.getvalue())
         self.assertNotIn("Traceback", error.getvalue())
 
+    def test_make_material_approval_operation_reaches_approve_texture(self):
+        from slopforge import cli
+        manifest_path = self.root / "ai/assets/manifest.json"
+        save_manifest(manifest_path, {"schema_version": 4, "assets": {
+            "prop:relic": new_record("prop", "relic", "Stone relic", load_style(self.root), {"strategy": "text_only"})}})
+        with patch("slopforge.pipelines.model.approve_texture", return_value={"status": "passed"}) as approve_texture, \
+                redirect_stdout(StringIO()):
+            result = cli._run(cli._make_operation("approve-texture", self.root, "plain", name="relic",
+                                                  candidate=1, force=False))
+        self.assertEqual(result, 0)
+        self.assertFalse(approve_texture.call_args.kwargs["allow_placeholder_normal"])
+
     def test_cli_reports_structured_stage_failure_and_returns_nonzero(self):
         from slopforge.failures import StageFailure
         from slopforge.style import load_style
@@ -184,6 +196,29 @@ class SlopForgeTests(unittest.TestCase):
         style = load_style(self.root, config)
         self.assertEqual(config["asset_pipeline"]["active_style"], "plain")
         self.assertEqual(style["identity"]["genre"], "fantasy")
+
+    def test_config_keeps_defaults_for_empty_sections_without_mutating_them(self):
+        from slopforge.config import DEFAULTS
+        config_path = self.root / "ai/project.yaml"
+        config_path.write_text(config_path.read_text() + "  tools:\n  #  blender: /opt/blender\n")
+        with patch.dict(os.environ, {"BLENDER_BIN": "/env/blender"}):
+            config = load_project(self.root)
+        self.assertEqual(config["asset_pipeline"]["tools"]["comfy_url"], "http://127.0.0.1:8188")
+        self.assertEqual(config["asset_pipeline"]["tools"]["blender"], "/env/blender")
+        self.assertIsNone(DEFAULTS["tools"]["blender"])
+
+    def test_installed_package_ships_every_runtime_data_file(self):
+        try:
+            import tomllib
+        except ImportError:
+            self.skipTest("tomllib needs Python 3.11")
+        root = Path(__file__).resolve().parents[1]
+        data_files = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["setuptools"]["data-files"]
+        shipped = {path for patterns in data_files.values() for pattern in patterns for path in root.glob(pattern)}
+        for directory in ("workflows", "processing", "blender", "templates"):
+            for path in (root / directory).rglob("*"):
+                if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+                    self.assertTrue(path in shipped, f"{path.relative_to(root)} is loaded via tool_root() but not packaged")
 
     def test_taxonomy_supports_model_alias_and_safe_output_paths(self):
         types = load_taxonomy(self.root)
@@ -253,6 +288,24 @@ class SlopForgeTests(unittest.TestCase):
                                         manifest, "concept:potion", backend)
         approve_image_candidate(self.root, config, recipe, manifest, "concept:potion", 1)
         self.assertEqual(manifest["assets"]["concept:potion"]["generator"], generated[0]["generator"])
+
+    def test_interrupted_image_run_keeps_earlier_candidates_on_disk(self):
+        config = load_project(self.root)
+        style = load_style(self.root, config)
+        recipe = load_taxonomy(self.root)["concept"]
+        manifest = {"schema_version": 4, "assets": {"concept:potion": new_record("concept", "potion", "Potion", style, {"strategy": "text_only"})}}
+
+        def backend(_prompt, destination, seed, metadata):
+            if destination.name == "candidate_02.png":
+                raise KeyboardInterrupt
+            Image.new("RGB", (16, 16), "red").save(destination)
+
+        with self.assertRaises(KeyboardInterrupt):
+            generate_candidates(self.root, config, recipe, style, "potion", "Potion", 3,
+                                manifest, "concept:potion", backend)
+        saved = load_manifest(self.root / config["asset_pipeline"]["manifest"])
+        items = saved["assets"]["concept:potion"]["candidates"]["items"]
+        self.assertEqual([(item["number"], item["status"]) for item in items], [(1, "candidate"), (2, "failed")])
 
     def test_cli_auto_approval_keeps_first_candidate_provenance(self):
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
@@ -347,6 +400,12 @@ class SlopForgeTests(unittest.TestCase):
         with patch("sys.argv", argv):
             make_pbr_maps()
         self.assertTrue(any(pixel != (0, 0, 0) for pixel in Image.open(outputs["emission"]).getdata()))
+
+        # Emission keywords match whole words: "led" must not light up "sealed".
+        argv[argv.index("--prompt") + 1] = "sealed blue stone"
+        with patch("sys.argv", argv):
+            make_pbr_maps()
+        self.assertEqual(set(Image.open(outputs["emission"]).getdata()), {(0, 0, 0)})
 
     def test_model_approval_rejects_changed_style_before_processing(self):
         config = load_project(self.root)
@@ -627,6 +686,17 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual((material.name, material.material_prompt, material.count), ("terminal", "blue steel", 3))
         approved = parse_args(["approve-texture", "terminal", "4"])
         self.assertEqual((approved.name, approved.candidate), ("terminal", 4))
+        joined = parse_args(["--project=/tmp/game", "doctor"])
+        self.assertEqual((joined.command, joined.project), ("doctor", "/tmp/game"))
+        with redirect_stderr(StringIO()) as error, self.assertRaises(SystemExit):
+            parse_args([])
+        self.assertNotIn("asset_type", error.getvalue())
+
+    def test_doctor_uses_project_root_environment(self):
+        with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \
+                patch("slopforge.doctor.run_doctor", return_value=0) as run_doctor:
+            self.assertEqual(cli_main(["doctor"]), 0)
+        self.assertEqual(run_doctor.call_args.args[0], self.root.resolve())
 
     def test_agent_image_prompt_is_sent_verbatim_and_keeps_asset_brief(self):
         authored_prompt = "A hand-painted brass key, three-quarter view, deep teal enamel accents."
@@ -758,6 +828,24 @@ class SlopForgeTests(unittest.TestCase):
         manifest = load_manifest(self.root / "ai/assets/manifest.json")
         self.assertEqual(len(manifest["assets"]["concept:quick"]["candidates"]["items"]), 1)
         self.assertEqual(len(manifest["assets"]["concept:many"]["candidates"]["items"]), 2)
+
+    def test_generate_model_type_uses_image_budget_for_concepts(self):
+        import yaml
+        config_path = self.root / "ai/project.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["asset_pipeline"]["quality_tier"] = "normal"
+        config["asset_pipeline"]["defaults"] = {"image_candidates": 5, "model_candidates": 2}
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False))
+        with patch("slopforge.cli.model.generate", return_value=[]) as generate, redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "relic", "Relic"]), 0)
+        self.assertEqual(generate.call_args.args[6], 5)
+
+    def test_missing_configured_asset_python_stops_with_actionable_error(self):
+        import sys
+        from slopforge.backends.comfyui import python_executable
+        with self.assertRaisesRegex(FileNotFoundError, "asset_python.*SLOPFORGE_PYTHON"):
+            python_executable(self.root, {"asset_pipeline": {"tools": {"asset_python": "missing/python"}}})
+        self.assertEqual(python_executable(self.root, {"asset_pipeline": {"tools": {}}}), sys.executable)
 
     def test_hunyuan_workflow_uses_configured_checkpoint_and_seed(self):
         workflow = make_workflow("input.png", "pickup", "checkpoint.safetensors", 123)

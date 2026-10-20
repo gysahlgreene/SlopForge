@@ -629,6 +629,38 @@ avoid: [environment]
         self.assertEqual(preserved_conditioning["status"], "succeeded")
         self.assertEqual(len(preserved_conditioning["outputs"]), succeeded_output_count)
 
+    def test_resume_finishes_running_prior_without_running_stages_as_interruption(self):
+        # The process died between stages: the execution is running but no stage is.
+        from slopforge.failures import StageFailure
+        self._concept_candidates()
+
+        def generator(*_args, **_kwargs):
+            raise StageFailure("configuration", "preflight broken", operation="preflight", remedy="fix config")
+
+        with self.assertRaises(ValueError):
+            self._approve(generator)
+        manifest_path = self.root / self.config["asset_pipeline"]["manifest"]
+        full = load_manifest(manifest_path)
+        prior = full["assets"]["prop:relay"]["executions"][-1]
+        prior_id = prior["id"]
+        prior["status"] = "running"
+        prior.pop("failure", None)
+        prior.pop("finished_at", None)
+        self.assertFalse(any(stage["status"] == "running" for stage in prior["stages"]))
+        save_manifest(manifest_path, full)
+        self.manifest = load_manifest(manifest_path)
+        self.record = self.manifest["assets"]["prop:relay"]
+
+        with self.assertRaises(ValueError):
+            self._approve(generator, resume=True)
+
+        reloaded = load_manifest(manifest_path)["assets"]["prop:relay"]["executions"]
+        recovered = next(item for item in reloaded if item["id"] == prior_id)
+        self.assertEqual(recovered["status"], "failed")
+        self.assertEqual(recovered["failure"]["category"], "interruption")
+        self.assertTrue(recovered["failure"]["evidence"]["completion_not_persisted"])
+        self.assertFalse(any(item["status"] == "running" for item in reloaded))
+
     def _mesh_history(self, decision):
         from slopforge.pipelines.model import _mesh_slot_history
 
@@ -662,6 +694,14 @@ avoid: [environment]
 
         decision.update({"used": 1, "limit": 2, "next_seed_index": None})
         with self.assertRaisesRegex(ValueError, "action contradicts"):
+            self._mesh_history(decision)
+
+    def test_retry_decision_with_non_canonical_scope_hash_blocks_resume(self):
+        decision = {"scope": "mesh", "scope_sha256": "A" * 64,
+                    "stage": "mesh_workflow_execution", "stage_id": "stage-1",
+                    "attempt": 1, "category": "candidate_quality", "used": 1,
+                    "limit": 2, "action": "next_candidate", "next_seed_index": 1}
+        with self.assertRaisesRegex(ValueError, "Retry decision is malformed"):
             self._mesh_history(decision)
 
     def test_incomplete_non_quality_stop_decision_blocks_resume(self):

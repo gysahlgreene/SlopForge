@@ -29,7 +29,8 @@ class ExplorationTests(unittest.TestCase):
             "name: Plain\nversion: 1\nidentity: {}\nshape_language: {preferred: [], avoid: []}\n"
             "palette: {}\nmaterials: {}\nsurface_language: {preferred: [], avoid: []}\n"
             "lighting: {}\nasset_rules: {}\nmaterial_generation: {rules: []}\n")
-        self.config = {"asset_pipeline": {"candidate_root": "ai/assets/candidates", "output_root": "Assets/Art"}}
+        self.config = {"asset_pipeline": {"candidate_root": "ai/assets/candidates", "output_root": "Assets/Art",
+                                          "manifest": "ai/assets/manifest.json"}}
         self.style = {"name": "Test", "version": 1}
         self.asset_type = {"name": "concept", "pipeline": "image", "format": "PNG", "alpha_required": False,
                            "output_folder": "Concepts"}

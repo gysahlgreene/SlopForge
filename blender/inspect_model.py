@@ -10,6 +10,7 @@ from pathlib import Path
 import bpy
 import bmesh
 from mathutils import Vector
+from mathutils.kdtree import KDTree
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.character_readiness import classify_character_readiness
@@ -115,10 +116,13 @@ def topology_diagnostics(obj, weld_distance):
     bm = bmesh.new()
     bm.from_mesh(mesh)
     bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=weld_distance)
-    local_vertices = [vertex.co.copy() for vertex in mesh.vertices]
+    tree = KDTree(len(mesh.vertices))
+    for vertex in mesh.vertices:
+        tree.insert(vertex.co, vertex.index)
+    tree.balance()
 
     def source_indices(position):
-        return [index for index, co in enumerate(local_vertices) if (co - position).length <= weld_distance]
+        return sorted(index for _, index, _ in tree.find_range(position, weld_distance))
 
     world = obj.matrix_world
     diagnostics = []
@@ -145,11 +149,11 @@ def topology_diagnostics(obj, weld_distance):
         diagnostics.append({"object_name": obj.name, "component_index": None, "kind": "degenerate_face",
                             "polygon_index": polygon.index, "source_vertex_indices": list(polygon.vertices),
                             "center": [float(value) for value in center], "area": float(polygon.area)})
-    components = component_details(obj)
+    component_of = {index: part["component_index"] for part in component_details(obj)
+                    for index in part["source_vertex_indices"]}
     for item in diagnostics:
-        indices = set(item["source_vertex_indices"])
-        component = next((part for part in components if indices.intersection(part["source_vertex_indices"])), None)
-        item["component_index"] = component["component_index"] if component else None
+        item["component_index"] = min((component_of[index] for index in item["source_vertex_indices"]
+                                       if index in component_of), default=None)
     return sorted(diagnostics, key=lambda item: (item["object_name"], item["component_index"] or 0,
                                                  item["kind"], item.get("positions", [item.get("center", [])]),
                                                  item.get("polygon_index", -1)))
@@ -218,7 +222,9 @@ def inspect(source, face_budget):
         filepath = Path(bpy.path.abspath(image.filepath))
         if not image.packed_file and not filepath.is_file():
             missing_textures.append(str(filepath))
-    scales_applied = all(all(abs(value - 1.0) < 1e-4 for value in obj.scale) and all(abs(value) < 1e-4 for value in obj.rotation_euler) for obj in objects)
+    # World matrix: glTF imports use quaternion rotation, and parents can rotate or scale a mesh too.
+    scales_applied = all(rotation.angle < 1e-4 and all(abs(value - 1.0) < 1e-4 for value in scale)
+                         for _, rotation, scale in (obj.matrix_world.decompose() for obj in objects))
     component_sizes = [connected_components(obj.data) for obj in objects]
     components = sum(len(sizes) for sizes in component_sizes)
     component_records = [part for obj in objects for part in component_details(obj)]

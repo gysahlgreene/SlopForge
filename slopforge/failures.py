@@ -67,19 +67,6 @@ _REQUIRED_RECORD_FIELDS = frozenset({
 })
 
 
-def _is_valid_report_metric(value, name: str) -> bool:
-    """Return True for finite, non-negative numeric metrics excluding bools."""
-    if isinstance(value, bool):
-        return False
-    if not isinstance(value, (int, float)):
-        return False
-    if not math.isfinite(value):
-        return False
-    if value < 0:
-        return False
-    return True
-
-
 def failure_record(
     error: Exception | KeyboardInterrupt,
     *,
@@ -411,7 +398,3 @@ def candidate_quality_rejection(validation: dict) -> bool:
             return False
 
     return True
-
-
-def _is_retryable(category: str) -> bool:
-    return category in _RETRYABLE_CATEGORIES

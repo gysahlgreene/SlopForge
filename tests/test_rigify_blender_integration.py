@@ -10,6 +10,7 @@ from slopforge.config import load_project
 from slopforge.initializer import init_project
 from slopforge.manifest import load_manifest, new_record, register_artifact, save_manifest
 from slopforge.cli import main
+from readiness_fixture import approve_source_review
 
 
 @unittest.skipUnless(os.environ.get("SLOPFORGE_RUN_BLENDER_RIGIFY") == "1",
@@ -74,6 +75,7 @@ bpy.ops.export_scene.gltf(filepath=str(Path(__file__).parent / "Assets/Character
             manifest["assets"]["character:pilot"] = character
             register_artifact(manifest, "character:pilot", "model", "model.glb",
                               "Assets/Characters/pilot/model.glb", status="ready", approval_status="approved")
+            approve_source_review(root, manifest, "character:pilot")  # readiness approval requires it
             save_manifest(manifest_path, manifest)
 
             self.assertEqual(main(["--project", str(root), "character", "readiness", "pilot"]), 0)

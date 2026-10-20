@@ -189,15 +189,6 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
     }
 
 
-def summarize_validation(result):
-    lines = [f"Validation: {result['status'].replace('_', ' ')}"]
-    lines.extend(f"FAIL: {item}" for item in result.get("errors", []))
-    lines.extend(f"WARN: {item}" for item in result.get("warnings", []))
-    if not result.get("errors") and not result.get("warnings"):
-        lines.append("PASS: all configured checks ran")
-    return "\n".join(lines)
-
-
 # A sampled reconstruction can come out turned sideways (aspect error 0.69 on one realistic character)
 # or with limbs missing, while good ones fit the front concept within about 0.035 and wide, stocky
 # builds within 0.09.
@@ -206,6 +197,12 @@ MAX_CONCEPT_ASPECT_ERROR = 0.15
 
 def apply_concept_silhouette(validation, projection, limit=MAX_CONCEPT_ASPECT_ERROR):
     """Fail a candidate whose front silhouette does not match its concept (retryable quality code)."""
+    if (projection or {}).get("status") == "skipped":
+        validation["warnings"] = [*validation.get("warnings", []),
+            f"front concept projection skipped: {projection.get('reason', 'no reason recorded')}; "
+            "the base color is the voxel bake only, so inspect face and fine detail"]
+        if validation.get("status") == "passed":
+            validation["status"] = "passed_with_warnings"
     error = (projection or {}).get("aspect_error")
     if isinstance(error, bool) or not isinstance(error, (int, float)) or not math.isfinite(error):
         return validation

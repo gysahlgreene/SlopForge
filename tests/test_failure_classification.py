@@ -395,6 +395,20 @@ class TestCandidateQualityRejection(unittest.TestCase):
         self.assertNotEqual(report(0.03)["status"], "failed")
         self.assertNotIn("concept_silhouette", report(0.03).get("failure_codes", []))
 
+    def test_skipped_concept_projection_is_recorded_as_a_warning(self):
+        from slopforge.validation import apply_concept_silhouette
+
+        validation = apply_concept_silhouette(
+            {"status": "passed", "errors": [], "warnings": []},
+            {"status": "skipped", "aspect_error": 0.08,
+             "reason": "model and concept proportions differ by 8.0% (> 5%)"})
+        self.assertEqual(validation["status"], "passed_with_warnings")
+        self.assertTrue(any("concept projection skipped" in item and "8.0%" in item
+                            for item in validation["warnings"]), validation["warnings"])
+        projected = apply_concept_silhouette({"status": "passed", "errors": [], "warnings": []},
+                                             {"status": "projected", "aspect_error": 0.02})
+        self.assertEqual((projected["status"], projected["warnings"]), ("passed", []))
+
     def test_nonmanifold_budget_exceeds_limit(self):
         report = validate_model_outputs(
             {},

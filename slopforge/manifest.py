@@ -208,16 +208,6 @@ def start_execution(asset, identity_inputs, parent_execution_id=None):
     return execution
 
 
-def set_execution_identity(execution, identity_inputs):
-    if execution.get("stages"):
-        raise ValueError("Execution identity cannot change after a stage starts")
-    if not isinstance(identity_inputs, dict):
-        raise ValueError("Execution identity inputs must be an object")
-    execution["identity_inputs"] = copy.deepcopy(identity_inputs)
-    execution["identity_sha256"] = execution_identity(identity_inputs)
-    return execution
-
-
 def start_stage(execution, name, attempt, inputs, settings, provenance):
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Stage name must be a non-empty string")

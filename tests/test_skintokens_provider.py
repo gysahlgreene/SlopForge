@@ -279,3 +279,27 @@ def test_remote_host_runs_the_shared_runtime_over_ssh(tmp_path, monkeypatch):
     settings["asset_pipeline"]["tools"]["skintokens_checkout"] = "~/st"
     with pytest.raises(ValueError, match="absolute path"):
         skintokens_preflight(settings, tmp_path)
+
+
+def test_remote_cleanup_only_removes_the_created_work_directory(tmp_path, monkeypatch):
+    calls = []
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        if argv[0] == "ssh" and "mktemp" in argv:
+            return SimpleNamespace(returncode=0, stdout=banner, stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+    monkeypatch.setattr(rigging.subprocess, "run", fake_run)
+    source = tmp_path / "source.fbx"
+    source.write_bytes(b"input")
+    args = ({}, "gpu-box", "/py", "/st", "/st/w.ckpt", source, tmp_path / "out.glb", 1, tmp_path / "log")
+
+    banner = "conda activated\n/tmp/slopforge-skintokens-abc\n"
+    with pytest.raises(RuntimeError, match="upload"):
+        rigging._remote_inference(*args)
+    assert calls[-1][-4:] == ["rm", "-rf", "--", "/tmp/slopforge-skintokens-abc"]
+
+    calls.clear()
+    banner = "conda activated\n"
+    with pytest.raises(RuntimeError, match="work directory"):
+        rigging._remote_inference(*args)
+    assert not any("rm" in argv for argv in calls)

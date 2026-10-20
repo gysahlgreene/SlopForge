@@ -21,6 +21,7 @@ include = ["slopforge*"]
 
 [tool.setuptools.data-files]
 "share/slopforge/workflows" = ["workflows/*.json", "workflows/*.requirements.yaml"]
+"share/slopforge/workflows/inputs" = ["workflows/inputs/*.png"]
 "share/slopforge/processing" = ["processing/*.py"]
 "share/slopforge/blender" = ["blender/*.py"]
 "share/slopforge/templates" = ["templates/project.yaml", "templates/manifest.json", "templates/AGENTS.md", "templates/CLAUDE.md"]

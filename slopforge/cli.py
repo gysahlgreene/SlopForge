@@ -181,9 +181,8 @@ def parser():
 
 def parse_args(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv[:1] in (["-h"], ["--help"], ["--version"]) or argv[:1] in (["init"], ["make"], ["generate"], ["explore"], ["promote"], ["candidates"], ["approve"], ["reject"], ["review"], ["retexture"], ["approve-texture"], ["inspect"], ["doctor"], ["styles"], ["assets"], ["prompt"], ["recipe"], ["library"], ["animation"], ["character"], ["environment-check"]):
-        return parser().parse_args(argv)
-    if argv[:1] == ["--project"] and len(argv) > 2 and argv[2] in COMMANDS:
+    rest = argv[2:] if argv[:1] == ["--project"] else argv[1:] if argv[:1] and argv[0].startswith("--project=") else argv
+    if not rest or rest[0] in {"-h", "--help", "--version"} | COMMANDS:
         return parser().parse_args(argv)
     legacy = argparse.ArgumentParser(prog="slopforge", description="Automatic candidate generation.")
     legacy.add_argument("asset_type")
@@ -512,8 +511,8 @@ def _run(args):
     if args.command == "doctor":
         from .doctor import run_doctor
         project = None
-        if args.project:
-            project = Path(args.project).expanduser().resolve()
+        if args.project or os.environ.get("SLOPFORGE_PROJECT_ROOT"):
+            project = Path(args.project or os.environ["SLOPFORGE_PROJECT_ROOT"]).expanduser().resolve()
         else:
             try:
                 project = discover_project_root()
@@ -807,7 +806,7 @@ def _run(args):
         else:
             result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
                                            asset_type=recipe,
-                                           allow_placeholder_normal=args.allow_placeholder_normal)
+                                           allow_placeholder_normal=getattr(args, "allow_placeholder_normal", False))
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0
@@ -847,8 +846,8 @@ def _run(args):
         print(prompt_text)
         return 0
 
-    count_key = "image_candidates" if recipe["pipeline"] == "image" else "model_candidates"
-    count = args.count or pipeline["defaults"][count_key]
+    # Model types generate concept images here; model_candidates bounds mesh attempts at approval.
+    count = args.count or pipeline["defaults"]["image_candidates"]
     key = _asset_key(manifest, asset_type, args.name)
     if key in manifest["assets"]:
         record = manifest["assets"][key]

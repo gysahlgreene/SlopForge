@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from PIL import Image
 
 from .manifest import find_asset
+from .provenance import file_sha256
 
 
 _VIEWS = {"front": "preview.front", "side": "preview.side", "rear": "preview.rear",
@@ -17,8 +18,6 @@ _CLASSIFICATIONS = {"intentional", "repairable", "unresolved"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
-def _sha256(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _inspection_evidence_hash(report):
@@ -58,7 +57,7 @@ def _file_record(root, relative, label, missing, *, artifact=None, image=False):
         return {"path": relative, "artifact_id": artifact.get("id") if artifact else None,
                 "sha256": None, "status": "missing"}
     return {"path": relative, "artifact_id": artifact.get("id") if artifact else None,
-            "type": artifact.get("type") if artifact else None, "sha256": _sha256(path), "status": "verified"}
+            "type": artifact.get("type") if artifact else None, "sha256": file_sha256(path), "status": "verified"}
 
 
 def _artifact(asset, key_or_type):
@@ -340,7 +339,7 @@ def is_character_source_review_current(project_root, review):
             return False
         if not path:
             return False
-        current[key] = _sha256(path)
+        current[key] = file_sha256(path)
     return current == expected
 
 

@@ -205,6 +205,7 @@ class CharacterRiggingTests(unittest.TestCase):
                 "unclassified_objects": [], "unweighted_vertices": 0, "weight_sum_min": 1,
                 "weight_sum_max": 1, "max_influences": 4, "bind_pose_count": 28,
                 "material_coverage": {"base_color": 1.0}, "semantic_mapping": {"hips": "bone_0"},
+                "bone_names": ["Extra_7", "Hips", "LeftFinger1", "LeftHand", "Spine"],
                 "deformation_evidence": {pose: {"max_vertex_displacement": 0.1}
                                          for pose in request["evidence"]}}))
         with patch("slopforge.character_rigging.run_skintokens_inference", side_effect=inference), \
@@ -218,6 +219,33 @@ class CharacterRiggingTests(unittest.TestCase):
         self.assertEqual(character["pipeline_status"]["deformation_status"], "needs_review")
         self.assertEqual(character["artifacts"]["rig"]["approval"]["status"], "pending")
         self.assertEqual(character["artifacts"]["rig"]["validation"]["status"], "pass")
+        self.assertEqual(character["rigging"]["unity_humanoid_mapping"],
+                         {"Hips": "Hips", "LeftHand": "LeftHand", "Spine": "Spine"})
+
+    def test_skintokens_postprocess_failure_reports_the_blender_errors(self):
+        import json
+        import subprocess
+        self.test_skintokens_registers_only_postprocessed_fbx()
+        for path in (self.root / "Assets/Generated").rglob("*"):
+            if path.is_file():
+                path.unlink()
+        config = {"asset_pipeline": {"character_rigging_provider": "skintokens",
+                 "output_root": "Assets/Generated", "tools": {}}}
+        def inference(_config, _source, output, *, seed):
+            Path(output).write_bytes(b"raw glb")
+            return {"revision": "rev", "checkpoint_id": "ckpt", "checkpoint_sha256": "a" * 64}
+        def blender(command, **kwargs):
+            request = json.loads(Path(command[-1]).read_text())
+            Path(request["report"]).write_text(json.dumps({"status": "failed", "errors": ["no armature in output"]}))
+            if kwargs.get("check"):
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 1)
+        with patch("slopforge.character_rigging.run_skintokens_inference", side_effect=inference), \
+             patch("slopforge.character_rigging.blender_executable", return_value="blender"), \
+             patch("slopforge.character_rigging.subprocess.run", side_effect=blender):
+            with self.assertRaisesRegex(RuntimeError, "no armature in output"):
+                run_character_rigging(self.root, config, self.manifest, "character:pilot",
+                                      source_output="normalized_model")
 
 
 if __name__ == "__main__":

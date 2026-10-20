@@ -550,7 +550,7 @@ class RecipeTests(unittest.TestCase):
 
         generate.assert_called_once()
         self.assertEqual(generate.call_args.args[6], 4)
-        self.assertEqual(generate.call_args.kwargs["generation_prompt"], "A blue wall terminal")
+        self.assertTrue(generate.call_args.kwargs["generation_prompt"].startswith("A blue wall terminal\n\n"))
         self.assertEqual(self.manifest["assets"]["recipe:demo"]["status"], "awaiting_approval")
 
     def test_image_children_use_configured_candidate_default(self):
@@ -684,6 +684,31 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(len(generated), 1)
         stage = self.manifest["assets"]["recipe:demo"]["recipe_instance"]["stages"]["terminal"]
         self.assertEqual(stage["reuse_decisions"][-1]["reusable"], True)
+
+    def test_resume_expects_the_prompt_a_model_child_was_generated_with(self):
+        self.definition["children"] = [{"id": "terminal", "type": "prop", "description": "Brass relay",
+                                        "generation_prompt": "A brass relay", "materials": ["casing=metal"]}]
+        (self.root / "ai/recipes/sample_pack.yaml").write_text(yaml.safe_dump(self.definition))
+        asset_types = {"prop": {"name": "prop", "pipeline": "model"}}
+        generated, requested = [], []
+
+        def generate(*_args, **kwargs):
+            generated.append(kwargs["generation_prompt"])
+            return [{"number": 1, "status": "candidate"}]
+
+        def decide(_root, _asset, _stage, child, _config):
+            requested.append(child["requested_generation_prompt"])
+            return {"reusable": True, "reasons": []}
+
+        with patch("slopforge.recipes.model.generate", side_effect=generate), \
+                patch("slopforge.recipes.model.prop_child_reuse_decision", side_effect=decide):
+            recipes.run_recipe(self.root, self.config, self.style, asset_types, self.manifest,
+                               "sample_pack", instance_name="demo")
+            recipes.resume_recipe(self.root, self.config, self.style, asset_types, self.manifest, "demo")
+
+        self.assertEqual(generated, requested)
+        self.assertIn("RECONSTRUCTION REQUIREMENTS", generated[0])
+        self.assertIn("casing", generated[0])
 
     def test_failed_replacement_does_not_restore_stale_recipe_child_as_approved(self):
         self.style["_directory"] = str(self.root / "styles")

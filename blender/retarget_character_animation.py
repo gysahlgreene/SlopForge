@@ -31,6 +31,15 @@ def one_armature(objects, label):
     return armatures[0]
 
 
+def source_action(source):
+    """The imported clip: the armature's active action, else the only action with keyframes."""
+    active = source.animation_data.action if source.animation_data else None
+    actions = [active] if active else [action for action in bpy.data.actions if not action.is_empty]
+    if len(actions) != 1:
+        fail(f"Animation FBX must provide exactly one action; found {len(actions)}")
+    return actions[0]
+
+
 def evaluated_vertices(meshes):
     bpy.context.view_layer.update()
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -61,13 +70,7 @@ def run(request):
     meshes = [obj for obj in rig_objects if obj.type == "MESH"]
     source_objects = import_source(animation_file)
     source = one_armature(source_objects, "Animation source")
-    actions = [action for action in bpy.data.actions if action.name in {
-        source.animation_data.action.name if source.animation_data and source.animation_data.action else ""}]
-    if not actions:
-        actions = [action for action in bpy.data.actions if len(action.fcurves) > 0]
-    if len(actions) != 1:
-        fail(f"Animation FBX must provide exactly one action; found {len(actions)}")
-    action = actions[0]
+    action = source_action(source)
     if source.animation_data is None:
         source.animation_data_create()
     source.animation_data.action = action

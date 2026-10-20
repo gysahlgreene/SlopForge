@@ -328,23 +328,32 @@ class ComfyUIClient:
 
     def wait_for_completion(self, prompt_id, timeout=3600, poll_interval=1):
         deadline = time.monotonic() + timeout
+        transport_failures = 0
         try:
             while time.monotonic() < deadline:
                 try:
                     entry = self.history(prompt_id)
                 except ComfyUIError as exc:
+                    # A dropped poll does not stop the remote job; back off and ask again while time remains.
+                    delay = min(poll_interval * 2 ** transport_failures, 30)
+                    if exc.category == "environment" and time.monotonic() + delay < deadline:
+                        transport_failures += 1
+                        time.sleep(delay)
+                        continue
                     evidence = exc.evidence if isinstance(exc.evidence, dict) else {}
                     raise ComfyUIError(
                         str(exc), category=exc.category or "inference",
                         operation=exc.operation or "wait_for_completion",
                         evidence={**evidence, "prompt_id": prompt_id, "outcome_unknown": True}) from exc
+                transport_failures = 0
                 if entry:
                     status = entry.get("status", {})
                     if status.get("status_str") == "error":
                         raise ComfyUIError(f"ComfyUI generation {prompt_id} failed: {status.get('messages', status)}",
                                            category="inference", operation="wait_for_completion",
                                            evidence={"prompt_id": prompt_id, "remote_terminal": True})
-                    if status.get("completed") and entry.get("outputs"):
+                    if status.get("completed"):
+                        entry.setdefault("outputs", {})  # callers report a job that saved nothing
                         return entry
                 time.sleep(poll_interval)
         except KeyboardInterrupt as exc:
@@ -415,7 +424,10 @@ def python_executable(project_root, config):
     path = Path(configured).expanduser()
     if not path.is_absolute():
         path = Path(project_root) / path
-    return str(path) if path.is_file() else sys.executable
+    if not path.is_file():
+        raise FileNotFoundError(f"Configured helper Python not found: {path}; fix asset_pipeline.tools.asset_python "
+                                "or SLOPFORGE_PYTHON, or unset both to use the running interpreter")
+    return str(path)
 
 
 def comfy_environment(config, project_root=None):
