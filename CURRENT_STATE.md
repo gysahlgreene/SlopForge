@@ -407,3 +407,9 @@ Props criterion v5 runs (2026-10-21, commit `221c8d1`; [evidence](docs/media/pro
   - downloads are not retried.
 
 M0 exit record (2026-10-21): [docs/M0-EXIT-RECORD.md](docs/M0-EXIT-RECORD.md) maps each M0 exit item to evidence and gaps and proposes closing M0 for static props on `h100`/`final`. The owner decides. `make verify-live` on 2026-10-21 passed (3 tests, 9 subtests, 70 s).
+
+Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
+- **Change:** `wait_for_completion` asks `/queue` straight after a dropped connection recovers, and otherwise every 30 s. A job that is neither queued, running nor in history (read again, to cover a job that finishes in between) stops as an `environment` failure marked `remote_lost` and `remote_terminal`, so `--resume` can queue it again. `download_output` retries transport failures up to five times with backoff, and does not retry HTTP errors.
+- **Tests:** unit tests cover a lost job after a restart, a job that finishes between the two checks, periodic checks of a waiting job, `/queue` parsing, a retried download and a 404 that is not retried.
+- **Live check (H100):** a pending job deleted through ComfyUI's queue API was reported lost in 2.3 s, while a running job checked every 2 s completed normally.
+- **Not verified live:** an actual service restart, and a dropped download.
