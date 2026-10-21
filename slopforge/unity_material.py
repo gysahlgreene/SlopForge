@@ -31,35 +31,47 @@ def make_metallic_gloss(metallic_path, roughness_path, destination):
     Image.merge("RGBA", (metallic, metallic, metallic, ImageChops.invert(roughness))).save(destination)
 
 
-def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)),)):
+def emitter_colour_mask(base, match):
+    """One target's colour-rule mask ("L") on an RGB image, opened so small flecks drop out.
+
+    match None means large pale near-neutral regions clearly paler than most of the map (paper); otherwise
+    texels within a small colour distance of match.
+    """
+    size = max(3, round(15 * base.width / 2048) | 1)  # odd kernel, 15 px at 2048
+    if match is None:
+        r, g, b = base.split()
+        low = ImageChops.darker(ImageChops.darker(r, g), b)
+        high = ImageChops.lighter(ImageChops.lighter(r, g), b)
+        # TRELLIS.2 bakes pale paper anywhere from ~157 to ~254 depending on the seed; 1.3x the map's
+        # median keeps a body as pale as the paper from glowing with it (docs/MATERIALS.md, Known limits).
+        counts = list(accumulate(low.histogram()))
+        # Capped at 225: when paper is most of the map the median is the paper itself (a lampshade).
+        cut = min(225, max(150, 1.3 * next(v for v, count in enumerate(counts) if 2 * count >= counts[-1])))
+        mask = ImageChops.multiply(low.point(lambda v: 255 if v >= cut else 0),
+                                   ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
+    else:
+        distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
+        mask = ImageChops.lighter(ImageChops.lighter(*distance.split()[:2]), distance.split()[2])
+        mask = mask.point(lambda v: 255 if v <= 48 else 0)
+    return mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
+
+
+def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)),), extra_masks=None):
     """Emission for declared glowing regions, found in the generated base color map.
 
-    Each target is (match_rgb, glow_rgb). match_rgb None means large pale near-neutral regions clearly
-    paler than most of the map (paper); otherwise texels within a small colour distance of match_rgb.
-    A morphological opening drops small flecks. Returns the smallest target's fraction of the map, so one
-    emitter that was found cannot hide another declared one that is missing.
+    Each target is (match_rgb, glow_rgb), found by emitter_colour_mask. extra_masks, one per target or None,
+    adds texels found another way (the concept's emitter carried onto the texture, slopforge/emitters.py).
+    Returns the smallest target's fraction of the map, so one emitter that was found cannot hide another
+    declared one that is missing.
     """
     with Image.open(basecolor_path) as image:
         base = image.convert("RGB")
-    size = max(3, round(15 * base.width / 2048) | 1)  # odd kernel, 15 px at 2048
+    size = max(3, round(15 * base.width / 2048) | 1)
     emission, fractions = Image.new("RGB", base.size), []
-    for match, glow in targets:
-        if match is None:
-            r, g, b = base.split()
-            low = ImageChops.darker(ImageChops.darker(r, g), b)
-            high = ImageChops.lighter(ImageChops.lighter(r, g), b)
-            # TRELLIS.2 bakes pale paper anywhere from ~157 to ~254 depending on the seed; 1.3x the map's
-            # median keeps a body as pale as the paper from glowing with it (docs/MATERIALS.md, Known limits).
-            counts = list(accumulate(low.histogram()))
-            # Capped at 225: when paper is most of the map the median is the paper itself (a lampshade).
-            cut = min(225, max(150, 1.3 * next(v for v, count in enumerate(counts) if 2 * count >= counts[-1])))
-            mask = ImageChops.multiply(low.point(lambda v: 255 if v >= cut else 0),
-                                       ImageChops.subtract(high, low).point(lambda v: 255 if v <= 25 else 0))
-        else:
-            distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
-            mask = ImageChops.lighter(ImageChops.lighter(*distance.split()[:2]), distance.split()[2])
-            mask = mask.point(lambda v: 255 if v <= 48 else 0)
-        mask = mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
+    for index, (match, glow) in enumerate(targets):
+        mask = emitter_colour_mask(base, match)
+        if extra_masks and extra_masks[index] is not None:
+            mask = ImageChops.lighter(mask, extra_masks[index].convert("L").resize(base.size))
         fractions.append(sum(mask.histogram()[128:]) / (base.width * base.height))
         soft = mask.filter(ImageFilter.GaussianBlur(max(1, size // 5)))
         emission = Image.composite(Image.new("RGB", base.size, tuple(glow)), emission, soft)

@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "A local-first 3D game-asset pipeline powered by ComfyUI, Blender, and Unity"
 license = {file = "LICENSE"}
 requires-python = ">=3.10,<3.15"
-dependencies = ["numpy", "Pillow", "PyYAML", "rembg[cpu]"]
+dependencies = ["numpy", "Pillow", "PyYAML", "rembg[cpu]", "scipy"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
