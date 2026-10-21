@@ -296,3 +296,17 @@ Emitter preflight (2026-10-20, H100 `h100`/final, one brief, private evidence; i
 - Concept 1 shows the lens at the declared colour and passed the check, but all three mesh seeds baked the lens dark rust-brown (about RGB 80, 32, 11), with `emitter_missing` each time and no asset delivered.
 
 So the colour-only miss on the bake is systematic for this brief, as #62 suspected; the preflight cannot catch it, because the concept is correct. Matching on hue alone would also light the copper caps, which bake to a similar orange family. The follow-up is to locate the emitter in the concept, where matching works, and project that mask onto the mesh, as `blender/project_concept.py` already projects concepts for characters. Not verified: undeclared-colour (pale) emitters through the live preflight, and briefs other than the relay.
+
+Concept-registered emitters (2026-10-21, issue #62; private evidence): the relay's amber lens baked dark rust, dark grey-brown or olive across seeds, so colour matching on the bake missed it on every seed. Each declared emitter is now also found in the approved concept and carried onto the texture:
+- `blender/concept_view.py` fits the view to the concept silhouette (overlaps 0.969–0.975 on the relay bakes) and renders base-colour and float UV passes.
+- `slopforge/emitters.py` keeps the largest matching blob, grows it along the declared hue (so copper glints are dropped), maps it onto the render through the silhouettes' bounding boxes, and marks the texels shown there.
+- `derive_emission` lets either source mark a texel.
+
+Results:
+- **Offline:** on the three earlier bakes the mapped lens outline sat on the lens each time.
+- **Live,** H100 h100/final, the same concept that previously failed `emitter_missing` on all three seeds: the first mesh attempt produced a valid candidate (`emissive_fraction` 0.0006 from projection, no retry). That seed rebuilt the lens as a protruding tan boss, and the glow sits on it.
+- **Regression test:** a real-Blender test shows colour matching alone missing a dark-baked disc while the projection finds it and lands on its texels.
+
+`scipy` is now a declared dependency; rembg already installed it.
+
+Not verified: pale undeclared-colour emitters through the projection on a live run, briefs other than the relay, and the visual result. The earlier, unregistered projection prototypes are recorded on #62.

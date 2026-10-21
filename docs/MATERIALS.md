@@ -66,7 +66,18 @@ result against that declaration before anyone reviews it.
    colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:
    every channel at least 150 and at least 1.3 times the map's median, capped at 225 so a paper lampshade that
    is most of the map is still found; channels within 25 of each other).
-   Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. A candidate
+   Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. The bake's
+   colour is not reliable: one amber lens concept baked dark rust, dark grey-brown and olive on three seeds. So
+   each declared emitter is also found in the approved concept, where its colour holds, and carried onto the
+   texture. `blender/concept_view.py` renders the mesh along the view that best fits the concept silhouette
+   (front half of the view sphere; skipped below 0.9 overlap), as base colour and float UV coordinates.
+   `slopforge/emitters.py` then:
+   - keeps the largest matching blob for a declared colour, which drops glints on parts of a similar hue;
+   - grows that blob over connected pixels of the declared hue;
+   - maps it onto the render through the silhouettes' bounding boxes, and marks the texels the render shows there.
+
+   A texel glows when either way finds it. The candidate records `emission_projection` (status, view, overlap, texture
+   fraction per target). A candidate
    whose base color is missing any one declared emitter fails with `emitter_missing` (`emissive_fraction` is the
    smallest declared emitter's share of the map, so a found lens cannot hide missing panels), a retryable quality code, so the next
    mesh seed is tried within the tier's attempt budget. Before any mesh inference, `approve` applies the same rule

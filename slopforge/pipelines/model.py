@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+import numpy as np
 from PIL import Image
 
 from ..backends.blender import inspect_model, process_model
@@ -22,7 +23,8 @@ from ..provenance import generator_provenance, file_sha256
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
-from ..unity_material import build_unity_material, derive_emission, make_metallic_gloss, unity_cli
+from ..unity_material import build_unity_material, derive_emission, emitter_colour_mask, make_metallic_gloss, unity_cli
+from ..emitters import concept_emitter_mask, project_to_texture
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_silhouette, apply_declared_emitter, is_placeholder_normal,
                           measure_material_maps, validate_image, validate_model_outputs)
 
@@ -1151,10 +1153,12 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     declared = asset.get("materials") or []
-    emissive_fraction = None
-    targets = set(_emitter_targets(declared).values())
+    emissive_fraction = projection = None
+    targets = sorted(set(_emitter_targets(declared).values()), key=str)
     if targets:
-        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"], sorted(targets, key=str))
+        projected, projection = _project_concept_emitters(root, config, (lineage or {}).get("concept_cutout"),
+                                                          mesh_path, paths, targets)
+        emissive_fraction = derive_emission(paths["basecolor"], paths["emission"], targets, extra_masks=projected)
     else:
         with Image.open(paths["basecolor"]) as image:
             Image.new("RGB", image.size, (0, 0, 0)).save(paths["emission"])
@@ -1210,6 +1214,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "kind": "mesh_pbr", "seed": mesh_info.get("seed"),
             "normal_source": mesh_info.get("normal_source", "unknown"),
             "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
+            **({"emission_projection": projection} if projection else {}),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
             "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,
@@ -1318,6 +1323,42 @@ def concept_route(config, asset_type, conditioning):
     return workflows["character_image"], {**conditioning,
                                           "references": [reference] + conditioning["references"],
                                           "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
+
+
+def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
+    """Declared emitters found in the approved concept, as texture masks for this candidate (slopforge/emitters.py).
+
+    Colour matching on the bake still runs, so a skipped or failed projection only loses this addition; the
+    report says why. Returns (masks or None, report).
+    """
+    if cutout is None or not Path(cutout).is_file():
+        return None, {"status": "skipped", "reason": "approved concept cutout is missing"}
+    prefix, report = paths["directory"] / "concept_view", paths["directory"] / "concept_view.json"
+    request = paths["directory"] / "concept_view_request.json"
+    request.write_text(json.dumps({"model": str(mesh_path), "basecolor": str(paths["basecolor"]),
+                                   "concept": str(cutout), "prefix": str(prefix), "report": str(report)}))
+    result = subprocess.run([blender_executable(config, root), "--background", "--python-exit-code", "1", "--python",
+                             str(tool_root() / "blender/concept_view.py"), "--", str(request)],
+                            capture_output=True, text=True)
+    projection = (json.loads(report.read_text()) if report.is_file() else
+                  {"status": "failed", "error": (result.stdout + result.stderr)[-500:]})
+    projection.pop("traceback", None)
+    if projection.get("status") != "rendered":
+        return None, projection
+    uv_path = Path(f"{prefix}_uv.npy")
+    try:
+        concept = Image.open(cutout).convert("RGBA")
+        flat = Image.alpha_composite(Image.new("RGBA", concept.size, (0, 0, 0, 255)), concept).convert("RGB")
+        view, uv = Image.open(f"{prefix}_base.png").convert("RGBA"), np.load(uv_path)
+        with Image.open(paths["basecolor"]) as image:
+            size = image.size
+        masks = [project_to_texture(concept, concept_emitter_mask(concept, match, np.asarray(
+                     emitter_colour_mask(flat, match)) > 127), view, uv, size) for match, _glow in targets]
+    finally:
+        uv_path.unlink(missing_ok=True)  # 64 MB float pass; the base render and report stay as evidence
+        Path(f"{prefix}_uv.exr").unlink(missing_ok=True)
+    projection["texture_fractions"] = [round(sum(mask.histogram()[128:]) / (size[0] * size[1]), 5) for mask in masks]
+    return masks, projection
 
 
 def _emitter_targets(materials):
@@ -2259,7 +2300,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             lineage = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                        "execution_id": execution["id"], "attempt": attempt_number,
                        "upstream": upstream, "material_inputs": material_inputs,
-                           "assembly_inputs": assembly_inputs, "reuse_execution": prior}
+                           "assembly_inputs": assembly_inputs, "reuse_execution": prior,
+                       "concept_cutout": paths["cutout"]}
             previous_materials = ([item for item in asset.get("material_candidates", {}).get("items", [])
                                    if item.get("execution_id") == prior["id"] and
                                    item.get("mesh_attempt") == attempt_number] if prior else [])
