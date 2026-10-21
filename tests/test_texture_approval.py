@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 from itertools import product
@@ -331,3 +332,72 @@ class UnityPreviewTests(unittest.TestCase):
             candidate["status"] = "failed"
             with self.assertRaises(ValueError):
                 model.unity_preview(root, config, manifest, "prop:relic", 1)
+
+
+class UnityIdentityTests(unittest.TestCase):
+    KEYS = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss",
+            "emission", "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
+
+    def _setup(self, root):
+        (root / "Assets").mkdir()
+        init_project(root)
+        config = load_project(root)
+        self.candidate = model.material_candidate_paths(root, config, "relic", 1)
+        outputs = {}
+        for name in self.KEYS:
+            self.candidate[name].parent.mkdir(parents=True, exist_ok=True)
+            self.candidate[name].write_bytes(("first " + name).encode())
+            outputs[name] = self.candidate[name].relative_to(root).as_posix()
+        (root / "retained.glb").write_bytes(b"glb")
+        asset = {"name": "relic", "status": "awaiting_texture_approval", "source": {"glb": "retained.glb"},
+                 "generator": {"workflow": {}, "seed": {}},
+                 "material_candidates": {"selected": None, "items": [
+                     {"number": 1, "status": "candidate", "prompt": "steel", "outputs": outputs,
+                      "validation": {"status": "passed"}}]}}
+        return config, {"assets": {"prop:relic": asset}}
+
+    def _unity(self, guids):
+        def build(project_root, fbx, material, maps, render=None):
+            Path(material).write_bytes(b"material")
+            paths = {"fbx": fbx, "material": material, **maps}
+            return {"unity_version": "6000.6.3f1",
+                    "assets": {role: {"path": Path(path).relative_to(project_root).as_posix(), "guid": guids[role]}
+                               for role, path in paths.items()},
+                    "material_textures": {role: guids[role] for role in maps}}
+        return build
+
+    def test_publication_records_the_unity_import_under_the_logical_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, manifest = self._setup(root)
+            guids = {role: f"{index:032x}" for index, role in
+                     enumerate(("fbx", "material", "basecolor", "normal", "metallic_gloss", "emission"))}
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=self._unity(guids)):
+                model.approve_texture(root, config, manifest, "prop:relic", 1)
+            record = load_manifest(root / config["asset_pipeline"]["manifest"])["assets"]["prop:relic"]["unity_import"]
+            self.assertEqual(record["logical_id"], "prop:relic")
+            self.assertEqual({role: entry["guid"] for role, entry in record["assets"].items()}, guids)
+
+    def test_republish_that_changes_a_unity_guid_fails_and_restores_the_previous_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, manifest = self._setup(root)
+            asset = manifest["assets"]["prop:relic"]
+            guids = {role: f"{index:032x}" for index, role in
+                     enumerate(("fbx", "material", "basecolor", "normal", "metallic_gloss", "emission"))}
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=self._unity(guids)):
+                model.approve_texture(root, config, manifest, "prop:relic", 1)
+            published = model.model_paths(root, config, "relic")["fbx"]
+            first_import = json.loads(json.dumps(asset["unity_import"]))
+            self.candidate["fbx"].write_bytes(b"second fbx")
+            regenerated = dict(guids, fbx="f" * 32)  # e.g. the FBX's .meta was lost and regenerated on a fresh checkout
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=self._unity(regenerated)):
+                with self.assertRaisesRegex(StageFailure, "changed the Unity GUID of the fbx") as caught:
+                    model.approve_texture(root, config, manifest, "prop:relic", 1, force=True)
+            self.assertEqual(caught.exception.category, "processing_validation")
+            self.assertEqual(published.read_bytes(), b"first fbx")
+            self.assertEqual(asset["unity_import"], first_import)
+            self.assertEqual(asset["executions"][-1]["status"], "failed")

@@ -1,12 +1,14 @@
 import json
 import shutil
 import subprocess
+import tempfile
 import uuid
 from itertools import accumulate
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
+from .provenance import file_sha256
 
 
 def unity_cli(project_root):
@@ -80,7 +82,11 @@ def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)
 
 
 def build_unity_material(project_root, fbx, material, maps, render=None):
-    """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG."""
+    """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG.
+
+    Returns Unity's import record: per role (fbx, material, each map) its path, GUID, importer type, a hash
+    of the importer settings and the file hash, plus the GUID of each texture the material references.
+    """
     root = Path(project_root).resolve()
     cli = unity_cli(root)
 
@@ -97,6 +103,8 @@ def build_unity_material(project_root, fbx, material, maps, render=None):
     editor_dir.mkdir(parents=True, exist_ok=True)
     script = editor_dir / f"SlopForgeMaterialBuilder_{uuid.uuid4().hex}.cs"
     class_name = script.stem
+    scratch = tempfile.TemporaryDirectory(prefix="slopforge-unity-")
+    report_path = Path(scratch.name) / "import.json"
     quote = json.dumps
     script.write_text(f'''using System;
 using System.IO;
@@ -111,6 +119,7 @@ public static class {class_name}
     {{
         const string fbxPath = {quote(fbx_asset)};
         const string materialPath = {quote(material_asset)};
+        const string reportPath = {quote(str(report_path))};
         AssetDatabase.Refresh();
         var model = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
         var source = model == null ? null : model.GetComponentsInChildren<Renderer>(true)
@@ -173,6 +182,13 @@ public static class {class_name}
         if (!assigned.IsKeywordEnabled("_EMISSION"))
             throw new Exception("Unity disabled emission on the generated material; its emission map would not render");
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
+        File.WriteAllText(reportPath, JsonUtility.ToJson(new Report {{
+            unity_version = Application.unityVersion,
+            assets = new[] {{ Describe("fbx", fbxPath), Describe("material", materialPath),
+                {", ".join(f'Describe("{name}", {quote(map_assets[name])})' for name in ("basecolor", "normal", "metallic_gloss", "emission"))} }},
+            material_textures = new[] {{ Reference(mat, "basecolor", "_BaseMap", "_MainTex"),
+                Reference(mat, "normal", "_BumpMap"), Reference(mat, "metallic_gloss", "_MetallicGlossMap"),
+                Reference(mat, "emission", "_EmissionMap") }} }}));
         {f"RenderViews(imported, {quote(str(Path(render).resolve()))});" if render else ""}
     }}
 
@@ -212,6 +228,28 @@ public static class {class_name}
         Debug.Log("SLOPFORGE_UNITY_RENDER " + path);
     }}
 
+    [Serializable] public class Entry {{ public string role, path, guid, importer, settings_sha256; }}
+    [Serializable] public class Report {{ public string unity_version; public Entry[] assets, material_textures; }}
+
+    static Entry Describe(string role, string path)
+    {{
+        var importer = AssetImporter.GetAtPath(path);
+        if (importer == null) throw new Exception("Unity has no importer for " + path);
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {{
+            var settings = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(EditorJsonUtility.ToJson(importer)));
+            return new Entry {{ role = role, path = path, guid = AssetDatabase.AssetPathToGUID(path),
+                importer = importer.GetType().Name,
+                settings_sha256 = BitConverter.ToString(settings).Replace("-", "").ToLowerInvariant() }};
+        }}
+    }}
+    static Entry Reference(Material mat, string role, params string[] properties)
+    {{
+        var texture = GetTexture(mat, properties);
+        var path = texture == null ? "" : AssetDatabase.GetAssetPath(texture);
+        return new Entry {{ role = role, path = path, guid = path == "" ? "" : AssetDatabase.AssetPathToGUID(path) }};
+    }}
+
     static bool IsUniversalPipeline(Type type)
     {{
         for (var current = type; current != null; current = current.BaseType)
@@ -245,9 +283,26 @@ public static class {class_name}
     }}
 }}
 ''')
-    try:
-        subprocess.run([cli, "run", str(root), "--timeout", "600", "--", "-executeMethod",
-                        f"{class_name}.Build"], check=True)
-    finally:
-        script.unlink(missing_ok=True)
-        script.with_suffix(".cs.meta").unlink(missing_ok=True)
+    with scratch:
+        try:
+            subprocess.run([cli, "run", str(root), "--timeout", "600", "--", "-executeMethod",
+                            f"{class_name}.Build"], check=True)
+        finally:
+            script.unlink(missing_ok=True)
+            script.with_suffix(".cs.meta").unlink(missing_ok=True)
+        report = json.loads(report_path.read_text())
+    return _import_record(root, report)
+
+
+def _import_record(root, report):
+    assets = {item["role"]: {"path": item["path"], "guid": item["guid"], "importer": item["importer"],
+                             "settings_sha256": item["settings_sha256"], "sha256": file_sha256(root / item["path"])}
+              for item in report["assets"]}
+    textures = {item["role"]: item["guid"] for item in report["material_textures"]}
+    wrong = sorted(role for role, guid in textures.items() if not guid or guid != assets[role]["guid"])
+    if wrong or not all(entry["guid"] for entry in assets.values()):
+        raise StageFailure("processing_validation",
+                           f"Unity import is inconsistent: the material does not reference the published "
+                           f"{', '.join(wrong) or 'assets'} or an asset has no GUID", operation="unity_import",
+                           remedy="open the project in Unity, check the Console for import errors, and approve again")
+    return {"unity_version": report["unity_version"], "assets": assets, "material_textures": textures}

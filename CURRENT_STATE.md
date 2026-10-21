@@ -338,3 +338,10 @@ The budget gap, measured (2026-10-21, the same three meshes, offline plus one H1
 - **GPU QEM placement:** the character graph's decimation inputs gave 10–44% lower distance than the current midpoint placement.
 - **What it looks like:** smooth-shaded without normal maps, the GPU route flattens crate plank seams and rivets. With the baked normal map, as delivered, the routes look nearly the same at whole-object framing.
 - **Decision:** neither change is adopted. The lost budget mostly costs silhouette precision at close range. Revisit if close-up views, LODs or collision need the geometry.
+
+Unity asset identity (2026-10-21, issue #24): publication already replaced files in place, kept `.meta` files and reused an existing material, but nothing recorded or checked the identity.
+- **Change:** after each import, Unity reports for the FBX, the material and each map its GUID, importer type and a hash of its importer settings, plus the GUID of each texture the material references. SlopForge adds file hashes and records the report as `unity_import` under the asset's logical ID. Approval stops and restores the previous files if the material references other textures or if republishing changed a GUID at the same path.
+- **Live check** (Unity 6000.6.3f1, URP 17.6.0, opt-in `SLOPFORGE_RUN_UNITY_IMPORT=1`): replacing the FBX and maps kept every GUID and the material's texture references. Reimporting unchanged sources gave the same report, `.meta` bytes and file list. A new name gave all-new GUIDs and left the original's `.meta` files unchanged.
+- **Negative controls:** a `.meta` with an edited GUID was reported and refused. A deleted `.meta` got its old GUID back from this machine's `Library/` cache, so the delete case is only exercised on a fresh checkout.
+- **Tests:** unit tests cover the report, the material reference check, the recorded `unity_import` and the refused republish with rollback.
+- **Not covered:** a prefab or scene that references the asset, and Unity's own asset-database consistency check.
