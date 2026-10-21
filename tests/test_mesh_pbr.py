@@ -419,7 +419,7 @@ if __name__ == "__main__":
 
 
 class DeclaredMaterialTests(unittest.TestCase):
-    def _candidate(self, root, materials, metallic_value, basecolor):
+    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None):
         source = root / "source"
         source.mkdir()
         (source / "relay.glb").write_bytes(b"mesh")
@@ -436,7 +436,7 @@ class DeclaredMaterialTests(unittest.TestCase):
         save_manifest(root / "manifest.json", manifest)
         lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
                    "key": "prop:lantern", "execution_id": execution["id"], "upstream": [],
-                   "material_inputs": [], "assembly_inputs": []}
+                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout}
 
         def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
             fbx.write_bytes(b"fbx"); blend.write_bytes(b"blend"); options["preview_dir"].mkdir()
@@ -450,9 +450,37 @@ class DeclaredMaterialTests(unittest.TestCase):
                                    "transforms_applied": True, "missing_textures": []}}
         with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                 patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
-            return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}}, {"face_budget": "prop_faces"},
+            return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}},
+                                              {"face_budget": "prop_faces", **(limits or {})},
                                               asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
                                               lineage=lineage)
+
+    def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
+        # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the
+        # v2 jug a washed-out navy (saturation 0.57); other seeds on the same concept stayed faithful.
+        from slopforge.failures import candidate_quality_rejection
+        limits = {"max_concept_hue_difference": 4, "min_concept_chroma_ratio": 0.6}
+        jug = [{"region": "jug", "class": "nonmetal", "description": "glaze"}]
+        for concept_rgb, texture_rgb, code in (((40, 60, 150), (40, 62, 148), None),
+                                               ((40, 60, 150), (30, 110, 140), "colour_hue_shift"),
+                                               ((40, 60, 150), (70, 76, 100), "colour_desaturated"),
+                                               ((128, 128, 130), (30, 110, 140), None)):  # grey concept: no hue to keep
+            with self.subTest(texture=texture_rgb), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                cutout = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                cutout.paste((*concept_rgb, 255), (16, 8, 48, 56))
+                cutout.save(root / "concept_cutout.png")
+                candidate = self._candidate(root, jug, 0, Image.new("RGB", (64, 64), texture_rgb),
+                                            cutout=root / "concept_cutout.png", limits=limits)
+                validation = candidate["validation"]
+                self.assertIn("concept_chroma", validation["measured"])
+                if code is None:
+                    self.assertEqual(candidate["status"], "candidate")
+                    self.assertFalse({"colour_hue_shift", "colour_desaturated"} & set(validation.get("failure_codes", [])))
+                else:
+                    self.assertEqual(candidate["status"], "failed")
+                    self.assertIn(code, validation["failure_codes"])
+                    self.assertTrue(candidate_quality_rejection(validation))
 
     def test_partial_metal_map_is_zeroed_when_brief_declares_no_metal(self):
         # 2026-10-20 glazed jug: TRELLIS.2 decoded the declared non-metal glaze at metallic ~0.38-0.60.

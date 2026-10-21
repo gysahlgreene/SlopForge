@@ -5,6 +5,11 @@ face_budget: prop_faces
 # Owner-declared (props criterion v2, 2026-10-21): after hidden inner parts are removed, a mesh with more than
 # five separate parts fails as component_budget and the next seed is tried.
 max_components: 5
+# Owner-declared (2026-10-21): the base colour must keep the concept's hue (CIE hue difference dH* at most 4)
+# and at least 0.6 of its saturation; drift fails as colour_hue_shift / colour_desaturated and the next seed
+# is tried. Near-grey concepts (chroma under 10) are not checked.
+max_concept_hue_difference: 4
+min_concept_chroma_ratio: 0.6
 requirements:
   - physical object with a clean silhouette
   - plausible from multiple viewing angles

@@ -371,3 +371,15 @@ Props criterion v3 runs (2026-10-21, commit `ee61783`; [evidence](docs/media/pro
   - jug ribbing in Unity;
   - pale crate wood;
   - publication, Play mode, scene scale, other profiles, and repeatability beyond two runs per brief are unchecked.
+
+Owner review of v3 and the colour check (2026-10-21; private evidence):
+- **Review:** the owner rated all three v3 props better than v2 and said colour accuracy against the concept is important.
+- **Where the drift comes from:** the delivered base colour is the TRELLIS.2 output byte for byte. On B2's concept, four `cfg 1` seeds kept the hue within dH* 4.6, against 9.9 (teal) on the protocol's seed.
+- **Texture `cfg 3` rejected:** it did not keep hue closer, and it changed lightness by up to 20 (jugs darker, crates brighter).
+- **Change:** new projects' `prop` type compares the base colour's median CIELAB chromaticity with the concept's. dH* above 4 (`colour_hue_shift`) or less than 0.6 of the concept's saturation (`colour_desaturated`) fails the candidate and retries the next seed. Near-grey concepts are skipped. The owner accepted the thresholds.
+- **Calibration on earlier runs:** the check fails the v3 teal jug and the v2 navy jug, and passes the v1 and v3 B1 jugs and both v3 crates.
+- **Not covered:**
+  - the crates' systematically pale wood (passes; a retry would not fix it);
+  - colour drift in a small part (only the dominant colour is compared);
+  - lightness.
+- **Status:** not yet run under a protocol, and the v3 status claim stays pending until a criterion v4 run includes the check.

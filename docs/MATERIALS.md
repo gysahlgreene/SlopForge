@@ -176,6 +176,18 @@ and none are declared yet.
 - **Mesh repair:** Blender's voxel remesh needs closed volumes and erased thin open parts
   (planks, handles, lattices); the H100 TRELLIS.2 graphs therefore remesh on the GPU and pass
   `--no-voxel-repair`. Other workflows still use the Blender voxel repair.
+- **Colour drift:** TRELLIS.2 samples the texture without guidance (`cfg 1.0`), so its colour wanders from
+  seed to seed. On one cobalt jug concept, four seeds kept the hue to within a CIE hue difference (dH*) of
+  4.6, and the protocol's seed baked teal (9.9). The base colour map was the generator's output byte for
+  byte, so the drift is not SlopForge processing. Raising the texture `cfg` to 3 did not keep the hue
+  closer, and it shifted lightness by up to 20 (darker jugs, brighter crates), so the graph is unchanged.
+  New projects' `prop` type compares the base colour with the approved concept: median CIELAB chromaticity
+  of the concept's object pixels against the map's used texels. A dH* above 4 (`colour_hue_shift`), or
+  less than 0.6 of the concept's saturation (`colour_desaturated`), fails the candidate, and the next
+  seed is tried. Lightness is not compared, because the concept is lit and the map is albedo. Near-grey
+  concepts (chroma under 10) are not checked. One dominant colour is compared, so a small part that
+  drifted is not caught. The crate's wood comes out about 9° yellower and 13–34% less saturated on every
+  seed. It passes the check, and retrying would not fix it.
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as

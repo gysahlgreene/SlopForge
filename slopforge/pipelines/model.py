@@ -25,8 +25,9 @@ from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import build_unity_material, derive_emission, emitter_colour_mask, make_metallic_gloss, unity_cli
 from ..emitters import concept_emitter_mask, project_to_texture
-from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_silhouette, apply_declared_emitter, is_placeholder_normal,
-                          measure_material_maps, validate_image, validate_model_outputs)
+from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
+                          concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
+                          validate_model_outputs)
 
 
 def _artifact_ref(root, path, artifact_id, kind, stage, attempt, derived_from=()):
@@ -1203,6 +1204,10 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation["status"] = "passed_with_warnings"
     if emissive_fraction is not None:
         validation = apply_declared_emitter(validation, emissive_fraction)
+    colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
+    cutout = (lineage or {}).get("concept_cutout")
+    if any(limit is not None for limit in colour_limits) and cutout and Path(cutout).is_file():
+        validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"]), *colour_limits)
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in

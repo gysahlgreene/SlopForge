@@ -17,6 +17,8 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "boundary_budget",
     "concept_silhouette",
     "emitter_missing",
+    "colour_hue_shift",
+    "colour_desaturated",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -369,6 +371,8 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "boundary_budget": ("boundary_edge_count", "max_boundary_edges"),
         "concept_silhouette": ("concept_aspect_error", "max_concept_aspect_error"),
         "emitter_missing": ("emissive_fraction", "min_emissive_fraction"),
+        "colour_hue_shift": ("concept_hue_difference", "max_concept_hue_difference"),
+        "colour_desaturated": ("concept_chroma_ratio", "min_concept_chroma_ratio"),
     }
 
     for code in codes:
