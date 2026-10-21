@@ -36,6 +36,9 @@ Malformed/ambiguous `earliest_stale_stage` records now fail closed in
 [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28). The helper still
 has no production callers. M0 remains active until all core exit evidence below is met.
 
+The [M0 exit evidence record](docs/M0-EXIT-RECORD.md) (2026-10-21) maps each item below to its evidence and gaps and
+proposes closing M0 for static props on `h100`/`final`; the owner decides.
+
 Before closing M0, retain a compact evidence record demonstrating:
 
 - A documented clean starting state: project configuration, dependencies, workflow
