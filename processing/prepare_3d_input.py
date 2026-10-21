@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
+import sys
 from pathlib import Path
 
 from PIL import Image
@@ -81,3 +83,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # rembg's onnxruntime can abort in its own teardown at interpreter exit (SIGABRT, "recursive_mutex lock
+    # failed"; 2 of 64 runs on macOS), after the outputs are written. Skip teardown once main() succeeds.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
