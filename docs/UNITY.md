@@ -13,6 +13,13 @@ The Unity Editor may be closed during generation. Open the project afterward to 
 
 Texture approval creates a Unity Lit material for the Built-in Render Pipeline or URP. HDRP and custom render pipelines currently stop with an explicit unsupported-pipeline error rather than receiving a mismatched shader.
 
+An approved asset keeps its Unity identity when it is published again. Its files have fixed paths under the asset's name. Approval replaces them in place and leaves their `.meta` files alone, and it reuses an existing material, so the asset keeps its GUIDs. Scene and prefab references therefore keep pointing at the new version. A new asset name gives new files with new GUIDs and leaves the old asset untouched. After each import, Unity reports for the FBX, the material and each map:
+- its path and GUID;
+- its importer type;
+- a hash of its importer settings.
+
+SlopForge adds each file's SHA-256 and records the report as `unity_import` on the asset, under its logical ID (for example `prop:crate`). Approval stops before it is recorded in two cases: the material does not reference the published maps, or republishing changed a GUID at the same path, for example when a `.meta` file was lost and Unity made a new one on a checkout without its `Library/` cache. The previous files and `.meta` files are then restored. Restore the `.meta` files from version control, or publish under a new name. On a machine whose `Library/` still knows the path, Unity gave a deleted `.meta` its old GUID back.
+
 To check a material candidate in Unity before anyone approves it, run `slopforge --project <project> unity-preview <name> <material-number>`. It copies the candidate's FBX and maps to `<output_root>/CandidatePreviews/<name>/material_NN/`, imports them with the same Lit material assignment check as approval, and saves a four-view render from the active pipeline to the candidate's `unity_preview.png`. The result and the hashes of its inputs are recorded as `unity_preview` on the candidate; the candidate's status, approval and the asset's published outputs are not changed. This is an editor batch render, not a Play-mode or in-scene check.
 
 3D model outputs are arranged under `Models/<name>/` or `Characters/<name>/`: `Source/` holds the concept, cutout, white-background Hunyuan input, and source GLB; `Materials/` holds base color, normal, roughness, metallic, and emission maps; the folder root holds preview Blend and FBX. The pipeline retains source files for provenance and debugging.

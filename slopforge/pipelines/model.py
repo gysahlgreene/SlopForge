@@ -1660,9 +1660,10 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             if (root / mesh_source).resolve() != paths["glb"].resolve():
                 paths["glb"].parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / mesh_source, paths["glb"])
-            build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
-                                 f"{asset['name']}_preview_PBR.mat",
-                                 {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
+            unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
+                                                f"{asset['name']}_preview_PBR.mat",
+                                                {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
+            _require_stable_unity_identity(asset.get("unity_import"), unity_import)
             validation = dict(candidate["validation"])
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
@@ -1706,8 +1707,22 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     finish_stage(publication_stage, "succeeded", published)
     finish_execution(execution, "succeeded")
     asset["published_artifacts"] = published
+    asset["unity_import"] = {"logical_id": key, **unity_import}
     save_manifest(root / pipeline["manifest"], manifest)
     return validation
+
+
+def _require_stable_unity_identity(previous, current):
+    """Republishing an asset must keep the Unity GUID at each path, or scene and prefab references break."""
+    before = (previous or {}).get("assets", {})
+    changed = sorted(role for role, entry in current["assets"].items()
+                     if before.get(role, {}).get("path") == entry["path"] and before[role]["guid"] != entry["guid"])
+    if changed:
+        raise StageFailure("processing_validation",
+                           f"Republishing changed the Unity GUID of the {', '.join(changed)}; references to the "
+                           "previous asset would break", operation="unity_import",
+                           remedy="restore the asset's .meta files from version control and approve again, "
+                                  "or publish it under a new asset name")
 
 
 def unity_preview(project_root, config, manifest, key, number, *, asset_type="prop"):

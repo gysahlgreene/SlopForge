@@ -575,11 +575,20 @@ class DeclaredMaterialTests(unittest.TestCase):
         from slopforge.unity_material import build_unity_material
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            from test_unity_import import fake_unity
             maps = {name: root / f"Assets/{name}.png" for name in ("basecolor", "normal", "metallic_gloss", "emission")}
+            for path in (*maps.values(), root / "Assets/lantern.fbx"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x")
             scripts = []
+            unity = fake_unity(root, {role: "a" * 32 for role in ("fbx", "material", *maps)})
+
+            def run(*args, **kwargs):
+                scripts.extend(path.read_text() for path in (root / "Assets/Editor").glob("*.cs"))
+                unity(*args, **kwargs)
+
             with patch("slopforge.unity_material.unity_cli", return_value="unity"), \
-                    patch("slopforge.unity_material.subprocess.run", side_effect=lambda *_args, **_kwargs: scripts.extend(
-                        path.read_text() for path in (root / "Assets/Editor").glob("*.cs"))):
+                    patch("slopforge.unity_material.subprocess.run", side_effect=run):
                 build_unity_material(root, root / "Assets/lantern.fbx", root / "Assets/lantern.mat", maps)
         # URP's validation sets _EMISSION from the GI flags, which default to EmissiveIsBlack.
         self.assertLess(scripts[0].index("MaterialGlobalIlluminationFlags.BakedEmissive"),

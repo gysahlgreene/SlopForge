@@ -15,6 +15,11 @@ from slopforge.taxonomy import load_taxonomy
 from slopforge.validation import validate_model_outputs
 
 
+def fake_unity_material(_root, _fbx, material, _maps, render=None):
+    Path(material).write_bytes(b"mat")
+    return {"unity_version": "test", "assets": {}, "material_textures": {}}
+
+
 class PropLineageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -334,9 +339,8 @@ avoid: [environment]
             dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
             self._materializer)
         from slopforge.pipelines.model import approve_texture, model_paths
-        def unity(_root, _fbx, output, _maps): Path(output).write_bytes(b"unity material")
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
-                patch("slopforge.pipelines.model.build_unity_material", side_effect=unity):
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         publication = record["executions"][-1]
@@ -361,7 +365,7 @@ avoid: [environment]
             self._materializer)
         from slopforge.pipelines.model import approve_texture
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
-                patch("slopforge.pipelines.model.build_unity_material", side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"mat")):
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         candidate = record["material_candidates"]["items"][0]
@@ -391,7 +395,7 @@ avoid: [environment]
         from slopforge.pipelines.model import approve_texture, model_paths
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
                 patch("slopforge.pipelines.model.build_unity_material",
-                      side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"material")):
+                      side_effect=fake_unity_material):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", candidate["number"])
         final = model_paths(self.root, self.config, "relay", "prop")
         self.assertEqual(final["basecolor"].read_bytes(), b"bytes:basecolor")
@@ -403,7 +407,7 @@ avoid: [environment]
             self._materializer)
         from slopforge.pipelines.model import approve_texture, retexture
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
-                patch("slopforge.pipelines.model.build_unity_material", side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"mat")):
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         generation = self.record["executions"][-2]
         with patch("slopforge.pipelines.model._generate_material_candidate", side_effect=self._materializer):
@@ -562,7 +566,7 @@ avoid: [environment]
         from slopforge.pipelines.model import approve_texture, retexture
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
                 patch("slopforge.pipelines.model.build_unity_material",
-                      side_effect=lambda _r, _f, out, _m: Path(out).write_bytes(b"mat")):
+                      side_effect=fake_unity_material):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
 
         def generate_image(_root, _config, _workflow, _prompt, destination, _prefix, _seed, metadata):
