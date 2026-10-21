@@ -8,7 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageStat
 
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
@@ -1150,9 +1150,16 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
     for key in ("basecolor", "normal", "roughness", "metallic"):
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
+    declared = asset.get("materials") or []
+    declares_metal = any(item.get("class") == "metal" for item in declared)
+    generator_metallic = None
+    if declared and not declares_metal:
+        # Declared non-metals are dielectrics (metallic 0); TRELLIS.2 decoded a glossy glaze at 0.3-0.6 (2026-10-20).
+        with Image.open(paths["metallic"]) as image:
+            generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
+            Image.new("RGB", image.size).save(paths["metallic"])
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
-    declared = asset.get("materials") or []
     emissive_fraction = projection = None
     targets = sorted(set(_emitter_targets(declared).values()), key=str)
     if targets:
@@ -1186,19 +1193,14 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if asset_type.get("concept_projection"):
         validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
-    if any(item.get("class") == "metal" for item in declared):  # the brief explains a metallic map
+    if declares_metal or generator_metallic is not None:  # the brief explains the metallic map
         maps["warnings"] = [item for item in maps["warnings"] if not item.startswith("metallic map is")]
+    if generator_metallic is not None:
+        maps["maps"]["metallic"]["generator_mean"] = round(generator_metallic, 4)
     validation.setdefault("measured", {})["material_maps"] = maps["maps"]
     validation["warnings"] = [*validation.get("warnings", []), *maps["warnings"]]
     if maps["warnings"] and validation["status"] == "passed":
         validation["status"] = "passed_with_warnings"
-    metal = maps["maps"].get("metallic", {}).get("near_full_metal_fraction", 0)
-    if declared and not any(item.get("class") == "metal" for item in declared) and metal >= 0.5:
-        validation["errors"] = [*validation.get("errors", []),
-            f"metallic map is {metal:.0%} fully metallic but the brief declares no metal regions; "
-            "revise the concept so non-metal materials read as matte, or declare the metal region"]
-        validation["failure_codes"] = [*validation.get("failure_codes", []), "material_mismatch"]
-        validation["status"] = "failed"
     if emissive_fraction is not None:
         validation = apply_declared_emitter(validation, emissive_fraction)
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
@@ -1215,6 +1217,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "normal_source": mesh_info.get("normal_source", "unknown"),
             "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             **({"emission_projection": projection} if projection else {}),
+            "metallic_source": "declared_nonmetal" if generator_metallic is not None else "generator",
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
             "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,

@@ -94,7 +94,26 @@ result against that declaration before anyone reviews it.
    `EmissiveIsBlack`, so until 2026-10-20 URP silently dropped it and emitters that glowed in
    Blender stayed dark in Unity. The import now fails if Unity still disables `_EMISSION`.
 
-7. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
+7. **Metallic.** When the brief declares materials and none is `metal`, the material stage
+   writes a zero metallic map: declared non-metals are dielectrics, and a metal/roughness
+   material gives them metallic 0 whether they are matte or glossy. TRELLIS.2 decodes glossy
+   non-metals as partly metallic. On 2026-10-20 a glazed jug declared entirely non-metal
+   decoded at 0.38 and 0.60 on the glaze and about 0.2 on the cork and twine. No texel was
+   fully metallic, so the earlier fully-metallic gate missed it. Metallic scales the diffuse
+   colour down, which darkened the cobalt glaze towards navy; its base color was also decoded
+   darker than the concept (median glaze RGB 29,46,75 against 39,59,104). The generator's map stays in
+   the mesh attempt's `native_material/metallic.png`. The candidate records
+   `metallic_source: declared_nonmetal`, and its validation records the generator's mean as
+   `material_maps.metallic.generator_mean` next to the final `mean`. A brief that declares a
+   metal region keeps the generator's map (`metallic_source: generator`), because nothing maps
+   a declaration to texels; so does a brief with no declarations, as with emission.
+   Verified on 2026-10-20 (H100, `final`, two fresh jug runs and one crate run). Both jug
+   maps were zero, from generator means of 0.47 and 0.22. One jug was re-rendered with only
+   the generator's map restored: its glaze measured median RGB 4,38,67, against 10,62,101
+   with the zero map. The crate kept its generator map (mean 0.04), with metallic texels on
+   the grey iron brackets.
+
+8. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
    run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`
@@ -106,8 +125,7 @@ Material-map checks run on every native candidate and are recorded in its valida
 
 | Check | Result |
 | --- | --- |
-| Metallic map ≥ 50% fully metallic while the brief declares no metal | Candidate fails (`material_mismatch`); revise the concept so non-metals read as matte |
-| Metallic map ≥ 90% fully metallic with no metal declared or no declarations | Warning |
+| Metallic map ≥ 90% fully metallic and the brief declares no materials | Warning |
 | Emissive region declared but no matching pale or declared-colour region found (`emissive_fraction` 0) | Candidate fails (`emitter_missing`); the next mesh seed is tried within the budget |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
@@ -141,8 +159,10 @@ and none are declared yet.
     white trim) on a darker body can glow when the brief declares an undeclared-colour emitter;
   - removing "light box" and "unlit in daylight" from the brief made no clear difference (3 of 12
     concepts lit or partly lit either way).
-- **Glossy non-metals:** polished stone or glazed concepts can be decoded as metal; the
-  declared-material check catches this, and matte wording in the concept prevents it.
+- **Glossy non-metals:** TRELLIS.2 decodes polished stone and glazes as partly or fully
+  metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
+  declares metal keeps the generator's values everywhere, including any false metal on
+  its glossy non-metal regions.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
   on metal parts. Treat Mac metallic output as unreliable until it is checked on a metal asset.
 - **Hidden faces:** single-image conditioning guesses faces the concept does not show and can copy
