@@ -176,8 +176,13 @@ and none are declared yet.
 - **Mesh repair:** Blender's voxel remesh needs closed volumes and erased thin open parts
   (planks, handles, lattices); the H100 TRELLIS.2 graphs therefore remesh on the GPU and pass
   `--no-voxel-repair`. Other workflows still use the Blender voxel repair.
-- **Small debris:** tiny detached components are reported but not removed automatically, because
-  size alone cannot separate debris from small intended parts such as rivets.
+- **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
+  (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
+  views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as
+  characters (`remove_enclosed_components`), before UV unwrapping, so they no longer take atlas space. A live crate
+  then came out as one component. Components outside the main surface are still only reported: size alone
+  cannot separate debris from small intended parts such as rivets. The GPU graph still decimates to the
+  budget before the hidden parts are removed, so their share is lost rather than spent on visible detail.
 
 See the [material showcase](media/material-showcase-2026-10/README.md) for generated examples
 and the [quality tiers](QUALITY-TIERS.md) for resolution settings and the diagnosis record.

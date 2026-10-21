@@ -319,3 +319,11 @@ Declared non-metal metallic (2026-10-20, H100 `h100`/`final`, private outputs): 
 - **Crate.** One fresh run kept its generator map (mean 0.04). Its metallic texels sit on grey iron (median base color 76,79,79), not the wood (127,103,75), and it also imported through `unity-preview`.
 - **Warning.** At `1cf90ee` the zero map added a spurious "single constant color" warning, so the jug candidates were `passed_with_warnings`. It is fixed with a test; outputs are unchanged.
 - **Not covered.** The glaze base color is still decoded darker than the concept (median 29,46,75 against 39,59,104 on run B1), and one new jug's handle came out teal. A brief that also declares metal keeps any false metal on its glossy non-metal regions. The `nonmetal` concept rule still asks for matte surfaces with no polished highlights, against glossy-glaze briefs. No visual approval: the owner reviews.
+
+Hidden components on props (2026-10-21, issue #64; private evidence): the 3–25 "detached components" reported on the six protocol props were all hidden inside the main body.
+- **Evidence:** rendering each prop from eight directions, from the sides, above and below, with and without every non-main component changed no pixel on any prop, while those components held 7–39% of the triangles (11,672 of 29,892 on lantern C1).
+- **Change:** `prepare_model.py` now runs the existing enclosed-component removal on every mesh preparation, not only with `--local-repair` (characters). It runs before UV unwrapping, so hidden parts also stop taking texture-atlas space.
+- **Live check** (H100 h100/final, the protocol crate brief): 3,128 hidden vertices removed; the candidate was one component with 23,719 faces, passed validation with no warnings, and its previews are intact.
+- **Tests:** the Blender regression test now covers the prop path (`--no-voxel-repair`) as well as `--local-repair`.
+
+Not done: the GPU graph still decimates to the face budget before the hidden parts are removed, so the freed share is not yet spent on visible detail. Components outside the main surface are still only reported.
