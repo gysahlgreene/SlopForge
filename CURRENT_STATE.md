@@ -327,3 +327,8 @@ Hidden components on props (2026-10-21, issue #64; private evidence): the 3–25
 - **Tests:** the Blender regression test now covers the prop path (`--no-voxel-repair`) as well as `--local-repair`.
 
 Not done: the GPU graph still decimates to the face budget before the hidden parts are removed, so the freed share is not yet spent on visible detail. Components outside the main surface are still only reported.
+
+GPU removal of hidden components, rejected (2026-10-21, H100 h100/final; private evidence): the remesh option `sign_mode.drop_enclosed_components` was A/B tested against the committed graph on fixed seeds, comparing eight-view silhouettes.
+- **Crate and lantern:** silhouettes matched (IoU ≥ 0.998) and the delivered mesh had 25–27% more faces (23,552 → 29,806; 18,064 → 22,584). The lantern still had 3,614 hidden vertices left for Blender to remove.
+- **Jug:** silhouette IoU fell to 0.82–0.91, because the option deleted the handle and the stopper.
+- **Decision:** the option stays off in every graph. Hidden parts are still removed in Blender after decimation, so the budget gap above stays open. As with `drop_inverted_components` on characters, the GPU component filters delete visible parts on some shapes.
