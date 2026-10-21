@@ -13,7 +13,6 @@ from scipy import ndimage
 
 HUE_TOLERANCE = 15     # degrees around the declared colour's hue that still belong to the emitter (shading)
 MIN_SATURATION = 0.35  # below this a pixel is grey or white, not the emitter's colour
-KEEP_RELATIVE = 0.25   # pale panels: blobs below this share of the largest are flecks, not further panes
 
 
 def _flat(concept):
@@ -22,19 +21,17 @@ def _flat(concept):
 
 
 def concept_emitter_mask(concept, match, seed_mask):
-    """Concept pixels of one declared emitter.
+    """Concept pixels of one emitter declared with a colour (match).
 
     seed_mask is the pipeline's colour rule on the concept (emitter_colour_mask), which catches only the
-    emitter's brightest pixels plus glints elsewhere. For a declared colour only the largest blob is kept and
-    grown over connected pixels of its hue, so the shaded body is covered; a kept glint would grow over a whole
-    part of similar hue (copper caps next to an amber lens). Pale panels keep every sizeable blob.
+    emitter's brightest pixels plus glints elsewhere. Only the largest blob is kept and grown over connected
+    pixels of its hue, so the shaded body is covered; a kept glint would grow over a whole part of similar hue
+    (copper caps next to an amber lens).
     """
     labels, count = ndimage.label(seed_mask)
     if not count:
         return seed_mask
     sizes = ndimage.sum(seed_mask, labels, range(1, count + 1))
-    if match is None:  # pale emitters (paper) have no hue to grow along, and often several panes
-        return np.isin(labels, 1 + np.flatnonzero(sizes >= KEEP_RELATIVE * sizes.max()))
     seed = labels == 1 + int(np.argmax(sizes))
     rgb = _flat(concept).astype(float) / 255
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]

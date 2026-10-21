@@ -126,6 +126,24 @@ bpy.ops.render.render(write_still=True)
 """
 
 
+class PaleEmitterProjectionTests(unittest.TestCase):
+    def test_pale_emitters_keep_the_colour_rule_and_skip_the_render(self):
+        # Live lantern 2026-10-21: the pale rule on the concept took granite highlights, and 90% of the
+        # projected texels were stone, while paper bakes pale enough for the colour rule on the bake.
+        from unittest.mock import patch
+        from slopforge.pipelines.model import _project_concept_emitters
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _concept().save(root / "concept.png")
+            with patch("slopforge.pipelines.model.subprocess.run", side_effect=AssertionError("no render")):
+                masks, report = _project_concept_emitters(root, {}, root / "concept.png", root / "mesh.glb",
+                                                          {"directory": root, "basecolor": root / "base.png"},
+                                                          [(None, (255, 178, 102))])
+        self.assertIsNone(masks)
+        self.assertEqual(report["status"], "skipped")
+        self.assertIn("pale", report["reason"])
+
+
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class ConceptEmitterBlenderTests(unittest.TestCase):
     def test_lens_baked_dark_is_found_through_the_concept_and_lands_on_its_texels(self):

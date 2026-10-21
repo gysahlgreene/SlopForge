@@ -68,8 +68,10 @@ result against that declaration before anyone reviews it.
    is most of the map is still found; channels within 25 of each other).
    Small flecks are removed, and the candidate records `emission_source: declared_emissive_mask`. The bake's
    colour is not reliable: one amber lens concept baked dark rust, dark grey-brown and olive on three seeds. So
-   each declared emitter is also found in the approved concept, where its colour holds, and carried onto the
-   texture. `blender/concept_view.py` renders the mesh along the view that best fits the concept silhouette
+   each emitter declared with a colour (`emissive#rrggbb`) is also found in the approved concept, where its colour
+   holds, and carried onto the texture. Pale emitters are not projected: on a live lantern the pale rule took
+   granite highlights in the concept and 90% of the projected texels were stone, while the paper itself baked
+   pale enough for the colour rule. `blender/concept_view.py` renders the mesh along the view that best fits the concept silhouette
    (front half of the view sphere; skipped below 0.9 overlap), as base colour and float UV coordinates.
    `slopforge/emitters.py` then:
    - keeps the largest matching blob for a declared colour, which drops glints on parts of a similar hue;

@@ -310,3 +310,5 @@ Results:
 `scipy` is now a declared dependency; rembg already installed it.
 
 Not verified: pale undeclared-colour emitters through the projection on a live run, briefs other than the relay, and the visual result. The earlier, unregistered projection prototypes are recorded on #62.
+
+Pale emitters and the concept projection (2026-10-21, live lantern on H100 h100/final, protocol brief C, private evidence): the first mesh attempt passed (`emissive_fraction` 0.021; fit 50°/5°, overlap 0.953). Projecting the pale panels, though, marked mostly granite: projected texels averaged mid-grey (117, 113, 112), and only 10% of them were paper found by the colour rule (204, 196, 188), because the pale rule on the concept also takes stone highlights. Only emitters declared with a colour are now projected; pale emitters use the colour rule on the bake, which found this lantern's panels (0.017 of the map).
