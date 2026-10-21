@@ -361,3 +361,13 @@ Props criterion v2 runs (2026-10-21, commit `ca15b1c`, H100 `final`, Unity 6000.
 - **B2 failed in conditioning:** `prepare_3d_input.py` wrote its outputs, then died with SIGABRT (`recursive_mutex lock failed`) at interpreter exit. Its outputs are byte-identical to clean re-runs. It was not resumed, because it is not an environment failure under the record.
 - **Owner review:** all three props rated better than the v1 runs.
 - **Still visible:** the jug glaze is darker than the concept, faint ribbing shows on the jug in Unity, and the crate wood is pale.
+
+Props criterion v3 runs (2026-10-21, commit `ee61783`; [evidence](docs/media/props-provisional-2026-10-v3/README.md)). Criterion v3 is v2 with the conditioning exit fix.
+- **Fix:** `prepare_3d_input.py` and `prepare_views.py` skip ONNX Runtime teardown with `os._exit(0)` after success. The crash happened in 2 of 64 runs before the fix and in 0 of 96 after. A stand-in `rembg` that aborts at exit guards it in `tests/test_rembg_exit.py`.
+- **Result:** all six runs pass every stage and every owner-accepted threshold on the first mesh attempt, each as one part, through Unity URP import.
+- **Status:** at most Provisional for "static props, `h100`/`final`, `ee61783`, Unity 6000.6.3f1 / URP 17.6.0 import", pending the owner's visual review of these runs.
+- **Gaps:**
+  - B2's glaze came out teal against a cobalt concept, and no threshold measures base-color fidelity;
+  - jug ribbing in Unity;
+  - pale crate wood;
+  - publication, Play mode, scene scale, other profiles, and repeatability beyond two runs per brief are unchecked.
