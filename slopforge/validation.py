@@ -250,25 +250,37 @@ def _lab(rgb):
     return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], -1)
 
 
-def concept_colour_fidelity(cutout_path, basecolor_path):
-    """How far the base colour map's dominant colour drifted from the approved concept's.
+def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_report=None):
+    """How far the candidate's base colour drifted from the approved concept's dominant colour.
 
-    Compares median CIELAB chromaticity of the concept's object pixels with the map's used texels: the CIE
-    hue difference (dH*, weighted by both chromas) and the map's share of the concept's chroma. The concept
-    is lit and the map is albedo, so lightness is not compared.
+    Compares median CIELAB chromaticity of the concept's object pixels with the base colour as the concept shows
+    it (view_path: the map rendered from the concept's fitted view), giving the CIE hue difference (dH*, weighted
+    by both chromas) and the share of the concept's chroma kept. Without a view the whole map is used: hue agrees
+    with the view within about 1, but hidden insides and bases lower the atlas's saturation, so it is not checked.
+    The concept is lit and the map is albedo, so lightness is not compared.
     """
     with Image.open(cutout_path) as image:
         cut = np.asarray(image.convert("RGBA"), dtype=float)
-    with Image.open(basecolor_path) as image:
-        step = max(1, image.width // 1024)  # a 4096 map at full size needs 400 MB of floats
-        base = np.asarray(image.convert("RGB"), dtype=float)[::step, ::step].reshape(-1, 3)
+    if view_path is not None:
+        with Image.open(view_path) as image:
+            view = np.asarray(image.convert("RGBA"), dtype=float)
+        texture, source = view[..., :3][view[..., 3] > 200], "concept_view"
+    else:
+        with Image.open(basecolor_path) as image:
+            step = max(1, image.width // 1024)  # a 4096 map at full size needs 400 MB of floats
+            base = np.asarray(image.convert("RGB"), dtype=float)[::step, ::step].reshape(-1, 3)
+        texture, source = base[base.sum(-1) > 15], "atlas"  # unused atlas texels are black
     concept = np.median(_lab(cut[..., :3][cut[..., 3] > 200])[:, 1:], 0)
-    texture = np.median(_lab(base[base.sum(-1) > 15])[:, 1:], 0)  # unused atlas texels are black
+    texture = np.median(_lab(texture)[:, 1:], 0)
     c1, c2 = float(np.hypot(*concept)), float(np.hypot(*texture))
     hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
-    return {"concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
-            "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
-            "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None}
+    fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
+                "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
+                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None}
+    if view_report:
+        fidelity["concept_view"] = {key: view_report.get(key) for key in ("status", "silhouette_iou", "reason")
+                                    if view_report.get(key) is not None}
+    return fidelity
 
 
 def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None):
@@ -283,6 +295,13 @@ def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chro
                lambda value, limit: value < limit, "lost the concept's saturation"))
     for code, metric, limit_key, limit, fails, what in checks:
         if limit is None:
+            continue
+        if code == "colour_desaturated" and fidelity.get("colour_source") != "concept_view":
+            validation["warnings"] = [*validation.get("warnings", []),
+                "saturation against the concept was not checked: no view from the concept's side "
+                f"({fidelity.get('concept_view', {}).get('reason', 'not rendered')}), and the whole map includes hidden parts"]
+            if validation.get("status") == "passed":
+                validation["status"] = "passed_with_warnings"
             continue
         limits[limit_key] = limit
         if fails(fidelity[metric], limit):

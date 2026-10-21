@@ -383,3 +383,13 @@ Owner review of v3 and the colour check (2026-10-21; private evidence):
   - colour drift in a small part (only the dominant colour is compared);
   - lightness.
 - **Status:** not yet run under a protocol, and the v3 status claim stays pending until a criterion v4 run includes the check.
+
+Props criterion v4 runs and the corrected colour check (2026-10-21, commit `0465073`; [evidence](docs/media/props-provisional-2026-10-v4/README.md)). Status **Experimental**.
+- **Result:** five of six pass. B2 failed the colour check (`colour_desaturated`) on all three mesh attempts.
+- **The check was measuring the wrong surfaces.** It used the whole atlas, including hidden insides and bases. That failed B2's cobalt first candidate (atlas saturation 0.42; 0.83 from the concept's side) and passed B1's visibly teal glaze (atlas dH* 3.9; 6.3 from the concept's side).
+- **Fix:** the check now renders the base colour from the concept's fitted view (fit at least 0.8, no UV pass). When no view fits, it checks hue on the atlas and records a warning that saturation was not checked. Failure messages name their codes.
+- **Re-measured from the concept's side:**
+  - the v3 teal jug (10.5) and the v2 navy jug (6.1) still fail;
+  - B2's three v4 candidates pass (0.83, 0.63, 0.66);
+  - the v3 crate passes.
+- **Next:** this is tested under [criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md).

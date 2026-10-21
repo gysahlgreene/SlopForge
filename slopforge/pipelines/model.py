@@ -856,7 +856,8 @@ def _validation_failure(validation, *, stage, attempt):
     retryable = candidate_quality_rejection(validation)
     failure = StageFailure(
         "candidate_quality" if retryable else "processing_validation",
-        "Candidate failed configured structural validation",
+        "Candidate failed validation" + (f" ({', '.join(validation['failure_codes'])})"
+                                         if validation.get("failure_codes") else ""),
         operation="validate_model_outputs",
         remedy=("generate another mesh candidate within the configured budget" if retryable else
                 "inspect the validation report and correct the deterministic failure"),
@@ -1207,7 +1208,12 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     cutout = (lineage or {}).get("concept_cutout")
     if any(limit is not None for limit in colour_limits) and cutout and Path(cutout).is_file():
-        validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"]), *colour_limits)
+        # The atlas also holds hidden insides and bases, so compare what the concept shows (2026-10-21 jug: atlas
+        # saturation 0.42 of the concept's, 0.83 from the concept's side). 0.8 fits the concept's side; jugs fit 0.86.
+        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False)
+        rendered = paths["directory"] / "concept_colour_base.png" if view.get("status") == "rendered" else None
+        validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered, view),
+                                          *colour_limits)
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1333,6 +1339,24 @@ def concept_route(config, asset_type, conditioning):
                                           "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
 
 
+def _concept_view(root, config, cutout, mesh_path, paths, name, **options):
+    """Render the candidate's base colour from the concept's fitted view (blender/concept_view.py); returns its report.
+
+    The render is <candidate>/<name>_base.png; options (min_iou, uv) pass through to the script.
+    """
+    prefix, report = paths["directory"] / name, paths["directory"] / f"{name}.json"
+    request = paths["directory"] / f"{name}_request.json"
+    request.write_text(json.dumps({"model": str(mesh_path), "basecolor": str(paths["basecolor"]),
+                                   "concept": str(cutout), "prefix": str(prefix), "report": str(report), **options}))
+    result = subprocess.run([blender_executable(config, root), "--background", "--python-exit-code", "1", "--python",
+                             str(tool_root() / "blender/concept_view.py"), "--", str(request)],
+                            capture_output=True, text=True)
+    view = (json.loads(report.read_text()) if report.is_file() else
+            {"status": "failed", "error": (result.stdout + result.stderr)[-500:]})
+    view.pop("traceback", None)
+    return view
+
+
 def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
     """Declared emitters found in the approved concept, as texture masks for this candidate (slopforge/emitters.py).
 
@@ -1345,16 +1369,8 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
         return None, {"status": "skipped", "reason": "pale emitters use the colour rule on the bake only"}
     if cutout is None or not Path(cutout).is_file():
         return None, {"status": "skipped", "reason": "approved concept cutout is missing"}
-    prefix, report = paths["directory"] / "concept_view", paths["directory"] / "concept_view.json"
-    request = paths["directory"] / "concept_view_request.json"
-    request.write_text(json.dumps({"model": str(mesh_path), "basecolor": str(paths["basecolor"]),
-                                   "concept": str(cutout), "prefix": str(prefix), "report": str(report)}))
-    result = subprocess.run([blender_executable(config, root), "--background", "--python-exit-code", "1", "--python",
-                             str(tool_root() / "blender/concept_view.py"), "--", str(request)],
-                            capture_output=True, text=True)
-    projection = (json.loads(report.read_text()) if report.is_file() else
-                  {"status": "failed", "error": (result.stdout + result.stderr)[-500:]})
-    projection.pop("traceback", None)
+    prefix = paths["directory"] / "concept_view"
+    projection = _concept_view(root, config, cutout, mesh_path, paths, "concept_view")
     if projection.get("status") != "rendered":
         return None, projection
     uv_path = Path(f"{prefix}_uv.npy")

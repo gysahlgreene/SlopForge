@@ -182,10 +182,14 @@ and none are declared yet.
   byte, so the drift is not SlopForge processing. Raising the texture `cfg` to 3 did not keep the hue
   closer, and it shifted lightness by up to 20 (darker jugs, brighter crates), so the graph is unchanged.
   New projects' `prop` type compares the base colour with the approved concept: median CIELAB chromaticity
-  of the concept's object pixels against the map's used texels. A dH* above 4 (`colour_hue_shift`), or
-  less than 0.6 of the concept's saturation (`colour_desaturated`), fails the candidate, and the next
-  seed is tried. Lightness is not compared, because the concept is lit and the map is albedo. Near-grey
-  concepts (chroma under 10) are not checked. One dominant colour is compared, so a small part that
+  of the concept's object pixels against the base colour rendered, unlit, from the concept's fitted view
+  (`blender/concept_view.py`, silhouette fit at least 0.8). A dH* above 4 (`colour_hue_shift`), or less
+  than 0.6 of the concept's saturation (`colour_desaturated`), fails the candidate, and the next seed is
+  tried. The whole atlas is the wrong comparison: it includes hidden insides and bases. In the v4 protocol
+  it gave a cobalt jug 0.42 of the concept's saturation, against 0.83 from the concept's side, and a teal
+  jug a hue difference of 3.9, against 6.3. When no view fits, hue is checked on the atlas, and a warning
+  records that saturation was not checked. Lightness is not compared, because the concept is lit and the
+  map is albedo. Near-grey concepts (chroma under 10) are not checked. One dominant colour is compared, so a small part that
   drifted is not caught. The crate's wood comes out about 9° yellower and 13–34% less saturated on every
   seed. It passes the check, and retrying would not fix it.
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body

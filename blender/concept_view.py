@@ -98,9 +98,10 @@ def run(request):
                 best = (iou, theta, phi)
     iou, theta, phi = best
     report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}
-    if iou < MIN_SILHOUETTE_IOU:
-        return {**report, "status": "skipped",
-                "reason": f"best silhouette fit {iou:.3f} is below {MIN_SILHOUETTE_IOU}"}
+    # Colour comparison only needs the concept's side of the model, not texel registration.
+    min_iou = float(request.get("min_iou", MIN_SILHOUETTE_IOU))
+    if iou < min_iou:
+        return {**report, "status": "skipped", "reason": f"best silhouette fit {iou:.3f} is below {min_iou}"}
 
     towards, right, up = view_axes(math.radians(theta), math.radians(phi))
     centre = Vector(world.mean(0))
@@ -127,6 +128,8 @@ def run(request):
     scene.render.image_settings.file_format, scene.render.image_settings.color_mode = "PNG", "RGBA"
     scene.render.filepath = request["prefix"] + "_base.png"
     bpy.ops.render.render(write_still=True)
+    if not request.get("uv", True):
+        return {**report, "status": "rendered", "size": size}
 
     obj.data.materials.clear()
     obj.data.materials.append(emission_material("ConceptViewUV"))
