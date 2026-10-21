@@ -183,6 +183,10 @@ and none are declared yet.
   then came out as one component. Components outside the main surface are still only reported: size alone
   cannot separate debris from small intended parts such as rivets. The GPU graph still decimates to the
   budget before the hidden parts are removed, so their share is lost rather than spent on visible detail.
+  Do not enable the remesh's `sign_mode.drop_enclosed_components` to fix this: it added a quarter more
+  visible faces to a crate and a lantern, but deleted a jug's handle and stopper (2026-10-21).
+  Decimating the detail remesh in Blender after removing hidden parts followed the surface 2.7–7.7× more
+  closely, but with the baked normal map the shaded result looked nearly the same, so it is not used.
 
 See the [material showcase](media/material-showcase-2026-10/README.md) for generated examples
 and the [quality tiers](QUALITY-TIERS.md) for resolution settings and the diagnosis record.

@@ -29,3 +29,7 @@ include = ["slopforge*"]
 "share/slopforge/templates/asset_types" = ["templates/asset_types/*.yaml"]
 "share/slopforge/templates/recipes" = ["templates/recipes/*.yaml"]
 "share/slopforge/templates/continue" = ["templates/continue/*.md"]
+
+[tool.pytest.ini_options]
+# private/ holds untracked diagnostics (some import bpy); collect only the suite.
+testpaths = ["tests"]

@@ -327,3 +327,14 @@ Hidden components on props (2026-10-21, issue #64; private evidence): the 3–25
 - **Tests:** the Blender regression test now covers the prop path (`--no-voxel-repair`) as well as `--local-repair`.
 
 Not done: the GPU graph still decimates to the face budget before the hidden parts are removed, so the freed share is not yet spent on visible detail. Components outside the main surface are still only reported.
+
+GPU removal of hidden components, rejected (2026-10-21, H100 h100/final; private evidence): the remesh option `sign_mode.drop_enclosed_components` was A/B tested against the committed graph on fixed seeds, comparing eight-view silhouettes.
+- **Crate and lantern:** silhouettes matched (IoU ≥ 0.998) and the delivered mesh had 25–27% more faces (23,552 → 29,806; 18,064 → 22,584). The lantern still had 3,614 hidden vertices left for Blender to remove.
+- **Jug:** silhouette IoU fell to 0.82–0.91, because the option deleted the handle and the stopper.
+- **Decision:** the option stays off in every graph. Hidden parts are still removed in Blender after decimation. As with `drop_inverted_components` on characters, the GPU component filters delete visible parts on some shapes.
+
+The budget gap, measured (2026-10-21, the same three meshes, offline plus one H100 run each; private evidence). Distances are mean distance from the visible detail remesh to the delivered mesh, as a share of the bounding-box diagonal.
+- **Blender decimation from the detail remesh:** Blender removed the hidden parts first, then decimated to the budget. Faces went from 23,552/18,064/29,470 to about 28,500, and distance fell 2.7–7.7× (crate 1.9e-4 → 2.5e-5). It cost 11–26 s more Blender time and raised non-manifold edges from 1–78 to 150–530.
+- **GPU QEM placement:** the character graph's decimation inputs gave 10–44% lower distance than the current midpoint placement.
+- **What it looks like:** smooth-shaded without normal maps, the GPU route flattens crate plank seams and rivets. With the baked normal map, as delivered, the routes look nearly the same at whole-object framing.
+- **Decision:** neither change is adopted. The lost budget mostly costs silhouette precision at close range. Revisit if close-up views, LODs or collision need the geometry.
