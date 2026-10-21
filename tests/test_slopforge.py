@@ -565,7 +565,7 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("processing_validation", str(failure.exception))
         self.assertIn("stage=material_assembly_export", str(failure.exception))
         self.assertIn("message=material_assembly_export", str(failure.exception))
-        self.assertIn("Candidate failed configured structural validation", str(failure.exception))
+        self.assertIn("Candidate failed validation", str(failure.exception))
         self.assertIn("remedy:", str(failure.exception))
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["validation"]["status"], "failed")

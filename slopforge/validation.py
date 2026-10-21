@@ -1,6 +1,7 @@
 from pathlib import Path
 import math
 
+import numpy as np
 from PIL import Image
 
 
@@ -233,4 +234,79 @@ def apply_declared_emitter(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
             "or declare its colour with emissive#rrggbb"]
         validation["failure_codes"] = [*validation.get("failure_codes", []), "emitter_missing"]
         validation["status"] = "failed"
+    return validation
+
+
+MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
+
+
+def _lab(rgb):
+    """CIELAB (D65) of an (N, 3) array of sRGB 0-255 values."""
+    c = rgb / 255.0
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    xyz = c @ np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]]).T
+    xyz /= np.array([0.95047, 1.0, 1.08883])
+    f = np.where(xyz > (6 / 29) ** 3, np.cbrt(xyz), xyz / (3 * (6 / 29) ** 2) + 4 / 29)
+    return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], -1)
+
+
+def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_report=None):
+    """How far the candidate's base colour drifted from the approved concept's dominant colour.
+
+    Compares median CIELAB chromaticity of the concept's object pixels with the base colour as the concept shows
+    it (view_path: the map rendered from the concept's fitted view), giving the CIE hue difference (dH*, weighted
+    by both chromas) and the share of the concept's chroma kept. Without a view the whole map is used: hue agrees
+    with the view within about 1, but hidden insides and bases lower the atlas's saturation, so it is not checked.
+    The concept is lit and the map is albedo, so lightness is not compared.
+    """
+    with Image.open(cutout_path) as image:
+        cut = np.asarray(image.convert("RGBA"), dtype=float)
+    if view_path is not None:
+        with Image.open(view_path) as image:
+            view = np.asarray(image.convert("RGBA"), dtype=float)
+        texture, source = view[..., :3][view[..., 3] > 200], "concept_view"
+    else:
+        with Image.open(basecolor_path) as image:
+            step = max(1, image.width // 1024)  # a 4096 map at full size needs 400 MB of floats
+            base = np.asarray(image.convert("RGB"), dtype=float)[::step, ::step].reshape(-1, 3)
+        texture, source = base[base.sum(-1) > 15], "atlas"  # unused atlas texels are black
+    concept = np.median(_lab(cut[..., :3][cut[..., 3] > 200])[:, 1:], 0)
+    texture = np.median(_lab(texture)[:, 1:], 0)
+    c1, c2 = float(np.hypot(*concept)), float(np.hypot(*texture))
+    hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
+    fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
+                "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
+                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None}
+    if view_report:
+        fidelity["concept_view"] = {key: view_report.get(key) for key in ("status", "silhouette_iou", "reason")
+                                    if view_report.get(key) is not None}
+    return fidelity
+
+
+def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None):
+    """Fail a candidate whose base colour lost the concept's hue or saturation (retryable quality codes)."""
+    validation.setdefault("measured", {}).update(fidelity)
+    if fidelity["concept_chroma"] < MIN_CONCEPT_CHROMA:
+        return validation
+    limits = validation.setdefault("limits", {})
+    checks = (("colour_hue_shift", "concept_hue_difference", "max_concept_hue_difference", max_hue_difference,
+               lambda value, limit: value > limit, "shifted hue from the concept"),
+              ("colour_desaturated", "concept_chroma_ratio", "min_concept_chroma_ratio", min_chroma_ratio,
+               lambda value, limit: value < limit, "lost the concept's saturation"))
+    for code, metric, limit_key, limit, fails, what in checks:
+        if limit is None:
+            continue
+        if code == "colour_desaturated" and fidelity.get("colour_source") != "concept_view":
+            validation["warnings"] = [*validation.get("warnings", []),
+                "saturation against the concept was not checked: no view from the concept's side "
+                f"({fidelity.get('concept_view', {}).get('reason', 'not rendered')}), and the whole map includes hidden parts"]
+            if validation.get("status") == "passed":
+                validation["status"] = "passed_with_warnings"
+            continue
+        limits[limit_key] = limit
+        if fails(fidelity[metric], limit):
+            validation["errors"] = [*validation.get("errors", []),
+                f"base colour {what} ({metric} {fidelity[metric]}, limit {limit}), so another seed is tried"]
+            validation["failure_codes"] = [*validation.get("failure_codes", []), code]
+            validation["status"] = "failed"
     return validation

@@ -176,12 +176,30 @@ and none are declared yet.
 - **Mesh repair:** Blender's voxel remesh needs closed volumes and erased thin open parts
   (planks, handles, lattices); the H100 TRELLIS.2 graphs therefore remesh on the GPU and pass
   `--no-voxel-repair`. Other workflows still use the Blender voxel repair.
+- **Colour drift:** TRELLIS.2 samples the texture without guidance (`cfg 1.0`), so its colour wanders from
+  seed to seed. On one cobalt jug concept, four seeds kept the hue to within a CIE hue difference (dH*) of
+  4.6, and the protocol's seed baked teal (9.9). The base colour map was the generator's output byte for
+  byte, so the drift is not SlopForge processing. Raising the texture `cfg` to 3 did not keep the hue
+  closer, and it shifted lightness by up to 20 (darker jugs, brighter crates), so the graph is unchanged.
+  New projects' `prop` type compares the base colour with the approved concept: median CIELAB chromaticity
+  of the concept's object pixels against the base colour rendered, unlit, from the concept's fitted view
+  (`blender/concept_view.py`, silhouette fit at least 0.8). A dH* above 4 (`colour_hue_shift`), or less
+  than 0.6 of the concept's saturation (`colour_desaturated`), fails the candidate, and the next seed is
+  tried. The whole atlas is the wrong comparison: it includes hidden insides and bases. In the v4 protocol
+  it gave a cobalt jug 0.42 of the concept's saturation, against 0.83 from the concept's side, and a teal
+  jug a hue difference of 3.9, against 6.3. When no view fits, hue is checked on the atlas, and a warning
+  records that saturation was not checked. Lightness is not compared, because the concept is lit and the
+  map is albedo. Near-grey concepts (chroma under 10) are not checked. One dominant colour is compared, so a small part that
+  drifted is not caught. The crate's wood comes out about 9° yellower and 13–34% less saturated on every
+  seed. It passes the check, and retrying would not fix it.
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as
   characters (`remove_enclosed_components`), before UV unwrapping, so they no longer take atlas space. A live crate
-  then came out as one component. Components outside the main surface are still only reported: size alone
-  cannot separate debris from small intended parts such as rivets. The GPU graph still decimates to the
+  then came out as one component, as did a jug and a lantern. Components outside the main surface are not
+  removed, because size alone cannot separate debris from small intended parts such as rivets. New projects'
+  `prop` type allows at most five parts (`max_components: 5`, owner-declared on 2026-10-21); a mesh with
+  more fails as `component_budget` and the next seed is tried. The GPU graph still decimates to the
   budget before the hidden parts are removed, so their share is lost rather than spent on visible detail.
   Do not enable the remesh's `sign_mode.drop_enclosed_components` to fix this: it added a quarter more
   visible faces to a crate and a lantern, but deleted a jug's handle and stopper (2026-10-21).

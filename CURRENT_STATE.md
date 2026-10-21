@@ -5,7 +5,8 @@
 Follow the [product contract and document precedence](docs/PRODUCT_CONTRACT.md),
 [pipeline contract](docs/PIPELINE_CONTRACT.md),
 [quality contract](docs/QUALITY_CONTRACT.md), and [roadmap](ROADMAP.md).
-M0 core reliability is active; props are the next category gate. Historical
+M0 core reliability was closed by the owner on 2026-10-21 ([exit record](docs/M0-EXIT-RECORD.md));
+M1 Props is the active milestone. Historical
 humanoid work is bounded evidence, not the next production milestone.
 
 ## M0 package tracking
@@ -46,13 +47,13 @@ No broad category/workflow/profile is claimed Qualified here.
 | Package 3 failure handling | Merged; deterministic offline verification passed | Structured failure records, bounded topology-budget mesh retries, resume accounting, and unknown remote-outcome stop are merged in PR #36. See the [Package 3 plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md) and verification record below. No live inference, visual, Unity runtime, or qualification claim |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
-| Unity prop delivery | Partially working; six-run import evidence | 2026-10-20: six fresh runs of three briefs imported through `unity-preview` into Unity 6000.6.3f1 / URP 17.6.0 with the Lit material assigned and a four-view batch render ([evidence](docs/media/props-provisional-2026-10/README.md)); no `approve-texture` publication, Play-mode or in-scene check. Earlier: The source lantern passed configured structural checks and imported into Unity 6000.6.3f1 / URP 17.6.0 with stable GUID/importer settings. Three private Blender refinement probes found opaque window faces, a neutral 1×1 normal map, and strongly mottled body material; a localized core/glass edit did not resolve the visual gap and was not promoted. Repair likely requires substantial body/window reconstruction. Material/visual approval is pending; the refined FBX was not imported into Unity, and no Play-mode or category qualification record exists |
+| Unity prop delivery | Partially working; 30 protocol runs imported | Criteria v1–v5 (2026-10-20/21): fresh H100 runs imported through `unity-preview` into Unity 6000.6.3f1 / URP 17.6.0 with the Lit material assigned and a four-view batch render (latest: [v5](docs/media/props-provisional-2026-10-v5/README.md), 6 of 6). Publication through `approve-texture` is shown on one live asset and by the opt-in Unity identity test (#74). Play mode and in-scene checks are not run |
 | Humanoid import and movement | Partially working; historical asset-specific evidence | [Humanoid test 1](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): valid Avatar and walk movement; arm deformation under review, topology defects; not production-cleared |
 | Body-deformation benchmark | Partially working; historical asset-specific review | [Diagnostic benchmark](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed delivered body rig and Unity motion; source visual quality rejected; separate final-tier source pending review, not covered by rig approval |
 | Fine detail/material fidelity and general rig recovery | Known unreliable | Recovery and benchmark reports retain visual defects; prior humanoid test 3's recovered rig remains rejected as recorded before this task; it is not promoted by these contracts |
-| Cross-brief/category repeatability | Experimental (props, `h100`/`final`, commit `4d3ea32`) | [Qualification record v1](docs/media/props-provisional-2026-10/QUALIFICATION-RECORD.md) and six runs: crate and jug passed every technical criterion in both runs, but by the record's concept criteria A1 (no straps) and both jug runs (no three-quarter view) are concept-stage failures, so only A2 passes every stage; both lantern runs missed the declared emissive region, so the set is not Provisional. Visual approval pending; no failure rate; no other categories |
+| Cross-brief/category repeatability | Provisional (static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
 | Modular environment, mechanical and creature/Generic runtime quality | Unverified | Recipes, kits and rig tooling are capabilities; representative visual, performance, deformation and runtime evidence is still required |
-| Complete readiness/qualification claims | Blocked by missing acceptance/enforcement evidence | Project requirements and thresholds must be declared and applicable gates checked; gaps below prevent inferring readiness from `ready` or `qualified` runtime labels |
+| Complete readiness/qualification claims | Props: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
 The recovery report historically described qualification of a failure class. Under
 the quality contract this is bounded regression/recovery evidence, not a complete
@@ -345,3 +346,64 @@ Unity asset identity (2026-10-21, issue #24): publication already replaced files
 - **Negative controls:** a `.meta` with an edited GUID was reported and refused. A deleted `.meta` got its old GUID back from this machine's `Library/` cache, so the delete case is only exercised on a fresh checkout.
 - **Tests:** unit tests cover the report, the material reference check, the recorded `unity_import` and the refused republish with rollback.
 - **Not covered:** scene references (prefab only), meshes whose object names change between versions, and Unity's own asset-database consistency check.
+
+Owner review and props criterion v2 (2026-10-21):
+- **Review:** the owner rated all three v1 protocol props better than the 60% baseline. No percentage or asset approval was given.
+- **Decisions:**
+  - side-on concepts are acceptable for round props when every named part is visible;
+  - the protocol briefs are rewritten with the authoring guidance;
+  - the proposed thresholds are accepted.
+- **Recorded in:** [criterion v2](docs/media/props-provisional-2026-10-v2/QUALIFICATION-RECORD.md), committed before its runs.
+- **Pipeline change:** new projects' `prop` type allows at most five separate parts (`max_components: 5`). More fails as the retryable `component_budget`. The six most recent post-fix meshes (crate, jug and lantern, two each) were all one part.
+- **Thresholds checked in the record only:** UV area at least 0.20; the lantern's declared emitter at least 0.5% of the map (a valid relay lens measured 0.06%, so this is not a pipeline-wide minimum); mean metallic at most 0.05 on briefs that declare no metal.
+
+Props criterion v2 runs (2026-10-21, commit `ca15b1c`, H100 `final`, Unity 6000.6.3f1 / URP 17.6.0; [evidence](docs/media/props-provisional-2026-10-v2/README.md)). Status **Experimental**.
+- **Five of six pass every stage and threshold.** Each passed on its first mesh attempt with no warning, as a single part, and imported into Unity. Both crates are taller than wide with their straps, the lantern panels glow (2.9% and 3.1%), and the declared non-metal jug and lanterns have zero metallic maps.
+- **B2 failed in conditioning:** `prepare_3d_input.py` wrote its outputs, then died with SIGABRT (`recursive_mutex lock failed`) at interpreter exit. Its outputs are byte-identical to clean re-runs. It was not resumed, because it is not an environment failure under the record.
+- **Owner review:** all three props rated better than the v1 runs.
+- **Still visible:** the jug glaze is darker than the concept, faint ribbing shows on the jug in Unity, and the crate wood is pale.
+
+Props criterion v3 runs (2026-10-21, commit `ee61783`; [evidence](docs/media/props-provisional-2026-10-v3/README.md)). Criterion v3 is v2 with the conditioning exit fix.
+- **Fix:** `prepare_3d_input.py` and `prepare_views.py` skip ONNX Runtime teardown with `os._exit(0)` after success. The crash happened in 2 of 64 runs before the fix and in 0 of 96 after. A stand-in `rembg` that aborts at exit guards it in `tests/test_rembg_exit.py`.
+- **Result:** all six runs pass every stage and every owner-accepted threshold on the first mesh attempt, each as one part, through Unity URP import.
+- **Status:** at most Provisional for "static props, `h100`/`final`, `ee61783`, Unity 6000.6.3f1 / URP 17.6.0 import", pending the owner's visual review of these runs.
+- **Gaps:**
+  - B2's glaze came out teal against a cobalt concept, and no threshold measures base-color fidelity;
+  - jug ribbing in Unity;
+  - pale crate wood;
+  - publication, Play mode, scene scale, other profiles, and repeatability beyond two runs per brief are unchecked.
+
+Owner review of v3 and the colour check (2026-10-21; private evidence):
+- **Review:** the owner rated all three v3 props better than v2 and said colour accuracy against the concept is important.
+- **Where the drift comes from:** the delivered base colour is the TRELLIS.2 output byte for byte. On B2's concept, four `cfg 1` seeds kept the hue within dH* 4.6, against 9.9 (teal) on the protocol's seed.
+- **Texture `cfg 3` rejected:** it did not keep hue closer, and it changed lightness by up to 20 (jugs darker, crates brighter).
+- **Change:** new projects' `prop` type compares the base colour's median CIELAB chromaticity with the concept's. dH* above 4 (`colour_hue_shift`) or less than 0.6 of the concept's saturation (`colour_desaturated`) fails the candidate and retries the next seed. Near-grey concepts are skipped. The owner accepted the thresholds.
+- **Calibration on earlier runs:** the check fails the v3 teal jug and the v2 navy jug, and passes the v1 and v3 B1 jugs and both v3 crates.
+- **Not covered:**
+  - the crates' systematically pale wood (passes; a retry would not fix it);
+  - colour drift in a small part (only the dominant colour is compared);
+  - lightness.
+- **Status:** not yet run under a protocol, and the v3 status claim stays pending until a criterion v4 run includes the check.
+
+Props criterion v4 runs and the corrected colour check (2026-10-21, commit `0465073`; [evidence](docs/media/props-provisional-2026-10-v4/README.md)). Status **Experimental**.
+- **Result:** five of six pass. B2 failed the colour check (`colour_desaturated`) on all three mesh attempts.
+- **The check was measuring the wrong surfaces.** It used the whole atlas, including hidden insides and bases. That failed B2's cobalt first candidate (atlas saturation 0.42; 0.83 from the concept's side) and passed B1's visibly teal glaze (atlas dH* 3.9; 6.3 from the concept's side).
+- **Fix:** the check now renders the base colour from the concept's fitted view (fit at least 0.8, no UV pass). When no view fits, it checks hue on the atlas and records a warning that saturation was not checked. Failure messages name their codes.
+- **Re-measured from the concept's side:**
+  - the v3 teal jug (10.5) and the v2 navy jug (6.1) still fail;
+  - B2's three v4 candidates pass (0.83, 0.63, 0.66);
+  - the v3 crate passes.
+- **Next:** this is tested under [criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md).
+
+Props criterion v5 runs (2026-10-21, commit `221c8d1`; [evidence](docs/media/props-provisional-2026-10-v5/README.md)).
+- **Result:** all six runs pass every stage and every owner-accepted threshold, including the colour check measured from the concept's side (dH* 0.7–3.7, saturation 0.76–1.32; lanterns grey and unchecked). None needed a colour retry. Both jugs are cobalt.
+- **C1:** the H100 login hold ended and ComfyUI restarted, which lost C1's queued mesh job. The agent interrupted the waiting CLI, and the record's one permitted `approve --resume` finished it.
+- **Status:** **Provisional** for that scope. On 2026-10-21 the owner rated the v5 runs better than v3 and closed M0.
+- **Gaps:**
+  - pale crate wood;
+  - a crate top reconstructed closed;
+  - jug ribbing;
+  - lost ComfyUI jobs are not detected;
+  - downloads are not retried.
+
+M0 exit record (2026-10-21): [docs/M0-EXIT-RECORD.md](docs/M0-EXIT-RECORD.md) maps each M0 exit item to evidence and gaps and proposes closing M0 for static props on `h100`/`final`. The owner decides. `make verify-live` on 2026-10-21 passed (3 tests, 9 subtests, 70 s).

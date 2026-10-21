@@ -1,0 +1,956 @@
+[
+ {
+  "run": "A1",
+  "asset": "supply_crate",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 6,
+  "concept_seed": 4205565761,
+  "concept_seeds": [
+   825344523,
+   379582690,
+   3526334166,
+   1234963064,
+   4262764495,
+   4205565761
+  ],
+  "selection": "concept 6 selected by the agent for evaluation (criterion v3): two riveted straps and brackets on every corner, taller than wide, three-quarter view; 02 has an extra short strap, 05 has one strap, 03 and 04 lack top-corner brackets; 06 has the clearest brackets",
+  "mesh_attempts": [
+   [
+    1,
+    4097231607,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 4097231607,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      13
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      249
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      34
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      6
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      106
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      14
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      1
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      41
+     ]
+    ]
+   }
+  ],
+  "generate_s": 34,
+  "approve_s": 299,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 29422,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 90,
+  "nonmanifold_edges": 65,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.38,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.671,
+   0.681,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.095,
+  "metallic_near_black": 0.7183,
+  "emission_source": "none",
+  "emissive_fraction": null,
+  "metallic_mean": 0.1613,
+  "metallic_source": "generator",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true
+  }
+ },
+ {
+  "run": "B1",
+  "asset": "ceramic_jug",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 6,
+  "concept_seed": 3003278047,
+  "concept_seeds": [
+   2822899872,
+   1689548010,
+   3484954893,
+   3938028420,
+   3537944651,
+   3003278047
+  ],
+  "selection": "concept 6 selected by the agent for evaluation (criterion v3): twine wrapped visibly around the handle, open handle loop, cork stopper, side-on (criterion 4 for round props); 03 and 05 wrap the twine around the neck",
+  "mesh_attempts": [
+   [
+    1,
+    3431001266,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 3431001266,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      5
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      5
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      92
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      13
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      5
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      32
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      17
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      1
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      39
+     ]
+    ]
+   }
+  ],
+  "generate_s": 25,
+  "approve_s": 140,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 28765,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 2,
+  "nonmanifold_edges": 92,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.575,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.517,
+   0.507,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.0,
+  "metallic_near_black": 1.0,
+  "emission_source": "none",
+  "emissive_fraction": null,
+  "metallic_mean": 0.0,
+  "metallic_source": "declared_nonmetal",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true,
+   "metallic_mean<=0.05": true
+  }
+ },
+ {
+  "run": "C1",
+  "asset": "stone_lantern",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 1,
+  "concept_seed": 2008337611,
+  "concept_seeds": [
+   2008337611,
+   2697594234,
+   696049589,
+   3115050983,
+   2317026680,
+   2572215744
+  ],
+  "selection": "concept 1 selected by the agent for evaluation (criterion v3): square light box with lattice panels on two faces, ribbed four-sided roof with finial, chamfered tier, chunky square base, three-quarter view, panels unlit; 05 has a hexagonal box",
+  "mesh_attempts": [
+   [
+    1,
+    746271991,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 746271991,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      5
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      7
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      70
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      4
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      24
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      12
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      24
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      42
+     ]
+    ]
+   }
+  ],
+  "generate_s": 24,
+  "approve_s": 144,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 29962,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 0,
+  "nonmanifold_edges": 8,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.366,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.495,
+   0.493,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.0,
+  "metallic_near_black": 1.0,
+  "emission_source": "declared_emissive_mask",
+  "emissive_fraction": 0.0322,
+  "metallic_mean": 0.0,
+  "metallic_source": "declared_nonmetal",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true,
+   "emitter>=0.5%": true,
+   "metallic_mean<=0.05": true
+  }
+ },
+ {
+  "run": "A2",
+  "asset": "supply_crate",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 5,
+  "concept_seed": 304811649,
+  "concept_seeds": [
+   3580569259,
+   3705888265,
+   1609184559,
+   3189384832,
+   304811649,
+   1973739973
+  ],
+  "selection": "concept 5 selected by the agent for evaluation (criterion v3): two riveted straps and brackets on every corner, taller than wide, three-quarter view; 03 has partial straps, 02 lacks top-corner brackets",
+  "mesh_attempts": [
+   [
+    1,
+    2449827331,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 2449827331,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      5
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      161
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      26
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      5
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      64
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      14
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      1
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      51
+     ]
+    ]
+   }
+  ],
+  "generate_s": 26,
+  "approve_s": 222,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 27476,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 160,
+  "nonmanifold_edges": 23,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.402,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.664,
+   0.662,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.0001,
+  "metallic_near_black": 0.7573,
+  "emission_source": "none",
+  "emissive_fraction": null,
+  "metallic_mean": 0.1327,
+  "metallic_source": "generator",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true
+  }
+ },
+ {
+  "run": "B2",
+  "asset": "ceramic_jug",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 6,
+  "concept_seed": 1963838077,
+  "concept_seeds": [
+   3757310606,
+   824613290,
+   2175295834,
+   1026015233,
+   3840112214,
+   1963838077
+  ],
+  "selection": "concept 6 selected by the agent for evaluation (criterion v3): twine wrapped on the handle, open handle loop, cork stopper, side-on (criterion 4); 01 and 02 wrap the twine around the neck",
+  "mesh_attempts": [
+   [
+    1,
+    1020223229,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 1020223229,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      5
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      99
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      13
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      5
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      39
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      17
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      1
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      34
+     ]
+    ]
+   }
+  ],
+  "generate_s": 26,
+  "approve_s": 143,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 26936,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 0,
+  "nonmanifold_edges": 125,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.614,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.541,
+   0.532,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.0,
+  "metallic_near_black": 1.0,
+  "emission_source": "none",
+  "emissive_fraction": null,
+  "metallic_mean": 0.0,
+  "metallic_source": "declared_nonmetal",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true,
+   "metallic_mean<=0.05": true
+  }
+ },
+ {
+  "run": "C2",
+  "asset": "stone_lantern",
+  "commit": "ee61783",
+  "concepts": 6,
+  "selected_concept": 3,
+  "concept_seed": 70634656,
+  "concept_seeds": [
+   2434066832,
+   4235174781,
+   70634656,
+   1676150117,
+   410547010,
+   2082097434
+  ],
+  "selection": "concept 3 selected by the agent for evaluation (criterion v3): square light box with two lattice faces, ribbed roof with finial, chamfered tier, square base, three-quarter view, panels unlit",
+  "mesh_attempts": [
+   [
+    1,
+    2835502201,
+    "qualified"
+   ]
+  ],
+  "material_candidates": [
+   [
+    1,
+    "candidate"
+   ]
+  ],
+  "material_number": 1,
+  "material_seed": 2835502201,
+  "executions": [
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ],
+     [
+      "concept_generation",
+      "succeeded",
+      4
+     ]
+    ]
+   },
+   {
+    "status": "succeeded",
+    "failure": null,
+    "stages": [
+     [
+      "conditioning_preparation",
+      "succeeded",
+      8
+     ],
+     [
+      "mesh_workflow_execution",
+      "succeeded",
+      85
+     ],
+     [
+      "mesh_raw_acquisition",
+      "succeeded",
+      10
+     ],
+     [
+      "mesh_preparation",
+      "succeeded",
+      4
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      29
+     ],
+     [
+      "mesh_output_acquisition",
+      "succeeded",
+      15
+     ],
+     [
+      "material_generation",
+      "succeeded",
+      25
+     ],
+     [
+      "material_assembly_export",
+      "succeeded",
+      27
+     ]
+    ]
+   }
+  ],
+  "generate_s": 25,
+  "approve_s": 144,
+  "resume_s": null,
+  "validation": "passed",
+  "errors": [],
+  "warnings": [],
+  "triangles": 23450,
+  "budget": 30000,
+  "components": 1,
+  "boundary_edges": 0,
+  "nonmanifold_edges": 1,
+  "degenerate_faces": 0,
+  "uv_area_sum": 0.408,
+  "uv_outside": 0.0,
+  "dimensions": [
+   0.498,
+   0.498,
+   1.0
+  ],
+  "map_size": [
+   4096,
+   4096
+  ],
+  "normal_source": "blender_mikktspace_bake",
+  "full_metal_fraction": 0.0,
+  "metallic_near_black": 1.0,
+  "emission_source": "declared_emissive_mask",
+  "emissive_fraction": 0.0148,
+  "metallic_mean": 0.0,
+  "metallic_source": "declared_nonmetal",
+  "unity": {
+   "status": "imported",
+   "version": "6000.6.3f1",
+   "error": null,
+   "render": true
+  },
+  "thresholds": {
+   "components<=5": true,
+   "uv_area>=0.20": true,
+   "triangles<=30000": true,
+   "maps 4096": true,
+   "emitter>=0.5%": true,
+   "metallic_mean<=0.05": true
+  }
+ }
+]

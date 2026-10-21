@@ -419,7 +419,7 @@ if __name__ == "__main__":
 
 
 class DeclaredMaterialTests(unittest.TestCase):
-    def _candidate(self, root, materials, metallic_value, basecolor):
+    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None):
         source = root / "source"
         source.mkdir()
         (source / "relay.glb").write_bytes(b"mesh")
@@ -436,7 +436,7 @@ class DeclaredMaterialTests(unittest.TestCase):
         save_manifest(root / "manifest.json", manifest)
         lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
                    "key": "prop:lantern", "execution_id": execution["id"], "upstream": [],
-                   "material_inputs": [], "assembly_inputs": []}
+                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout}
 
         def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
             fbx.write_bytes(b"fbx"); blend.write_bytes(b"blend"); options["preview_dir"].mkdir()
@@ -450,9 +450,67 @@ class DeclaredMaterialTests(unittest.TestCase):
                                    "transforms_applied": True, "missing_textures": []}}
         with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                 patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
-            return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}}, {"face_budget": "prop_faces"},
+            return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}},
+                                              {"face_budget": "prop_faces", **(limits or {})},
                                               asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
                                               lineage=lineage)
+
+    def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
+        # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the
+        # v2 jug a washed-out navy (saturation 0.62 from the concept's side); other seeds stayed faithful.
+        from slopforge.failures import candidate_quality_rejection
+        limits = {"max_concept_hue_difference": 4, "min_concept_chroma_ratio": 0.6}
+        jug = [{"region": "jug", "class": "nonmetal", "description": "glaze"}]
+        for concept_rgb, view_rgb, code in (((40, 60, 150), (40, 62, 148), None),
+                                            ((40, 60, 150), (30, 110, 140), "colour_hue_shift"),
+                                            ((40, 60, 150), (48, 48, 81), "colour_desaturated"),  # same hue
+                                            ((128, 128, 130), (30, 110, 140), None)):  # grey concept: no hue to keep
+            with self.subTest(view=view_rgb), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                candidate = self._colour_candidate(root, jug, concept_rgb, (20, 20, 30), view_rgb, limits)
+                validation = candidate["validation"]
+                self.assertEqual(validation["measured"]["colour_source"], "concept_view")
+                if code is None:
+                    self.assertEqual(candidate["status"], "candidate")
+                    self.assertFalse({"colour_hue_shift", "colour_desaturated"} & set(validation.get("failure_codes", [])))
+                else:
+                    self.assertEqual(candidate["status"], "failed")
+                    self.assertIn(code, validation["failure_codes"])
+                    self.assertTrue(candidate_quality_rejection(validation))
+                    self.assertIn(code, candidate["failure"]["message"])
+
+    def test_without_a_concept_view_only_hue_is_checked_on_the_whole_map(self):
+        # Hidden insides and bases lower the whole map's saturation (2026-10-21 jug: 0.42 of the concept's,
+        # 0.83 from the concept's side), so a washed-out atlas alone must not fail the candidate.
+        limits = {"max_concept_hue_difference": 4, "min_concept_chroma_ratio": 0.6}
+        jug = [{"region": "jug", "class": "nonmetal", "description": "glaze"}]
+        for atlas_rgb, status in (((48, 48, 81), "candidate"), ((30, 110, 140), "failed")):  # same hue, 0.39 saturation
+            with self.subTest(atlas=atlas_rgb), tempfile.TemporaryDirectory() as temporary:
+                candidate = self._colour_candidate(Path(temporary), jug, (40, 60, 150), atlas_rgb, None, limits)
+                validation = candidate["validation"]
+                self.assertEqual(validation["measured"]["colour_source"], "atlas")
+                self.assertEqual(candidate["status"], status)
+                self.assertNotIn("colour_desaturated", validation.get("failure_codes", []))
+                self.assertTrue(any("saturation against the concept was not checked" in item
+                                    for item in validation["warnings"]))
+
+    def _colour_candidate(self, root, materials, concept_rgb, atlas_rgb, view_rgb, limits):
+        cutout = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+        cutout.paste((*concept_rgb, 255), (16, 8, 48, 56))
+        cutout.save(root / "concept_cutout.png")
+
+        def view(_root, _config, _cutout, _mesh, paths, name, **options):
+            self.assertEqual((options["min_iou"], options["uv"]), (0.8, False))
+            if view_rgb is None:
+                return {"status": "skipped", "silhouette_iou": 0.7, "reason": "best silhouette fit 0.700 is below 0.8"}
+            render = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+            render.paste((*view_rgb, 255), (16, 8, 48, 56))
+            render.save(paths["directory"] / f"{name}_base.png")
+            return {"status": "rendered", "silhouette_iou": 0.95}
+
+        with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+            return self._candidate(root, materials, 0, Image.new("RGB", (64, 64), atlas_rgb),
+                                   cutout=root / "concept_cutout.png", limits=limits)
 
     def test_partial_metal_map_is_zeroed_when_brief_declares_no_metal(self):
         # 2026-10-20 glazed jug: TRELLIS.2 decoded the declared non-metal glaze at metallic ~0.38-0.60.
