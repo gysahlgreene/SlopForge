@@ -105,7 +105,7 @@ accuracy as important. The owner's review of v5 is pending.
 ### 6. `make verify` passes with skips reported; authorized live checks and human/Unity evidence cover the claimed scope
 
 **Evidence:**
-- `make verify`: 721 passed, 8 skipped. The skips are opt-in tests: live ComfyUI, Unity, SkinTokens and
+- `make verify`: 722 passed, 8 skipped. The skips are opt-in tests: live ComfyUI, Unity, SkinTokens and
   Blender rig smokes.
 - `make verify-live` on 2026-10-21, against the H100: 3 passed with 9 subtests in 70 s. That covers every
   bundled workflow checked against `/object_info`, plus the live image and 3D integration tests.
