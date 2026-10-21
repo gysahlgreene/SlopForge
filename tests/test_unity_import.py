@@ -108,6 +108,42 @@ class UnityImportIdentityLiveTests(unittest.TestCase):
     def _metas(self, folder):
         return {path.name: path.read_bytes() for path in folder.glob("*.meta")}
 
+    def _editor(self, body):
+        """Run C# statements in the Unity project; `result` (a string) comes back."""
+        name = f"SlopForgeIdentityProbe_{uuid.uuid4().hex}"
+        script = self.root / f"Assets/Editor/{name}.cs"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        output = Path(tempfile.mkdtemp()) / "result.txt"
+        script.write_text("using System.IO; using System.Linq; using UnityEditor; using UnityEngine;\n"
+                          f"public static class {name} {{ public static void Run() {{ AssetDatabase.Refresh(); "
+                          f"string result = \"\"; {body} File.WriteAllText({json.dumps(str(output))}, result); }} }}\n")
+        try:
+            subprocess.run(["unity", "run", str(self.root), "--timeout", "600", "--", "-executeMethod", f"{name}.Run"],
+                           check=True, capture_output=True)
+        finally:
+            script.unlink(missing_ok=True)
+            script.with_suffix(".cs.meta").unlink(missing_ok=True)
+        return output.read_text()
+
+    def test_prefab_follows_the_republished_mesh_and_material(self):
+        folder = self.test_root / "relic"
+        first = self._publish(folder, 1.0, (200, 40, 40, 255))
+        model, prefab = first["assets"]["fbx"]["path"], f"{self.test_root.relative_to(self.root).as_posix()}/ref.prefab"
+        probe = (f'var root = AssetDatabase.LoadAssetAtPath<GameObject>("{prefab}"); '
+                 'var filter = root.GetComponentInChildren<MeshFilter>(); '
+                 'result = AssetDatabase.GetAssetPath(filter.sharedMesh) + "|" + '
+                 'filter.sharedMesh.bounds.size.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "|" + '
+                 'AssetDatabase.GetAssetPath(root.GetComponentInChildren<Renderer>().sharedMaterial);')
+        before = self._editor(f'var instance = (GameObject)PrefabUtility.InstantiatePrefab('
+                              f'AssetDatabase.LoadAssetAtPath<GameObject>("{model}")); '
+                              f'PrefabUtility.SaveAsPrefabAsset(instance, "{prefab}"); Object.DestroyImmediate(instance); '
+                              + probe).split("|")
+        self._publish(folder, 2.0, (40, 200, 40, 255))
+        after = self._editor(probe).split("|")
+        self.assertEqual((before[0], after[0]), (model, model))
+        self.assertAlmostEqual(float(after[1]) / float(before[1]), 2.0, places=3)  # now the replaced, larger cube
+        self.assertEqual((before[2], after[2]), (first["assets"]["material"]["path"],) * 2)
+
     def setUp(self):
         self.root = Path(UNITY_PROJECT).resolve()
         self.test_root = self.root / f"Assets/SlopForgeIdentityTest_{uuid.uuid4().hex[:8]}"
