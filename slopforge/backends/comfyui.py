@@ -326,9 +326,16 @@ class ComfyUIClient:
         result = self.json("GET", f"/history/{prompt_id}")
         return result.get(prompt_id)
 
-    def wait_for_completion(self, prompt_id, timeout=3600, poll_interval=1):
+    def queued(self, prompt_id):
+        """Whether ComfyUI still holds the prompt as running or pending."""
+        queue = self.json("GET", "/queue")
+        return any(isinstance(item, list) and len(item) > 1 and item[1] == prompt_id
+                   for key in ("queue_running", "queue_pending") for item in queue.get(key) or [])
+
+    def wait_for_completion(self, prompt_id, timeout=3600, poll_interval=1, queue_check_interval=30):
         deadline = time.monotonic() + timeout
         transport_failures = 0
+        last_queue_check = time.monotonic()
         try:
             while time.monotonic() < deadline:
                 try:
@@ -345,7 +352,7 @@ class ComfyUIClient:
                         str(exc), category=exc.category or "inference",
                         operation=exc.operation or "wait_for_completion",
                         evidence={**evidence, "prompt_id": prompt_id, "outcome_unknown": True}) from exc
-                transport_failures = 0
+                recovered, transport_failures = transport_failures > 0, 0
                 if entry:
                     status = entry.get("status", {})
                     if status.get("status_str") == "error":
@@ -355,6 +362,20 @@ class ComfyUIClient:
                     if status.get("completed"):
                         entry.setdefault("outputs", {})  # callers report a job that saved nothing
                         return entry
+                elif recovered or time.monotonic() - last_queue_check >= queue_check_interval:
+                    # A service restart drops queued jobs (2026-10-21, H100): neither queued nor in history means
+                    # lost. History is read again because ComfyUI records a finished job before it leaves the queue.
+                    last_queue_check = time.monotonic()
+                    try:
+                        held = self.queued(prompt_id) or self.history(prompt_id) is not None
+                    except ComfyUIError:
+                        held = True  # cannot tell yet; keep polling
+                    if not held:
+                        raise ComfyUIError(
+                            f"ComfyUI no longer has generation {prompt_id}: it is not queued, running or in "
+                            "history, so the service probably restarted; resume to queue it again",
+                            category="environment", operation="wait_for_completion",
+                            evidence={"prompt_id": prompt_id, "remote_lost": True, "remote_terminal": True})
                 time.sleep(poll_interval)
         except KeyboardInterrupt as exc:
             raise ComfyUIError(
@@ -396,12 +417,19 @@ class ComfyUIClient:
         query = urlencode({"filename": filename, "subfolder": subfolder, "type": output.get("type", "output")})
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            data = self._request("GET", f"/view?{query}")
-        except ComfyUIError as exc:
-            raise ComfyUIError(f"Could not download ComfyUI output {filename}: {exc}",
-                               category=exc.category or "inference", operation="download_output",
-                               evidence={"filename": filename, "output_type": output.get("type", "output")}) from exc
+        for attempt in range(5):
+            try:
+                data = self._request("GET", f"/view?{query}")
+                break
+            except ComfyUIError as exc:
+                # A dropped connection loses a finished job's outputs (2026-10-21 timeout); a server answer is final.
+                if exc.category == "environment" and attempt < 4:
+                    time.sleep(min(2 ** attempt, 30))
+                    continue
+                raise ComfyUIError(f"Could not download ComfyUI output {filename}: {exc}",
+                                   category=exc.category or "inference", operation="download_output",
+                                   evidence={"filename": filename, "output_type": output.get("type", "output"),
+                                             "attempts": attempt + 1}) from exc
         fd, temporary = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
         try:
             with os.fdopen(fd, "wb") as handle:

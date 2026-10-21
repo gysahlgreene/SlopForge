@@ -130,8 +130,8 @@ accuracy as important), and v5 better than v3. The v5 set is Provisional for its
 - A crate's open top can be reconstructed closed.
 - Glass and transparent parts (#44).
 - Invented hidden sides (#63).
-- A lost ComfyUI job is not detected.
-- Output downloads are not retried.
+- A lost ComfyUI job is not detected (fixed after closure, issue #76).
+- Output downloads are not retried (fixed after closure, issue #76).
 
 ## Decision
 

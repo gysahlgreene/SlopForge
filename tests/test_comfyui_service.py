@@ -331,7 +331,84 @@ with patch.object(client, 'validate_workflow'), patch.object(client, 'json', sid
         done = {"status": {"completed": True}, "outputs": {"9": {"images": []}}}
         client.history = Mock(side_effect=[
             ComfyUIError("connection reset", category="environment", operation="http_get"), None, done])
+        client.queued = Mock(return_value=True)  # still running after the blip
         self.assertEqual(client.wait_for_completion("prompt-42", timeout=5, poll_interval=0.01), done)
+
+    def test_job_lost_in_a_service_restart_stops_as_a_known_environment_failure(self):
+        # 2026-10-21, v5 run C1: the H100's ComfyUI restarted and the queued mesh job vanished; the CLI
+        # polled an empty history until its deadline.
+        client = ComfyUIClient("http://remote:8188")
+        client.history = Mock(side_effect=[
+            ComfyUIError("connection refused", category="environment", operation="http_get"), None, None])
+        client.queued = Mock(return_value=False)
+        with patch("slopforge.backends.comfyui.time.sleep"), self.assertRaises(ComfyUIError) as raised:
+            client.wait_for_completion("prompt-42", timeout=60)
+        self.assertEqual(raised.exception.category, "environment")
+        self.assertTrue(raised.exception.evidence["remote_lost"])
+        self.assertTrue(raised.exception.evidence["remote_terminal"])  # resume may queue it again
+        self.assertFalse(raised.exception.evidence.get("outcome_unknown", False))
+        self.assertIn("resume", str(raised.exception))
+
+    def test_job_that_finishes_between_the_history_and_queue_checks_is_not_lost(self):
+        client = ComfyUIClient("http://remote:8188")
+        done = {"status": {"completed": True}, "outputs": {"9": {}}}
+        client.history = Mock(side_effect=[
+            ComfyUIError("connection reset", category="environment", operation="http_get"), None, done, done])
+        client.queued = Mock(return_value=False)  # it left the queue for history
+        with patch("slopforge.backends.comfyui.time.sleep"):
+            self.assertEqual(client.wait_for_completion("prompt-42", timeout=60), done)
+
+    def test_queue_is_checked_periodically_and_a_waiting_job_is_left_alone(self):
+        client = ComfyUIClient("http://remote:8188")
+        done = {"status": {"completed": True}, "outputs": {}}
+        client.history = Mock(side_effect=[None, None, None, done])
+        client.queued = Mock(return_value=True)
+        with patch("slopforge.backends.comfyui.time.sleep"):
+            self.assertEqual(client.wait_for_completion("prompt-42", timeout=60, queue_check_interval=0), done)
+        self.assertEqual(client.queued.call_count, 3)
+        client.history = Mock(return_value=None)
+        client.queued = Mock(return_value=False)
+        with patch("slopforge.backends.comfyui.time.sleep"), self.assertRaises(ComfyUIError) as raised:
+            client.wait_for_completion("prompt-42", timeout=60, queue_check_interval=0)
+        self.assertTrue(raised.exception.evidence["remote_lost"])
+
+    def test_queued_reads_running_and_pending_prompts(self):
+        client = ComfyUIClient("http://remote:8188")
+        client.json = Mock(return_value={"queue_running": [[0, "a", {}, {}, []]], "queue_pending": [[1, "b", {}, {}, []]]})
+        self.assertEqual([client.queued(prompt) for prompt in ("a", "b", "c")], [True, True, False])
+
+    def test_output_download_retries_a_dropped_connection(self):
+        client = ComfyUIClient("http://remote:8188")
+        attempts = []
+
+        def open_request(request, timeout):
+            attempts.append(request.full_url)
+            if len(attempts) < 3:
+                raise URLError("timed out")
+            return Response(b"png data")
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("slopforge.backends.comfyui.urlopen", open_request), \
+                patch("slopforge.backends.comfyui.time.sleep"):
+            destination = Path(directory) / "basecolor.png"
+            client.download_output({"filename": "basecolor.png", "type": "output"}, destination)
+            self.assertEqual(destination.read_bytes(), b"png data")
+        self.assertEqual(len(attempts), 3)
+
+    def test_output_download_does_not_retry_a_server_answer(self):
+        from urllib.error import HTTPError
+        client = ComfyUIClient("http://remote:8188")
+        attempts = []
+
+        def open_request(request, timeout):
+            attempts.append(1)
+            raise HTTPError(request.full_url, 404, "missing", {}, None)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("slopforge.backends.comfyui.urlopen", open_request), \
+                patch("slopforge.backends.comfyui.time.sleep"), self.assertRaises(ComfyUIError) as raised:
+            client.download_output({"filename": "basecolor.png", "type": "output"}, Path(directory) / "b.png")
+        self.assertEqual((len(attempts), raised.exception.category), (1, "inference"))
 
     def test_completed_job_without_outputs_returns_instead_of_waiting_for_timeout(self):
         client = ComfyUIClient("http://remote:8188")
