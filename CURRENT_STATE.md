@@ -5,7 +5,8 @@
 Follow the [product contract and document precedence](docs/PRODUCT_CONTRACT.md),
 [pipeline contract](docs/PIPELINE_CONTRACT.md),
 [quality contract](docs/QUALITY_CONTRACT.md), and [roadmap](ROADMAP.md).
-M0 core reliability is active; props are the next category gate. Historical
+M0 core reliability was closed by the owner on 2026-10-21 ([exit record](docs/M0-EXIT-RECORD.md));
+M1 Props is the active milestone. Historical
 humanoid work is bounded evidence, not the next production milestone.
 
 ## M0 package tracking
@@ -50,7 +51,7 @@ No broad category/workflow/profile is claimed Qualified here.
 | Humanoid import and movement | Partially working; historical asset-specific evidence | [Humanoid test 1](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): valid Avatar and walk movement; arm deformation under review, topology defects; not production-cleared |
 | Body-deformation benchmark | Partially working; historical asset-specific review | [Diagnostic benchmark](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed delivered body rig and Unity motion; source visual quality rejected; separate final-tier source pending review, not covered by rig approval |
 | Fine detail/material fidelity and general rig recovery | Known unreliable | Recovery and benchmark reports retain visual defects; prior humanoid test 3's recovered rig remains rejected as recorded before this task; it is not promoted by these contracts |
-| Cross-brief/category repeatability | Experimental, Provisional pending the owner's v5 review (props, `h100`/`final`, commit `221c8d1`) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
+| Cross-brief/category repeatability | Provisional (static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
 | Modular environment, mechanical and creature/Generic runtime quality | Unverified | Recipes, kits and rig tooling are capabilities; representative visual, performance, deformation and runtime evidence is still required |
 | Complete readiness/qualification claims | Props: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
@@ -397,7 +398,7 @@ Props criterion v4 runs and the corrected colour check (2026-10-21, commit `0465
 Props criterion v5 runs (2026-10-21, commit `221c8d1`; [evidence](docs/media/props-provisional-2026-10-v5/README.md)).
 - **Result:** all six runs pass every stage and every owner-accepted threshold, including the colour check measured from the concept's side (dH* 0.7–3.7, saturation 0.76–1.32; lanterns grey and unchecked). None needed a colour retry. Both jugs are cobalt.
 - **C1:** the H100 login hold ended and ComfyUI restarted, which lost C1's queued mesh job. The agent interrupted the waiting CLI, and the record's one permitted `approve --resume` finished it.
-- **Status:** Provisional at most, pending the owner's review of these runs.
+- **Status:** **Provisional** for that scope. On 2026-10-21 the owner rated the v5 runs better than v3 and closed M0.
 - **Gaps:**
   - pale crate wood;
   - a crate top reconstructed closed;

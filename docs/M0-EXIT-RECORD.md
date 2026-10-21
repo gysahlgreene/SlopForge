@@ -1,7 +1,7 @@
 # M0 core reliability: exit evidence record
 
-Prepared 2026-10-21 against the [roadmap](../ROADMAP.md)'s M0 exit evidence. The agent proposes closing M0
-within the scope below. **Closing it is the project owner's decision.** This record does not qualify any
+Prepared 2026-10-21 against the [roadmap](../ROADMAP.md)'s M0 exit evidence. **The project owner closed M0 on
+2026-10-21** on this record, within the scope below, after rating the v5 runs better than v3. This record does not qualify any
 category, and Qualified stays out of scope.
 
 **Scope of the claim:**
@@ -97,8 +97,8 @@ criteria, permitted interventions and unchecked gates.
 | v4 | 5 of 6 | The colour check measured hidden surfaces (fixed) |
 | v5 | 6 of 6 | Colour judged from the concept's side; one permitted resume |
 
-The owner rated v1 better than the 60% baseline, v2 better than v1, and v3 better than v2, and named colour
-accuracy as important. The owner's review of v5 is pending.
+The owner rated v1 better than the 60% baseline, v2 better than v1, v3 better than v2 (naming colour
+accuracy as important), and v5 better than v3. The v5 set is Provisional for its scope.
 
 **Gaps:** two runs per brief cannot measure a failure rate.
 
@@ -112,7 +112,7 @@ accuracy as important. The owner's review of v5 is pending.
 - Live inference evidence comes from the protocol runs and experiments.
 - Human review evidence comes from the owner's reviews of v1–v3.
 
-**Gaps:** the owner's review of v5 is still to come.
+**Gaps:** none beyond those listed per item.
 
 ## Unchecked gates (do not count as passes)
 
@@ -133,9 +133,8 @@ accuracy as important. The owner's review of v5 is pending.
 - A lost ComfyUI job is not detected.
 - Output downloads are not retried.
 
-## Proposal
+## Decision
 
-Every M0 exit item has evidence within the scope above, and the gaps are listed against each item.
-The agent proposes:
-1. closing M0 Core reliability (epic #26) once the owner has reviewed the v5 runs;
-2. making **M1 Props** the active milestone, carrying the limits above into it.
+Every M0 exit item has evidence within the scope above, and the gaps are listed against each item. On
+2026-10-21 the owner closed M0 Core reliability (epic #26) and made **M1 Props** the active milestone,
+carrying the limits above into it.

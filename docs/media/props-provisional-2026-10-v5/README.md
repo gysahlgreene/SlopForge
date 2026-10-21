@@ -8,9 +8,8 @@ copy of the Unity 6000.6.3f1 / URP 17.6.0 blank project.
 **All six runs pass every stage and every owner-accepted threshold, including the colour check.** Five passed
 with no intervention. C1 used the record's one permitted `approve --resume` after an interruption.
 
-- **Status:** by the record, this supports at most **Provisional**, for "static props, `h100`/`final`, commit
-  `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import". It also needs the owner's visual review of these runs,
-  which is pending.
+- **Status: Provisional** for "static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0
+  import". On 2026-10-21 the owner reviewed these runs and rated them better than v3.
 - **Not Qualified:** six runs cannot qualify the pipeline.
 
 ## Results by gate
