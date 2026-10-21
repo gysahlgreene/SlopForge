@@ -180,8 +180,10 @@ and none are declared yet.
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as
   characters (`remove_enclosed_components`), before UV unwrapping, so they no longer take atlas space. A live crate
-  then came out as one component. Components outside the main surface are still only reported: size alone
-  cannot separate debris from small intended parts such as rivets. The GPU graph still decimates to the
+  then came out as one component, as did a jug and a lantern. Components outside the main surface are not
+  removed, because size alone cannot separate debris from small intended parts such as rivets. New projects'
+  `prop` type allows at most five parts (`max_components: 5`, owner-declared on 2026-10-21); a mesh with
+  more fails as `component_budget` and the next seed is tried. The GPU graph still decimates to the
   budget before the hidden parts are removed, so their share is lost rather than spent on visible detail.
   Do not enable the remesh's `sign_mode.drop_enclosed_components` to fix this: it added a quarter more
   visible faces to a crate and a lantern, but deleted a jug's handle and stopper (2026-10-21).

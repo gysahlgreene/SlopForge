@@ -904,3 +904,20 @@ class TestValidatorMalformedTopologyMetrics(unittest.TestCase):
         report = self._report(component_count=10 ** 1000)
         self.assertEqual(report["status"], "failed")
         self.assertIn("metric_invalid", report["failure_codes"])
+
+
+class PropComponentBudgetTests(unittest.TestCase):
+    def test_new_projects_retry_props_with_more_than_five_visible_parts(self):
+        import tempfile
+        from pathlib import Path
+        from slopforge.initializer import init_project
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            limit = load_taxonomy(root)["prop"]["max_components"]
+        self.assertEqual(limit, 5)  # owner-declared props criterion v2
+        within, over = (_quality_report(component_count=count, max_components=limit) for count in (5, 6))
+        self.assertNotIn("component_budget", within.get("failure_codes", []))
+        self.assertTrue(candidate_quality_rejection(over))

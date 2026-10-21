@@ -10,8 +10,9 @@ pass every technical criterion in the record, but only A2 passes every stage. By
 record's concept-selection criteria, A1 (no concept shows the brief's straps) and both jug
 runs (no concept is in three-quarter view) are concept-stage failures; this was corrected
 after post-merge review. Both lantern runs miss their declared emissive region, so this set
-is **Experimental**, not Provisional. Visual approval is the
-owner's decision and has not been given.
+is **Experimental**, not Provisional. Owner review (2026-10-21): all three props were rated better than
+the 2026-10-18 baseline, which was rated about 60% of target. No percentage or asset approval was given.
+The follow-up runs are under [criterion v2](../props-provisional-2026-10-v2/QUALIFICATION-RECORD.md).
 
 ## Results by gate
 

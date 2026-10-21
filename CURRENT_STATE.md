@@ -345,3 +345,13 @@ Unity asset identity (2026-10-21, issue #24): publication already replaced files
 - **Negative controls:** a `.meta` with an edited GUID was reported and refused. A deleted `.meta` got its old GUID back from this machine's `Library/` cache, so the delete case is only exercised on a fresh checkout.
 - **Tests:** unit tests cover the report, the material reference check, the recorded `unity_import` and the refused republish with rollback.
 - **Not covered:** scene references (prefab only), meshes whose object names change between versions, and Unity's own asset-database consistency check.
+
+Owner review and props criterion v2 (2026-10-21):
+- **Review:** the owner rated all three v1 protocol props better than the 60% baseline. No percentage or asset approval was given.
+- **Decisions:**
+  - side-on concepts are acceptable for round props when every named part is visible;
+  - the protocol briefs are rewritten with the authoring guidance;
+  - the proposed thresholds are accepted.
+- **Recorded in:** [criterion v2](docs/media/props-provisional-2026-10-v2/QUALIFICATION-RECORD.md), committed before its runs.
+- **Pipeline change:** new projects' `prop` type allows at most five separate parts (`max_components: 5`). More fails as the retryable `component_budget`. The six most recent post-fix meshes (crate, jug and lantern, two each) were all one part.
+- **Thresholds checked in the record only:** UV area at least 0.20; the lantern's declared emitter at least 0.5% of the map (a valid relay lens measured 0.06%, so this is not a pipeline-wide minimum); mean metallic at most 0.05 on briefs that declare no metal.
