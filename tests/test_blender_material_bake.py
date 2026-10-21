@@ -446,11 +446,15 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
 """)
             subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
                            check=True, capture_output=True, text=True)
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
-                                     str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "out.glb"),
-                                     str(root / "out.blend"), "--mesh-only", "--face-budget", "100000",
-                                     "--voxel-resolution", "32", "--local-repair"],
-                                    check=True, capture_output=True, text=True)
-            self.assertIn("Removed enclosed inner-shell vertices: 1106", result.stdout)
-            faces = int(result.stdout.split("Input faces: ")[1].split()[0])
-            self.assertEqual(faces, 48 * 24 * 2 - 2 * 48 + 12)  # outer sphere triangulated + cube
+            # Characters (local repair) and props (GPU-remeshed, no voxel repair) both drop the hidden shell:
+            # on six 2026-10-20 props every non-main component was invisible from eight views.
+            for flag in ("--local-repair", "--no-voxel-repair"):
+                with self.subTest(flag=flag):
+                    result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                             str(ROOT / "blender/prepare_model.py"), "--", str(glb),
+                                             str(root / "out.glb"), str(root / "out.blend"), "--mesh-only",
+                                             "--face-budget", "100000", "--voxel-resolution", "32", flag],
+                                            check=True, capture_output=True, text=True)
+                    self.assertIn("Removed enclosed inner-shell vertices: 1106", result.stdout)
+                    faces = int(result.stdout.split("Input faces: ")[1].split()[0])
+                    self.assertEqual(faces, 48 * 24 * 2 - 2 * 48 + 12)  # outer sphere triangulated + cube

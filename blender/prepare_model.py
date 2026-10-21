@@ -417,10 +417,11 @@ if mesh_only:
         detail_source.data = obj.data.copy()
         bpy.context.collection.objects.link(detail_source)
         detail_source.select_set(False)
-    if "--local-repair" in sys.argv:
-        removed = remove_enclosed_components(obj.data, max(maximum - minimum) * 1e-5)
-        if removed:
-            print(f"Removed enclosed inner-shell vertices: {removed}")
+    # Hidden inner components cost budget and atlas space on props too: on six 2026-10-20 H100 props they held
+    # 7-39% of the triangles, and removing them changed no pixel in eight views (issue #64).
+    removed = remove_enclosed_components(obj.data, max(maximum - minimum) * 1e-5)
+    if removed:
+        print(f"Removed enclosed inner-shell vertices: {removed}")
     boundary, nonmanifold = topology_edge_counts(obj.data, max(maximum - minimum) * 1e-7)
     # A voxel remesh needs closed volumes; it erases thin open parts (planks, handles, lattices).
     # Workflows that already ran a UDF remesh on the GPU pass --no-voxel-repair.
