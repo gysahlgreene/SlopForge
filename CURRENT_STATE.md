@@ -355,3 +355,9 @@ Owner review and props criterion v2 (2026-10-21):
 - **Recorded in:** [criterion v2](docs/media/props-provisional-2026-10-v2/QUALIFICATION-RECORD.md), committed before its runs.
 - **Pipeline change:** new projects' `prop` type allows at most five separate parts (`max_components: 5`). More fails as the retryable `component_budget`. The six most recent post-fix meshes (crate, jug and lantern, two each) were all one part.
 - **Thresholds checked in the record only:** UV area at least 0.20; the lantern's declared emitter at least 0.5% of the map (a valid relay lens measured 0.06%, so this is not a pipeline-wide minimum); mean metallic at most 0.05 on briefs that declare no metal.
+
+Props criterion v2 runs (2026-10-21, commit `ca15b1c`, H100 `final`, Unity 6000.6.3f1 / URP 17.6.0; [evidence](docs/media/props-provisional-2026-10-v2/README.md)). Status **Experimental**.
+- **Five of six pass every stage and threshold.** Each passed on its first mesh attempt with no warning, as a single part, and imported into Unity. Both crates are taller than wide with their straps, the lantern panels glow (2.9% and 3.1%), and the declared non-metal jug and lanterns have zero metallic maps.
+- **B2 failed in conditioning:** `prepare_3d_input.py` wrote its outputs, then died with SIGABRT (`recursive_mutex lock failed`) at interpreter exit. Its outputs are byte-identical to clean re-runs. It was not resumed, because it is not an environment failure under the record.
+- **Owner review:** all three props rated better than the v1 runs.
+- **Still visible:** the jug glaze is darker than the concept, faint ribbing shows on the jug in Unity, and the crate wood is pale.
