@@ -1329,8 +1329,12 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
     """Declared emitters found in the approved concept, as texture masks for this candidate (slopforge/emitters.py).
 
     Colour matching on the bake still runs, so a skipped or failed projection only loses this addition; the
-    report says why. Returns (masks or None, report).
+    report says why. Returns (masks or None, report). Only emitters declared with a colour are projected: the pale
+    rule on a concept also takes stone highlights (live lantern, 2026-10-21: 90% of the projected texels were
+    granite), while pale paper bakes pale enough for the colour rule on the bake.
     """
+    if all(match is None for match, _glow in targets):
+        return None, {"status": "skipped", "reason": "pale emitters use the colour rule on the bake only"}
     if cutout is None or not Path(cutout).is_file():
         return None, {"status": "skipped", "reason": "approved concept cutout is missing"}
     prefix, report = paths["directory"] / "concept_view", paths["directory"] / "concept_view.json"
@@ -1352,12 +1356,13 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
         view, uv = Image.open(f"{prefix}_base.png").convert("RGBA"), np.load(uv_path)
         with Image.open(paths["basecolor"]) as image:
             size = image.size
-        masks = [project_to_texture(concept, concept_emitter_mask(concept, match, np.asarray(
+        masks = [None if match is None else project_to_texture(concept, concept_emitter_mask(concept, match, np.asarray(
                      emitter_colour_mask(flat, match)) > 127), view, uv, size) for match, _glow in targets]
     finally:
         uv_path.unlink(missing_ok=True)  # 64 MB float pass; the base render and report stay as evidence
         Path(f"{prefix}_uv.exr").unlink(missing_ok=True)
-    projection["texture_fractions"] = [round(sum(mask.histogram()[128:]) / (size[0] * size[1]), 5) for mask in masks]
+    projection["texture_fractions"] = [None if mask is None else round(sum(mask.histogram()[128:]) / (size[0] * size[1]), 5)
+                                       for mask in masks]
     return masks, projection
 
 
