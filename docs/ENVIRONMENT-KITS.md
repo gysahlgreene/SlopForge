@@ -95,6 +95,24 @@ What it does in Unity (batch mode):
 
 A corner's open side is read from the placed mesh, so it needs no assumption about the FBX axes.
 
+**Joints:**
+- **Declared thickness:** declare walls and doorways with their thickness as part of `target_size`, such as
+  `[3, 0.75, 3]`, and give the corner the same `arm_thickness`.
+- **Why:** the corner's arms lie inside its bounds, so Blender finds its open side, measures each arm, and rescales
+  across the arms only, keeping the outer bounds exact. Generated stone corners had arms of 0.98–1.16 m against
+  walls of 0.74–0.88 m, so in the first `corner_joint` scene the corner stepped out past the walls.
+- **Placement:** with one thickness, place walls inside a cell edge with their outer face on it, as the corner's
+  arms are, and they continue the corner flush.
+- **Check:** `environment-check` compares each published corner's measured arm thickness with the declared one.
+
+**Stretch:**
+- **What it is:** sizing a module to its declared size stretches it when its concept's proportions differ. Blender
+  records the ratio (`axis_stretch`).
+- **The limit:** `max_stretch` (kit-wide or per module) fails a module that stretches past it, as `module_stretch`.
+- **No retry:** another mesh seed from the same concept would stretch again, so approval stops and asks for a
+  concept closer to the module's proportions. A doorway concept on 2026-10-22 stretched 1.45 to fit 3 × 3 m.
+- **In `environment-check`:** the limit is applied too.
+
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 
 The checks report modular measurements; they do not rescale or rotate geometry, apply materials to models, or assemble a room scene. Intended front-facing direction and visual seams still need review in Blender/Unity. Use the supplied grid constraints as a starting profile and adjust them per kit rather than treating one grid size as universal.

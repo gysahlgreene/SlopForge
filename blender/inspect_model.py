@@ -322,6 +322,8 @@ def inspect(source, face_budget, real_scale=False):
     corner = corner_profile([obj.matrix_world @ vertex.co for obj in objects for vertex in obj.data.vertices],
                             measured["footprint_quadrants"], minimum, maximum)
     measured["arm_thickness"] = corner[1] if corner else None
+    stretches = [float(obj["slopforge_axis_stretch"]) for obj in objects if "slopforge_axis_stretch" in obj]
+    measured["axis_stretch"] = max(stretches) if stretches else None
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:

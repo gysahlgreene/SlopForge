@@ -463,14 +463,16 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             probe = root / "probe.py"
             probe.write_text("""import bpy, json, sys
 obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
-json.dump(list(obj.dimensions), open(sys.argv[-1], 'w'))
+json.dump(list(obj.dimensions) + [obj.get("slopforge_axis_stretch")], open(sys.argv[-1], 'w'))
 """)
             subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
                            check=True, capture_output=True, text=True)
-            x, y, z = json.loads(result.read_text())
+            x, y, z, stretch = json.loads(result.read_text())
             self.assertAlmostEqual(x, 3.0, places=3)  # the 1.0-long side was turned onto X
             self.assertAlmostEqual(z, 3.0, places=3)
             self.assertLess(y, 1.0)  # free thickness keeps a proportional size
+            # The face (1.0 x 0.9 scaled to 3 x 3) stretched 1.11; the thin depth axis does not count.
+            self.assertAlmostEqual(stretch, 1.111, places=2)
 
     def test_declared_pivot_places_the_origin_and_inspection_reads_real_scale_and_footprint(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -550,6 +552,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                            check=True, capture_output=True, text=True)
             measured = json.loads(report.read_text())["measured"]
         self.assertEqual([round(value, 2) for value in measured["dimensions"]], [3.0, 3.0, 3.0])
+        self.assertAlmostEqual(measured["axis_stretch"], 1.0, places=2)  # the 1 m L scaled evenly to 3 m
         # Before: arms 1.2 m thick (0.4 of 3 m). After: the declared 0.75 m.
         for thickness in measured["arm_thickness"]:
             self.assertAlmostEqual(thickness, 0.75, delta=0.05)

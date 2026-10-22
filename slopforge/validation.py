@@ -302,6 +302,27 @@ def apply_module_footprint(validation, quadrants, footprint):
     return validation
 
 
+def apply_module_stretch(validation, stretch, maximum):
+    """Fail a kit module whose declared size stretched its concept's proportions past the kit's limit.
+
+    Not retryable: the stretch comes from the approved concept, so another mesh seed would stretch it again
+    (2026-10-22: a doorway concept stretched 1.45 to fit 3 x 3 m).
+    """
+    if stretch is None:
+        return validation
+    validation.setdefault("measured", {})["axis_stretch"] = stretch
+    if maximum is None:
+        return validation
+    validation.setdefault("limits", {})["max_axis_stretch"] = maximum
+    if stretch > maximum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the module was stretched {stretch:g} times along one axis to reach its declared size (limit {maximum:g}): "
+            "approve a concept closer to the module's proportions"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "module_stretch"]
+        validation["status"] = "failed"
+    return validation
+
+
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
 
 

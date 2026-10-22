@@ -958,6 +958,19 @@ class PropComponentBudgetTests(unittest.TestCase):
         self.assertNotIn("concept_fit", whole.get("failure_codes", []))
         self.assertNotIn("concept_fit", unmeasured.get("failure_codes", []))
 
+    def test_module_stretched_past_its_limit_stops_without_retrying(self):
+        # A module's stretch comes from its concept's proportions, so another mesh seed would stretch again
+        # (2026-10-22: a doorway concept stretched 1.45 to fit 3 x 3 m).
+        from slopforge.validation import apply_module_stretch
+        squeezed = apply_module_stretch(_quality_report(component_count=1), 1.45, 1.3)
+        fitted = apply_module_stretch(_quality_report(component_count=1), 1.11, 1.3)
+        unlimited = apply_module_stretch(_quality_report(component_count=1), 1.45, None)
+        self.assertIn("module_stretch", squeezed["failure_codes"])
+        self.assertIn("approve a concept", squeezed["errors"][-1])
+        self.assertFalse(candidate_quality_rejection(squeezed))
+        self.assertEqual((fitted["status"], fitted["measured"]["axis_stretch"]), ("passed", 1.11))
+        self.assertEqual((unlimited["status"], unlimited["failure_codes"]), ("passed", []))  # no limit declared
+
     def test_corner_module_without_an_open_side_is_a_retryable_quality_failure(self):
         # 2026-10-22: stone corners that reconstructed as an L left one footprint quarter at 0.00; one that came out
         # a solid block measured 0.86 in every quarter.

@@ -28,7 +28,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_swatch, make_seamless
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_concept_fit, apply_declared_glass, apply_module_footprint,
+                          apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -1229,6 +1229,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_glass(validation, glass_fraction)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
+    validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
+                                      asset.get("max_stretch"))
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
@@ -1348,7 +1350,7 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness") if asset.get(key)}
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch") if asset.get(key)}
 
 
 CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}

@@ -596,3 +596,25 @@ Kit joints: declared wall thickness and corner arm thickness (2026-10-22, issue 
   - recipe validation and the flags reaching Blender;
   - `environment-check` for arm thickness;
   - an opt-in Blender test: an L with 1.2 m arms comes out with 0.75 m arms inside an unchanged 3 × 3 × 3 m box.
+
+Kit module stretch limit and recipe child aspect (2026-10-22, issue #91).
+- **Cause:** sizing a module to its declared size stretches it when its concept's proportions differ.
+  - One doorway stretched 1.45 to 3 × 3 m.
+  - Square-canvas stone corners came out taller than their arms are long and stretched 1.40.
+- **Change:**
+  - Blender records `axis_stretch` over the axes that shape the module's face. A declared thin axis is left out, so
+    a wall's thickness doesn't count: 1.36 over all axes, 1.19 over its face.
+  - `max_stretch` (kit-wide or per module) fails a module past it as `module_stretch`. This is not retryable: another
+    mesh seed from the same concept would stretch again, so approval stops and asks for a concept closer to the
+    module's shape. `environment-check` applies the limit too.
+  - Recipe children can declare `aspect`. It is applied at generation and again on resume, so the identity
+    matches.
+  - The stone kit's corner uses `landscape` and the kit sets `max_stretch: 1.3`, which the owner accepted for M2.
+- **Evidence:**
+  - *Fixed seeds:* square-canvas corners measured h/w 1.01–1.17; on landscape all six were about cube-proportioned
+    (0.70–0.88).
+  - *Live fresh run:* stretch was floor 1.00, wall 1.10, doorway 1.25, corner 1.03 and column 1.00, all within 1.3.
+- **Tests:**
+  - the stretch rule is not retryable, and is copied and checked;
+  - a child aspect sets the canvas and survives resume;
+  - an opt-in Blender test: a 1 × 0.9 face sized to 3 × 3 reports 1.11.

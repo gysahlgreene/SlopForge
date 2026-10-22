@@ -77,6 +77,10 @@ def validate_environment_kit(recipe_asset, manifest):
         quadrants = measured.get("footprint_quadrants")
         if module_rules.get(child_id, {}).get("footprint") == "corner" and quadrants and min(quadrants) > 0.15:
             errors.append("the corner module has no open side: its footprint fills every quarter")
+        limit = module_rules.get(child_id, {}).get("max_stretch", constraints.get("max_stretch"))
+        stretch = measured.get("axis_stretch")
+        if limit is not None and stretch is not None and stretch > limit:
+            errors.append(f"stretched {stretch:g} times along one axis to its declared size (limit {limit:g})")
         wanted = module_rules.get(child_id, {}).get("arm_thickness")
         arms = measured.get("arm_thickness")
         tolerance = module_rules.get(child_id, {}).get("snap_tolerance", snap_tolerance)

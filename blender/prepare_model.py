@@ -491,6 +491,12 @@ if not reuse_stage_mesh and not mesh_only:
         bpy.context.view_layer.update()
         print(f"Scaled to target size {[round(v, 4) for v in high - low]}; "
               f"axis stretch ratio {max(factors) / min(factors):.3f}")
+        # Kept on the object so inspection can report it: a large stretch means the concept's proportions did not
+        # fit the module (issue #91). Only the axes that shape its face count: a wall's declared thickness squeezes
+        # its depth on purpose (2026-10-22: wall 1.36 over all axes, 1.19 over its face).
+        sizes = high - low
+        face = [factor for axis, factor in enumerate(factors) if sizes[axis] >= 0.5 * max(sizes)]
+        obj["slopforge_axis_stretch"] = round(max(face) / min(face), 4)
         if "--arm-thickness" in sys.argv:
             # A kit corner's arms take the kit's declared wall thickness, so walls continue them flush; the outer
             # bounds stay exact. 2026-10-22: generated arms were about 1 m against 0.74 m walls (issue #90).

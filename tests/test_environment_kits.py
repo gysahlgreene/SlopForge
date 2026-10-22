@@ -258,6 +258,36 @@ class EnvironmentKitTests(unittest.TestCase):
                     "arm_thickness": arms}}}}}
             self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["corner"]["status"], status)
 
+    def test_max_stretch_is_declared_copied_and_checked(self):
+        from unittest.mock import patch
+        from slopforge import recipes
+        from slopforge.recipes import _validate_kit_constraints
+        for bad in ({"max_stretch": 0.9}, {"modules": {"wall": {"max_stretch": True}}}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "max_stretch"):
+                _validate_kit_constraints({"kit_constraints": bad}, {"wall"})
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"max_stretch": 1.3,
+            "modules": {"doorway": {}}}},
+            "stages": {"doorway": {"asset_key": "architecture:doorway", "asset_id": "door-id"}}}}
+        for stretch, status in ((1.12, "passed"), (1.45, "failed")):
+            manifest = {"assets": {"architecture:doorway": {"type": "architecture", "status": "ready",
+                "validation": {"measured": {"dimensions": [3.0, 0.75, 3.0], "bounds_min": [0, 0, 0],
+                    "bounds_max": [3, 0.75, 3], "transforms_applied": True, "axis_stretch": stretch}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["doorway"]["status"], status)
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            from slopforge.config import load_project
+            from slopforge.style import load_style
+            config = load_project(project)
+            manifest = load_manifest(project / "ai/assets/manifest.json")
+            with patch("slopforge.recipes.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                    patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]):
+                recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
+                                   "stone_ruin_kit", instance_name="ruin")
+        self.assertEqual(manifest["assets"]["architecture:ruin_doorway"]["max_stretch"], 1.3)
+        self.assertNotIn("max_stretch", manifest["assets"]["texture:ruin_stone"])
+
     def test_validation_checks_a_top_center_pivot(self):
         recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {
             "grid_size": 1.0, "pivot_tolerance": 0.01, "modules": {"floor": {"pivot": "top_center"}}}},
