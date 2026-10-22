@@ -21,6 +21,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "colour_desaturated",
     "glass_missing",
     "uv_area_budget",
+    "concept_fit",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -377,6 +378,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "colour_desaturated": ("concept_chroma_ratio", "min_concept_chroma_ratio"),
         "glass_missing": ("glass_fraction", "min_glass_fraction"),
         "uv_area_budget": ("uv_area_sum", "min_uv_area"),
+        "concept_fit": ("concept_fit", "min_concept_fit"),
     }
 
     for code in codes:

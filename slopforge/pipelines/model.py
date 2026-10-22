@@ -27,7 +27,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               make_metallic_gloss, unity_cli)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_declared_glass,
+                          apply_concept_fit, apply_declared_glass,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -1213,14 +1213,18 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if glass_fraction is not None:
         validation = apply_declared_glass(validation, glass_fraction)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
+    min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
-    if any(limit is not None for limit in colour_limits) and cutout and Path(cutout).is_file():
+    if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():
         # The atlas also holds hidden insides and bases, so compare what the concept shows (2026-10-21 jug: atlas
         # saturation 0.42 of the concept's, 0.83 from the concept's side). 0.8 fits the concept's side; jugs fit 0.86.
         view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False)
         rendered = paths["directory"] / "concept_colour_base.png" if view.get("status") == "rendered" else None
-        validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered, view),
-                                          *colour_limits)
+        if any(limit is not None for limit in colour_limits):
+            validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered,
+                                                                                  view), *colour_limits)
+        if min_fit is not None:
+            validation = apply_concept_fit(validation, view, min_fit)
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in

@@ -151,6 +151,41 @@ json.dump({{'uv_min':[min(p[i] for p in uvs) for i in (0,1)],'uv_max':[max(p[i] 
             for actual, expected in zip(data["uv_min"] + data["uv_max"], (0.4,0.2,0.5,0.3)):
                 self.assertAlmostEqual(actual, expected, places=5)
 
+    def test_noisy_organic_mesh_keeps_most_of_its_atlas(self):
+        # 2026-10-22 tree stump: bark and moss unwrapped into ~10,600 islands, and 12-texel padding left 4.4% of
+        # the map for the surface. 4-texel padding and a concave repack keep a noisy surface usable.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, prepared, blend = root / "stump.glb", root / "prepared.glb", root / "prepared.blend"
+            fixture = root / "fixture.py"
+            fixture.write_text('''import bpy, random, sys
+random.seed(3)
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=6)
+for vertex in bpy.context.object.data.vertices:
+    vertex.co *= 1 + random.uniform(-0.04, 0.04)
+bpy.ops.object.shade_smooth()  # flat shading would split every face apart in the glTF export
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--", str(glb),
+                            str(prepared), str(blend), "--mesh-only", "--no-voxel-repair", "--face-budget", "100000",
+                            "--texture-size", "4096"], check=True, capture_output=True)
+            result = root / "uv.json"
+            snapshot = root / "snapshot.py"
+            snapshot.write_text(f'''import bpy, json
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath={str(prepared)!r})
+mesh = next(o.data for o in bpy.data.objects if o.type == "MESH")
+uv = mesh.uv_layers.active.data
+area = sum(abs(sum(a.x * b.y - b.x * a.y for a, b in zip(p, p[1:] + p[:1]))) / 2
+           for p in ([uv[i].uv for i in poly.loop_indices] for poly in mesh.polygons))
+json.dump({{"area": area}}, open({str(result)!r}, "w"))
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(snapshot)], check=True, capture_output=True)
+            # This fixture measured 0.040 with the old 12-texel padding and 0.165 with 4 texels and a concave repack.
+            self.assertGreater(json.loads(result.read_text())["area"], 0.12)
+
     def test_declared_glass_faces_get_their_own_material(self):
         # Issue #44: glass texels carry base colour alpha; their faces need a separate (transparent) engine material.
         with tempfile.TemporaryDirectory() as temporary:

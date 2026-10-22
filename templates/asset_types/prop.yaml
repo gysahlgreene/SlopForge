@@ -9,9 +9,10 @@ max_components: 5
 # and at least 0.6 of its saturation; drift fails as colour_hue_shift / colour_desaturated and the next seed
 # is tried. Near-grey concepts (chroma under 10) are not checked.
 max_concept_hue_difference: 4
-# Owner-declared (2026-10-21, enforced from 2026-10-22): UV area under 0.2 fails as uv_area_budget and the next
-# seed is tried; a shattered reconstruction unwraps into tiny charts (0.025 on a glass bottle, 0.22-0.63 whole).
-min_uv_area: 0.2
+# Owner-accepted (2026-10-22): a mesh that fits the concept's outline under 0.8 fails as concept_fit and the next seed is tried: shattered
+# reconstructions fitted 0.71-0.75, whole props 0.86-0.99 (2026-10-22). UV area stopped separating them once
+# islands were padded by 4 texels (shattered 0.11-0.12, whole tree stumps 0.10-0.19).
+min_concept_fit: 0.8
 min_concept_chroma_ratio: 0.6
 requirements:
   - physical object with a clean silhouette

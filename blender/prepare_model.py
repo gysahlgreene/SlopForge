@@ -503,7 +503,13 @@ if not reuse_stage_mesh and not preserve_uvs:
     obj.select_set(True)
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.003)
+    # Pad islands by about 4 texels. A 0.003 margin (12 texels at 4096) spent an organic prop's atlas on padding:
+    # a tree stump unwrapped into 10,600 islands used 4.4% of its map. 4 texels and a concave repack gave 19%, and a
+    # crate 0.30 -> 0.55, a jug 0.54 -> 0.65, with unchanged stretch (2026-10-22).
+    margin = 4 / texture_size
+    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
+    bpy.ops.uv.select_all(action="SELECT")
+    bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
     bpy.ops.object.mode_set(mode="OBJECT")
 if mesh_only:
     if detail_source is not None:
