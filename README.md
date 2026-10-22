@@ -63,7 +63,7 @@ That makes static props on this tier **Provisional**. The owner reviewed the run
 
 **Known limits:**
 - **Unseen sides are invented.** The canister's front strip was copied onto its sides and back as darker panels ([#63](https://github.com/gysahlgreene/SlopForge/issues/63)).
-- **Proportions are not followed.** All 12 stump concepts came out taller than wide, against the brief ([#65](https://github.com/gysahlgreene/SlopForge/issues/65)).
+- **Wording does not always hold proportions.** Every stump's trunk came out taller than wide whatever the wording. An opt-in shape guide fixed it in 12 of 12 concepts and one run through Unity ([evidence](docs/media/concept-proportion-2026-10/README.md), [#65](https://github.com/gysahlgreene/SlopForge/issues/65)).
 - **Some surfaces differ from the concept:**
   - crate wood comes out paler than its concept;
   - one crate's open top was rebuilt closed;

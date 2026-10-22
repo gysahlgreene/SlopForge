@@ -60,6 +60,13 @@ Concepts follow explicit statements far better than implied ones ([concept adher
 - State the view and overall proportion first. Pass `--aspect portrait` for objects clearly taller than wide, or `--aspect landscape` for wider ones: a "slightly taller than wide" crate came out taller on 0 of 6 square concepts and 6 of 6 portrait ones.
 - For boxy or architectural props, a camera sentence such as "elevated three-quarter view from the front left, looking down about 30 degrees" gives more top and side information. Check the design survives it: it closed an open crate.
 - Round objects (jugs, bottles) stay in profile whatever the wording.
+- Some proportions fight the concept model's prior, and no wording moves them: every "short, wider than tall"
+  tree stump still had a tall trunk. Add `--shape-guide cylinder:0.5` (or `box:<height/width>`): a depth guide of
+  that envelope holds the concept's main mass while the prompt draws the details. It took the stump from 0 of 18 to
+  12 of 12 squat trunks, with the roots and mushrooms kept
+  ([concept proportion evidence](media/concept-proportion-2026-10/README.md)). It needs `workflows.guided_image`
+  (set on the h100 profiles). The guide also sets the view angle, so check the design survives it, and leave it
+  off when the wording already works.
 
 Review material placement and geometry in all three mesh views before final approval. Declared `emissive` regions get an emission map, and `glass` regions get a second, transparent material; see [Materials](MATERIALS.md). Unity appearance still needs an editor check.
 
