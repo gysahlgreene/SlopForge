@@ -106,13 +106,19 @@ def validate_environment_kit(recipe_asset, manifest):
                         for i, value in enumerate(origin)) for origin in measured["origins"]):
                 errors.append("one or more object pivots fall outside the module bounds")
 
+        size = measured.get("texture_size") or [0, 0]
         results[child_id] = {"status": "failed" if errors else "passed", "asset_id": asset.get("id"),
-                             "dimensions": dimensions, "errors": errors}
+                             "dimensions": dimensions, "faces": measured.get("face_count"),
+                             # basecolor, normal, metallic/smoothness and emission at one size
+                             "map_texels": 4 * size[0] * size[1], "errors": errors}
         failed |= bool(errors)
 
     status = "failed" if failed else "partial" if pending else "passed"
+    measured_modules = [result for result in results.values() if "map_texels" in result]
+    budgets = {"faces": sum(result.get("faces") or 0 for result in measured_modules),
+               "map_texels": sum(result["map_texels"] for result in measured_modules)}
     return {"schema_version": 1, "kit": recipe_asset.get("name"), "status": status,
-            "constraints": constraints, "modules": results}
+            "constraints": constraints, "modules": results, "budgets": budgets}
 
 
 def scene_placements(recipe_asset, manifest, layout_name):

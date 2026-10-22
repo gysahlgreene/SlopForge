@@ -288,6 +288,33 @@ class EnvironmentKitTests(unittest.TestCase):
         self.assertEqual(manifest["assets"]["architecture:ruin_doorway"]["max_stretch"], 1.3)
         self.assertNotIn("max_stretch", manifest["assets"]["texture:ruin_stone"])
 
+    def test_module_budgets_are_declared_applied_and_totalled(self):
+        from slopforge.pipelines.model import _face_budget, _fit_texture_size
+        from slopforge.recipes import _validate_kit_constraints
+        from PIL import Image
+        for bad in ({"face_budget": 0}, {"texture_size": 3000}, {"texture_size": 8192}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "face_budget|texture_size"):
+                _validate_kit_constraints({"kit_constraints": {"modules": {"floor": bad}}}, {"floor"})
+        pipeline = {"model_budgets": {"architecture_faces": 60000}}
+        self.assertEqual(_face_budget(pipeline, {"face_budget": "architecture_faces"}, {}), 60000)
+        self.assertEqual(_face_budget(pipeline, {"face_budget": "architecture_faces"}, {"face_budget": 8000}), 8000)
+        with tempfile.TemporaryDirectory() as temporary:
+            maps = {key: Path(temporary) / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
+            for path in maps.values():
+                Image.new("RGB", (64, 64), "grey").save(path)
+            _fit_texture_size(maps, 32)
+            self.assertEqual({Image.open(path).size for path in maps.values()}, {(32, 32)})
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"modules": {}}},
+            "stages": {name: {"asset_key": f"architecture:{name}", "asset_id": name} for name in ("floor", "wall")}}}
+        measured = lambda faces, size: {"dimensions": [3.0, 3.0, 0.2], "bounds_min": [0, 0, 0], "bounds_max": [3, 3, 0.2],
+                                        "transforms_applied": True, "face_count": faces, "texture_size": [size, size]}
+        manifest = {"assets": {
+            "architecture:floor": {"type": "architecture", "status": "ready", "validation": {"measured": measured(8000, 1024)}},
+            "architecture:wall": {"type": "architecture", "status": "ready", "validation": {"measured": measured(30000, 2048)}}}}
+        report = validate_environment_kit(recipe, manifest)
+        self.assertEqual(report["modules"]["floor"]["map_texels"], 4 * 1024 * 1024)
+        self.assertEqual(report["budgets"], {"faces": 38000, "map_texels": 4 * (1024 ** 2 + 2048 ** 2)})
+
     def test_validation_checks_a_top_center_pivot(self):
         recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {
             "grid_size": 1.0, "pivot_tolerance": 0.01, "modules": {"floor": {"pivot": "top_center"}}}},

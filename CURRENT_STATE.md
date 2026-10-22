@@ -618,3 +618,17 @@ Kit module stretch limit and recipe child aspect (2026-10-22, issue #91).
   - the stretch rule is not retryable, and is copied and checked;
   - a child aspect sets the canvas and survives resume;
   - an opt-in Blender test: a 1 × 0.9 face sized to 3 × 3 reports 1.11.
+
+Kit budgets (2026-10-22, issue #93; [evidence](docs/media/kit-budgets-2026-10/README.md)).
+- **Change:** module rules can declare `face_budget`, used on the GPU, in Blender and in the stage identities, and
+  `texture_size`, which resizes the maps. `environment-check` reports each module's faces and map texels, and the
+  kit's totals.
+- **Owner decision:** after a close-up comparison, the owner accepted floor 15k faces, walls, doorway and corner
+  40k, column 20k, and all maps at 2048². The stone kit declares them.
+- **Live:** a fresh stone kit at these budgets built its scenes with no check errors. Totals were 100,177 faces
+  and 83.9M map texels, against about 230k faces and 335M texels before.
+- **Tests:**
+  - budget validation;
+  - the asset override and the map resize;
+  - kit totals.
+- **Not verified:** the comparison used Blender's decimation at one distance.

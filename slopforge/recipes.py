@@ -106,6 +106,11 @@ def _validate_kit_constraints(definition, child_ids):
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
         if rule.get("footprint") not in (None, "corner"):
             raise ValueError(f"kit_constraints.modules.{child_id}.footprint must be corner (an L that opens one side)")
+        budget, size = rule.get("face_budget"), rule.get("texture_size")
+        if budget is not None and (type(budget) is not int or budget < 100):
+            raise ValueError(f"kit_constraints.modules.{child_id}.face_budget must be a whole number of faces (at least 100)")
+        if size is not None and (type(size) is not int or size not in (256, 512, 1024, 2048, 4096)):
+            raise ValueError(f"kit_constraints.modules.{child_id}.texture_size must be a power of two from 256 to 4096")
         arm = rule.get("arm_thickness")
         if arm is not None:
             sides = [value for value in (rule.get("target_size") or [None, None])[:2] if value is not None]
@@ -730,6 +735,9 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
             asset["footprint"] = rule["footprint"]
         if rule.get("arm_thickness"):
             asset["arm_thickness"] = rule["arm_thickness"]
+        for budget in ("face_budget", "texture_size"):
+            if rule.get(budget):
+                asset[budget] = rule[budget]
         stretch = rule.get("max_stretch", constraints.get("max_stretch"))
         if stretch and child["id"] in constraints.get("modules", {}):
             asset["max_stretch"] = stretch

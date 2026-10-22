@@ -7,6 +7,8 @@
 # Approve the `stone` texture before the modules: every module's base colour is baked from it (the
 # shared kit material), so the kit's stone matches; each module keeps its own normal map and
 # brightness variation.
+# Budgets (owner-accepted 2026-10-22): floor 15k faces, walls, doorway and corner 40k, column 20k, all maps
+# 2048². Up close they were hard to tell from 60k and 4096² (docs/media/kit-budgets-2026-10).
 # The corner stays unguided: its inside view reconstructs as an L, an outside view as a solid block.
 id: stone_ruin_kit
 version: 1
@@ -33,6 +35,8 @@ kit_constraints:
       flat_axis: 2
       max_dimension: 4.1
       pivot: top_center
+      face_budget: 15000
+      texture_size: 2048
     wall:
       target_size:
       - 3
@@ -43,6 +47,8 @@ kit_constraints:
       - 2
       vertical_axis: 2
       max_dimension: 4.1
+      face_budget: 40000
+      texture_size: 2048
     doorway:
       target_size:
       - 3
@@ -53,6 +59,8 @@ kit_constraints:
       - 2
       vertical_axis: 2
       max_dimension: 4.1
+      face_budget: 40000
+      texture_size: 2048
     corner:
       target_size:
       - 3
@@ -61,12 +69,16 @@ kit_constraints:
       vertical_axis: 2
       footprint: corner
       arm_thickness: 0.75
+      face_budget: 40000
+      texture_size: 2048
     column:
       target_size:
       - null
       - null
       - 3
       vertical_axis: 2
+      face_budget: 20000
+      texture_size: 2048
 children:
 - id: stone
   type: texture

@@ -113,6 +113,15 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
   concept closer to the module's proportions. A doorway concept on 2026-10-22 stretched 1.45 to fit 3 × 3 m.
 - **In `environment-check`:** the limit is applied too.
 
+**Budgets:**
+- **Declaring them:** a module rule can declare `face_budget`, the faces it is decimated to on the GPU and in
+  Blender, and `texture_size`, its maps' resolution (256 to 4096). Otherwise it takes its asset type's budget.
+  Architecture's is 60,000 faces and 4096² maps on the final tier; a flat 3 × 3 m floor tile used 59,988.
+- **Reporting:** `environment-check` reports each module's faces and map texels (base colour, normal,
+  metallic/smoothness and emission), and the kit's totals under `budgets`.
+- **Not yet:** a kit-wide limit waits for the owner's M2 criteria
+  ([#94](https://github.com/gysahlgreene/SlopForge/issues/94)).
+
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 
 The checks report modular measurements; they do not rescale or rotate geometry, apply materials to models, or assemble a room scene. Intended front-facing direction and visual seams still need review in Blender/Unity. Use the supplied grid constraints as a starting profile and adjust them per kit rather than treating one grid size as universal.

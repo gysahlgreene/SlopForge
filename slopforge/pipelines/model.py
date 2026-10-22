@@ -1054,7 +1054,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             candidate["artifacts"].extend(map_refs)
             map_started = False
             candidate["stage_attempts"]["material_map_acquisition"] = number
-        face_budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+        face_budget = _face_budget(pipeline, asset_type, asset)
         textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
         assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
@@ -1159,6 +1159,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
     for key in ("basecolor", "normal", "roughness", "metallic"):
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
+    if asset.get("texture_size"):
+        _fit_texture_size({key: paths[key] for key in ("basecolor", "normal", "roughness", "metallic")},
+                          asset["texture_size"])
     declared = asset.get("materials") or []
     declares_metal = any(item.get("class") == "metal" for item in declared)
     generator_metallic = None
@@ -1186,7 +1189,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
          ("surface", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")]
         + [(paths["generator"], "generation.metadata")])
     artifacts.extend(material_refs)
-    budget = int(config["asset_pipeline"]["model_budgets"].get(asset_type.get("face_budget"), 30000))
+    budget = _face_budget(config["asset_pipeline"], asset_type, asset)
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
     assembly_inputs = [*material_refs, *(lineage or {}).get("assembly_inputs", [])]
     kit = kit_swatch(root, context["manifest"], asset) if asset.get("kit_material") else None
@@ -1231,6 +1234,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
                                       asset.get("max_stretch"))
+    with Image.open(paths["basecolor"]) as image:
+        validation.setdefault("measured", {})["texture_size"] = list(image.size)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
@@ -1347,10 +1352,26 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
     return refs, attempts
 
 
+def _face_budget(pipeline, asset_type, asset, default=30000):
+    """A kit module's declared face budget, else its asset type's: a flat floor tile need not spend a doorway's 60k
+    faces (2026-10-22 kit: a 3 x 3 m floor used 59,988)."""
+    budget = asset.get("face_budget") or pipeline.get("model_budgets", {}).get(asset_type.get("face_budget"), default)
+    return int(budget) if budget is not None else None
+
+
+def _fit_texture_size(maps, size):
+    """Resize a kit module's generated maps to its declared texture size (a texture-memory budget)."""
+    for path in maps.values():
+        with Image.open(path) as image:
+            if image.size != (size, size):
+                image.resize((size, size), Image.LANCZOS).save(path)
+
+
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch") if asset.get(key)}
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size")
+            if asset.get(key)}
 
 
 CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}
@@ -1631,8 +1652,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     mesh_ref = next((artifact for stage in reversed(parent_execution.get("stages", []) if parent_execution else [])
                      for artifact in reversed(stage.get("outputs", []))
                      if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
-    processing_settings = {"face_budget": int(pipeline.get("model_budgets", {}).get(
-                               asset_type.get("face_budget"), 30000)),
+    processing_settings = {"face_budget": _face_budget(pipeline, asset_type, asset),
                            "material_scale": float(pipeline.get("material_scale", 3.0)),
                            "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
     processed_reuse = processed_mesh_reuse_decision(root, asset, mesh_ref, processing_settings) \
@@ -2079,7 +2099,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                 "configured_inputs": workflow_node_inputs(config, "model", Path(workflow).name) if workflow else {}}},
         "quality": {"tier": pipeline.get("selected_quality_tier", "normal"),
                     "settings": pipeline.get("quality_settings", {})},
-        "mesh": {"face_budget": pipeline.get("model_budgets", {}).get(asset_type.get("face_budget")),
+        "mesh": {"face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                  "voxel_resolution": asset_type.get("voxel_resolution"), "seeds": mesh_seeds,
                  "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")},
         "material_prompt": material_prompt, "material_count": material_count,
@@ -2250,7 +2270,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             mesh_settings = {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api",
                              "workflow_identity": execution["identity_inputs"]["workflows"]["model"],
                              "quality": mesh_quality,
-                             "face_budget": pipeline["model_budgets"].get(asset_type.get("face_budget")),
+                             "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
             scope_sha256 = execution_identity({
@@ -2316,7 +2336,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 if mesh_outputs is None:
                     config["_journal_context"] = journal_context
                     if workflow:
-                        budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+                        budget = _face_budget(pipeline, asset_type, asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
