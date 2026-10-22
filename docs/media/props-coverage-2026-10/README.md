@@ -11,7 +11,7 @@ qualification protocol: there is one run per brief and no record committed in ad
 | Run | Prop kind | Result | Notes |
 | --- | --- | --- | --- |
 | D1 | Fully metal: cast-iron pot | Pass, first mesh attempt, through Unity | Handles, lid with knob and feet reconstructed; dark iron |
-| E1 | Sci-fi hard surface: fuel canister | Pass, first mesh attempt, through Unity | The cyan indicator strip baked darker, so the colour rule found 0.67% of the map: it glows in Blender's front view but barely in Unity. The steel frame ribs picked up the strip's blue |
+| E1 | Sci-fi hard surface: fuel canister | Pass, first mesh attempt, through Unity | The declared cyan strip was found by the concept projection (fit 0.99, 0.67% of the map), and it glows in the Unity views that face the front. TRELLIS also painted darker blue panels between the frame ribs on the sides and back, copying the front strip onto sides the concept does not show (#63). They do not glow, as the brief declares one strip |
 | F1 | Organic: tree stump | **Fail**: all three mesh attempts rejected on UV area (0.017–0.044) | The meshes were whole. Bark and moss unwrapped into about 10,600 islands, and 12-texel padding left 2–4% of the map for surface |
 | F2 | Organic: tree stump, with this change | Pass, first mesh attempt, through Unity | Concept fit 0.95; UV area 0.084 |
 | G1 | Glass part: brass lantern globe | Pass, first mesh attempt, through Unity | 6.7% glass found; the globe reads as frosted glass |
