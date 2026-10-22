@@ -1,12 +1,23 @@
+<div align="center">
+
 # SlopForge
 
 **Turn an asset brief into a reviewed 3D game asset.**
 
-SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU; keep your assets, approval decisions, and provenance in your own project.
+![Seven generated props turning on a dark stage: a stone lantern, a glazed jug, a mossy tree stump, a supply crate, a cast-iron pot, a sci-fi fuel canister and a brass lantern](docs/media/props-lineup-2026-10/props_lineup.gif)
+
+<sub>Each prop was generated from a written brief on an H100 and imported into Unity, with no manual repair.</sub>
+
+[![Verify](https://img.shields.io/github/actions/workflow/status/gysahlgreene/SlopForge/ci.yml?branch=main&label=verify&style=flat-square)](https://github.com/gysahlgreene/SlopForge/actions/workflows/ci.yml)
+[![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776ab?style=flat-square)](docs/INSTALL.md)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-ffdd00?style=flat-square&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
 
 [Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md)
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-ffdd00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
+</div>
+
+SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU, and keep your assets, approval decisions and provenance in your own project.
 
 ## What it makes
 
@@ -25,15 +36,15 @@ Every 3D asset type shares the same [materials and textures](#materials-and-text
 
 | Supply crate | Glazed jug | Stone lantern |
 | :---: | :---: | :---: |
-| ![Supply crate, run 1](docs/media/props-provisional-2026-10-v5/A1_supply_crate_turntable.gif) | ![Glazed jug, run 1](docs/media/props-provisional-2026-10-v5/B1_ceramic_jug_turntable.gif) | ![Stone lantern, run 1](docs/media/props-provisional-2026-10-v5/C1_stone_lantern_turntable.gif) |
-| ![Supply crate, run 2](docs/media/props-provisional-2026-10-v5/A2_supply_crate_turntable.gif) | ![Glazed jug, run 2](docs/media/props-provisional-2026-10-v5/B2_ceramic_jug_turntable.gif) | ![Stone lantern, run 2](docs/media/props-provisional-2026-10-v5/C2_stone_lantern_turntable.gif) |
+| <img src="docs/media/props-provisional-2026-10-v5/A1_supply_crate_turntable.gif" width="240" alt="Supply crate, run 1"> | <img src="docs/media/props-provisional-2026-10-v5/B1_ceramic_jug_turntable.gif" width="240" alt="Glazed jug, run 1"> | <img src="docs/media/props-provisional-2026-10-v5/C1_stone_lantern_turntable.gif" width="240" alt="Stone lantern, run 1"> |
+| <img src="docs/media/props-provisional-2026-10-v5/A2_supply_crate_turntable.gif" width="240" alt="Supply crate, run 2"> | <img src="docs/media/props-provisional-2026-10-v5/B2_ceramic_jug_turntable.gif" width="240" alt="Glazed jug, run 2"> | <img src="docs/media/props-provisional-2026-10-v5/C2_stone_lantern_turntable.gif" width="240" alt="Stone lantern, run 2"> |
 | oak planks + wrought iron | cobalt glaze + cork + twine | granite + glowing paper + wood |
 
 **Four more kinds of prop, one run each** (2026-10-22):
 
 | Cast-iron pot | Sci-fi fuel canister | Mossy tree stump | Brass lantern |
 | :---: | :---: | :---: | :---: |
-| ![Cast-iron pot](docs/media/props-coverage-2026-10/D1_iron_pot_turntable.gif) | ![Sci-fi fuel canister](docs/media/props-coverage-2026-10/E1_fuel_canister_turntable.gif) | ![Mossy tree stump](docs/media/props-coverage-2026-10/F2_tree_stump_turntable.gif) | ![Brass lantern](docs/media/props-coverage-2026-10/G1_brass_lantern_turntable.gif) |
+| <img src="docs/media/props-coverage-2026-10/D1_iron_pot_turntable.gif" width="180" alt="Cast-iron pot"> | <img src="docs/media/props-coverage-2026-10/E1_fuel_canister_turntable.gif" width="180" alt="Sci-fi fuel canister"> | <img src="docs/media/props-coverage-2026-10/F2_tree_stump_turntable.gif" width="180" alt="Mossy tree stump"> | <img src="docs/media/props-coverage-2026-10/G1_brass_lantern_turntable.gif" width="180" alt="Brass lantern"> |
 | all metal | paint + steel + glowing strip | bark + moss + mushrooms | brass + glass globe |
 
 Each prop was generated on an H100 from a written brief through `generate` → `approve`, with no manual repair, then imported into a fresh Unity 6000.6.3f1 / URP 17.6.0 project. Every run is checked from the concept through to the engine:
@@ -79,7 +90,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 
 | Realistic | Stylized hero | Anime | Hand-painted |
 | :---: | :---: | :---: | :---: |
-| ![Realistic mercenary walking](docs/media/character-styles-2026-10/realistic_walk.gif) | ![Stylized hero walking](docs/media/character-styles-2026-10/hero_walk.gif) | ![Anime adventurer walking](docs/media/character-styles-2026-10/anime_walk.gif) | ![Hand-painted dwarf walking](docs/media/character-styles-2026-10/painted_walk.gif) |
+| <img src="docs/media/character-styles-2026-10/realistic_walk.gif" width="180" alt="Realistic mercenary walking"> | <img src="docs/media/character-styles-2026-10/hero_walk.gif" width="180" alt="Stylized hero walking"> | <img src="docs/media/character-styles-2026-10/anime_walk.gif" width="180" alt="Anime adventurer walking"> | <img src="docs/media/character-styles-2026-10/painted_walk.gif" width="180" alt="Hand-painted dwarf walking"> |
 
 Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk are solid; the models are not yet game quality: forms are lumpy, faces soft and fingers fused, the limits of current open single-image 3D generation. Experimental and unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
 
@@ -91,15 +102,15 @@ Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), 
 
 | Stone well | Market stall | Stone shrine |
 | :---: | :---: | :---: |
-| ![Stone well turntable](docs/media/structure-showcase-2026-10/stone_well_turntable.gif) | ![Market stall turntable](docs/media/structure-showcase-2026-10/market_stall_turntable.gif) | ![Stone shrine turntable](docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif) |
+| <img src="docs/media/structure-showcase-2026-10/stone_well_turntable.gif" width="240" alt="Stone well turntable"> | <img src="docs/media/structure-showcase-2026-10/market_stall_turntable.gif" width="240" alt="Market stall turntable"> | <img src="docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif" width="240" alt="Stone shrine turntable"> |
 | **Watchtower** | **Ruined arch** | **Sci-fi bunker** |
-| ![Watchtower turntable](docs/media/structure-showcase-2026-10/watchtower_turntable.gif) | ![Ruined arch turntable](docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif) | ![Sci-fi bunker turntable](docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif) |
+| <img src="docs/media/structure-showcase-2026-10/watchtower_turntable.gif" width="240" alt="Watchtower turntable"> | <img src="docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif" width="240" alt="Ruined arch turntable"> | <img src="docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif" width="240" alt="Sci-fi bunker turntable"> |
 
 Standalone structures use the `architecture` asset type with the same brief-declared materials as props. Modular kits are recipes whose modules declare real sizes, so pieces snap on a shared grid:
 
 | Modular stone kit courtyard |
 | :---: |
-| ![Stone ruin kit courtyard turntable](docs/media/structure-showcase-2026-10/stone_ruin_kit_turntable.gif) |
+| <img src="docs/media/structure-showcase-2026-10/stone_ruin_kit_turntable.gif" width="360" alt="Stone ruin kit courtyard turntable"> |
 
 The floor, wall, doorway and column modules come out at their declared 3 m sizes and pass the kit's grid and pivot rules; the courtyard is assembled from them in Blender as a demonstration. One run each, not yet visually approved or imported into Unity; the kit's corner module reconstructed incorrectly. [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md) · [Environment kits →](docs/ENVIRONMENT-KITS.md)
 
