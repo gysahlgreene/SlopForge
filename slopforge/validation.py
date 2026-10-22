@@ -261,6 +261,26 @@ def apply_declared_glass(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
         validation["status"] = "failed"
     return validation
 
+
+def apply_concept_fit(validation, view, minimum):
+    """Fail a candidate whose mesh no longer matches the concept's outline (retryable quality code).
+
+    view is blender/concept_view.py's report: the best silhouette fit of the mesh to the approved concept. Shattered
+    reconstructions fitted 0.71-0.75 and every whole prop 0.86-0.99 (2026-10-22); UV area no longer separates them.
+    """
+    fit = (view or {}).get("silhouette_iou")
+    if fit is None:
+        return validation  # not measured; the concept view report says why
+    validation.setdefault("measured", {})["concept_fit"] = fit
+    validation.setdefault("limits", {})["min_concept_fit"] = minimum
+    if fit < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"mesh fits the concept's outline at {fit} (limit {minimum}): the reconstruction is likely shattered or "
+            "turned, so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "concept_fit"]
+        validation["status"] = "failed"
+    return validation
+
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
 
 

@@ -494,6 +494,16 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertTrue(any("saturation against the concept was not checked" in item
                                     for item in validation["warnings"]))
 
+    def test_candidate_that_no_longer_fits_the_concept_outline_retries(self):
+        # 2026-10-22 shattered glass bottles fitted 0.71-0.75; whole props 0.86-0.99.
+        jug = [{"region": "jug", "class": "nonmetal", "description": "glaze"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = self._colour_candidate(Path(temporary), jug, (40, 60, 150), (40, 62, 148), None,
+                                               {"min_concept_fit": 0.8})
+        self.assertEqual(candidate["status"], "failed")
+        self.assertIn("concept_fit", candidate["validation"]["failure_codes"])
+        self.assertEqual(candidate["validation"]["measured"]["concept_fit"], 0.7)
+
     def _colour_candidate(self, root, materials, concept_rgb, atlas_rgb, view_rgb, limits):
         cutout = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         cutout.paste((*concept_rgb, 255), (16, 8, 48, 56))

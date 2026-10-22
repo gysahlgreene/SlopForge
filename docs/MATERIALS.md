@@ -119,9 +119,9 @@ result against that declaration before anyone reviews it.
      "glass" alone draws it see-through, and the class rule appended to the prompt did not change that: six
      concepts with an extra reconstruction rule looked as translucent as six without. A see-through concept
      can still reconstruct as shards on some seeds.
-   - **Shattered meshes:** a shattered seed now fails on UV area (below), and the next seed is tried. One
-     shattered bottle passed every other check, with one part. Projects created before 2026-10-22 need
-     `min_uv_area: 0.2` added to their `ai/asset_types/prop.yaml`.
+   - **Shattered meshes:** a shattered seed now fails on its fit to the concept's outline (`concept_fit`,
+     below), and the next seed is tried. One shattered bottle had passed every other check, with one part.
+     Projects created before 2026-10-22 need `min_concept_fit: 0.8` added to their `ai/asset_types/prop.yaml`.
    - **Whole-glass objects are not reliable.** With the solid wording, three seeds of one bottle gave two
      whole bottles, which just missed the saturation check at 0.587 and 0.554 of the concept's, and one
      shattered mesh. Glass parts held in an opaque frame, such as the lantern's globe, came out whole.
@@ -160,7 +160,8 @@ Material-map checks run on every native candidate and are recorded in its valida
 | Metallic map ≥ 90% fully metallic and the brief declares no materials | Warning |
 | Emissive region declared but no matching pale or declared-colour region found (`emissive_fraction` 0) | Candidate fails (`emitter_missing`); the next mesh seed is tried within the budget |
 | Glass declared but no matching pale or declared-tint region found (`glass_fraction` 0) | Candidate fails (`glass_missing`); the next mesh seed is tried within the budget |
-| UV area under the asset type's `min_uv_area` (props: 0.2) | Candidate fails (`uv_area_budget`): a shattered reconstruction unwraps into tiny charts (0.025 on a glass bottle; whole props 0.22–0.63); the next mesh seed is tried |
+| Mesh fits the concept's outline under `min_concept_fit` (props: 0.8) | Candidate fails (`concept_fit`): shattered reconstructions fitted 0.71–0.75, whole props 0.86–0.99; the next mesh seed is tried. The fit comes from the concept view the colour check renders |
+| UV area under an asset type's optional `min_uv_area` | Candidate fails (`uv_area_budget`). No bundled type sets it: with 4-texel padding, shattered meshes (0.11–0.12) and whole organic props (0.10–0.19) overlap |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
 
@@ -205,6 +206,13 @@ and none are declared yet.
   from the approved concept and its prompt and reconstructs from all four; on one relay run the copied disc
   was gone, but the generated back invented a vent, the plate colour faded, and the crate's views never
   agreed well enough to run. See [multi-view conditioning](WORKFLOWS.md#multi-view-conditioning-props).
+- **UV padding:** mesh preparation pads UV islands by 4 texels at the atlas size, then re-packs them with
+  Blender's concave packer. The old 0.003 margin (12 texels at 4096) spent a noisy organic surface's atlas on
+  padding: a tree stump unwrapped into about 10,600 islands and used 4.4% of its map, so its texture was
+  effectively about 800² of a 4096² atlas. Re-unwrapped, the stump went to 19%, a crate 0.30 → 0.55 and a jug
+  0.54 → 0.65, with unchanged stretch. Padding of 4 texels starts to bleed between neighbouring islands at the
+  third mip level (1024 for a 4096 atlas), so distant seams can show faint colour lines.
+  [Coverage evidence](media/props-coverage-2026-10/README.md).
 - **Thin parts:** hollow rings, wires and paper-thin parts reconstruct as torn sheets; the
   reconstruction rules ask for chunky thick-walled forms.
 - **Mesh repair:** Blender's voxel remesh needs closed volumes and erased thin open parts

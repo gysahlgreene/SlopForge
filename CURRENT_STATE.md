@@ -428,6 +428,17 @@ Glass and transparent parts (2026-10-22, issue #44; private evidence).
 - **A bottle with that wording:** seeds 1 and 2 reconstructed whole (UV area 0.65 and 0.61) but failed `colour_desaturated` (0.587 and 0.554 of the concept's saturation). Seed 3 was shattered (UV area 0.021). It passed only because that test project predates `min_uv_area`: existing projects keep their asset types, so add `min_uv_area: 0.2` to `ai/asset_types/prop.yaml` by hand.
 - **Status:** glass parts in an opaque prop (the lantern) work end to end. Whole-glass objects are not reliable: some seeds shatter (a new project now retries them), and the bottle's colour sits at the saturation limit.
 
+Prop coverage exploration (2026-10-22; [evidence](docs/media/props-coverage-2026-10/README.md)). One run each of a fully metal pot, a sci-fi canister, an organic tree stump and a glass-part lantern.
+- **Passed:** the pot, canister and lantern, each on its first mesh attempt and through Unity.
+- **Stump:** failed every seed on UV area (0.017–0.044), although its meshes were whole. Bark and moss unwrapped into about 10,600 islands, and 12-texel padding used most of the map.
+- **Change:** UV islands are now padded by 4 texels and re-packed concave. The stump went 0.044 → 0.19, a crate 0.30 → 0.55 and a jug 0.54 → 0.65, with unchanged stretch.
+- **Shattered-mesh check replaced:** with that padding, UV area no longer separated shattered bottles (0.11–0.12) from whole stumps (0.10–0.19), so props now retry on a concept silhouette fit under 0.8 (`concept_fit`; shattered 0.71–0.75, whole 0.86–0.99) instead of UV area.
+- **Re-run:** with these changes the stump passed on its first seed (fit 0.95) and imported into Unity.
+- **Open:**
+  - the canister's cyan strip baked darker and was only partly found (0.67%);
+  - every stump concept was taller than wide against the brief;
+  - lantern globes are drawn see-through despite the solid wording.
+
 Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Change:** `wait_for_completion` asks `/queue` straight after a dropped connection recovers, and otherwise every 30 s. A job that is neither queued, running nor in history (read again, to cover a job that finishes in between) stops as an `environment` failure marked `remote_lost` and `remote_terminal`, so `--resume` can queue it again. `download_output` retries transport failures up to five times with backoff, and does not retry HTTP errors.
 - **Tests:** unit tests cover a lost job after a restart, a job that finishes between the two checks, periodic checks of a waiting job, `/queue` parsing, a retried download and a 404 that is not retried.
