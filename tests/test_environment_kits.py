@@ -164,6 +164,75 @@ class EnvironmentKitTests(unittest.TestCase):
         self.assertEqual(manifest["assets"]["architecture:ruin_floor"]["pivot"], "top_center")
         self.assertEqual(manifest["assets"]["architecture:ruin_wall"]["pivot"], "bottom_center")
 
+    def test_kit_material_reaches_declared_modules_from_a_texture_child(self):
+        from unittest.mock import patch
+        from slopforge import recipes
+        from slopforge.backends import blender
+        from slopforge.config import load_project
+        from slopforge.style import load_style
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            definition = {"id": "mini", "version": 1, "description": "A wall, a crate and their stone",
+                          "kit_constraints": {"material": {"source": "stone", "tile_size": 2},
+                                              "modules": {"wall": {"target_size": [3, None, 3]}}},
+                          "children": [{"id": "stone", "type": "texture", "description": "Granite surface"},
+                                       {"id": "wall", "type": "architecture", "description": "A wall"},
+                                       {"id": "crate", "type": "prop", "description": "A crate"}]}
+            recipe = project / "ai/recipes/mini.yaml"
+            for bad in ({"source": "wall", "tile_size": 2}, {"source": "stone", "tile_size": 0}):
+                recipe.write_text(json.dumps({**definition, "kit_constraints": {
+                    **definition["kit_constraints"], "material": bad}}))
+                with self.subTest(material=bad), self.assertRaisesRegex(ValueError, "material"):
+                    load_recipe(project, "mini", load_taxonomy(project))
+            recipe.write_text(json.dumps(definition))
+            config = load_project(project)
+            manifest = load_manifest(project / "ai/assets/manifest.json")
+            with patch("slopforge.recipes.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                    patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]):
+                recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
+                                   "mini", instance_name="ruin")
+        self.assertEqual(manifest["assets"]["architecture:ruin_wall"]["kit_material"],
+                         {"asset_key": "texture:ruin_stone", "tile_size": 2})
+        self.assertNotIn("kit_material", manifest["assets"]["prop:ruin_crate"])  # not a declared module
+        with patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000,
+                                  kit_material="swatch.png", kit_tile_size=2.0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--kit-material") + 1:command.index("--kit-material") + 4],
+                         ["swatch.png", "--kit-tile-size", "2"])
+
+    def test_corner_footprint_is_declared_copied_and_checked(self):
+        from unittest.mock import patch
+        from slopforge import recipes
+        from slopforge.recipes import _validate_kit_constraints
+        with self.assertRaisesRegex(ValueError, "footprint"):
+            _validate_kit_constraints({"kit_constraints": {"modules": {"corner": {"footprint": "round"}}}}, {"corner"})
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {
+            "modules": {"corner": {"footprint": "corner"}}}},
+            "stages": {"corner": {"asset_key": "architecture:corner", "asset_id": "corner-id"}}}}
+        for quadrants, status in (([0.7, 0.9, 0.7, 0.0], "passed"), ([0.86] * 4, "failed")):
+            manifest = {"assets": {"architecture:corner": {"type": "architecture", "status": "ready",
+                "validation": {"measured": {"dimensions": [3.0, 3.0, 3.0], "bounds_min": [0, 0, 0],
+                    "bounds_max": [3, 3, 3], "transforms_applied": True, "footprint_quadrants": quadrants}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["corner"]["status"], status)
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            from slopforge.config import load_project
+            from slopforge.style import load_style
+            config = load_project(project)
+            manifest = load_manifest(project / "ai/assets/manifest.json")
+            with patch("slopforge.recipes.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                    patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]):
+                recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
+                                   "stone_ruin_kit", instance_name="ruin")
+        self.assertEqual(manifest["assets"]["architecture:ruin_corner"]["footprint"], "corner")
+        self.assertNotIn("footprint", manifest["assets"]["architecture:ruin_wall"])
+
     def test_validation_checks_a_top_center_pivot(self):
         recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {
             "grid_size": 1.0, "pivot_tolerance": 0.01, "modules": {"floor": {"pivot": "top_center"}}}},

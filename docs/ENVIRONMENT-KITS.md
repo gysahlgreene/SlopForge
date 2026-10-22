@@ -32,6 +32,39 @@ Inspection also records `footprint_quadrants`: how much of each quarter of the m
 geometry, in the order +X+Y, −X+Y, −X−Y, +X−Y. An L-shaped corner leaves one quadrant nearly empty, which shows
 which way it opens. The 2026-10-22 stone corner measured 0.69, 0.0, 0.69 and 0.90.
 
+## Shared kit material
+
+Modules generated one at a time do not match: in the first assembled courtyard the columns came out sandy and the
+walls grey. A kit can name one texture child as its material:
+
+```yaml
+kit_constraints:
+  material: {source: stone, tile_size: 2.0}   # metres per repeat
+children:
+  - id: stone
+    type: texture
+    generation_prompt: Seamless, front-facing, evenly lit surface of weathered grey granite ...
+```
+
+**Order of approval:** approve the texture first (`approve <run>_stone <number>`), then each module. Approving a
+module before its kit texture stops before any inference and names the texture to approve.
+
+**What happens to each module** declared in `kit_constraints.modules`, in its mesh-aware material stage:
+- the texture is made seamless;
+- it is box-projected at `tile_size` metres per repeat;
+- its base colour is re-baked as the swatch × baked ambient occlusion × the module's own brightness relative to
+  its mean, softened to 60%.
+
+So every module gets the swatch's hue. Each one keeps its block-to-block light and dark, and its own normal,
+roughness and metallic maps. The seamless swatch's hash and the tile size join the module's assembly-stage
+settings.
+
+**Unity mip levels:** the bake leaves nothing black outside the UV islands. Uncovered texels take the module's
+mean colour, as TRELLIS's own maps do. A first live run left them black, and Unity's smaller mips blended that into
+island edges as black patches on column capitals and the doorway frame.
+
+**Limits:** the colour of an invented back face is replaced, but its brightness pattern is kept at 60%.
+
 ## Layouts and the Unity test scene
 
 A recipe's `layouts` place modules to test that they work together. Each placement gives:

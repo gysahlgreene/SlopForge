@@ -71,6 +71,12 @@ def _validate_kit_constraints(definition, child_ids):
     modules = constraints.get("modules", {})
     if not isinstance(modules, dict) or not set(modules) <= child_ids:
         raise ValueError("kit_constraints.modules must map known child ids to rules")
+    material = constraints.get("material")
+    if material is not None:
+        tile = material.get("tile_size") if isinstance(material, dict) else None
+        if (not isinstance(material, dict) or material.get("source") not in child_ids or
+                not isinstance(tile, (int, float)) or isinstance(tile, bool) or not math.isfinite(tile) or tile <= 0):
+            raise ValueError("kit_constraints.material needs a source child id and a positive tile_size in metres")
     for child_id, rule in modules.items():
         if not isinstance(rule, dict):
             raise ValueError(f"kit_constraints.modules.{child_id} must be a mapping")
@@ -92,6 +98,8 @@ def _validate_kit_constraints(definition, child_ids):
         pivot = rule.get("pivot")
         if pivot is not None and pivot not in PIVOTS:
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
+        if rule.get("footprint") not in (None, "corner"):
+            raise ValueError(f"kit_constraints.modules.{child_id}.footprint must be corner (an L that opens one side)")
         target = rule.get("target_size")
         if target is not None and (not isinstance(target, list) or len(target) != 3
                                    or all(value is None for value in target)
@@ -173,6 +181,10 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
         if child.get("quality_tier") is not None and not isinstance(child["quality_tier"], str):
             raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
     _validate_layouts(definition, children, asset_types)
+    material = (definition.get("kit_constraints") or {}).get("material")
+    if material and asset_types.get(next(child["type"] for child in children if child["id"] == material["source"]),
+                                    {}).get("pipeline") != "image":
+        raise ValueError("kit_constraints.material.source must be a texture (image) child")
     return definition, children
 
 
@@ -697,6 +709,14 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
         pivot = rule.get("pivot", constraints.get("pivot"))
         if pivot and pivot != "center" and asset_types[child["type"]].get("pipeline") == "model":
             asset["pivot"] = pivot
+        if rule.get("footprint"):
+            asset["footprint"] = rule["footprint"]
+        material = constraints.get("material")
+        if material and child["id"] in constraints.get("modules", {}) and asset_types[child["type"]].get("pipeline") == "model":
+            # Every declared module takes its base colour from the kit's texture child once that is approved.
+            source = next(item for item in children if item["id"] == material["source"])
+            asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}"),
+                                     "tile_size": material["tile_size"]}
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",
