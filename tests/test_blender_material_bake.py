@@ -151,6 +151,44 @@ json.dump({{'uv_min':[min(p[i] for p in uvs) for i in (0,1)],'uv_max':[max(p[i] 
             for actual, expected in zip(data["uv_min"] + data["uv_max"], (0.4,0.2,0.5,0.3)):
                 self.assertAlmostEqual(actual, expected, places=5)
 
+    def test_declared_glass_faces_get_their_own_material(self):
+        # Issue #44: glass texels carry base colour alpha; their faces need a separate (transparent) engine material.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, fbx, blend = [root / f"cube.{extension}" for extension in ("glb", "fbx", "blend")]
+            maps = [root / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            base = Image.new("RGBA", (64, 64), (60, 150, 90, 255))
+            base.paste((60, 150, 90, 89), (0, 0, 32, 64))  # left half is glass
+            base.save(maps[0])
+            for path, color in zip(maps[1:], ((128, 128, 255), (128, 128, 128), (0, 0, 0), (0, 0, 0))):
+                Image.new("RGB", (64, 64), color).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text('''import bpy,sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add()
+mesh = bpy.context.object.data
+for polygon in mesh.polygons:
+    left = 0.1 if polygon.index < 3 else 0.6
+    for corner, loop in enumerate(polygon.loop_indices):
+        mesh.uv_layers.active.data[loop].uv = (left + (0.2 if corner in (1, 2) else 0), 0.4 + (0.2 if corner in (2, 3) else 0))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1],export_format='GLB')
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)], check=True, capture_output=True)
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
+                            str(glb), str(fbx), str(blend), *map(str, maps), "--preserve-uvs"], check=True, capture_output=True)
+            result = root / "snapshot.json"
+            snapshot = root / "snapshot.py"
+            snapshot.write_text(f'''import bpy,json
+bpy.ops.wm.open_mainfile(filepath={str(blend)!r})
+mesh=next(o.data for o in bpy.context.scene.objects if o.type=='MESH')
+json.dump({{'materials':[m.name for m in mesh.materials],'faces':len(mesh.polygons),'glass':sorted(p.index for p in mesh.polygons if p.material_index == 1)}},open({str(result)!r},'w'))
+''')
+            subprocess.run([BLENDER, "--background", "--python", str(snapshot)], check=True, capture_output=True)
+            data = json.loads(result.read_text())
+            self.assertEqual(data["materials"], ["cube_PBR", "cube_Glass"])
+            self.assertEqual(len(data["glass"]) * 2, data["faces"])  # the three glass quads, as triangles
+            self.assertIn(b"cube_Glass", fbx.read_bytes())
+
     def test_bakes_generated_material_and_renders_three_mesh_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

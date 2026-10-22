@@ -413,3 +413,23 @@ Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Tests:** unit tests cover a lost job after a restart, a job that finishes between the two checks, periodic checks of a waiting job, `/queue` parsing, a retried download and a 404 that is not retried.
 - **Live check (H100):** a pending job deleted through ComfyUI's queue API was reported lost in 2.3 s, while a running job checked every 2 s completed normally.
 - **Not verified live:** an actual service restart, and a dropped download.
+
+Glass and transparent parts (2026-10-22, issue #44; private evidence).
+- **What reconstructs:** on the H100, a potion bottle drawn as clear glass with liquid reconstructed as shards with no cork, while "a solid smooth green surface, nothing visible through it" came out whole. A brass lantern's clear globe came out as a pale opaque shell with either wording.
+- **Change:**
+  - A `glass[#rrggbb]` material class with a solid-surface concept rule.
+  - The material stage finds glass by the tint's hue at any lightness, or as the pale region for clear glass, and sets alpha 0.35, roughness 0.05 and metallic 0. No glass found fails as the retryable `glass_missing`.
+  - Blender moves glass faces onto a `<name>_Glass` material, and the review renders show them see-through.
+  - Unity gets a second, transparent URP Lit material for those faces (owner decision: two materials for glass props). A single transparent material cannot keep depth writes: URP's Lit setup turns them off.
+  - The owner-accepted UV-area threshold is now enforced for props (`min_uv_area: 0.2`, retryable `uv_area_budget`). A shattered bottle had passed every check with UV area 0.025.
+- **Tests:**
+  - unit tests for the class, the masks, the candidate, the retry and the Unity script;
+  - a real-Blender face-split test;
+  - an opt-in Unity test (URP 17.6.0) in which the glass material is transparent (queue 3000) and the main one opaque.
+- **Live:**
+  - The brass lantern's globe was found on 4.8% of the map, and its 1,584 glass faces read as frosted see-through glass in Unity.
+  - A bottle's first seed retried on the five-part limit; the second was found as 44% glass by colour distance and looked blotchy.
+  - With the hue rule, another bottle found 98% glass, but its mesh was shattered. That case now fails on UV area.
+- **Authoring:** describe glass in the image prompt by its solid look. An extra reconstruction rule did not change concept translucency.
+- **A bottle with that wording:** seeds 1 and 2 reconstructed whole (UV area 0.65 and 0.61) but failed `colour_desaturated` (0.587 and 0.554 of the concept's saturation). Seed 3 was shattered (UV area 0.021). It passed only because that test project predates `min_uv_area`: existing projects keep their asset types, so add `min_uv_area: 0.2` to `ai/asset_types/prop.yaml` by hand.
+- **Status:** glass parts in an opaque prop (the lantern) work end to end. Whole-glass objects are not reliable: some seeds shatter (a new project now retries them), and the bottle's colour sits at the saturation limit.

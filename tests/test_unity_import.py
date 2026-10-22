@@ -38,9 +38,9 @@ def fake_unity(root, guids, texture_guids=None):
 class UnityImportReportTests(unittest.TestCase):
     def _project(self, root):
         maps = {name: root / f"Assets/Relic/{name}.png" for name in ROLES}
-        for path in maps.values():
+        for index, path in enumerate(maps.values()):
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(path.stem.encode())
+            Image.new("RGB", (4, 4), (index * 40, 90, 90)).save(path)
         (root / "Assets/Relic/relic.fbx").write_bytes(b"fbx")
         return maps
 
@@ -173,3 +173,37 @@ class UnityImportIdentityLiveTests(unittest.TestCase):
         renamed = self._publish(self.test_root / "relic_copy", 1.0, (40, 40, 200, 255))
         self.assertFalse({entry["guid"] for entry in renamed["assets"].values()} & set(guids.values()))
         self.assertEqual(self._metas(self.test_root / "relic"), metas)
+
+    def test_glass_faces_get_a_transparent_material_and_the_rest_stays_opaque(self):
+        # Issue #44: Blender puts declared glass faces on a _Glass material; Unity makes that one transparent.
+        folder = self.test_root / "jar"
+        folder.mkdir(parents=True)
+        staging = Path(tempfile.mkdtemp())
+        glb = staging / "jar.glb"
+        script = ("import bpy; bpy.ops.wm.read_factory_settings(use_empty=True); bpy.ops.mesh.primitive_cube_add(); "
+                  "mesh = bpy.context.object.data\n"
+                  "for polygon in mesh.polygons:\n"
+                  "    for corner, loop in enumerate(polygon.loop_indices):\n"
+                  "        mesh.uv_layers.active.data[loop].uv = ((0.1 if polygon.index < 3 else 0.6) + (0.2 if corner in (1, 2) else 0), "
+                  "0.4 + (0.2 if corner in (2, 3) else 0))\n"
+                  f"bpy.ops.export_scene.gltf(filepath={str(glb)!r}, export_format='GLB')")
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script], check=True, capture_output=True)
+        maps = {role: folder / f"{role}.png" for role in ("basecolor", "normal", "roughness", "metallic", "emission")}
+        base = Image.new("RGBA", (64, 64), (60, 150, 90, 255))
+        base.paste((60, 150, 90, 89), (0, 0, 32, 64))
+        base.save(maps["basecolor"])
+        for role, colour in (("normal", (128, 128, 255)), ("roughness", (60, 60, 60)), ("metallic", (0, 0, 0)), ("emission", (0, 0, 0))):
+            Image.new("RGB", (64, 64), colour).save(maps[role])
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                        str(Path(__file__).resolve().parents[1] / "blender/prepare_model.py"), "--", str(glb),
+                        str(folder / "jar.fbx"), str(staging / "jar.blend"), *map(str, maps.values()), "--preserve-uvs"],
+                       check=True, capture_output=True)
+        shutil.rmtree(staging)
+        Image.new("RGBA", (64, 64), (0, 0, 0, 200)).save(folder / "metallic_gloss.png")
+        record = build_unity_material(self.root, folder / "jar.fbx", folder / "jar_PBR.mat",
+                                      {role: folder / f"{role}.png" for role in ("basecolor", "normal", "metallic_gloss", "emission")})
+        self.assertIn("glass_material", record["assets"])
+        glass, main = (folder / "jar_PBR_Glass.mat").read_text(), (folder / "jar_PBR.mat").read_text()
+        self.assertIn("_SURFACE_TYPE_TRANSPARENT", glass)
+        self.assertIn("m_CustomRenderQueue: 3000", glass)
+        self.assertNotIn("_SURFACE_TYPE_TRANSPARENT", main)

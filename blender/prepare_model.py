@@ -109,6 +109,28 @@ def load_texture(nodes, path, non_color=False):
     return node
 
 
+def glass_faces(mesh, image_path):
+    """Faces whose UV centre falls on declared glass: base colour alpha below 0.5 (unity_material.apply_glass)."""
+    import numpy as np
+    image = bpy.data.images.load(str(image_path), check_existing=True)
+    width, height = image.size
+    if image.channels < 4 or not mesh.uv_layers.active or not len(mesh.polygons):
+        return []
+    pixels = np.empty(width * height * 4, np.float32)
+    image.pixels.foreach_get(pixels)
+    alpha = pixels.reshape(height, width, 4)[:, :, 3]  # rows start at the bottom, as UV v does
+    uv = np.empty(len(mesh.loops) * 2, np.float32)
+    mesh.uv_layers.active.data.foreach_get("uv", uv)
+    starts = np.empty(len(mesh.polygons), np.int64)
+    mesh.polygons.foreach_get("loop_start", starts)
+    counts = np.empty(len(mesh.polygons), np.int64)
+    mesh.polygons.foreach_get("loop_total", counts)
+    centre = np.add.reduceat(uv.reshape(-1, 2), starts) / counts[:, None]
+    x = np.clip((centre[:, 0] % 1.0) * width, 0, width - 1).astype(int)
+    y = np.clip((centre[:, 1] % 1.0) * height, 0, height - 1).astype(int)
+    return np.nonzero(alpha[y, x] < 0.5)[0].tolist()
+
+
 def combined_bounds(objects):
     points = []
 
@@ -550,6 +572,8 @@ if tex is not None:
     socket = get_socket(bsdf, "Base Color")
     if socket:
         links.new(tex.outputs["Color"], socket)
+    # Declared glass carries base colour alpha (slopforge.unity_material.apply_glass); maps without it read 1.
+    links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
 
 
 # Roughness
@@ -637,6 +661,16 @@ if tex is not None:
 
 obj.data.materials.clear()
 obj.data.materials.append(material)
+# Declared glass gets its own material, so the engine can draw it transparent and keep the rest opaque with
+# depth writes (issue #44); it shares the maps, whose alpha marks the glass.
+glass = glass_faces(obj.data, basecolor_path) if basecolor_path and basecolor_path.exists() else []
+if glass:
+    glass_material = material.copy()
+    glass_material.name = f"{input_glb.stem}_Glass"
+    obj.data.materials.append(glass_material)
+    for index in glass:
+        obj.data.polygons[index].material_index = 1
+    print(f"Glass faces: {len(glass)} of {len(obj.data.polygons)}")
 
 
 # -------------------------------------------------

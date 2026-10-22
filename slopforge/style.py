@@ -51,23 +51,27 @@ MATERIAL_CLASSES = {
     # regions unlit; the material stage adds the glow. Naming the glow ("switched off, not glowing") drew it lit
     # in every concept, so the rule only describes the unlit look (docs/MATERIALS.md, Known limits).
     "emissive": "a solid opaque surface with a dull matte finish in its own flat daytime colour",
+    # Glass drawn see-through reconstructed as shattered shards (2026-10-22 potion bottle); drawn as a solid tinted
+    # surface it came out whole. The material stage makes it see-through (docs/MATERIALS.md, Glass).
+    "glass": "a solid smooth glossy surface in its own tint with a faint sheen; nothing visible through it and nothing inside it",
 }
 
 
 def parse_material_spec(spec):
-    """Parse 'region=class[: description]'; class is nonmetal, metal, emissive or emissive#rrggbb.
+    """Parse 'region=class[: description]'; class is nonmetal, metal, emissive[#rrggbb] or glass[#rrggbb].
 
-    The optional emissive colour is the region's base colour in the concept; the material stage
-    matches it in the generated base colour map and glows in that colour.
+    The optional colour is the region's base colour in the concept; the material stage matches it in the
+    generated base colour map (emitters glow in it, glass turns see-through there). Without one, the region is
+    found as the map's pale near-neutral area.
     """
     region, separator, rest = spec.partition("=")
     material_class, _, detail = rest.partition(":")
     material_class, _, color = material_class.strip().lower().partition("#")
     region, detail = region.strip(), detail.strip()
-    valid_color = not color or (material_class == "emissive" and len(color) == 6
+    valid_color = not color or (material_class in ("emissive", "glass") and len(color) == 6
                                 and all(c in "0123456789abcdef" for c in color))
     if not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color:
-        raise ValueError("--material must be 'region=nonmetal|metal|emissive[#rrggbb][: description]', "
+        raise ValueError("--material must be 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]', "
                          f"got {spec!r}")
     item = {"region": region, "class": material_class, "description": detail}
     if color:

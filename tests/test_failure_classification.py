@@ -934,3 +934,26 @@ class PropComponentBudgetTests(unittest.TestCase):
             prop = load_taxonomy(root)["prop"]
         # Owner-declared 2026-10-21, calibrated on the protocol jugs and crates.
         self.assertEqual((prop["max_concept_hue_difference"], prop["min_concept_chroma_ratio"]), (4, 0.6))
+
+    def test_shattered_mesh_with_tiny_uv_area_retries_the_next_seed(self):
+        # 2026-10-22 glass bottle: a shattered reconstruction (UV area 0.025) passed every check; whole ones
+        # measure 0.22-0.63. The owner accepted UV area >= 0.2 for props on 2026-10-21.
+        import tempfile
+        from pathlib import Path
+        from slopforge.initializer import init_project
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            limit = load_taxonomy(root)["prop"]["min_uv_area"]
+        self.assertEqual(limit, 0.2)
+        def report(uv_area):
+            return validate_model_outputs({}, inspection={"status": "passed", "errors": [], "warnings": [], "measured": {
+                "mesh_objects": 1, "vertex_count": 24, "face_count": 8, "dimensions": [1, 1, 1], "uv_layers": 1,
+                "material_count": 1, "image_texture_count": 4, "component_count": 1, "nonmanifold_edge_count": 0,
+                "uv_area_sum": uv_area, "transforms_applied": True, "missing_textures": []}}, min_uv_area=limit)
+        shattered, whole = report(0.025), report(0.48)
+        self.assertIn("uv_area_budget", shattered["failure_codes"])
+        self.assertTrue(candidate_quality_rejection(shattered))
+        self.assertNotIn("uv_area_budget", whole.get("failure_codes", []))

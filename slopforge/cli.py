@@ -42,7 +42,7 @@ def parser():
     generate.add_argument("description")
     generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
     generate.add_argument("--material", action="append", default=[], dest="materials",
-                          help="Declare a material region: 'region=nonmetal|metal|emissive[: description]' (repeatable)")
+                          help="Declare a material region: 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
     generate.add_argument("--aspect", choices=("square", "portrait", "landscape"),
                           help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for wider")
     generate.add_argument("--count", type=int)
