@@ -37,16 +37,19 @@ asset_pipeline:
       workflows:
         model: trellis2_image_to_model_api.json
     # character_image: pose-conditioned concepts for asset types with pose_control (needs the
-    # Z-Image Fun ControlNet Union patch; see docs/CHARACTER-RIGGING.md).
+    # Z-Image Fun ControlNet Union patch; see docs/CHARACTER-RIGGING.md). guided_image: the same graph,
+    # used for a prop concept generated with --shape-guide (see docs/AGENT-INTEGRATION.md).
     h100:
       workflows:
         model: trellis2_image_to_model_h100_api.json
         character_image: image_character_pose_api.json
+        guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
     h100_final:
       workflows:
         model: pixal3d_image_to_model_h100_api.json
         character_image: image_character_pose_api.json
+        guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
     # h100_multiview: props condition Pixal3D on generated front, side and back views of the
     # approved concept instead of guessing unseen sides from it (see docs/WORKFLOWS.md).
@@ -55,6 +58,7 @@ asset_pipeline:
         model: pixal3d_multiview_image_to_model_h100_api.json
         views: image_views_qwen_edit_api.json
         character_image: image_character_pose_api.json
+        guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
 
   # Quality is independent of compute_profile and COMFYUI_URL.

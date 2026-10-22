@@ -53,6 +53,7 @@ def run_doctor(project_root=None):
             types = load_taxonomy(root)
             report("PASS", "Asset taxonomy", f"{len(types)} types")
             for role, key in (("Workflow", "image"), ("Character concept workflow", "character_image"),
+                              ("Guided concept workflow", "guided_image"),
                               ("Model workflow", "model"), ("Character model workflow", "character_model"),
                               ("View workflow", "views")):
                 configured = config["asset_pipeline"]["workflows"].get(key)

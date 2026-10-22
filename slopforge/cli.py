@@ -45,6 +45,9 @@ def parser():
                           help="Declare a material region: 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
     generate.add_argument("--aspect", choices=("square", "portrait", "landscape"),
                           help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for wider")
+    generate.add_argument("--shape-guide", metavar="SHAPE:H/W",
+                          help="Hold a prop concept's main mass to a cylinder or box of this height/width, such as "
+                               "cylinder:0.5, when the wording and --aspect do not")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -850,6 +853,9 @@ def _run(args):
         raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
     if getattr(args, "aspect", None) and recipe["pipeline"] != "model":
         raise ValueError(f"--aspect applies to 3D asset types; {asset_type} is an image asset type")
+    if getattr(args, "shape_guide", None) and recipe["pipeline"] != "model":
+        raise ValueError(f"--shape-guide applies to 3D asset types; {asset_type} is an image asset type")
+    shape_guide = model.parse_shape_guide(args.shape_guide) if getattr(args, "shape_guide", None) else None
     if args.image_prompt:
         rules = reconstruction_rules(recipe, materials)
         prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")
@@ -895,7 +901,8 @@ def _run(args):
                                     count, manifest, key, generation_prompt=prompt_text,
                                     reference_paths=getattr(args, "reference_paths", None),
                                     reference_categories=getattr(args, "reference_categories", None),
-                                    reference_entries=reference_entries, aspect=getattr(args, "aspect", None)))
+                                    reference_entries=reference_entries, aspect=getattr(args, "aspect", None),
+                                    shape_guide=shape_guide))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"
