@@ -74,6 +74,9 @@ def validate_environment_kit(recipe_asset, manifest):
 
         if measured.get("transforms_applied") is not True:
             errors.append("mesh orientation/scale transforms are not applied")
+        quadrants = measured.get("footprint_quadrants")
+        if module_rules.get(child_id, {}).get("footprint") == "corner" and quadrants and min(quadrants) > 0.15:
+            errors.append("the corner module has no open side: its footprint fills every quarter")
         objects = measured.get("objects") or []
         if objects:
             pivot = module_rules.get(child_id, {}).get("pivot", constraints.get("pivot", "center"))

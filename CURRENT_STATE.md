@@ -498,3 +498,34 @@ Kit layouts assembled in Unity (2026-10-22, M2; [evidence](docs/media/kit-scene-
   - declared module thickness (wall 0.74 m, doorway 0.82 m, corner arms about 1 m);
   - the doorway, squeezed 45%;
   - Play mode, lightmapping, and more than one run.
+
+Shared kit material and corner footprint check (2026-10-22, M2; [evidence](docs/media/kit-material-2026-10/README.md)).
+- **Owner decision:** one shared material per kit, so modules match.
+- **Change:**
+  - `kit_constraints.material: {source: <texture child>, tile_size: <m>}`.
+  - In each declared module's material stage, the approved texture is made seamless. The base colour is re-baked
+    as the swatch (box-projected in metres) × baked ambient occlusion × 60% of the module's own relative
+    brightness. The module keeps its normal, roughness and metallic maps.
+  - An unapproved kit texture stops approval before mesh inference. The swatch hash and tile size join the
+    assembly-stage settings.
+  - Uncovered atlas texels take the mean colour, which stops mip bleeding.
+  - `footprint: corner` modules fail as the retryable `module_footprint` code when the emptiest footprint quarter is
+    above 0.15, and `environment-check` fails a published one.
+  - The shipped `stone_ruin_kit` has a `stone` texture child, the material and a corner footprint.
+- **Live:**
+  - *First run:* found black mip patches (the bake left about 60% of each atlas black) and a corner that rebuilt as
+    a solid block (0.86 in every quarter). Both are fixed. The new check failed that corner on its real data.
+  - *Final fresh run:* every module passed on its first attempt, with no black texels. The courtyard (25 instances)
+    and corner joint built with no errors in matching granite.
+- **Tests:**
+  - the seamless wrap;
+  - the kit texture preflight, in a unit test and in an approval that stops before mesh inference;
+  - recipe validation, and that only declared modules get the material;
+  - the backend flags;
+  - the retryable code and environment-check for corners;
+  - an opt-in Blender test: swatch hue, the module's own brightness kept, and no black texels.
+- **Not verified:**
+  - the corner retry live;
+  - visual approval, Play mode and lightmapping;
+  - more than two runs of one kit.
+  Module thickness is still undeclared, so the corner joint steps out.

@@ -2,6 +2,9 @@
 # Walls, doorway, corner and column stand on their origin; the floor's walkable top is at its origin, so walls
 # placed at y = 0 stand on the floor. Layouts are in metres on Unity's axes (x right, z forward, y up);
 # `environment-scene <run> courtyard` builds and checks them in Unity once every module is published.
+# Approve the `stone` texture before the modules: every module's base colour is baked from it (the
+# shared kit material), so the kit's stone matches; each module keeps its own normal map and
+# brightness variation.
 # The corner stays unguided: its inside view reconstructs as an L, an outside view as a solid block.
 id: stone_ruin_kit
 version: 1
@@ -50,13 +53,23 @@ kit_constraints:
       - 3
       - 3
       vertical_axis: 2
+      footprint: corner
     column:
       target_size:
       - null
       - null
       - 3
       vertical_axis: 2
+  material:
+    source: stone
+    tile_size: 2.0
 children:
+- id: stone
+  type: texture
+  description: The kit's shared weathered granite surface.
+  generation_prompt: Seamless, front-facing, evenly lit surface of weathered grey granite stone with fine black-and-white
+    speckle, subtle tonal variation and a few small pits, matte, no blocks, no joints, no mortar lines, no objects,
+    no perspective, no shadows, no text, no border.
 - id: floor
   type: architecture
   description: A square weathered flagstone floor tile.

@@ -281,6 +281,27 @@ def apply_concept_fit(validation, view, minimum):
         validation["status"] = "failed"
     return validation
 
+# A module declared as an L corner must leave one quarter of its footprint nearly empty. Real stone corners measured
+# 0.00 there (others 0.69-0.92); one that reconstructed as a solid block measured 0.86 in every quarter (2026-10-22).
+MAX_OPEN_QUADRANT = 0.15
+
+
+def apply_module_footprint(validation, quadrants, footprint):
+    """Fail a kit module whose footprint lacks its declared shape (retryable quality code)."""
+    if footprint != "corner" or not quadrants:
+        return validation
+    opening = round(min(quadrants), 3)
+    validation.setdefault("measured", {})["open_quadrant"] = opening
+    validation.setdefault("limits", {})["max_open_quadrant"] = MAX_OPEN_QUADRANT
+    if opening > MAX_OPEN_QUADRANT:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the corner module has no open side (emptiest quarter of its footprint {opening}, limit "
+            f"{MAX_OPEN_QUADRANT}): it reconstructed as a solid block, so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "module_footprint"]
+        validation["status"] = "failed"
+    return validation
+
+
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
 
 
