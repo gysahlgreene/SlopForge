@@ -27,7 +27,8 @@ for path in sorted(paths):
         errors.append(f'{path.relative_to(root)}: private machine metadata')
     if path.suffix != '.md':
         continue
-    for target in re.findall(r'\]\(([^)]+)\)', text):
+    # Markdown links and images, plus HTML <img src> used for fixed-size gallery tiles.
+    for target in re.findall(r'\]\(([^)]+)\)', text) + re.findall(r'<img [^>]*src="([^"]+)"', text):
         target = target.strip('<>').split('#')[0]
         if not target or '://' in target or target.startswith('mailto:'):
             continue

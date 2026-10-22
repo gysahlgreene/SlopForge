@@ -36,7 +36,11 @@ canvas asked for wider than tall. The lantern globes were drawn see-through desp
 
 ## Evidence
 
-Each strip shows the selected concept and the Blender front, side, rear and three-quarter renders (top), and
+| D1 iron pot | E1 fuel canister | F2 tree stump | G1 brass lantern |
+| :---: | :---: | :---: | :---: |
+| ![D1 turntable](D1_iron_pot_turntable.gif) | ![E1 turntable](E1_fuel_canister_turntable.gif) | ![F2 turntable](F2_tree_stump_turntable.gif) | ![G1 turntable](G1_brass_lantern_turntable.gif) |
+
+The turntables are Blender renders of each run's first valid material candidate. Each strip shows the selected concept and the Blender front, side, rear and three-quarter renders (top), and
 the Unity URP render from four sides (bottom).
 
 ![D1 iron pot](D1_iron_pot.png)
