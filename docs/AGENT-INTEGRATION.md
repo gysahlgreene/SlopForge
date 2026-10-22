@@ -66,7 +66,8 @@ Concepts follow explicit statements far better than implied ones ([concept adher
   12 of 12 squat trunks, with the roots and mushrooms kept
   ([concept proportion evidence](media/concept-proportion-2026-10/README.md)). It needs `workflows.guided_image`
   (set on the h100 profiles). The guide also sets the view angle, so check the design survives it, and leave it
-  off when the wording already works.
+  off when the wording already works. Do not guide kit corners from outside the L: such a concept looked right
+  but reconstructed as a solid block, while the unguided inside view reconstructed as an L.
 
 Review material placement and geometry in all three mesh views before final approval. Declared `emissive` regions get an emission map, and `glass` regions get a second, transparent material; see [Materials](MATERIALS.md). Unity appearance still needs an editor check.
 

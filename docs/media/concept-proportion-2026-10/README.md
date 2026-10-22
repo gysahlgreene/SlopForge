@@ -103,6 +103,30 @@ This run went through the CLI from a fresh copy of the Unity 6000.6.3f1 / URP 17
 The moss came out yellower on the mesh than in the concept. This is the known gap: the colour of small parts is
 not checked.
 
+## Kit modules: guides did not help
+
+The stone ruin kit's recipe prompts were run unchanged on the same six seeds, with and without a guide shaped like
+the module. The guides here were rendered by the experiment harness, which also draws a wall slab and an L-shaped
+corner. `--shape-guide` itself offers only cylinder and box.
+
+![Corner and wall modules with and without a guide](kit_modules.jpg)
+
+- **Wall:**
+  - The unguided wall prompt already gives near-square faces (outline h/w 1.01–1.16).
+  - A slab guide made four of six *wider* than tall.
+- **Corner:**
+  - Without a guide, all six concepts show the *inside* of the L.
+  - With an L-shaped guide, all six show the *outside* corner, with the L's top visible.
+  - That looked like the fix for the 2026-10-18 corner, which had reconstructed as a closed block, but the mesh
+    says otherwise. Seen from above (below), the unguided inside-view corner reconstructed as a real L, covering
+    0.55 of its footprint. The guided outside-view corner reconstructed as a **solid block**, covering 0.99.
+
+From outside, an L corner looks like the corner of a solid cube, so the 3D model fills it in. The inside view
+shows both inner faces. **Leave corner and wall modules unguided.** The 2026-10-18 failure was that one concept,
+not the inside view.
+
+![Top-down silhouettes: unguided corner (left) is an L; L-guided corner (right) is a solid block](corner_footprints.png)
+
 ## Limits
 
 - One brief was tested in depth, with spot checks on two others, and only one guided run went through to Unity.
