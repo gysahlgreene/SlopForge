@@ -1,4 +1,5 @@
 import copy
+import json
 import tempfile
 import unittest
 import hashlib
@@ -1740,3 +1741,41 @@ class RemainingPublicationMalformedParentOutputTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelChildResumeTests(unittest.TestCase):
+    """Resume through the real concept pipeline: only the image backend is faked."""
+
+    def test_resume_keeps_architecture_and_prop_children_with_their_concepts(self):
+        from PIL import Image
+        from slopforge.config import load_project
+        from slopforge.initializer import init_project
+        from slopforge.style import load_style
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "game"
+            (root / "Assets").mkdir(parents=True)
+            init_project(root)
+            (root / "ai/recipes/mini_kit.yaml").write_text(yaml.safe_dump({
+                "id": "mini_kit", "version": 1, "description": "A wall module and a crate",
+                "children": [{"id": "wall", "type": "architecture", "description": "A stone wall module"},
+                             {"id": "crate", "type": "prop", "description": "A wooden crate"}]}))
+            config = load_project(root)
+            style, types = load_style(root, config), load_taxonomy(root)
+            manifest_path = root / config["asset_pipeline"]["manifest"]
+            manifest = load_manifest(manifest_path)
+            seeds = []
+
+            def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata, **_kwargs):
+                seeds.append(seed)
+                Image.new("RGB", (64, 64), "grey").save(destination)
+                metadata.write_text(json.dumps({"workflow": "image.json"}))
+            with patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+                recipes.run_recipe(root, config, style, types, manifest, "mini_kit", instance_name="ruin")
+                generated = len(seeds)
+                recipes.resume_recipe(root, config, style, types, manifest, "ruin")
+            # An architecture module once lost its approved concepts here: its concepts had no lineage.
+            self.assertEqual(len(seeds), generated)
+            stages = manifest["assets"]["recipe:ruin"]["recipe_instance"]["stages"]
+            for child in ("wall", "crate"):
+                self.assertEqual(stages[child]["reuse_decisions"][-1], {"reusable": True, "reasons": []}, child)
