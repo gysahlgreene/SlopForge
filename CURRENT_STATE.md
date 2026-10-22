@@ -413,3 +413,4 @@ Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Tests:** unit tests cover a lost job after a restart, a job that finishes between the two checks, periodic checks of a waiting job, `/queue` parsing, a retried download and a 404 that is not retried.
 - **Live check (H100):** a pending job deleted through ComfyUI's queue API was reported lost in 2.3 s, while a running job checked every 2 s completed normally.
 - **Not verified live:** an actual service restart, and a dropped download.
+- **Follow-up (2026-10-22):** four glass-experiment runs lost finished outputs when the login hold expired and ComfyUI restarted during their downloads, because five retries lasted only 15 s. Downloads now retry a dropped connection for up to 2 minutes, with backoff capped at 30 s; a test checks that the window outlasts 60 s and ends by 120 s.

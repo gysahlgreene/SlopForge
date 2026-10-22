@@ -395,6 +395,26 @@ with patch.object(client, 'validate_workflow'), patch.object(client, 'json', sid
             self.assertEqual(destination.read_bytes(), b"png data")
         self.assertEqual(len(attempts), 3)
 
+    def test_output_download_retries_for_its_window_then_stops(self):
+        client = ComfyUIClient("http://remote:8188")
+        clock = [0.0]
+
+        def wait(seconds):
+            clock[0] += seconds
+
+        def open_request(request, timeout):
+            raise URLError("connection refused")  # the service is restarting
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("slopforge.backends.comfyui.urlopen", open_request), \
+                patch("slopforge.backends.comfyui.time.sleep", wait), \
+                patch("slopforge.backends.comfyui.time.monotonic", lambda: clock[0]), \
+                self.assertRaises(ComfyUIError) as raised:
+            client.download_output({"filename": "b.png", "type": "output"}, Path(directory) / "b.png")
+        self.assertEqual(raised.exception.category, "environment")
+        self.assertGreater(clock[0], 60)  # long enough to outlast a service restart
+        self.assertLessEqual(clock[0], 120)
+
     def test_output_download_does_not_retry_a_server_answer(self):
         from urllib.error import HTTPError
         client = ComfyUIClient("http://remote:8188")

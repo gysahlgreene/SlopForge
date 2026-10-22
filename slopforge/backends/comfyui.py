@@ -407,7 +407,7 @@ class ComfyUIClient:
         visit(history.get("outputs", history))
         return found
 
-    def download_output(self, output, destination):
+    def download_output(self, output, destination, retry_window=120):
         filename = output.get("filename")
         if not filename or Path(filename).name != filename:
             raise ValueError(f"Invalid ComfyUI output filename: {filename!r}")
@@ -417,14 +417,18 @@ class ComfyUIClient:
         query = urlencode({"filename": filename, "subfolder": subfolder, "type": output.get("type", "output")})
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        for attempt in range(5):
+        # Outputs survive a ComfyUI restart, so a dropped connection is retried long enough to outlast one: four
+        # 2026-10-22 runs lost finished outputs when 15 s of retries ended mid-restart. A server answer is final.
+        deadline, attempt = time.monotonic() + retry_window, 0
+        while True:
             try:
                 data = self._request("GET", f"/view?{query}")
                 break
             except ComfyUIError as exc:
-                # A dropped connection loses a finished job's outputs (2026-10-21 timeout); a server answer is final.
-                if exc.category == "environment" and attempt < 4:
-                    time.sleep(min(2 ** attempt, 30))
+                delay = min(2 ** attempt, 30)
+                if exc.category == "environment" and time.monotonic() + delay < deadline:
+                    attempt += 1
+                    time.sleep(delay)
                     continue
                 raise ComfyUIError(f"Could not download ComfyUI output {filename}: {exc}",
                                    category=exc.category or "inference", operation="download_output",
