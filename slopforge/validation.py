@@ -81,7 +81,7 @@ def measure_material_maps(paths, near_black_level=8):
 
 def validate_model_outputs(paths, inspection=None, face_budget=None, project_root=None,
                            max_components=None, max_nonmanifold_edges=None,
-                           max_boundary_edges=None):
+                           max_boundary_edges=None, min_uv_area=None):
     errors, warnings, failure_codes = [], [], []
     root = Path(project_root).resolve() if project_root else None
     measured = {key: (Path(path).resolve().relative_to(root).as_posix()
@@ -179,6 +179,14 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
             elif boundary_edge_count > max_boundary_edges:
                 _add_err("boundary_budget",
                          f"boundary edge count {boundary_edge_count} exceeds budget {max_boundary_edges}")
+        uv_area = report.get("uv_area_sum")
+        if min_uv_area is not None:
+            # A shattered reconstruction unwraps into tiny charts: 0.025 on a 2026-10-22 glass bottle, 0.22-0.63 whole.
+            if not _finite_nonnegative_number(uv_area):
+                _add_err("metric_invalid", "UV area was not measured")
+            elif uv_area < min_uv_area:
+                _add_err("uv_area_budget", f"UV area {uv_area:.3f} is below {min_uv_area}: the mesh is likely "
+                                           "shattered into small pieces")
     return {
         "status": "failed" if errors else "passed_with_warnings" if warnings else "passed",
         "errors": errors, "failure_codes": failure_codes,
@@ -187,6 +195,7 @@ def validate_model_outputs(paths, inspection=None, face_budget=None, project_roo
             "max_components": max_components,
             "max_nonmanifold_edges": max_nonmanifold_edges,
             "max_boundary_edges": max_boundary_edges,
+            "min_uv_area": min_uv_area,
         },
     }
 
@@ -236,6 +245,21 @@ def apply_declared_emitter(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
         validation["status"] = "failed"
     return validation
 
+
+
+def apply_declared_glass(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
+    """Fail a candidate whose base colour has no region for the brief's declared glass (retryable quality code)."""
+    measured = round(fraction, 4)
+    validation.setdefault("measured", {})["glass_fraction"] = measured
+    validation.setdefault("limits", {})["min_glass_fraction"] = minimum
+    if measured < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            "brief declares glass but no matching region was found in base color, so another seed is tried; if every "
+            "seed misses it, approve a concept that shows the glass as a solid tinted surface or declare its tint with "
+            "glass#rrggbb"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "glass_missing"]
+        validation["status"] = "failed"
+    return validation
 
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
 

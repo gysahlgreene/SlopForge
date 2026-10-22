@@ -6,6 +6,7 @@ import uuid
 from itertools import accumulate
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
 from .provenance import file_sha256
@@ -81,6 +82,53 @@ def derive_emission(basecolor_path, destination, targets=((None, (255, 178, 102)
     return min(fractions)
 
 
+GLASS_ALPHA = 0.35  # see-through, yet still reads as a surface
+GLASS_ROUGHNESS = 0.05
+
+
+def glass_mask(base, match):
+    """Texels of one declared glass region ("L" mask): its tint's hue at any lightness, or the pale region.
+
+    Tinted glass bakes with dark shading: on the 2026-10-22 bottle the colour-distance rule found 44% of its
+    texels and left the body blotchy, while the tint's hue (emitters.HUE_TOLERANCE, MIN_SATURATION) found 84%.
+    """
+    if match is None:
+        return emitter_colour_mask(base, None)
+    from .emitters import HUE_TOLERANCE, MIN_SATURATION
+    hsv = np.asarray(base.convert("HSV"), dtype=float)
+    tint = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))
+    hue = np.abs((hsv[..., 0] - tint[0] + 128) % 256 - 128) * 360 / 256
+    return Image.fromarray(((hue <= HUE_TOLERANCE) & (hsv[..., 1] >= MIN_SATURATION * 255)).astype(np.uint8) * 255)
+
+
+def apply_glass(basecolor_path, roughness_path, metallic_path, matches):
+    """Make declared glass regions see-through, smooth and non-metallic in the maps; returns the share found.
+
+    TRELLIS.2 reconstructs glass drawn as a solid tinted surface as an opaque surface (2026-10-22 bottle and
+    lantern globe). Each match is the glass's concept colour, or None for clear glass (glass_mask). Glass texels
+    get alpha GLASS_ALPHA in the base colour.
+    """
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGB")
+    mask = Image.new("L", base.size, 0)
+    for match in matches:
+        mask = ImageChops.lighter(mask, glass_mask(base, match))
+    base.putalpha(mask.point(lambda value: 255 - round(value * (1 - GLASS_ALPHA))))
+    base.save(basecolor_path)
+    for path, value in ((roughness_path, round(255 * GLASS_ROUGHNESS)), (metallic_path, 0)):
+        with Image.open(path) as image:
+            mode, channel = image.mode, image.convert("L")
+        channel.paste(value, mask=mask)
+        channel.convert(mode).save(path)
+    return sum(mask.histogram()[128:]) / (base.width * base.height)
+
+
+def glass_material_path(material):
+    """The Unity material for a prop's declared glass faces, next to its main material."""
+    material = Path(material)
+    return material.with_name(material.stem + "_Glass.mat")
+
+
 def build_unity_material(project_root, fbx, material, maps, render=None):
     """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG.
 
@@ -89,12 +137,16 @@ def build_unity_material(project_root, fbx, material, maps, render=None):
     """
     root = Path(project_root).resolve()
     cli = unity_cli(root)
+    with Image.open(maps["basecolor"]) as image:
+        # Declared glass is the only source of base colour alpha (apply_glass).
+        transparent = "A" in image.getbands() and image.getchannel("A").getextrema()[0] < 255
 
     fbx = Path(fbx).resolve()
     material = Path(material).resolve()
     try:
         fbx_asset = fbx.relative_to(root).as_posix()
         material_asset = material.relative_to(root).as_posix()
+        glass_asset = glass_material_path(material).relative_to(root).as_posix()
         map_assets = {name: Path(path).resolve().relative_to(root).as_posix() for name, path in maps.items()}
     except ValueError as exc:
         raise ValueError("Unity FBX, material, and maps must be inside the Unity project") from exc
@@ -120,10 +172,13 @@ public static class {class_name}
         const string fbxPath = {quote(fbx_asset)};
         const string materialPath = {quote(material_asset)};
         const string reportPath = {quote(str(report_path))};
+        const string glassPath = {quote(glass_asset)};
         AssetDatabase.Refresh();
         var model = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
-        var source = model == null ? null : model.GetComponentsInChildren<Renderer>(true)
-            .SelectMany(renderer => renderer.sharedMaterials).FirstOrDefault(material => material != null);
+        var sources = model == null ? new Material[0] : model.GetComponentsInChildren<Renderer>(true)
+            .SelectMany(renderer => renderer.sharedMaterials).Where(material => material != null).ToArray();
+        var source = sources.FirstOrDefault(material => !material.name.EndsWith("_Glass"));
+        var glassSource = sources.FirstOrDefault(material => material.name.EndsWith("_Glass"));
         var sourceName = source == null ? Path.GetFileNameWithoutExtension(fbxPath) + "_PBR" : source.name;
         var sourceId = new AssetImporter.SourceAssetIdentifier(typeof(Material), sourceName);
         var pipeline = GraphicsSettings.currentRenderPipeline;
@@ -137,7 +192,7 @@ public static class {class_name}
         if (shader == null)
             throw new Exception("Lit shader '" + shaderName + "' was not found for the active render pipeline");
 
-        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true);
+        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true, {str(transparent).lower()});
         SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false);
         SetImport({quote(map_assets["metallic_gloss"])}, TextureImporterType.Default, false);
         SetImport({quote(map_assets["emission"])}, TextureImporterType.Default, true);
@@ -166,12 +221,32 @@ public static class {class_name}
         mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
         mat.EnableKeyword("_EMISSION");
         EditorUtility.SetDirty(mat);
+        Material glass = null;
+        if ({str(transparent).lower()})
+        {{
+            // Declared glass: its faces carry their own FBX material; it shares the maps and draws transparent.
+            if (glassSource == null)
+                throw new Exception("The base colour marks glass, but the FBX has no _Glass material for it");
+            glass = AssetDatabase.LoadAssetAtPath<Material>(glassPath);
+            if (glass == null)
+            {{
+                glass = new Material(shader);
+                AssetDatabase.CreateAsset(glass, glassPath);
+            }}
+            glass.shader = shader;
+            glass.CopyPropertiesFromMaterial(mat);
+            glass.name = glassSource.name;
+            SetTransparent(glass);
+            EditorUtility.SetDirty(glass);
+        }}
         AssetDatabase.SaveAssets();
 
         var importer = (ModelImporter)AssetImporter.GetAtPath(fbxPath);
         importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
         importer.materialSearch = ModelImporterMaterialSearch.Everywhere;
         importer.AddRemap(sourceId, mat);
+        if (glass != null)
+            importer.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), glassSource.name), glass);
         importer.SaveAndReimport();
         var imported = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
         var assigned = imported == null ? null : imported.GetComponentsInChildren<Renderer>(true)
@@ -181,10 +256,13 @@ public static class {class_name}
             throw new Exception("Unity did not import the FBX with the generated PBR material assigned");
         if (!assigned.IsKeywordEnabled("_EMISSION"))
             throw new Exception("Unity disabled emission on the generated material; its emission map would not render");
+        if (glass != null && !imported.GetComponentsInChildren<Renderer>(true).SelectMany(renderer => renderer.sharedMaterials)
+                .Any(candidate => candidate == glass && candidate.renderQueue >= (int)RenderQueue.Transparent))
+            throw new Exception("Unity did not assign the transparent glass material; the glass would render opaque");
         Debug.Log("SLOPFORGE_MATERIAL_ASSIGNED " + materialPath + " -> " + fbxPath);
         File.WriteAllText(reportPath, JsonUtility.ToJson(new Report {{
             unity_version = Application.unityVersion,
-            assets = new[] {{ Describe("fbx", fbxPath), Describe("material", materialPath),
+            assets = new[] {{ Describe("fbx", fbxPath), Describe("material", materialPath),{' Describe("glass_material", glassPath),' if transparent else ''}
                 {", ".join(f'Describe("{name}", {quote(map_assets[name])})' for name in ("basecolor", "normal", "metallic_gloss", "emission"))} }},
             material_textures = new[] {{ Reference(mat, "basecolor", "_BaseMap", "_MainTex"),
                 Reference(mat, "normal", "_BumpMap"), Reference(mat, "metallic_gloss", "_MetallicGlossMap"),
@@ -256,13 +334,34 @@ public static class {class_name}
             if (current.FullName == "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset") return true;
         return false;
     }}
-    static void SetImport(string path, TextureImporterType type, bool srgb)
+    static void SetImport(string path, TextureImporterType type, bool srgb, bool alpha = false)
     {{
         var importer = (TextureImporter)AssetImporter.GetAtPath(path);
         if (importer == null) throw new Exception("Texture did not import: " + path);
         importer.textureType = type;
         importer.sRGBTexture = srgb;
+        importer.alphaIsTransparency = alpha;
         importer.SaveAndReimport();
+    }}
+    static void SetTransparent(Material mat)
+    {{
+        // Only glass faces use this material, so the usual transparent setup (no depth writes) sorts correctly.
+        SetFloat(mat, "_Surface", 1f);
+        SetFloat(mat, "_Blend", 0f);
+        SetFloat(mat, "_ZWrite", 0f);
+        SetFloat(mat, "_SrcBlend", (float)BlendMode.SrcAlpha);
+        SetFloat(mat, "_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
+        SetFloat(mat, "_SrcBlendAlpha", (float)BlendMode.One);
+        SetFloat(mat, "_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
+        SetFloat(mat, "_Mode", 3f);  // Built-in Standard: Transparent
+        mat.SetOverrideTag("RenderType", "Transparent");
+        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        mat.renderQueue = (int)RenderQueue.Transparent;
+        // URP's own keyword setup, when its editor assembly is present; reflection keeps Built-in projects compiling.
+        var gui = Type.GetType("UnityEditor.Rendering.Universal.ShaderGUI.BaseShaderGUI, Unity.RenderPipelines.Universal.Editor");
+        var setup = gui == null ? null : gui.GetMethod("SetMaterialKeywords",
+            new[] {{ typeof(Material), typeof(Action<Material>), typeof(Action<Material>) }});
+        if (setup != null) setup.Invoke(null, new object[] {{ mat, null, null }});
     }}
     static void SetTexture(Material mat, string urp, string builtin, string path)
     {{

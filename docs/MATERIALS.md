@@ -19,8 +19,9 @@ result against that declaration before anyone reviews it.
      --material "lens=emissive: amber glass"
    ```
 
-   Classes are `nonmetal`, `metal` and `emissive`; `emissive#rrggbb` gives a coloured
-   emitter's colour in the concept so the material stage can find it. Declarations are stored on the asset
+   Classes are `nonmetal`, `metal`, `emissive` and `glass`. `emissive#rrggbb` and `glass#rrggbb` give a
+   coloured emitter's or tinted glass's colour in the concept, so the material stage can find it. Without a
+   colour, the region is found as the map's pale near-neutral area (clear glass, pale paper). Declarations are stored on the asset
    record and apply to every later stage.
 
 2. **Concept.** SlopForge appends reconstruction rules and the declared regions to every
@@ -94,7 +95,38 @@ result against that declaration before anyone reviews it.
    `EmissiveIsBlack`, so until 2026-10-20 URP silently dropped it and emitters that glowed in
    Blender stayed dark in Unity. The import now fails if Unity still disables `_EMISSION`.
 
-7. **Metallic.** When the brief declares materials and none is `metal`, the material stage
+7. **Glass.** Image-to-3D cannot reconstruct see-through glass. On 2026-10-22 a potion bottle drawn as clear
+   glass with liquid reconstructed as shattered shards, with no cork. The same bottle drawn as "a solid
+   smooth green surface, nothing visible through it" came out whole. A brass lantern's clear globe came out as
+   a pale opaque shell with either wording. So the concept rule for `glass` asks for "a solid smooth glossy
+   surface in its own tint with a faint sheen; nothing visible through it and nothing inside it".
+   - **Material stage:** it finds the glass in the base colour by its declared tint, or as the pale region,
+     and gives those texels alpha 0.35, roughness 0.05 and metallic 0.
+   - **Retry:** a candidate where no glass is found fails as `glass_missing`, and the next seed is tried.
+   - **Blender:** faces whose UV centre falls on glass alpha go onto a second material, `<name>_Glass`, which
+     shares the maps. The review renders show the glass see-through.
+   - **Unity:** a separate transparent URP Lit material, `<material>_Glass.mat`, is made for those faces,
+     and the import fails if it is not assigned. The rest stays opaque with depth writes.
+   - **Runtime cost:** a glass prop costs two materials (draw calls), not one, and the owner accepted that on
+     2026-10-22. A single transparent material with depth writes forced on would have kept one, but URP's
+     Lit material setup turns depth writes off again for transparent surfaces.
+   - **Tint:** tinted glass needs its tint declared. A pale-amber globe was found on 0.1% of its map by the
+     pale rule. Tinted glass is matched by hue at any lightness, because glass bakes with dark shading. On one
+     bottle, colour distance found 44% of the glass and left it blotchy, while the tint's hue found 84% (98%
+     on a later bottle).
+   - **Prompt wording:** describe glass in `--image-prompt` by its solid look, for example "its green glass
+     drawn as a solid smooth green surface with a faint sheen, nothing visible through the glass". The word
+     "glass" alone draws it see-through, and the class rule appended to the prompt did not change that: six
+     concepts with an extra reconstruction rule looked as translucent as six without. A see-through concept
+     can still reconstruct as shards on some seeds.
+   - **Shattered meshes:** a shattered seed now fails on UV area (below), and the next seed is tried. One
+     shattered bottle passed every other check, with one part. Projects created before 2026-10-22 need
+     `min_uv_area: 0.2` added to their `ai/asset_types/prop.yaml`.
+   - **Whole-glass objects are not reliable.** With the solid wording, three seeds of one bottle gave two
+     whole bottles, which just missed the saturation check at 0.587 and 0.554 of the concept's, and one
+     shattered mesh. Glass parts held in an opaque frame, such as the lantern's globe, came out whole.
+
+8. **Metallic.** When the brief declares materials and none is `metal`, the material stage
    writes a zero metallic map: declared non-metals are dielectrics, and a metal/roughness
    material gives them metallic 0 whether they are matte or glossy. TRELLIS.2 decodes glossy
    non-metals as partly metallic. On 2026-10-20 a glazed jug declared entirely non-metal
@@ -113,7 +145,7 @@ result against that declaration before anyone reviews it.
    with the zero map. The crate kept its generator map (mean 0.04), with metallic texels on
    the grey iron brackets.
 
-8. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
+9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
    run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`
@@ -127,6 +159,8 @@ Material-map checks run on every native candidate and are recorded in its valida
 | --- | --- |
 | Metallic map ≥ 90% fully metallic and the brief declares no materials | Warning |
 | Emissive region declared but no matching pale or declared-colour region found (`emissive_fraction` 0) | Candidate fails (`emitter_missing`); the next mesh seed is tried within the budget |
+| Glass declared but no matching pale or declared-tint region found (`glass_fraction` 0) | Candidate fails (`glass_missing`); the next mesh seed is tried within the budget |
+| UV area under the asset type's `min_uv_area` (props: 0.2) | Candidate fails (`uv_area_budget`): a shattered reconstruction unwraps into tiny charts (0.025 on a glass bottle; whole props 0.22–0.63); the next mesh seed is tried |
 | Near-black or single-colour base color/roughness map, or mismatched map sizes | Warning |
 | UV area, out-of-range UVs, components and topology | Measured by the Blender inspection |
 

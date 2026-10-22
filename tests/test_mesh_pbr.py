@@ -635,9 +635,10 @@ class DeclaredMaterialTests(unittest.TestCase):
             root = Path(temporary)
             from test_unity_import import fake_unity
             maps = {name: root / f"Assets/{name}.png" for name in ("basecolor", "normal", "metallic_gloss", "emission")}
-            for path in (*maps.values(), root / "Assets/lantern.fbx"):
+            for path in maps.values():
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(b"x")
+                Image.new("RGB", (4, 4), "gray").save(path)
+            (root / "Assets/lantern.fbx").write_bytes(b"x")
             scripts = []
             unity = fake_unity(root, {role: "a" * 32 for role in ("fbx", "material", *maps)})
 

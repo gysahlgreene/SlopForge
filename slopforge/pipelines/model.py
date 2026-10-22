@@ -23,9 +23,11 @@ from ..provenance import generator_provenance, file_sha256
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
-from ..unity_material import build_unity_material, derive_emission, emitter_colour_mask, make_metallic_gloss, unity_cli
+from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
+                              make_metallic_gloss, unity_cli)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
+                          apply_declared_glass,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -923,6 +925,7 @@ def model_paths(project_root, config, name, asset_type="prop"):
             "roughness": materials / f"{name}_roughness.png", "metallic": materials / f"{name}_metallic.png",
             "metallic_gloss": materials / f"{name}_metallic_gloss.png",
             "unity_material": materials / f"{name}_preview_PBR.mat",
+            "unity_glass_material": glass_material_path(materials / f"{name}_preview_PBR.mat"),
             "emission": materials / f"{name}_emission.png", "preview_front": previews / f"{name}_front.png",
             "preview_side": previews / f"{name}_side.png", "preview_rear": previews / f"{name}_rear.png",
             "preview_three_quarter": previews / f"{name}_three_quarter.png",
@@ -1097,7 +1100,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         candidate["validation"] = validate_model_outputs(check_paths, inspection, face_budget, root,
             max_components=asset_type.get("max_components"),
             max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
-            max_boundary_edges=asset_type.get("max_boundary_edges"))
+            max_boundary_edges=asset_type.get("max_boundary_edges"), min_uv_area=asset_type.get("min_uv_area"))
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
         candidate["failure"] = _validation_failure(candidate["validation"],
@@ -1160,6 +1163,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
+    glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
+    glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1191,7 +1196,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
-        max_boundary_edges=asset_type.get("max_boundary_edges"))
+        max_boundary_edges=asset_type.get("max_boundary_edges"), min_uv_area=asset_type.get("min_uv_area"))
     if asset_type.get("concept_projection"):
         validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
@@ -1205,6 +1210,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation["status"] = "passed_with_warnings"
     if emissive_fraction is not None:
         validation = apply_declared_emitter(validation, emissive_fraction)
+    if glass_fraction is not None:
+        validation = apply_declared_glass(validation, glass_fraction)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     cutout = (lineage or {}).get("concept_cutout")
     if any(limit is not None for limit in colour_limits) and cutout and Path(cutout).is_file():
@@ -1229,6 +1236,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             **({"emission_projection": projection} if projection else {}),
             "metallic_source": "declared_nonmetal" if generator_metallic is not None else "generator",
+            **({"glass_source": "declared_glass_mask"} if glass_fraction is not None else {}),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
             "outputs": _relative_outputs(root, paths, keys), "artifacts": artifacts,
@@ -1390,11 +1398,11 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
     return masks, projection
 
 
-def _emitter_targets(materials):
-    """Declared emissive regions as derive_emission targets: region -> (match_rgb or None for pale, glow_rgb)."""
+def _emitter_targets(materials, material_class="emissive"):
+    """Declared regions of one class as colour-rule targets: region -> (match_rgb or None for pale, glow_rgb)."""
     rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
     return {item["region"]: (rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
-            for item in materials or [] if item.get("class") == "emissive"}
+            for item in materials or [] if item.get("class") == material_class}
 
 
 def check_emitters_in_concept(materials, cutout):
@@ -1627,7 +1635,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     candidate["outputs"]["metallic_gloss"] = packed.relative_to(root).as_posix()
     final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                   "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
-    existing = [paths[name] for name in (*final_keys, "glb", "unity_material") if paths[name].exists()]
+    existing = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material") if paths[name].exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Approved model outputs exist; pass --force to replace: {existing[0]}")
     sources = {name: root / candidate["outputs"][name] for name in final_keys}
@@ -1656,7 +1664,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     from .. import SCHEMA_VERSION
     manifest.setdefault("schema_version", SCHEMA_VERSION)
     save_manifest(root / pipeline["manifest"], manifest)
-    publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "validation")]
+    publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material", "validation")]
     publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
     with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
         backups = {}
@@ -1808,13 +1816,14 @@ def _published_artifacts(root, paths, candidate, execution_id):
                     "metallic": "texture.metallic", "metallic_gloss": "texture.metallic_gloss",
                     "emission": "texture.emission", "preview_front": "preview.front", "preview_side": "preview.side",
                     "preview_rear": "preview.rear", "preview_three_quarter": "preview.three_quarter",
-                    "unity_material": "material.unity", "validation": "validation.json", "glb": "mesh.glb"}
+                    "unity_material": "material.unity", "unity_glass_material": "material.unity_glass",
+                    "validation": "validation.json", "glb": "mesh.glb"}
     for key_name, kind in output_types.items():
         path = paths[key_name]
         parents = by_type.get(kind, [])
         if key_name == "glb" and mesh_ref:
             parents = [mesh_ref]
-        if key_name == "unity_material":
+        if key_name in ("unity_material", "unity_glass_material"):
             parents = [item for item in candidate_refs if item["type"].startswith("texture.")]
         if key_name == "validation":
             parents = candidate_refs
