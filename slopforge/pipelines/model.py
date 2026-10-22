@@ -1328,14 +1328,24 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
     return refs, attempts
 
 
-def concept_route(config, asset_type, conditioning):
+CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}
+
+
+def concept_route(config, asset_type, conditioning, shape_guide=None):
     """Concept workflow and conditioning for an asset type; generation and reuse checks share it.
 
     Asset types with pose_control use workflows.character_image when the profile configures it:
     prompts alone did not hold the pose (hands on hips, arms against the body), a skeleton does.
-    The skeleton's hash joins the conditioning identity, so changing it invalidates old concepts.
+    A prop with a rendered shape guide uses workflows.guided_image, the same ControlNet graph, which reads the
+    guide as depth. Either image's hash joins the conditioning identity, so changing it invalidates old concepts.
     """
     workflows = config["asset_pipeline"]["workflows"]
+    if shape_guide:
+        reference = {"path": str(shape_guide), "strength": SHAPE_GUIDE_STRENGTH, "category": "shape_guide",
+                     "source": Path(shape_guide).name, "sha256": file_sha256(shape_guide)}
+        return workflows["guided_image"], {**conditioning,
+                                           "references": [reference] + conditioning["references"],
+                                           "workflow_inputs": [CONTROL_SLOT] + conditioning["workflow_inputs"]}
     pose = asset_type.get("pose_control")
     if not pose or not workflows.get("character_image"):
         return workflows.get("image"), conditioning
@@ -1344,11 +1354,9 @@ def concept_route(config, asset_type, conditioning):
         raise ValueError(f"pose_control image not found: {image}")
     reference = {"path": str(image), "strength": float(pose.get("strength", 1.0)), "category": "pose_control",
                  "source": f"workflows/inputs/{pose['image']}", "sha256": file_sha256(image)}
-    slot = {"image": {"node": "pose_image", "input": "image"},
-            "strength": {"node": "pose_control", "input": "strength"}}
     return workflows["character_image"], {**conditioning,
                                           "references": [reference] + conditioning["references"],
-                                          "workflow_inputs": [slot] + conditioning["workflow_inputs"]}
+                                          "workflow_inputs": [CONTROL_SLOT] + conditioning["workflow_inputs"]}
 
 
 def _concept_view(root, config, cutout, mesh_path, paths, name, **options):
@@ -1438,6 +1446,65 @@ def check_emitters_in_concept(materials, cutout):
 # Concept canvases (Z-Image buckets). On 2026-10-20 a "taller than wide" crate brief drew 0 of 6 crates taller than
 # wide on the square canvas and 6 of 6 on portrait with the proportion stated first (docs/media/concept-adherence-2026-10).
 CONCEPT_ASPECTS = {"square": (1024, 1024), "portrait": (896, 1152), "landscape": (1152, 896)}
+SHAPE_GUIDES = ("cylinder", "box")
+# Stump concepts, 2026-10-22 (docs/media/concept-proportion-2026-10): at 0.5 most trunks stayed taller than wide;
+# at 0.8 the concept copied the primitive and lost the brief's roots.
+SHAPE_GUIDE_STRENGTH = 0.65
+
+
+def parse_shape_guide(spec):
+    """'cylinder:0.5' -> ('cylinder', 0.5): a primitive envelope and its height divided by its width."""
+    shape, _, ratio = spec.partition(":")
+    if shape not in SHAPE_GUIDES:
+        raise ValueError(f"--shape-guide must name cylinder or box, such as cylinder:0.5; got {spec!r}")
+    try:
+        ratio = float(ratio)
+    except ValueError:
+        raise ValueError(f"--shape-guide needs the envelope's height divided by width, such as cylinder:0.5; "
+                         f"got {spec!r}") from None
+    if not 0.2 <= ratio <= 5:
+        raise ValueError(f"--shape-guide height divided by width must be between 0.2 and 5, got {ratio:g}")
+    return shape, ratio
+
+
+def _latent_node(graph, workflow_name):
+    latent = next((node_id for node_id, node in graph.items() if "Latent" in node.get("class_type", "")
+                   and {"width", "height"} <= node.get("inputs", {}).keys()), None)
+    if latent is None:
+        raise ValueError(f"Concept workflow {workflow_name} has no latent image size for --aspect to set")
+    return latent
+
+
+def _render_shape_guide(root, config, destination, shape, ratio, width, height):
+    result = subprocess.run([blender_executable(config, root), "--background", "--python-exit-code", "1", "--python",
+                             str(tool_root() / "blender/shape_guide.py"), "--", str(destination), str(width),
+                             str(height), shape, str(ratio)], capture_output=True, text=True)
+    if result.returncode or not destination.is_file():
+        raise RuntimeError(f"Shape guide render failed: {(result.stdout + result.stderr)[-500:]}")
+
+
+def _shape_guide_image(root, config, asset_type, name, guide, aspect):
+    """Render the declared shape guide on the concept canvas, under the asset's candidates; returns its path."""
+    if asset_type.get("prompt_mode") == "character":
+        raise ValueError("A shape guide applies to prop concepts; character concepts follow their pose skeleton")
+    workflow = config["asset_pipeline"]["workflows"].get("guided_image")
+    if not workflow:
+        raise ValueError("--shape-guide needs asset_pipeline.workflows.guided_image, a concept graph with a ControlNet "
+                         "image input (the h100 profiles set image_character_pose_api.json)")
+    if aspect:
+        width, height = CONCEPT_ASPECTS[aspect]
+    else:
+        path = resolve_workflow(root, workflow)
+        graph = json.loads(path.read_text())
+        latent = _latent_node(graph, path.name)
+        canvas = {**graph[latent]["inputs"], **workflow_node_inputs(config, "image", path.name).get(latent, {})}
+        width, height = canvas["width"], canvas["height"]
+    shape, ratio = guide
+    destination = (root / config["asset_pipeline"]["candidate_root"] / asset_type["name"] / name /
+                   f"shape_guide_{shape}_{ratio:g}_{width}x{height}.png")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _render_shape_guide(root, config, destination, shape, ratio, width, height)
+    return destination
 
 
 def _with_concept_aspect(config, asset_type, workflow_path, aspect):
@@ -1447,11 +1514,7 @@ def _with_concept_aspect(config, asset_type, workflow_path, aspect):
         raise ValueError(f"Concept aspect must be one of {', '.join(CONCEPT_ASPECTS)}, got {aspect!r}")
     if asset_type.get("prompt_mode") == "character":
         raise ValueError("--aspect applies to prop concepts; character concepts follow their pose skeleton's canvas")
-    graph = json.loads(workflow_path.read_text())
-    latent = next((node_id for node_id, node in graph.items() if "Latent" in node.get("class_type", "")
-                   and {"width", "height"} <= node.get("inputs", {}).keys()), None)
-    if latent is None:
-        raise ValueError(f"Concept workflow {workflow_path.name} has no latent image size for --aspect to set")
+    latent = _latent_node(json.loads(workflow_path.read_text()), workflow_path.name)
     width, height = CONCEPT_ASPECTS[aspect]
     result = copy.deepcopy(config)
     by_workflow = (result["asset_pipeline"].setdefault("quality_settings", {}).setdefault("workflow_inputs", {})
@@ -1462,7 +1525,8 @@ def _with_concept_aspect(config, asset_type, workflow_path, aspect):
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
-             reference_paths=None, reference_categories=None, reference_entries=None, variations=None, aspect=None):
+             reference_paths=None, reference_categories=None, reference_entries=None, variations=None, aspect=None,
+             shape_guide=None):
     root = Path(project_root).resolve()
     conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
@@ -1471,7 +1535,8 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     workflow = pipeline["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
-    workflow, conditioning = concept_route(config, asset_type, conditioning)
+    guide_path = _shape_guide_image(root, config, asset_type, name, shape_guide, aspect) if shape_guide else None
+    workflow, conditioning = concept_route(config, asset_type, conditioning, guide_path)
     workflow_path = resolve_workflow(root, workflow)
     if aspect:
         config = _with_concept_aspect(config, asset_type, workflow_path, aspect)

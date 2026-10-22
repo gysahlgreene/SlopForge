@@ -703,6 +703,23 @@ class SlopForgeTests(unittest.TestCase):
                                        "--aspect", "portrait"]), 1)
         self.assertIn("--aspect applies to 3D asset types", error.getvalue())
 
+    def test_generate_parses_a_shape_guide_for_3d_types_only(self):
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate, \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "stump", "A short stump",
+                                       "--shape-guide", "cylinder:0.5"]), 0)
+        self.assertEqual(generate.call_args.kwargs["shape_guide"], ("cylinder", 0.5))
+        for spec, message in (("cone:0.5", "cylinder or box"), ("cylinder:wide", "height divided by width"),
+                              ("box:9", "between 0.2 and 5")):
+            with redirect_stderr(StringIO()) as error:
+                self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "stump", "A stump",
+                                           "--shape-guide", spec]), 1)
+            self.assertIn(message, error.getvalue())
+        with redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
+                                       "--shape-guide", "box:1"]), 1)
+        self.assertIn("--shape-guide applies to 3D asset types", error.getvalue())
+
     def test_doctor_uses_project_root_environment(self):
         with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \
                 patch("slopforge.doctor.run_doctor", return_value=0) as run_doctor:

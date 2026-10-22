@@ -34,6 +34,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Prop coverage exploration](media/props-coverage-2026-10/README.md): one run each of a metal pot, a sci-fi canister, an organic stump and a glass-part lantern; found the UV padding and shattered-mesh fixes.
 - [M0 exit evidence record](M0-EXIT-RECORD.md): each M0 exit item with its evidence and gaps; M0 closed by the owner on 2026-10-21.
 - [Concept adherence](media/concept-adherence-2026-10/README.md): fixed-seed concept tests of what makes concepts follow a brief (part sentences, `--aspect`, camera wording); the jug's profile view is unsolved.
+- [Concept proportions](media/concept-proportion-2026-10/README.md): no wording made a stump's trunk wider than tall; the opt-in `--shape-guide` depth guide did on 12 of 12 seeds.
 - [Material showcase](media/material-showcase-2026-10/README.md): five props of different materials generated from briefs, with maps, renders, conditions and limits.
 - [Texture mask recovery](media/texture-mask-recovery-2026-10/README.md): controlled failure, correction, fresh case and repeat; remaining appearance limitations.
 - [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): Unity walk playback, motion measurements, and current rig limitations.
