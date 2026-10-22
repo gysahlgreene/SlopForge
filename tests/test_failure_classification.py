@@ -957,3 +957,16 @@ class PropComponentBudgetTests(unittest.TestCase):
         self.assertTrue(candidate_quality_rejection(shattered))
         self.assertNotIn("concept_fit", whole.get("failure_codes", []))
         self.assertNotIn("concept_fit", unmeasured.get("failure_codes", []))
+
+    def test_corner_module_without_an_open_side_is_a_retryable_quality_failure(self):
+        # 2026-10-22: stone corners that reconstructed as an L left one footprint quarter at 0.00; one that came out
+        # a solid block measured 0.86 in every quarter.
+        from slopforge.validation import apply_module_footprint
+        block = apply_module_footprint(_quality_report(component_count=1), [0.86, 0.86, 0.86, 0.86], "corner")
+        corner = apply_module_footprint(_quality_report(component_count=1), [0.69, 0.92, 0.75, 0.0], "corner")
+        wall = apply_module_footprint(_quality_report(component_count=1), [1.0, 1.0, 1.0, 1.0], None)
+        self.assertIn("module_footprint", block["failure_codes"])
+        self.assertTrue(candidate_quality_rejection(block))
+        self.assertNotIn("module_footprint", corner.get("failure_codes", []))
+        self.assertEqual(corner["measured"]["open_quadrant"], 0.0)
+        self.assertNotIn("module_footprint", wall.get("failure_codes", []))

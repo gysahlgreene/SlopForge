@@ -20,7 +20,7 @@ from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene"}
 
 
 def parser():
@@ -170,6 +170,10 @@ def parser():
 
     environment_check = sub.add_parser("environment-check", help="Validate approved environment kit modules against their grid constraints")
     environment_check.add_argument("name", help="Completed environment recipe instance")
+    environment_scene = sub.add_parser("environment-scene",
+                                       help="Build a Unity test scene from a kit layout, with prefabs and snapping checks")
+    environment_scene.add_argument("name", help="Environment recipe instance whose modules are published to Unity")
+    environment_scene.add_argument("layout", help="Layout name from the recipe's layouts")
 
     recipe = sub.add_parser("recipe", help="Run or resume a project asset recipe")
     recipe_commands = recipe.add_subparsers(dest="recipe_action", required=True)
@@ -687,6 +691,31 @@ def _run(args):
         save_manifest(manifest_path, manifest)
         print(json.dumps(report, indent=2))
         return 0 if report["status"] == "passed" else 1
+
+    if args.command == "environment-scene":
+        from . import unity_scene
+        from .environment import scene_placements
+        selector = asset_key("recipe", args.name)
+        recipe_asset = manifest["assets"].get(selector)
+        if not recipe_asset or "recipe_instance" not in recipe_asset:
+            raise KeyError(f"No recipe run named {args.name!r}")
+        constraints = recipe_asset["recipe_instance"]["definition"].get("kit_constraints", {})
+        placements = scene_placements(recipe_asset, manifest, args.layout)
+        output = root / "ai/assets/environment_scenes" / f"{args.name}_{args.layout}.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        report = unity_scene.build_kit_scene(root, args.name, args.layout, placements,
+                                             grid=constraints.get("grid_size", 1.0),
+                                             tolerance=constraints.get("snap_tolerance", 0.05),
+                                             render=str(output.with_suffix(".png")))
+        output.write_text(json.dumps(report, indent=2) + "\n")
+        register_artifact(manifest, selector, f"kit.scene.{args.layout}", "data.environment_scene",
+                          output.relative_to(root).as_posix(), status="failed" if report["errors"] else "ready",
+                          provenance={"processor": "slopforge.unity_scene", "layout": args.layout,
+                                      "scene": report["scene"]},
+                          approval_status="not_required", validation={"errors": report["errors"]})
+        save_manifest(manifest_path, manifest)
+        print(json.dumps({key: report[key] for key in ("scene", "render", "errors")}, indent=2))
+        return 1 if report["errors"] else 0
 
     types = load_taxonomy(root)
     style = load_style(root, config)

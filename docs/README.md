@@ -30,6 +30,8 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 
 - [Character styles](media/character-styles-2026-10/README.md): four generated characters in four art styles, rigged automatically and walking, with how they were made and limits.
 - [Structure showcase](media/structure-showcase-2026-10/README.md): six generated structures and a real-scale modular stone kit, with turntables, maps, conditions and limits.
+- [Stone ruin kit in Unity](media/kit-scene-2026-10/README.md): the shipped kit assembled as a courtyard and a corner joint by `environment-scene`, with its checks and limits.
+- [Shared kit material](media/kit-material-2026-10/README.md): one seamless swatch per kit baked into every module's base colour; before/after courtyard, the black-patch and solid-corner defects the live runs found, and their fixes.
 - [Props provisional evidence](media/props-provisional-2026-10/README.md): three briefs, two independent H100 runs each, through Unity URP import, under a declared qualification record (criterion v1; owner rated better than the baseline). Later criteria: [v2](media/props-provisional-2026-10-v2/README.md) (5 of 6), [v3](media/props-provisional-2026-10-v3/README.md) (6 of 6), [v4](media/props-provisional-2026-10-v4/README.md) (5 of 6, colour check corrected) and [v5](media/props-provisional-2026-10-v5/README.md) (6 of 6, colour check on; Provisional).
 - [Prop coverage exploration](media/props-coverage-2026-10/README.md): one run each of a metal pot, a sci-fi canister, an organic stump and a glass-part lantern; found the UV padding and shattered-mesh fixes.
 - [M0 exit evidence record](M0-EXIT-RECORD.md): each M0 exit item with its evidence and gaps; M0 closed by the owner on 2026-10-21.

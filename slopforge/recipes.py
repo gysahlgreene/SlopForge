@@ -46,6 +46,10 @@ def _ordered_children(definition):
     return ordered
 
 
+# Where a module's origin sits: walls and columns stand on it (bottom_center), a floor's walkable top is at it.
+PIVOTS = {"center", "bottom_center", "top_center", "origin"}
+
+
 def _validate_kit_constraints(definition, child_ids):
     constraints = definition.get("kit_constraints")
     if constraints is None:
@@ -62,11 +66,17 @@ def _validate_kit_constraints(definition, child_ids):
                                 or not math.isfinite(maximum) or maximum <= 0):
         raise ValueError("kit_constraints.max_dimension must be positive")
     pivot = constraints.get("pivot")
-    if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+    if pivot is not None and pivot not in PIVOTS:
         raise ValueError("kit_constraints.pivot is unsupported")
     modules = constraints.get("modules", {})
     if not isinstance(modules, dict) or not set(modules) <= child_ids:
         raise ValueError("kit_constraints.modules must map known child ids to rules")
+    material = constraints.get("material")
+    if material is not None:
+        tile = material.get("tile_size") if isinstance(material, dict) else None
+        if (not isinstance(material, dict) or material.get("source") not in child_ids or
+                not isinstance(tile, (int, float)) or isinstance(tile, bool) or not math.isfinite(tile) or tile <= 0):
+            raise ValueError("kit_constraints.material needs a source child id and a positive tile_size in metres")
     for child_id, rule in modules.items():
         if not isinstance(rule, dict):
             raise ValueError(f"kit_constraints.modules.{child_id} must be a mapping")
@@ -86,8 +96,10 @@ def _validate_kit_constraints(definition, child_ids):
             if axis is not None and (type(axis) is not int or axis not in (0, 1, 2)):
                 raise ValueError(f"kit_constraints.modules.{child_id}.{axis_name} must be axis 0, 1, or 2")
         pivot = rule.get("pivot")
-        if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+        if pivot is not None and pivot not in PIVOTS:
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
+        if rule.get("footprint") not in (None, "corner"):
+            raise ValueError(f"kit_constraints.modules.{child_id}.footprint must be corner (an L that opens one side)")
         target = rule.get("target_size")
         if target is not None and (not isinstance(target, list) or len(target) != 3
                                    or all(value is None for value in target)
@@ -95,6 +107,38 @@ def _validate_kit_constraints(definition, child_ids):
                                           or isinstance(value, bool) or not math.isfinite(value) or value <= 0)
                                           for value in target)):
             raise ValueError(f"kit_constraints.modules.{child_id}.target_size must be three positive sizes or null")
+
+
+def _validate_layouts(definition, children, asset_types):
+    """`layouts` name test scenes: placements of 3D modules in metres, on Unity's axes (y up).
+
+    A rotation is in quarter turns about the vertical, or "auto" to turn a corner's open side toward the layout's
+    centre (environment-scene reads the opening from the placed mesh).
+    """
+    layouts = definition.get("layouts")
+    if layouts is None:
+        return
+    if not isinstance(layouts, dict) or not layouts:
+        raise ValueError("layouts must map layout names to placement lists")
+    pipelines = {child["id"]: asset_types.get(child["type"], {}).get("pipeline") for child in children}
+    for name, placements in layouts.items():
+        if not isinstance(placements, list) or not placements:
+            raise ValueError(f"layouts.{name} needs at least one placement")
+        for index, placement in enumerate(placements):
+            where = f"layouts.{name}[{index}]"
+            module = placement.get("module") if isinstance(placement, dict) else None
+            if module not in pipelines:
+                raise ValueError(f"{where} names an unknown module {module!r}")
+            if pipelines[module] != "model":
+                raise ValueError(f"{where} must place a 3D module; {module!r} is not one")
+            position = placement.get("position")
+            if (not isinstance(position, list) or len(position) not in (2, 3) or
+                    any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+                        for value in position)):
+                raise ValueError(f"{where} position must be [x, z] or [x, y, z] in metres")
+            rotation = placement.get("rotation", 0)
+            if rotation != "auto" and (not isinstance(rotation, (int, float)) or isinstance(rotation, bool) or rotation % 90):
+                raise ValueError(f"{where} rotation must be in quarter turns (0, 90, 180, 270) or auto")
 
 
 def load_recipe(project_root, name, asset_types, *, reference_library=None):
@@ -136,6 +180,11 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
         if child.get("quality_tier") is not None and not isinstance(child["quality_tier"], str):
             raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
+    _validate_layouts(definition, children, asset_types)
+    material = (definition.get("kit_constraints") or {}).get("material")
+    if material and asset_types.get(next(child["type"] for child in children if child["id"] == material["source"]),
+                                    {}).get("pipeline") != "image":
+        raise ValueError("kit_constraints.material.source must be a texture (image) child")
     return definition, children
 
 
@@ -653,9 +702,21 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
                            {"strategy": config.get("asset_pipeline", {}).get("conditioning", {}).get("strategy", "text_only")})
         if child.get("materials"):
             asset["materials"] = [parse_material_spec(spec) for spec in child["materials"]]
-        target = definition.get("kit_constraints", {}).get("modules", {}).get(child["id"], {}).get("target_size")
-        if target:
-            asset["target_size"] = target
+        constraints = definition.get("kit_constraints") or {}
+        rule = constraints.get("modules", {}).get(child["id"], {})
+        if rule.get("target_size"):
+            asset["target_size"] = rule["target_size"]
+        pivot = rule.get("pivot", constraints.get("pivot"))
+        if pivot and pivot != "center" and asset_types[child["type"]].get("pipeline") == "model":
+            asset["pivot"] = pivot
+        if rule.get("footprint"):
+            asset["footprint"] = rule["footprint"]
+        material = constraints.get("material")
+        if material and child["id"] in constraints.get("modules", {}) and asset_types[child["type"]].get("pipeline") == "model":
+            # Every declared module takes its base colour from the kit's texture child once that is approved.
+            source = next(item for item in children if item["id"] == material["source"])
+            asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}"),
+                                     "tile_size": material["tile_size"]}
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",

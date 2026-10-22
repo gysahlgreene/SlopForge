@@ -26,8 +26,9 @@ from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               make_metallic_gloss, unity_cli)
 from ..emitters import concept_emitter_mask, project_to_texture
+from ..kit_material import kit_swatch, make_seamless
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_concept_fit, apply_declared_glass,
+                          apply_concept_fit, apply_declared_glass, apply_module_footprint,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -1058,7 +1059,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
         assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
                              "face_budget": face_budget,
-                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
+                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py"),
+                             **_placement(asset)}
         assembly_attempt = previous_attempts.get("material_assembly_export", previous["number"]) if previous else number
         assembly_refs = _adopt_stage(lineage, "material_assembly_export", assembly_attempt,
                                      assembly_inputs, assembly_settings)
@@ -1091,9 +1093,10 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
-                      target_size=asset.get("target_size"))
+                      target_size=asset.get("target_size"), pivot=asset.get("pivot"))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
-        inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
+        inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
+                                   real_scale=bool(asset.get("target_size")))
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                         "preview_front", "preview_side", "preview_rear", "preview_three_quarter")}
@@ -1185,12 +1188,22 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     budget = int(config["asset_pipeline"]["model_budgets"].get(asset_type.get("face_budget"), 30000))
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
     assembly_inputs = [*material_refs, *(lineage or {}).get("assembly_inputs", [])]
+    kit = kit_swatch(root, context["manifest"], asset) if asset.get("kit_material") else None
+    kit_settings = {}
+    if kit:
+        make_seamless(kit[0], paths["directory"] / "kit_swatch.png")
+        kit_settings = {"kit_material_sha256": file_sha256(paths["directory"] / "kit_swatch.png"),
+                        "kit_tile_size": kit[1]}
     _lineage_start(lineage, "material_assembly_export", number, (),
-                   {"preserve_uvs": True, "face_budget": budget}, parents=assembly_inputs)
+                   {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
+                   parents=assembly_inputs)
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
-                  stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"))
-    inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
+                  stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
+                  pivot=asset.get("pivot"), kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
+                  kit_tile_size=kit[1] if kit else None)
+    inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
+                               real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
             "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
     validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root,
@@ -1212,6 +1225,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_emitter(validation, emissive_fraction)
     if glass_fraction is not None:
         validation = apply_declared_glass(validation, glass_fraction)
+    validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
+                                        asset.get("footprint"))
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
@@ -1326,6 +1341,12 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
         refs.append(_artifact_ref(root, path, f"view-{slot}:{execution_id}", f"image.view.{slot}",
                                   "conditioning_preparation", 1, [concept_artifact]))
     return refs, attempts
+
+
+def _placement(asset):
+    """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
+    Absent for other assets, whose settings (and so their identities) stay as before."""
+    return {key: asset[key] for key in ("target_size", "pivot") if asset.get(key)}
 
 
 CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}
@@ -2173,6 +2194,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         workflow = pipeline["workflows"].get("model")
         if workflow:  # declared emitters only drive the mesh-aware material stage
             check_emitters_in_concept(asset.get("materials"), paths["cutout"])
+        if asset.get("kit_material"):
+            if not workflow:
+                raise StageFailure("configuration", "A kit material is baked by the mesh-aware material stage",
+                                   operation="kit_material_preflight",
+                                   remedy="configure asset_pipeline.workflows.model (the h100 profiles set it)")
+            kit_swatch(root, manifest, asset)  # an unapproved kit texture stops here, before mesh inference
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
         material_candidates = []
         viable = []

@@ -153,6 +153,89 @@ def combined_bounds(objects):
     return minimum, maximum
 
 
+def bake_kit_basecolor(obj, basecolor_path, swatch_path, tile_size, keep_tone=0.6):
+    """Rebake a kit module's base colour from the kit's shared swatch, keeping the module's own brightness.
+
+    colour = swatch (box-projected, tile_size metres per repeat) x ambient occlusion x the module's own brightness
+    relative to its mean, softened by keep_tone. The swatch sets the hue for every module of the kit; the module keeps
+    its block-to-block light and dark and its normal map (2026-10-22 trial: sandy columns beside grey walls became one
+    granite, and walls kept their block variation).
+    """
+    import numpy as np
+    material = bpy.data.materials.new("KitBake")
+    material.use_nodes = True
+    nodes, links = material.node_tree.nodes, material.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    own = nodes.new("ShaderNodeTexImage")
+    own.image = bpy.data.images.load(str(basecolor_path), check_existing=False)
+    width, height = own.image.size
+    pixels = np.array(own.image.pixels[:]).reshape(-1, 4)[:, :3]
+    linear = np.where(pixels <= 0.04045, pixels / 12.92, ((pixels + 0.055) / 1.055) ** 2.4)
+    luminance = linear @ np.array([0.2126, 0.7152, 0.0722])
+    covered = luminance[luminance > 0.002]  # UV padding outside the islands is black
+    mean = float(covered.mean()) if covered.size else 1.0
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    for other in bpy.context.scene.objects:
+        other.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    scene = bpy.context.scene
+    scene.render.engine = "CYCLES"
+    scene.render.bake.margin = 8
+
+    occlusion = nodes.new("ShaderNodeTexImage")
+    occlusion.image = bpy.data.images.new("Kit AO", width=min(width, 2048), height=min(height, 2048), alpha=False)
+    occlusion.image.colorspace_settings.name = "Non-Color"
+    nodes.active = occlusion
+    scene.cycles.samples = 16
+    bpy.ops.object.bake(type="AO", use_clear=True, margin=8)
+
+    coordinates = nodes.new("ShaderNodeTexCoord")
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (1.0 / tile_size,) * 3  # object space is in metres for sized modules
+    links.new(coordinates.outputs["Object"], mapping.inputs["Vector"])
+    swatch = nodes.new("ShaderNodeTexImage")
+    swatch.image = bpy.data.images.load(str(swatch_path), check_existing=True)
+    swatch.projection, swatch.projection_blend, swatch.extension = "BOX", 0.15, "REPEAT"
+    links.new(mapping.outputs["Vector"], swatch.inputs["Vector"])
+    grey = nodes.new("ShaderNodeRGBToBW")
+    links.new(own.outputs["Color"], grey.inputs["Color"])
+    relative = nodes.new("ShaderNodeMath")
+    relative.operation, relative.inputs[1].default_value = "DIVIDE", mean
+    links.new(grey.outputs["Val"], relative.inputs[0])
+    tone = nodes.new("ShaderNodeMix")
+    tone.data_type, tone.inputs["Factor"].default_value, tone.inputs[2].default_value = "FLOAT", keep_tone, 1.0
+    links.new(relative.outputs["Value"], tone.inputs[3])
+    shade = nodes.new("ShaderNodeMath")
+    shade.operation = "MULTIPLY"
+    links.new(tone.outputs[0], shade.inputs[0])
+    links.new(occlusion.outputs["Color"], shade.inputs[1])
+    colour = nodes.new("ShaderNodeMix")
+    colour.data_type, colour.blend_type, colour.inputs["Factor"].default_value = "RGBA", "MULTIPLY", 1.0
+    links.new(swatch.outputs["Color"], colour.inputs[6])
+    links.new(shade.outputs["Value"], colour.inputs[7])
+    links.new(colour.outputs[2], bsdf.inputs["Base Color"])
+
+    target = bpy.data.images.new("Kit Base Color", width=width, height=height, alpha=False)
+    bake_node = nodes.new("ShaderNodeTexImage")
+    bake_node.image = target
+    nodes.active = bake_node
+    scene.cycles.samples = 1
+    bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_clear=True, margin=8)
+    # The bake clears everything outside the UV islands to black; Unity's smaller mips blended it into the islands'
+    # edges (black patches on 2026-10-22's courtyard). Fill it with the module's mean colour, as TRELLIS's maps are.
+    baked = np.array(target.pixels[:]).reshape(-1, 4)
+    empty = baked[:, :3].max(1) == 0
+    if empty.any() and not empty.all():
+        baked[empty, :3] = baked[~empty, :3].mean(0)
+        target.pixels.foreach_set(baked.astype(np.float32).ravel())
+    target.filepath_raw, target.file_format = str(basecolor_path), "PNG"
+    target.save()
+    obj.data.materials.clear()
+    print(f"Kit material: {Path(swatch_path).name} at {tile_size:g} m per repeat; module brightness mean {mean:.3f}")
+
+
 def bake_basecolor(obj, material, surface_path, destination, material_scale, surface_maps):
     nodes, links = material.node_tree.nodes, material.node_tree.links
     bsdf = nodes.get("Principled BSDF")
@@ -571,6 +654,12 @@ if surface_source_path:
     bsdf = bake_basecolor(obj, material, surface_source_path, basecolor_path, material_scale,
                          {"normal": normal_path, "roughness": roughness_path,
                           "metallic": metallic_path, "emission": emission_path})
+elif "--kit-material" in sys.argv:
+    kit_swatch = Path(sys.argv[sys.argv.index("--kit-material") + 1])
+    if not kit_swatch.is_file() or basecolor_path is None or not basecolor_path.is_file():
+        raise SystemExit("--kit-material needs the kit swatch and the module's base colour map")
+    bake_kit_basecolor(obj, basecolor_path, kit_swatch, float(sys.argv[sys.argv.index("--kit-tile-size") + 1]))
+    obj.data.materials.append(material)
 
 tex = load_texture(nodes, basecolor_path, non_color=False)
 
@@ -689,6 +778,16 @@ bpy.ops.object.origin_set(
     type="ORIGIN_GEOMETRY",
     center="BOUNDS",
 )
+if "--pivot" in sys.argv:
+    # Kit modules: walls stand on their origin (bottom_center); a floor's walkable top sits at it (top_center).
+    pivot = sys.argv[sys.argv.index("--pivot") + 1]
+    if pivot not in ("center", "bottom_center", "top_center"):
+        raise SystemExit(f"--pivot must be center, bottom_center or top_center, got {pivot!r}")
+    if pivot != "center":
+        heights = [(obj.matrix_world @ Vector(corner)).z for corner in obj.bound_box]
+        bpy.context.scene.cursor.location = Vector((obj.location.x, obj.location.y,
+                                                    min(heights) if pivot == "bottom_center" else max(heights)))
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
 
 if preview_dir:
     render_previews(obj, preview_dir, output_fbx.stem)

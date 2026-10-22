@@ -18,6 +18,83 @@ slopforge --project ~/UnityProjects/MyGame environment-check lunar_refinery
 
 Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See the [structure showcase](media/structure-showcase-2026-10/README.md) for a five-module kit.
 
+A module's `pivot` (or the kit's default `pivot`) places its origin in the exported FBX:
+- `bottom_center` for walls, doorways, corners and columns, which stand on their origin;
+- `top_center` for floors, whose walkable top sits at it;
+- `center` (the default) keeps the bounds centre.
+
+Unity keeps the FBX origin as the model's pivot. On 2026-10-22, centre-pivoted modules placed at ground level sank
+halfway into it. The size and pivot join the model's assembly-stage settings, so changing either rebuilds the
+model rather than reusing it. Sized modules are inspected at real scale, so a 3 m module is not flagged as larger
+than the normalised size.
+
+Inspection also records `footprint_quadrants`: how much of each quarter of the module's top-down footprint holds
+geometry, in the order +X+Y, −X+Y, −X−Y, +X−Y. An L-shaped corner leaves one quadrant nearly empty, which shows
+which way it opens. The 2026-10-22 stone corner measured 0.69, 0.0, 0.69 and 0.90.
+
+## Shared kit material
+
+Modules generated one at a time do not match: in the first assembled courtyard the columns came out sandy and the
+walls grey. A kit can name one texture child as its material:
+
+```yaml
+kit_constraints:
+  material: {source: stone, tile_size: 2.0}   # metres per repeat
+children:
+  - id: stone
+    type: texture
+    generation_prompt: Seamless, front-facing, evenly lit surface of weathered grey granite ...
+```
+
+**Order of approval:** approve the texture first (`approve <run>_stone <number>`), then each module. Approving a
+module before its kit texture stops before any inference and names the texture to approve.
+
+**What happens to each module** declared in `kit_constraints.modules`, in its mesh-aware material stage:
+- the texture is made seamless;
+- it is box-projected at `tile_size` metres per repeat;
+- its base colour is re-baked as the swatch × baked ambient occlusion × the module's own brightness relative to
+  its mean, softened to 60%.
+
+So every module gets the swatch's hue. Each one keeps its block-to-block light and dark, and its own normal,
+roughness and metallic maps. The seamless swatch's hash and the tile size join the module's assembly-stage
+settings.
+
+**Unity mip levels:** the bake leaves nothing black outside the UV islands. Uncovered texels take the module's
+mean colour, as TRELLIS's own maps do. A first live run left them black, and Unity's smaller mips blended that into
+island edges as black patches on column capitals and the doorway frame.
+
+**Limits:** the colour of an invented back face is replaced, but its brightness pattern is kept at 60%.
+
+## Layouts and the Unity test scene
+
+A recipe's `layouts` place modules to test that they work together. Each placement gives:
+- `module`: a 3D child;
+- `position`: `[x, z]` or `[x, y, z]` in metres on Unity's axes (y up);
+- `rotation`: quarter turns about the vertical, or `auto` for a corner, which turns it so its open side faces the
+  layout's centre.
+
+`init` installs `stone_ruin_kit`, which has a `courtyard` layout and a `corner_joint` layout. Once every module in
+a layout is published with `approve-texture`, build its scene:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame environment-scene ruin courtyard
+```
+
+What it does in Unity (batch mode):
+- **Prefabs:** each module becomes a prefab under `Assets/Art/Generated/Prefabs/<run>/`. It gets an identity
+  root, which hides the FBX axis rotation, a mesh collider and static flags (batching, occlusion, reflection
+  probes). Lightmap contribution is left off, because it needs lightmap UVs that would change the published import
+  settings.
+- **Scene:** it places the layout in `Assets/Art/Generated/Scenes/<run>_<layout>.unity` and renders four views.
+- **Checks:**
+  - each module stands at its placement height for its pivot;
+  - it has a collider and is static;
+  - neighbouring modules leave no gap wider than `snap_tolerance`.
+- **Report:** `ai/assets/environment_scenes/<run>_<layout>.json` and `.png`. The command exits nonzero when a
+  check fails.
+
+A corner's open side is read from the placed mesh, so it needs no assumption about the FBX axes.
+
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 
 The checks report modular measurements; they do not rescale or rotate geometry, apply materials to models, or assemble a room scene. Intended front-facing direction and visual seams still need review in Blender/Unity. Use the supplied grid constraints as a starting profile and adjust them per kit rather than treating one grid size as universal.

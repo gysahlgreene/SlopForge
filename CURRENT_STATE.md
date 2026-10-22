@@ -481,6 +481,90 @@ Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Not verified live:** an actual service restart, and a dropped download.
 - **Follow-up (2026-10-22):** four glass-experiment runs lost finished outputs when the login hold expired and ComfyUI restarted during their downloads, because five retries lasted only 15 s. Downloads now retry a dropped connection for up to 2 minutes, with backoff capped at 30 s; a test checks that the window outlasts 60 s and ends by 120 s.
 
+Kit module pivots and real-scale inspection (2026-10-22, M2).
+- **Problem:**
+  - Every model's origin was its bounds centre, and Unity keeps the FBX origin as the pivot. Measured in Unity, a
+    3 m wall placed at the origin ran from −1.5 m to +1.5 m, so placed at ground level it sank halfway into it.
+  - Inspection flagged every module sized in metres as "larger than the normalised scale".
+  - A module's declared `target_size` did not join its assembly-stage settings, so a changed size could reuse an
+    old model.
+- **Change:**
+  - Kit `pivot` rules (`bottom_center`, the new `top_center`, `center`) reach Blender, which places the FBX origin
+    there.
+  - The size and pivot join the assembly-stage settings, only when declared, so prop identities are unchanged.
+  - Sized modules are inspected at real scale.
+  - Inspection records `footprint_quadrants`, from which a corner's open side can be read. On the baseline stone
+    corner the open quadrant measured 0.0 and the others 0.69–0.90.
+- **Tests:**
+  - pivot validation, including `top_center`;
+  - the pivot and real-scale flags reach Blender;
+  - `recipe run` gives each module its pivot;
+  - `environment-check` checks a `top_center` pivot;
+  - an opt-in Blender test: a sized L gets its origin at its bottom or top centre, no scale warning, and one
+    empty footprint quadrant.
+- **Not verified live:** a kit regenerated with pivots and imported into Unity. That comes with the scene builder.
+
+Kit layouts assembled in Unity (2026-10-22, M2; [evidence](docs/media/kit-scene-2026-10/README.md)).
+- **Change:**
+  - Recipes can declare `layouts`: placements of 3D modules in metres on Unity's axes. A rotation is in quarter
+    turns, or `auto` for a corner.
+  - `environment-scene <run> <layout>` makes each published module a prefab: an identity root, a mesh collider and
+    static flags.
+  - It places the layout in a saved scene and renders four views.
+  - It checks in Unity that each module stands at its placement height for its pivot, has a collider, is static,
+    and leaves no seam gap wider than `snap_tolerance`. An `auto` corner is turned so the open side read from its
+    mesh faces the layout's centre.
+  - `init` installs a `stone_ruin_kit` recipe with `courtyard` and `corner_joint` layouts.
+- **Live:**
+  - The recipe ran from a fresh URP project on the H100. All five modules were published, `environment-check`
+    passed, and the 25-instance courtyard built with no errors.
+  - The corner auto-turned 90°.
+  - The run found that a top-pivot floor stood its own thickness too high: the prefab kept the FBX root's
+    translation. That is fixed, and the opt-in Unity test now covers a top-pivot module.
+- **Tests:**
+  - layout validation;
+  - placement resolution, which refuses unpublished modules;
+  - the CLI writes the report and records the artifact;
+  - an opt-in Unity test (`SLOPFORGE_RUN_UNITY_IMPORT=1`) covering grounding, a top-pivot module, a 0.2 m seam
+    gap and a corner turned inward.
+- **Not verified:**
+  - visual approval;
+  - matching module appearance (sandy columns, grey walls, invented blotchy wall backs);
+  - declared module thickness (wall 0.74 m, doorway 0.82 m, corner arms about 1 m);
+  - the doorway, squeezed 45%;
+  - Play mode, lightmapping, and more than one run.
+
+Shared kit material and corner footprint check (2026-10-22, M2; [evidence](docs/media/kit-material-2026-10/README.md)).
+- **Owner decision:** one shared material per kit, so modules match.
+- **Change:**
+  - `kit_constraints.material: {source: <texture child>, tile_size: <m>}`.
+  - In each declared module's material stage, the approved texture is made seamless. The base colour is re-baked
+    as the swatch (box-projected in metres) × baked ambient occlusion × 60% of the module's own relative
+    brightness. The module keeps its normal, roughness and metallic maps.
+  - An unapproved kit texture stops approval before mesh inference. The swatch hash and tile size join the
+    assembly-stage settings.
+  - Uncovered atlas texels take the mean colour, which stops mip bleeding.
+  - `footprint: corner` modules fail as the retryable `module_footprint` code when the emptiest footprint quarter is
+    above 0.15, and `environment-check` fails a published one.
+  - The shipped `stone_ruin_kit` has a `stone` texture child, the material and a corner footprint.
+- **Live:**
+  - *First run:* found black mip patches (the bake left about 60% of each atlas black) and a corner that rebuilt as
+    a solid block (0.86 in every quarter). Both are fixed. The new check failed that corner on its real data.
+  - *Final fresh run:* every module passed on its first attempt, with no black texels. The courtyard (25 instances)
+    and corner joint built with no errors in matching granite.
+- **Tests:**
+  - the seamless wrap;
+  - the kit texture preflight, in a unit test and in an approval that stops before mesh inference;
+  - recipe validation, and that only declared modules get the material;
+  - the backend flags;
+  - the retryable code and environment-check for corners;
+  - an opt-in Blender test: swatch hue, the module's own brightness kept, and no black texels.
+- **Not verified:**
+  - the corner retry live;
+  - visual approval, Play mode and lightmapping;
+  - more than two runs of one kit.
+  Module thickness is still undeclared, so the corner joint steps out.
+
 Recipe resume kept regenerating architecture modules (2026-10-22, M2).
 - **Cause:** concept generation started an execution record (lineage) only for the `prop` type. The model
   pipeline already built identity inputs for every 3D type, but they were dropped. On `recipe resume`, every

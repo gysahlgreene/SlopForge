@@ -12,6 +12,9 @@ def _pivot_target(bounds_min, bounds_max, pivot):
     if pivot == "bottom_center":
         center[2] = bounds_min[2]
         return center
+    if pivot == "top_center":
+        center[2] = bounds_max[2]
+        return center
     if pivot == "origin":
         return [0.0, 0.0, 0.0]
     raise ValueError(f"Unsupported environment module pivot rule: {pivot!r}")
@@ -71,6 +74,9 @@ def validate_environment_kit(recipe_asset, manifest):
 
         if measured.get("transforms_applied") is not True:
             errors.append("mesh orientation/scale transforms are not applied")
+        quadrants = measured.get("footprint_quadrants")
+        if module_rules.get(child_id, {}).get("footprint") == "corner" and quadrants and min(quadrants) > 0.15:
+            errors.append("the corner module has no open side: its footprint fills every quarter")
         objects = measured.get("objects") or []
         if objects:
             pivot = module_rules.get(child_id, {}).get("pivot", constraints.get("pivot", "center"))
@@ -97,3 +103,25 @@ def validate_environment_kit(recipe_asset, manifest):
     status = "failed" if failed else "partial" if pending else "passed"
     return {"schema_version": 1, "kit": recipe_asset.get("name"), "status": status,
             "constraints": constraints, "modules": results}
+
+
+def scene_placements(recipe_asset, manifest, layout_name):
+    """A recipe layout's placements resolved to published modules, on Unity's axes (y up), for environment-scene."""
+    instance = recipe_asset.get("recipe_instance", {})
+    layout = instance.get("definition", {}).get("layouts", {}).get(layout_name)
+    if not layout:
+        raise ValueError(f"Recipe run {recipe_asset.get('name')!r} has no layout {layout_name!r}")
+    placements = []
+    for placement in layout:
+        module = placement["module"]
+        asset = manifest.get("assets", {}).get(instance.get("stages", {}).get(module, {}).get("asset_key"), {})
+        fbx = asset.get("unity_import", {}).get("assets", {}).get("fbx", {}).get("path")
+        if asset.get("status") != "ready" or not fbx:
+            raise ValueError(f"Module {module!r} is not published to Unity; approve its concept and run "
+                             f"approve-texture first")
+        position = [float(value) for value in placement["position"]]
+        x, y, z = position if len(position) == 3 else (position[0], 0.0, position[1])
+        rotation = placement.get("rotation", 0)
+        placements.append({"module": module, "fbx": fbx, "pivot": asset.get("pivot", "center"),
+                           "x": x, "y": y, "z": z, "rotation": rotation if rotation == "auto" else f"{rotation:g}"})
+    return placements

@@ -465,6 +465,21 @@ avoid: [environment]
         self.assertNotEqual(square["identity_sha256"], portrait["identity_sha256"])
         self.assertEqual(workflow_node_inputs(self.config, "image", "image_text2img_api.json"), {})
 
+    def test_unapproved_kit_material_stops_before_mesh_inference(self):
+        from slopforge.failures import StageFailure
+        self._concept_candidates()
+        for pipeline in (self.config["asset_pipeline"], self.config["_quality_base_pipeline"]):
+            pipeline["workflows"]["model"] = "trellis2_image_to_model_api.json"
+        self.record["kit_material"] = {"asset_key": "texture:ruin_stone", "tile_size": 2}
+        calls = []
+        with patch("slopforge.pipelines.model.blender_executable", return_value="blender"), \
+                self.assertRaisesRegex(StageFailure, "ruin_stone"):
+            self._approve(lambda *_args, **_kwargs: calls.append(1))
+        self.assertEqual(calls, [])
+        failure = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])[
+            "assets"]["prop:relay"]["executions"][-1]["failure"]
+        self.assertEqual((failure["category"], failure["operation"]), ("configuration", "kit_material_preflight"))
+
     def _guided_concepts(self, guide, rendered, calls, **options):
         def backend(_root, _config, workflow, _prompt, destination, _prefix, _seed, metadata, **kwargs):
             calls.append((Path(workflow).name, kwargs.get("conditioning")))
