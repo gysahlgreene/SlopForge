@@ -14,7 +14,8 @@ def blender_environment():
 
 def process_model(project_root, config, glb, fbx, blend, textures, face_budget, *,
                   surface_source=None, preview_dir=None, material_scale=3.0,
-                  stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False, target_size=None, pivot=None):
+                  stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False, target_size=None, pivot=None,
+                  kit_material=None, kit_tile_size=None):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/prepare_model.py"
     command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python", str(script), "--",
@@ -31,6 +32,8 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
         command.extend(("--target-size", ",".join("-" if value is None else f"{value:g}" for value in target_size)))
     if pivot:
         command.extend(("--pivot", pivot))
+    if kit_material:
+        command.extend(("--kit-material", str(kit_material), "--kit-tile-size", f"{kit_tile_size:g}"))
     if stage_mesh:
         if reuse_stage_mesh:
             command[command.index("--") + 1] = str(stage_mesh)
