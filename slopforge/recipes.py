@@ -101,6 +101,38 @@ def _validate_kit_constraints(definition, child_ids):
             raise ValueError(f"kit_constraints.modules.{child_id}.target_size must be three positive sizes or null")
 
 
+def _validate_layouts(definition, children, asset_types):
+    """`layouts` name test scenes: placements of 3D modules in metres, on Unity's axes (y up).
+
+    A rotation is in quarter turns about the vertical, or "auto" to turn a corner's open side toward the layout's
+    centre (environment-scene reads the opening from the placed mesh).
+    """
+    layouts = definition.get("layouts")
+    if layouts is None:
+        return
+    if not isinstance(layouts, dict) or not layouts:
+        raise ValueError("layouts must map layout names to placement lists")
+    pipelines = {child["id"]: asset_types.get(child["type"], {}).get("pipeline") for child in children}
+    for name, placements in layouts.items():
+        if not isinstance(placements, list) or not placements:
+            raise ValueError(f"layouts.{name} needs at least one placement")
+        for index, placement in enumerate(placements):
+            where = f"layouts.{name}[{index}]"
+            module = placement.get("module") if isinstance(placement, dict) else None
+            if module not in pipelines:
+                raise ValueError(f"{where} names an unknown module {module!r}")
+            if pipelines[module] != "model":
+                raise ValueError(f"{where} must place a 3D module; {module!r} is not one")
+            position = placement.get("position")
+            if (not isinstance(position, list) or len(position) not in (2, 3) or
+                    any(not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+                        for value in position)):
+                raise ValueError(f"{where} position must be [x, z] or [x, y, z] in metres")
+            rotation = placement.get("rotation", 0)
+            if rotation != "auto" and (not isinstance(rotation, (int, float)) or isinstance(rotation, bool) or rotation % 90):
+                raise ValueError(f"{where} rotation must be in quarter turns (0, 90, 180, 270) or auto")
+
+
 def load_recipe(project_root, name, asset_types, *, reference_library=None):
     validate_asset_name(name)
     path = Path(project_root) / "ai/recipes" / f"{name}.yaml"
@@ -140,6 +172,7 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
         if child.get("quality_tier") is not None and not isinstance(child["quality_tier"], str):
             raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
+    _validate_layouts(definition, children, asset_types)
     return definition, children
 
 

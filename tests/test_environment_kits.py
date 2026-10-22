@@ -110,6 +110,23 @@ class EnvironmentKitTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pivot"):
             _validate_kit_constraints({"kit_constraints": {"modules": {"floor": {"pivot": "corner"}}}}, {"floor"})
 
+    def test_layouts_place_model_children_on_quarter_turns(self):
+        from slopforge.recipes import _validate_layouts
+        children = [{"id": "floor", "type": "architecture"}, {"id": "wall", "type": "architecture"},
+                    {"id": "stone", "type": "texture"}]
+        types = {"architecture": {"pipeline": "model"}, "texture": {"pipeline": "image"}}
+        good = {"layouts": {"courtyard": [{"module": "floor", "position": [1.5, -1.5]},
+                                          {"module": "wall", "position": [0, 3, 0], "rotation": 90},
+                                          {"module": "wall", "position": [3, 3], "rotation": "auto"}]}}
+        _validate_layouts(good, children, types)
+        for bad, message in (({"court": [{"module": "door", "position": [0, 0]}]}, "unknown module"),
+                             ({"court": [{"module": "stone", "position": [0, 0]}]}, "3D module"),
+                             ({"court": [{"module": "wall", "position": [0, 0], "rotation": 45}]}, "quarter turns"),
+                             ({"court": [{"module": "wall", "position": [0]}]}, "position"),
+                             ({"court": []}, "at least one")):
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                _validate_layouts({"layouts": bad}, children, types)
+
     def test_process_model_passes_module_pivot_to_blender(self):
         from unittest.mock import patch
         from slopforge.backends import blender
@@ -158,6 +175,61 @@ class EnvironmentKitTests(unittest.TestCase):
             manifest = {"assets": {"architecture:floor": {"type": "architecture", "status": "ready",
                 "outputs": {"blend": "floor.blend"}, "validation": {"measured": {**measured, "objects": objects}}}}}
             self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["floor"]["status"], status)
+
+    def _scene_kit(self, wall_status="ready"):
+        recipe = {"name": "ruin", "recipe_instance": {
+            "definition": {"kit_constraints": {"grid_size": 1.0, "snap_tolerance": 0.05, "pivot": "bottom_center",
+                                               "modules": {"floor": {"pivot": "top_center"}}},
+                           "layouts": {"court": [{"module": "floor", "position": [0, 0]},
+                                                 {"module": "wall", "position": [0, 1.5], "rotation": 90},
+                                                 {"module": "wall", "position": [3, 0, 1.5], "rotation": "auto"}]}},
+            "stages": {"floor": {"asset_key": "architecture:ruin_floor"}, "wall": {"asset_key": "architecture:ruin_wall"}}}}
+        fbx = lambda name: {"unity_import": {"assets": {"fbx": {"path": f"Assets/Art/{name}.fbx"}}}}
+        manifest = {"assets": {"architecture:ruin_floor": {"status": "ready", "pivot": "top_center", **fbx("floor")},
+                               "architecture:ruin_wall": {"status": wall_status, "pivot": "bottom_center", **fbx("wall")}}}
+        return recipe, manifest
+
+    def test_scene_placements_resolve_published_modules_on_unity_axes(self):
+        from slopforge.environment import scene_placements
+        recipe, manifest = self._scene_kit()
+        placements = scene_placements(recipe, manifest, "court")
+        self.assertEqual(placements[0], {"module": "floor", "fbx": "Assets/Art/floor.fbx", "pivot": "top_center",
+                                         "x": 0.0, "y": 0.0, "z": 0.0, "rotation": "0"})
+        self.assertEqual([(item["x"], item["y"], item["z"], item["rotation"]) for item in placements[1:]],
+                         [(0.0, 0.0, 1.5, "90"), (3.0, 0.0, 1.5, "auto")])
+        with self.assertRaisesRegex(ValueError, "no layout"):
+            scene_placements(recipe, manifest, "hall")
+        recipe, manifest = self._scene_kit(wall_status="awaiting_texture_approval")
+        with self.assertRaisesRegex(ValueError, "wall.*approve-texture"):
+            scene_placements(recipe, manifest, "court")
+
+    def test_cli_builds_the_scene_and_records_its_report(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            path = project / "ai/assets/manifest.json"
+            manifest = load_manifest(path)
+            recipe, kit = self._scene_kit()
+            manifest["assets"]["recipe:ruin"] = {"id": "kit-id", "name": "ruin", "type": "recipe", "status": "partial",
+                                                 "artifacts": {}, "outputs": {}, **recipe}
+            for key, asset in kit["assets"].items():
+                manifest["assets"][key] = {"id": key, "type": "architecture", "name": key.split(":")[1], **asset}
+            save_manifest(path, manifest)
+            calls = []
+
+            def build(root, kit_name, layout, placements, **options):
+                calls.append((kit_name, layout, len(placements), options["grid"], options["tolerance"]))
+                return {"scene": "Assets/Art/Generated/Scenes/ruin_court.unity", "render": options["render"],
+                        "errors": ["wall 1 seam gap 0.2 m"], "instances": [], "seams": []}
+            with patch("slopforge.unity_scene.build_kit_scene", side_effect=build):
+                self.assertEqual(main(["--project", str(project), "environment-scene", "ruin", "court"]), 1)
+            self.assertEqual(calls, [("ruin", "court", 3, 1.0, 0.05)])
+            report = json.loads((project / "ai/assets/environment_scenes/ruin_court.json").read_text())
+            self.assertEqual(report["errors"], ["wall 1 seam gap 0.2 m"])
+            artifact = load_manifest(path)["assets"]["recipe:ruin"]["artifacts"]["kit.scene.court"]
+            self.assertEqual(artifact["status"], "failed")
 
 
 if __name__ == "__main__":

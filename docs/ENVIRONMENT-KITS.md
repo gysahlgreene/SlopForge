@@ -32,6 +32,36 @@ Inspection also records `footprint_quadrants`: how much of each quarter of the m
 geometry, in the order +X+Y, −X+Y, −X−Y, +X−Y. An L-shaped corner leaves one quadrant nearly empty, which shows
 which way it opens. The 2026-10-22 stone corner measured 0.69, 0.0, 0.69 and 0.90.
 
+## Layouts and the Unity test scene
+
+A recipe's `layouts` place modules to test that they work together. Each placement gives:
+- `module`: a 3D child;
+- `position`: `[x, z]` or `[x, y, z]` in metres on Unity's axes (y up);
+- `rotation`: quarter turns about the vertical, or `auto` for a corner, which turns it so its open side faces the
+  layout's centre.
+
+`init` installs `stone_ruin_kit`, which has a `courtyard` layout and a `corner_joint` layout. Once every module in
+a layout is published with `approve-texture`, build its scene:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame environment-scene ruin courtyard
+```
+
+What it does in Unity (batch mode):
+- **Prefabs:** each module becomes a prefab under `Assets/Art/Generated/Prefabs/<run>/`. It gets an identity
+  root, which hides the FBX axis rotation, a mesh collider and static flags (batching, occlusion, reflection
+  probes). Lightmap contribution is left off, because it needs lightmap UVs that would change the published import
+  settings.
+- **Scene:** it places the layout in `Assets/Art/Generated/Scenes/<run>_<layout>.unity` and renders four views.
+- **Checks:**
+  - each module stands at its placement height for its pivot;
+  - it has a collider and is static;
+  - neighbouring modules leave no gap wider than `snap_tolerance`.
+- **Report:** `ai/assets/environment_scenes/<run>_<layout>.json` and `.png`. The command exits nonzero when a
+  check fails.
+
+A corner's open side is read from the placed mesh, so it needs no assumption about the FBX axes.
+
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 
 The checks report modular measurements; they do not rescale or rotate geometry, apply materials to models, or assemble a room scene. Intended front-facing direction and visual seams still need review in Blender/Unity. Use the supplied grid constraints as a starting profile and adjust them per kit rather than treating one grid size as universal.

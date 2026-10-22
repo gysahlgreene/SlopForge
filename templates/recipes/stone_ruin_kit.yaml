@@ -1,0 +1,222 @@
+# A weathered stone ruin kit on a 3 m grid (M2 example, 2026-10-22).
+# Walls, doorway, corner and column stand on their origin; the floor's walkable top is at its origin, so walls
+# placed at y = 0 stand on the floor. Layouts are in metres on Unity's axes (x right, z forward, y up);
+# `environment-scene <run> courtyard` builds and checks them in Unity once every module is published.
+# The corner stays unguided: its inside view reconstructs as an L, an outside view as a solid block.
+id: stone_ruin_kit
+version: 1
+description: A modular weathered-stone ruin kit with floor, wall, doorway, corner and column modules.
+kit_constraints:
+  grid_size: 1.0
+  snap_tolerance: 0.1
+  pivot_tolerance: 0.15
+  max_dimension: 8.0
+  pivot: bottom_center
+  modules:
+    floor:
+      target_size:
+      - 3
+      - 3
+      - null
+      snap_axes:
+      - 0
+      - 1
+      flat_axis: 2
+      max_dimension: 4.1
+      pivot: top_center
+    wall:
+      target_size:
+      - 3
+      - null
+      - 3
+      snap_axes:
+      - 0
+      - 2
+      vertical_axis: 2
+      max_dimension: 4.1
+    doorway:
+      target_size:
+      - 3
+      - null
+      - 3
+      snap_axes:
+      - 0
+      - 2
+      vertical_axis: 2
+      max_dimension: 4.1
+    corner:
+      target_size:
+      - 3
+      - 3
+      - 3
+      vertical_axis: 2
+    column:
+      target_size:
+      - null
+      - null
+      - 3
+      vertical_axis: 2
+children:
+- id: floor
+  type: architecture
+  description: A square weathered flagstone floor tile.
+  generation_prompt: One square modular floor tile, low and flat, made of large weathered grey flagstones with thin
+    mortar joints and a few chips, straight clean outer edges and a flat underside. Viewed from a high three-quarter
+    angle, isolated on a plain light-grey background.
+  materials:
+  - 'flagstones=nonmetal: weathered matte grey flagstone'
+- id: wall
+  type: architecture
+  description: A straight weathered stone wall module.
+  generation_prompt: One straight modular wall section, as wide as it is tall, built from large weathered grey granite
+    blocks with mortar joints, a thick even depth, flat vertical ends and a flat top. Plain matching back. Front
+    three-quarter view, isolated on a plain light-grey background.
+  materials:
+  - 'blocks=nonmetal: weathered matte granite blocks'
+- id: doorway
+  type: architecture
+  description: A stone wall module with a round-arched doorway.
+  generation_prompt: One modular wall section, as wide as it is tall, built from large weathered grey granite blocks
+    with a centred human-sized round-arched doorway opening and a carved keystone, thick even depth, flat vertical
+    ends and a flat top. Plain matching back. Front three-quarter view, isolated on a plain light-grey background.
+  materials:
+  - 'blocks=nonmetal: weathered matte granite blocks'
+- id: corner
+  type: architecture
+  description: A 90-degree stone wall corner module.
+  generation_prompt: One L-shaped 90-degree corner wall module built from large weathered grey granite blocks, two
+    equal straight arms joined at a right angle, the same height as its arm length, thick even depth, flat ends
+    and flat top. Front three-quarter view, isolated on a plain light-grey background.
+  materials:
+  - 'blocks=nonmetal: weathered matte granite blocks'
+- id: column
+  type: architecture
+  description: A weathered stone column with base and capital.
+  generation_prompt: One thick round stone column of weathered pale granite with a square stepped base and a simple
+    square capital, a few chips and cracks, chunky proportions. Front three-quarter view, isolated on a plain light-grey
+    background.
+  materials:
+  - 'stone=nonmetal: weathered matte pale granite'
+layouts:
+  courtyard:
+  - module: floor
+    position:
+    - -3
+    - -3
+  - module: floor
+    position:
+    - -3
+    - 0
+  - module: floor
+    position:
+    - -3
+    - 3
+  - module: floor
+    position:
+    - 0
+    - -3
+  - module: floor
+    position:
+    - 0
+    - 0
+  - module: floor
+    position:
+    - 0
+    - 3
+  - module: floor
+    position:
+    - 3
+    - -3
+  - module: floor
+    position:
+    - 3
+    - 0
+  - module: floor
+    position:
+    - 3
+    - 3
+  - module: wall
+    position:
+    - -3
+    - 4.5
+  - module: wall
+    position:
+    - 0
+    - 4.5
+  - module: wall
+    position:
+    - 3
+    - 4.5
+  - module: wall
+    position:
+    - -3
+    - -4.5
+  - module: doorway
+    position:
+    - 0
+    - -4.5
+  - module: wall
+    position:
+    - 3
+    - -4.5
+  - module: wall
+    position:
+    - -4.5
+    - -3
+    rotation: 90
+  - module: wall
+    position:
+    - -4.5
+    - 0
+    rotation: 90
+  - module: wall
+    position:
+    - -4.5
+    - 3
+    rotation: 90
+  - module: wall
+    position:
+    - 4.5
+    - -3
+    rotation: 90
+  - module: wall
+    position:
+    - 4.5
+    - 0
+    rotation: 90
+  - module: wall
+    position:
+    - 4.5
+    - 3
+    rotation: 90
+  - module: column
+    position:
+    - -4.5
+    - -4.5
+  - module: column
+    position:
+    - -4.5
+    - 4.5
+  - module: column
+    position:
+    - 4.5
+    - -4.5
+  - module: column
+    position:
+    - 4.5
+    - 4.5
+  corner_joint:
+  - module: corner
+    position:
+    - 0
+    - 0
+    rotation: auto
+  - module: wall
+    position:
+    - 3
+    - -1.5
+  - module: wall
+    position:
+    - -1.5
+    - 3
+    rotation: 90
