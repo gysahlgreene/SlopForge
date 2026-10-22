@@ -375,7 +375,27 @@ with patch.object(client, 'validate_workflow'), patch.object(client, 'json', sid
     def test_queued_reads_running_and_pending_prompts(self):
         client = ComfyUIClient("http://remote:8188")
         client.json = Mock(return_value={"queue_running": [[0, "a", {}, {}, []]], "queue_pending": [[1, "b", {}, {}, []]]})
-        self.assertEqual([client.queued(prompt) for prompt in ("a", "b", "c")], [True, True, False])
+        self.assertEqual([client.queued(prompt) for prompt in ("a", "b", "c")], ["running", "pending", None])
+
+    def test_time_queued_behind_other_jobs_does_not_count_toward_the_timeout(self):
+        # M2-v1, 2026-10-23: three concept jobs ran for 2-13 s but timed out at 600 s queued behind mesh jobs.
+        clock = [0.0]
+        tick = lambda seconds: clock.__setitem__(0, clock[0] + 10)
+        client = ComfyUIClient("http://remote:8188")
+        done = {"status": {"completed": True}, "outputs": {}}
+        client.history = Mock(side_effect=[None] * 20 + [done])
+        client.queued = Mock(return_value="pending")
+        with patch("slopforge.backends.comfyui.time.monotonic", lambda: clock[0]), \
+                patch("slopforge.backends.comfyui.time.sleep", tick):
+            self.assertEqual(client.wait_for_completion("prompt-42", timeout=60, queue_check_interval=10), done)
+            for state, max_queue_wait, queued_seconds in (("pending", 30, 30), ("running", 10800, 0)):
+                clock[0] = 0.0
+                client.history = Mock(return_value=None)
+                client.queued = Mock(return_value=state)
+                with self.assertRaises(ComfyUIError) as raised:
+                    client.wait_for_completion("prompt-42", timeout=60, queue_check_interval=10,
+                                               max_queue_wait=max_queue_wait)
+                self.assertEqual(raised.exception.evidence["queued_seconds"], queued_seconds)
 
     def test_output_download_retries_a_dropped_connection(self):
         client = ComfyUIClient("http://remote:8188")
