@@ -45,6 +45,10 @@ def parser():
                           help="Declare a material region: 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
     generate.add_argument("--aspect", choices=("square", "portrait", "landscape"),
                           help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for wider")
+    generate.add_argument("--target-size", metavar="X,Y,Z",
+                          help="Real size of a 3D asset in metres (z up); '-' keeps an axis in proportion, such as "
+                               "--target-size=-,-,3.2 for a structure 3.2 m tall (use = when it starts with '-'). "
+                               "The asset then stands on a bottom-centre pivot")
     generate.add_argument("--shape-guide", metavar="SHAPE:H/W",
                           help="Hold a prop concept's main mass to a cylinder or box of this height/width, such as "
                                "cylinder:0.5, when the wording and --aspect do not")
@@ -885,6 +889,9 @@ def _run(args):
     if getattr(args, "shape_guide", None) and recipe["pipeline"] != "model":
         raise ValueError(f"--shape-guide applies to 3D asset types; {asset_type} is an image asset type")
     shape_guide = model.parse_shape_guide(args.shape_guide) if getattr(args, "shape_guide", None) else None
+    if getattr(args, "target_size", None) and recipe["pipeline"] != "model":
+        raise ValueError(f"--target-size applies to 3D asset types; {asset_type} is an image asset type")
+    target_size = model.parse_target_size(args.target_size) if getattr(args, "target_size", None) else None
     if args.image_prompt:
         rules = reconstruction_rules(recipe, materials)
         prompt_text = args.image_prompt + ("\n\n" + rules if rules else "")
@@ -911,6 +918,9 @@ def _run(args):
         if materials:
             record["materials"] = materials
         manifest["assets"][key] = record
+    if target_size:
+        # Sized in metres, it is placed on the ground: Unity keeps the FBX origin as its pivot.
+        record.update({"target_size": target_size, "pivot": "bottom_center"})
     save_manifest(manifest_path, manifest)
 
     try:

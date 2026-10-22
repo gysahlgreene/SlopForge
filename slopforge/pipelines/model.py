@@ -1,4 +1,5 @@
 import json
+import math
 import copy
 import os
 import secrets
@@ -1496,6 +1497,22 @@ SHAPE_GUIDES = ("cylinder", "box")
 # Stump concepts, 2026-10-22 (docs/media/concept-proportion-2026-10): at 0.5 most trunks stayed taller than wide;
 # at 0.8 the concept copied the primitive and lost the brief's roots.
 SHAPE_GUIDE_STRENGTH = 0.65
+
+
+def parse_target_size(spec):
+    """'-,-,3.2' -> [None, None, 3.2]: a real size in metres per axis (x, y, z up); '-' keeps that axis in proportion."""
+    parts = str(spec).split(",")
+    if len(parts) != 3:
+        raise ValueError(f"--target-size needs three sizes in metres, such as -,-,3.2; got {spec!r}")
+    try:
+        sizes = [None if part.strip() == "-" else float(part) for part in parts]
+    except ValueError:
+        raise ValueError(f"--target-size sizes are metres or '-', such as -,-,3.2; got {spec!r}") from None
+    if all(size is None for size in sizes):
+        raise ValueError("--target-size needs at least one size; '-' keeps an axis in proportion")
+    if any(size is not None and not (math.isfinite(size) and size > 0) for size in sizes):
+        raise ValueError(f"--target-size sizes must be positive, got {spec!r}")
+    return sizes
 
 
 def parse_shape_guide(spec):
