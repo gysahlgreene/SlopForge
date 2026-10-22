@@ -577,3 +577,17 @@ Recipe resume kept regenerating architecture modules (2026-10-22, M2).
   pipeline, with only the image backend faked. Resume generates nothing new and reuses both. Before the fix it
   regenerated the architecture child's six concepts.
 - **Not verified live:** a kit resume on the H100.
+
+Standalone structures at real size, with concept checks (2026-10-22, issue #92; [evidence](docs/media/structures-real-size-2026-10/README.md)).
+- **Change:**
+  - `generate --target-size=x,y,z` gives any 3D asset a real size in metres, with `-` keeping an axis in
+    proportion. Such an asset stands on a bottom-centre pivot.
+  - `architecture` gets the owner-accepted prop limits for concept fit (0.8) and colour. Every 2026-10-22
+    structure and kit module fitted at 0.92–0.97.
+- **Live:** the well, shrine and bunker came out at exactly their declared 3.2, 3.5 and 3.0 m heights on
+  bottom-centre pivots, and passed concept fit (0.93–0.98) and the colour check on their first attempts.
+- **Tests:**
+  - CLI parsing, refusal for image types, and the size and pivot recorded on the asset;
+  - the architecture limits match the prop ones.
+- **Not verified:** a part limit for structures (#94). The bunker invented a second door, has a white patch, and
+  its small hazard stripes faded unchecked.
