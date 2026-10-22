@@ -468,3 +468,33 @@ Kit module pivots and real-scale inspection (2026-10-22, M2).
   - an opt-in Blender test: a sized L gets its origin at its bottom or top centre, no scale warning, and one
     empty footprint quadrant.
 - **Not verified live:** a kit regenerated with pivots and imported into Unity. That comes with the scene builder.
+
+Kit layouts assembled in Unity (2026-10-22, M2; [evidence](docs/media/kit-scene-2026-10/README.md)).
+- **Change:**
+  - Recipes can declare `layouts`: placements of 3D modules in metres on Unity's axes. A rotation is in quarter
+    turns, or `auto` for a corner.
+  - `environment-scene <run> <layout>` makes each published module a prefab: an identity root, a mesh collider and
+    static flags.
+  - It places the layout in a saved scene and renders four views.
+  - It checks in Unity that each module stands at its placement height for its pivot, has a collider, is static,
+    and leaves no seam gap wider than `snap_tolerance`. An `auto` corner is turned so the open side read from its
+    mesh faces the layout's centre.
+  - `init` installs a `stone_ruin_kit` recipe with `courtyard` and `corner_joint` layouts.
+- **Live:**
+  - The recipe ran from a fresh URP project on the H100. All five modules were published, `environment-check`
+    passed, and the 25-instance courtyard built with no errors.
+  - The corner auto-turned 90°.
+  - The run found that a top-pivot floor stood its own thickness too high: the prefab kept the FBX root's
+    translation. That is fixed, and the opt-in Unity test now covers a top-pivot module.
+- **Tests:**
+  - layout validation;
+  - placement resolution, which refuses unpublished modules;
+  - the CLI writes the report and records the artifact;
+  - an opt-in Unity test (`SLOPFORGE_RUN_UNITY_IMPORT=1`) covering grounding, a top-pivot module, a 0.2 m seam
+    gap and a corner turned inward.
+- **Not verified:**
+  - visual approval;
+  - matching module appearance (sandy columns, grey walls, invented blotchy wall backs);
+  - declared module thickness (wall 0.74 m, doorway 0.82 m, corner arms about 1 m);
+  - the doorway, squeezed 45%;
+  - Play mode, lightmapping, and more than one run.
