@@ -536,6 +536,8 @@ for loc, scale in (((-0.3, 0, 0.5), (0.4, 1.0, 1.0)), ((0, -0.3, 0.5), (1.0, 0.4
 bpy.ops.object.select_all(action='SELECT')
 bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
 bpy.ops.object.join()
+# Off-centre, as a generated mesh can be: the M2-v1 timber corner's rescale read bounds from before recentring.
+bpy.context.object.location = (0.7, 0.4, 0.2)
 bpy.ops.object.transform_apply(location=True, scale=True)
 bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.subdivide(number_cuts=8); bpy.ops.object.mode_set(mode='OBJECT')
 bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')

@@ -485,9 +485,13 @@ if not reuse_stage_mesh and not mesh_only:
         coords = [vertex.co for vertex in obj.data.vertices]
         low = Vector([min(co[axis] for co in coords) for axis in range(3)])
         high = Vector([max(co[axis] for co in coords) for axis in range(3)])
-        obj.data.transform(Matrix.Translation(Vector((-(low.x + high.x) / 2.0, -(low.y + high.y) / 2.0, -low.z))))
+        recentre = Vector((-(low.x + high.x) / 2.0, -(low.y + high.y) / 2.0, -low.z))
+        obj.data.transform(Matrix.Translation(recentre))
         obj.data.update()
         obj.location = Vector((0.0, 0.0, 0.0))  # geometry is now bottom-centred in its own space
+        # The arm rescale below reads these bounds: from before recentring, an off-centre corner's open side was
+        # missed and its arms were left as generated (M2-v1 timber corner, 2026-10-23).
+        low, high = low + recentre, high + recentre
         bpy.context.view_layer.update()
         print(f"Scaled to target size {[round(v, 4) for v in high - low]}; "
               f"axis stretch ratio {max(factors) / min(factors):.3f}")
