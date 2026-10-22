@@ -432,7 +432,7 @@ Prop coverage exploration (2026-10-22; [evidence](docs/media/props-coverage-2026
 - **Passed:** the pot, canister and lantern, each on its first mesh attempt and through Unity.
 - **Stump:** failed every seed on UV area (0.017–0.044), although its meshes were whole. Bark and moss unwrapped into about 10,600 islands, and 12-texel padding used most of the map.
 - **Change:** UV islands are now padded by 4 texels and re-packed concave. The stump went 0.044 → 0.19, a crate 0.30 → 0.55 and a jug 0.54 → 0.65, with unchanged stretch.
-- **Shattered-mesh check replaced:** with that padding, UV area no longer separated shattered bottles (0.11–0.12) from whole stumps (0.10–0.19), so props now retry on a concept silhouette fit under 0.8 (`concept_fit`; shattered 0.71–0.75, whole 0.86–0.99) instead of UV area.
+- **Shattered-mesh check replaced:** with that padding, UV area no longer separated shattered bottles (0.11–0.12) from whole stumps (0.10–0.19), so props now retry on a concept silhouette fit under 0.8 (`concept_fit`; shattered 0.71–0.75, whole 0.86–0.99) instead of UV area. The owner accepted 0.8 on 2026-10-22.
 - **Re-run:** with these changes the stump passed on its first seed (fit 0.95) and imported into Unity.
 - **Open:**
   - the canister's cyan strip baked darker and was only partly found (0.67%);
