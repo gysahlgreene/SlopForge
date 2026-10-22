@@ -12,6 +12,9 @@ def _pivot_target(bounds_min, bounds_max, pivot):
     if pivot == "bottom_center":
         center[2] = bounds_min[2]
         return center
+    if pivot == "top_center":
+        center[2] = bounds_max[2]
+        return center
     if pivot == "origin":
         return [0.0, 0.0, 0.0]
     raise ValueError(f"Unsupported environment module pivot rule: {pivot!r}")

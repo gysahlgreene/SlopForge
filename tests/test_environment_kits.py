@@ -103,6 +103,62 @@ class EnvironmentKitTests(unittest.TestCase):
             self.assertEqual(report["status"], "partial")
             self.assertEqual(manifest["assets"]["recipe:starter"]["artifacts"]["kit.validation"]["status"], "failed")
 
+    def test_pivot_rules_include_top_center_and_reject_unknown(self):
+        from slopforge.recipes import _validate_kit_constraints
+        _validate_kit_constraints({"kit_constraints": {"pivot": "bottom_center",
+                                                       "modules": {"floor": {"pivot": "top_center"}}}}, {"floor"})
+        with self.assertRaisesRegex(ValueError, "pivot"):
+            _validate_kit_constraints({"kit_constraints": {"modules": {"floor": {"pivot": "corner"}}}}, {"floor"})
+
+    def test_process_model_passes_module_pivot_to_blender(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            report = Path(temporary) / "out.json"
+            report.write_text("{}")
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, pivot="bottom_center")
+            blender.inspect_model("/tmp", {}, "out.blend", report, 1000, real_scale=True)
+        process, inspect = (call.args[0] for call in run.call_args_list)
+        self.assertEqual(process[process.index("--pivot") + 1], "bottom_center")
+        self.assertIn("--real-scale", inspect)
+
+    def test_run_recipe_gives_each_module_its_pivot_rule(self):
+        from unittest.mock import patch
+        from slopforge import recipes
+        from slopforge.config import load_project
+        from slopforge.style import load_style
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            (project / "ai/recipes/mini.yaml").write_text(json.dumps({
+                "id": "mini", "version": 1, "description": "Two modules",
+                "kit_constraints": {"pivot": "bottom_center", "modules": {
+                    "floor": {"target_size": [3, 3, None], "pivot": "top_center"}, "wall": {"target_size": [3, None, 3]}}},
+                "children": [{"id": "floor", "type": "architecture", "description": "A floor tile"},
+                             {"id": "wall", "type": "architecture", "description": "A wall"}]}))
+            config = load_project(project)
+            manifest = load_manifest(project / "ai/assets/manifest.json")
+            with patch("slopforge.recipes.model.generate", return_value=[{"number": 1, "status": "candidate"}]):
+                recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
+                                   "mini", instance_name="ruin")
+        self.assertEqual(manifest["assets"]["architecture:ruin_floor"]["pivot"], "top_center")
+        self.assertEqual(manifest["assets"]["architecture:ruin_wall"]["pivot"], "bottom_center")
+
+    def test_validation_checks_a_top_center_pivot(self):
+        recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {
+            "grid_size": 1.0, "pivot_tolerance": 0.01, "modules": {"floor": {"pivot": "top_center"}}}},
+            "stages": {"floor": {"asset_key": "architecture:floor", "asset_id": "floor-id"}}}}
+        bounds = {"bounds_min": [-1.5, -1.5, -0.2], "bounds_max": [1.5, 1.5, 0.0]}
+        measured = {"dimensions": [3.0, 3.0, 0.2], **bounds, "transforms_applied": True}
+        for origin, status in (([0.0, 0.0, 0.0], "passed"), ([0.0, 0.0, -0.1], "failed")):
+            objects = [{"name": "floor", **bounds, "origin": origin}]
+            manifest = {"assets": {"architecture:floor": {"type": "architecture", "status": "ready",
+                "outputs": {"blend": "floor.blend"}, "validation": {"measured": {**measured, "objects": objects}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["floor"]["status"], status)
+
 
 if __name__ == "__main__":
     unittest.main()

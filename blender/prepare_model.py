@@ -689,6 +689,16 @@ bpy.ops.object.origin_set(
     type="ORIGIN_GEOMETRY",
     center="BOUNDS",
 )
+if "--pivot" in sys.argv:
+    # Kit modules: walls stand on their origin (bottom_center); a floor's walkable top sits at it (top_center).
+    pivot = sys.argv[sys.argv.index("--pivot") + 1]
+    if pivot not in ("center", "bottom_center", "top_center"):
+        raise SystemExit(f"--pivot must be center, bottom_center or top_center, got {pivot!r}")
+    if pivot != "center":
+        heights = [(obj.matrix_world @ Vector(corner)).z for corner in obj.bound_box]
+        bpy.context.scene.cursor.location = Vector((obj.location.x, obj.location.y,
+                                                    min(heights) if pivot == "bottom_center" else max(heights)))
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
 
 if preview_dir:
     render_previews(obj, preview_dir, output_fbx.stem)

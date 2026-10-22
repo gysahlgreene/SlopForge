@@ -159,7 +159,40 @@ def topology_diagnostics(obj, weld_distance):
                                                  item.get("polygon_index", -1)))
 
 
-def inspect(source, face_budget):
+def footprint_quadrants(objects, minimum, maximum, cells=32):
+    """Share of each footprint quadrant (+X+Y, -X+Y, -X-Y, +X-Y about the bounds centre) that holds geometry,
+    on a top-down grid. An L-shaped corner leaves one quadrant nearly empty."""
+    width, depth = maximum[0] - minimum[0], maximum[1] - minimum[1]
+    if width <= 1e-9 or depth <= 1e-9:
+        return [0.0, 0.0, 0.0, 0.0]
+    cell_area = width * depth / cells ** 2
+    occupied = set()
+
+    def mark(x, y):
+        occupied.add((min(cells - 1, max(0, int((x - minimum[0]) / width * cells))),
+                      min(cells - 1, max(0, int((y - minimum[1]) / depth * cells)))))
+    for obj in objects:
+        points = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+        for point in points:
+            mark(point.x, point.y)
+        # Decimated flat faces have few vertices, so sample each face across its top-down area as well.
+        for polygon in obj.data.polygons:
+            corners = [points[index] for index in polygon.vertices]
+            for b, c in zip(corners[1:], corners[2:]):
+                a = corners[0]
+                area = abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2
+                steps = math.ceil(math.sqrt(area / cell_area)) * 2 if area > cell_area / 4 else 0
+                for i in range(1, steps):
+                    for j in range(1, steps - i):
+                        u, v = i / steps, j / steps
+                        mark(a.x + u * (b.x - a.x) + v * (c.x - a.x), a.y + u * (b.y - a.y) + v * (c.y - a.y))
+    half = cells // 2
+    quadrants = (lambda i, j: i >= half and j >= half, lambda i, j: i < half and j >= half,
+                 lambda i, j: i < half and j < half, lambda i, j: i >= half and j < half)
+    return [sum(1 for cell in occupied if inside(*cell)) / (half * half) for inside in quadrants]
+
+
+def inspect(source, face_budget, real_scale=False):
     errors, warnings = [], []
     extension = source.suffix.lower()
     if extension == ".blend":
@@ -263,7 +296,8 @@ def inspect(source, face_budget):
                 "degenerate_face_count": zero_area_faces,
                 "component_count": components, "boundary_edge_count": boundary_edges,
                 "nonmanifold_edge_count": nonmanifold_edges, "component_details": component_records,
-                "topology_diagnostics": topology_records, "face_budget": face_budget}
+                "topology_diagnostics": topology_records, "face_budget": face_budget,
+                "footprint_quadrants": footprint_quadrants(objects, minimum, maximum)}
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:
@@ -282,7 +316,7 @@ def inspect(source, face_budget):
         warnings.append("one or more mesh origins fall outside the combined bounds")
     if max(dimensions) > 100:
         errors.append("mesh bounds are implausibly large")
-    elif max(dimensions) > 1.5:
+    elif max(dimensions) > 1.5 and not real_scale:
         warnings.append("largest mesh dimension exceeds expected normalized scale")
     if components > len(objects):
         warnings.append(f"mesh contains {components} disconnected components; inspect for detached geometry")
@@ -295,12 +329,15 @@ def inspect(source, face_budget):
 
 def main():
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
+    real_scale = "--real-scale" in args  # sized in metres (kit modules), not normalised to 1
+    args = [arg for arg in args if arg != "--real-scale"]
     if len(args) != 3:
-        raise SystemExit("Usage: blender --background --python blender/inspect_model.py -- model.{blend,glb,fbx} validation.json face_budget")
+        raise SystemExit("Usage: blender --background --python blender/inspect_model.py -- "
+                         "model.{blend,glb,fbx} validation.json face_budget [--real-scale]")
     source, output, budget = Path(args[0]).resolve(), Path(args[1]).resolve(), int(args[2])
     if not source.is_file():
         raise SystemExit(f"Model file not found: {source}")
-    result = inspect(source, budget)
+    result = inspect(source, budget, real_scale)
     result["animation_readiness"] = classify_character_readiness(result)
     write_result(output, result)
 

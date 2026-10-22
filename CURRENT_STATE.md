@@ -445,3 +445,26 @@ Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Live check (H100):** a pending job deleted through ComfyUI's queue API was reported lost in 2.3 s, while a running job checked every 2 s completed normally.
 - **Not verified live:** an actual service restart, and a dropped download.
 - **Follow-up (2026-10-22):** four glass-experiment runs lost finished outputs when the login hold expired and ComfyUI restarted during their downloads, because five retries lasted only 15 s. Downloads now retry a dropped connection for up to 2 minutes, with backoff capped at 30 s; a test checks that the window outlasts 60 s and ends by 120 s.
+
+Kit module pivots and real-scale inspection (2026-10-22, M2).
+- **Problem:**
+  - Every model's origin was its bounds centre, and Unity keeps the FBX origin as the pivot. Measured in Unity, a
+    3 m wall placed at the origin ran from −1.5 m to +1.5 m, so placed at ground level it sank halfway into it.
+  - Inspection flagged every module sized in metres as "larger than the normalised scale".
+  - A module's declared `target_size` did not join its assembly-stage settings, so a changed size could reuse an
+    old model.
+- **Change:**
+  - Kit `pivot` rules (`bottom_center`, the new `top_center`, `center`) reach Blender, which places the FBX origin
+    there.
+  - The size and pivot join the assembly-stage settings, only when declared, so prop identities are unchanged.
+  - Sized modules are inspected at real scale.
+  - Inspection records `footprint_quadrants`, from which a corner's open side can be read. On the baseline stone
+    corner the open quadrant measured 0.0 and the others 0.69–0.90.
+- **Tests:**
+  - pivot validation, including `top_center`;
+  - the pivot and real-scale flags reach Blender;
+  - `recipe run` gives each module its pivot;
+  - `environment-check` checks a `top_center` pivot;
+  - an opt-in Blender test: a sized L gets its origin at its bottom or top centre, no scale warning, and one
+    empty footprint quadrant.
+- **Not verified live:** a kit regenerated with pivots and imported into Unity. That comes with the scene builder.

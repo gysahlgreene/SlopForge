@@ -1058,7 +1058,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
         assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
                              "face_budget": face_budget,
-                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
+                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py"),
+                             **_placement(asset)}
         assembly_attempt = previous_attempts.get("material_assembly_export", previous["number"]) if previous else number
         assembly_refs = _adopt_stage(lineage, "material_assembly_export", assembly_attempt,
                                      assembly_inputs, assembly_settings)
@@ -1091,9 +1092,10 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
-                      target_size=asset.get("target_size"))
+                      target_size=asset.get("target_size"), pivot=asset.get("pivot"))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
-        inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget)
+        inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
+                                   real_scale=bool(asset.get("target_size")))
         check_paths = {key: paths[key] for key in
                         ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                         "preview_front", "preview_side", "preview_rear", "preview_three_quarter")}
@@ -1186,11 +1188,13 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
     assembly_inputs = [*material_refs, *(lineage or {}).get("assembly_inputs", [])]
     _lineage_start(lineage, "material_assembly_export", number, (),
-                   {"preserve_uvs": True, "face_budget": budget}, parents=assembly_inputs)
+                   {"preserve_uvs": True, "face_budget": budget, **_placement(asset)}, parents=assembly_inputs)
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
-                  stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"))
-    inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget)
+                  stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
+                  pivot=asset.get("pivot"))
+    inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
+                               real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
             "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
     validation = validate_model_outputs({key: paths[key] for key in keys}, inspection, budget, root,
@@ -1326,6 +1330,12 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
         refs.append(_artifact_ref(root, path, f"view-{slot}:{execution_id}", f"image.view.{slot}",
                                   "conditioning_preparation", 1, [concept_artifact]))
     return refs, attempts
+
+
+def _placement(asset):
+    """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
+    Absent for other assets, whose settings (and so their identities) stay as before."""
+    return {key: asset[key] for key in ("target_size", "pivot") if asset.get(key)}
 
 
 def concept_route(config, asset_type, conditioning):

@@ -46,6 +46,10 @@ def _ordered_children(definition):
     return ordered
 
 
+# Where a module's origin sits: walls and columns stand on it (bottom_center), a floor's walkable top is at it.
+PIVOTS = {"center", "bottom_center", "top_center", "origin"}
+
+
 def _validate_kit_constraints(definition, child_ids):
     constraints = definition.get("kit_constraints")
     if constraints is None:
@@ -62,7 +66,7 @@ def _validate_kit_constraints(definition, child_ids):
                                 or not math.isfinite(maximum) or maximum <= 0):
         raise ValueError("kit_constraints.max_dimension must be positive")
     pivot = constraints.get("pivot")
-    if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+    if pivot is not None and pivot not in PIVOTS:
         raise ValueError("kit_constraints.pivot is unsupported")
     modules = constraints.get("modules", {})
     if not isinstance(modules, dict) or not set(modules) <= child_ids:
@@ -86,7 +90,7 @@ def _validate_kit_constraints(definition, child_ids):
             if axis is not None and (type(axis) is not int or axis not in (0, 1, 2)):
                 raise ValueError(f"kit_constraints.modules.{child_id}.{axis_name} must be axis 0, 1, or 2")
         pivot = rule.get("pivot")
-        if pivot is not None and pivot not in {"center", "bottom_center", "origin"}:
+        if pivot is not None and pivot not in PIVOTS:
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
         target = rule.get("target_size")
         if target is not None and (not isinstance(target, list) or len(target) != 3
@@ -653,9 +657,13 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
                            {"strategy": config.get("asset_pipeline", {}).get("conditioning", {}).get("strategy", "text_only")})
         if child.get("materials"):
             asset["materials"] = [parse_material_spec(spec) for spec in child["materials"]]
-        target = definition.get("kit_constraints", {}).get("modules", {}).get(child["id"], {}).get("target_size")
-        if target:
-            asset["target_size"] = target
+        constraints = definition.get("kit_constraints") or {}
+        rule = constraints.get("modules", {}).get(child["id"], {})
+        if rule.get("target_size"):
+            asset["target_size"] = rule["target_size"]
+        pivot = rule.get("pivot", constraints.get("pivot"))
+        if pivot and pivot != "center" and asset_types[child["type"]].get("pipeline") == "model":
+            asset["pivot"] = pivot
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",
