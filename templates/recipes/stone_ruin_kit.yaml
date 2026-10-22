@@ -1,6 +1,8 @@
 # A weathered stone ruin kit on a 3 m grid (M2 example, 2026-10-22).
 # Walls, doorway, corner and column stand on their origin; the floor's walkable top is at its origin, so walls
-# placed at y = 0 stand on the floor. Layouts are in metres on Unity's axes (x right, z forward, y up);
+# placed at y = 0 stand on the floor. Walls, the doorway and the corner's arms share one declared thickness
+# (0.75 m), so walls continue a corner flush: in the layouts, walls sit inside a cell edge with their outer
+# face on it, like the corner's arms. Layouts are in metres on Unity's axes (x right, z forward, y up);
 # `environment-scene <run> courtyard` builds and checks them in Unity once every module is published.
 # Approve the `stone` texture before the modules: every module's base colour is baked from it (the
 # shared kit material), so the kit's stone matches; each module keeps its own normal map and
@@ -30,7 +32,7 @@ kit_constraints:
     wall:
       target_size:
       - 3
-      - null
+      - 0.75
       - 3
       snap_axes:
       - 0
@@ -40,7 +42,7 @@ kit_constraints:
     doorway:
       target_size:
       - 3
-      - null
+      - 0.75
       - 3
       snap_axes:
       - 0
@@ -54,6 +56,7 @@ kit_constraints:
       - 3
       vertical_axis: 2
       footprint: corner
+      arm_thickness: 0.75
     column:
       target_size:
       - null
@@ -148,76 +151,60 @@ layouts:
     position:
     - 3
     - 3
-  - module: wall
+  - module: corner
     position:
     - -3
-    - 4.5
+    - -3
+    rotation: auto
+  - module: corner
+    position:
+    - -3
+    - 3
+    rotation: auto
+  - module: corner
+    position:
+    - 3
+    - -3
+    rotation: auto
+  - module: corner
+    position:
+    - 3
+    - 3
+    rotation: auto
   - module: wall
     position:
     - 0
-    - 4.5
-  - module: wall
-    position:
-    - 3
-    - 4.5
-  - module: wall
-    position:
-    - -3
-    - -4.5
+    - 4.125
   - module: doorway
     position:
     - 0
-    - -4.5
+    - -4.125
   - module: wall
     position:
-    - 3
-    - -4.5
-  - module: wall
-    position:
-    - -4.5
-    - -3
-    rotation: 90
-  - module: wall
-    position:
-    - -4.5
+    - 4.125
     - 0
     rotation: 90
   - module: wall
     position:
-    - -4.5
-    - 3
-    rotation: 90
-  - module: wall
-    position:
-    - 4.5
-    - -3
-    rotation: 90
-  - module: wall
-    position:
-    - 4.5
+    - -4.125
     - 0
     rotation: 90
-  - module: wall
-    position:
-    - 4.5
-    - 3
-    rotation: 90
   - module: column
     position:
-    - -4.5
-    - -4.5
+    - -1.5
+    - -1.5
   - module: column
     position:
-    - -4.5
-    - 4.5
+    - -1.5
+    - 1.5
   - module: column
     position:
-    - 4.5
-    - -4.5
+    - 1.5
+    - -1.5
   - module: column
     position:
-    - 4.5
-    - 4.5
+    - 1.5
+    - 1.5
   corner_joint:
   - module: corner
     position:
@@ -227,9 +214,9 @@ layouts:
   - module: wall
     position:
     - 3
-    - -1.5
+    - -1.125
   - module: wall
     position:
-    - -1.5
+    - -1.125
     - 3
     rotation: 90

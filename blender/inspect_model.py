@@ -192,6 +192,27 @@ def footprint_quadrants(objects, minimum, maximum, cells=32):
     return [sum(1 for cell in occupied if inside(*cell)) / (half * half) for inside in quadrants]
 
 
+def corner_profile(points, quadrants, minimum, maximum):
+    """For an L corner (one footprint quarter nearly empty): the open side's (x, y) signs and each arm's thickness.
+
+    An arm is measured from its outer edge, on the open side of the other arm, where the two do not overlap.
+    Returns None for other shapes.
+    """
+    if not quadrants or min(quadrants) > 0.15:
+        return None
+    open_index = quadrants.index(min(quadrants))
+    ox, oy = (1 if open_index in (0, 3) else -1), (1 if open_index in (0, 1) else -1)
+    centre_x, centre_y = (minimum[0] + maximum[0]) / 2, (minimum[1] + maximum[1]) / 2
+    width, depth = maximum[0] - minimum[0], maximum[1] - minimum[1]
+    outer_x = minimum[0] if ox > 0 else maximum[0]
+    outer_y = minimum[1] if oy > 0 else maximum[1]
+    along_y = sorted(abs(p[0] - outer_x) for p in points if (p[1] - centre_y) * oy > 0.1 * depth)
+    along_x = sorted(abs(p[1] - outer_y) for p in points if (p[0] - centre_x) * ox > 0.1 * width)
+    if not along_y or not along_x:
+        return None
+    return (ox, oy), [along_y[int(0.98 * (len(along_y) - 1))], along_x[int(0.98 * (len(along_x) - 1))]]
+
+
 def inspect(source, face_budget, real_scale=False):
     errors, warnings = [], []
     extension = source.suffix.lower()
@@ -298,6 +319,9 @@ def inspect(source, face_budget, real_scale=False):
                 "nonmanifold_edge_count": nonmanifold_edges, "component_details": component_records,
                 "topology_diagnostics": topology_records, "face_budget": face_budget,
                 "footprint_quadrants": footprint_quadrants(objects, minimum, maximum)}
+    corner = corner_profile([obj.matrix_world @ vertex.co for obj in objects for vertex in obj.data.vertices],
+                            measured["footprint_quadrants"], minimum, maximum)
+    measured["arm_thickness"] = corner[1] if corner else None
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:

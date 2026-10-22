@@ -233,6 +233,31 @@ class EnvironmentKitTests(unittest.TestCase):
         self.assertEqual(manifest["assets"]["architecture:ruin_corner"]["footprint"], "corner")
         self.assertNotIn("footprint", manifest["assets"]["architecture:ruin_wall"])
 
+    def test_corner_arm_thickness_is_declared_passed_on_and_checked(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        from slopforge.recipes import _validate_kit_constraints
+        for bad in ({"arm_thickness": 0.75}, {"footprint": "corner", "arm_thickness": 0},
+                    {"footprint": "corner", "arm_thickness": 2.0, "target_size": [3, 3, 3]}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "arm_thickness"):
+                _validate_kit_constraints({"kit_constraints": {"modules": {"corner": bad}}}, {"corner"})
+        _validate_kit_constraints({"kit_constraints": {"modules": {"corner": {
+            "footprint": "corner", "arm_thickness": 0.75, "target_size": [3, 3, 3]}}}}, {"corner"})
+        with patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, arm_thickness=0.75)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--arm-thickness") + 1], "0.75")
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"snap_tolerance": 0.05,
+            "modules": {"corner": {"footprint": "corner", "arm_thickness": 0.75}}}},
+            "stages": {"corner": {"asset_key": "architecture:corner", "asset_id": "corner-id"}}}}
+        for arms, status in (([0.76, 0.74], "passed"), ([1.0, 0.75], "failed")):
+            manifest = {"assets": {"architecture:corner": {"type": "architecture", "status": "ready",
+                "validation": {"measured": {"dimensions": [3.0, 3.0, 3.0], "bounds_min": [0, 0, 0],
+                    "bounds_max": [3, 3, 3], "transforms_applied": True, "footprint_quadrants": [0.8, 0.9, 0.8, 0.0],
+                    "arm_thickness": arms}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["corner"]["status"], status)
+
     def test_validation_checks_a_top_center_pivot(self):
         recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {
             "grid_size": 1.0, "pivot_tolerance": 0.01, "modules": {"floor": {"pivot": "top_center"}}}},

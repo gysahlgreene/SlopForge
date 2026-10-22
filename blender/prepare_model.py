@@ -5,7 +5,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally
-from inspect_model import topology_edge_counts
+from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
 TARGET_FACES = 30000
@@ -491,6 +491,30 @@ if not reuse_stage_mesh and not mesh_only:
         bpy.context.view_layer.update()
         print(f"Scaled to target size {[round(v, 4) for v in high - low]}; "
               f"axis stretch ratio {max(factors) / min(factors):.3f}")
+        if "--arm-thickness" in sys.argv:
+            # A kit corner's arms take the kit's declared wall thickness, so walls continue them flush; the outer
+            # bounds stay exact. 2026-10-22: generated arms were about 1 m against 0.74 m walls (issue #90).
+            wanted = float(sys.argv[sys.argv.index("--arm-thickness") + 1])
+            bounds = ([low.x, low.y, low.z], [high.x, high.y, high.z])
+            corner = corner_profile([vertex.co.copy() for vertex in obj.data.vertices],
+                                    footprint_quadrants([obj], *bounds), *bounds)
+            if corner is None:
+                print("--arm-thickness: no open side found, so the corner is left as is")
+            else:
+                (ox, oy), (arm_x, arm_y) = corner
+                outer = (low.x if ox > 0 else high.x, low.y if oy > 0 else high.y)
+                spans = (high.x - low.x, high.y - low.y)
+
+                def rescale(distance, current, span):
+                    # Piecewise linear across the side: the arm takes the wanted thickness, the rest fills the span.
+                    if distance <= current:
+                        return distance * wanted / current
+                    return wanted + (distance - current) * (span - wanted) / (span - current)
+                for vertex in obj.data.vertices:
+                    vertex.co.x = outer[0] + ox * rescale(abs(vertex.co.x - outer[0]), arm_x, spans[0])
+                    vertex.co.y = outer[1] + oy * rescale(abs(vertex.co.y - outer[1]), arm_y, spans[1])
+                obj.data.update()
+                print(f"Corner arms {arm_x:.3f} and {arm_y:.3f} set to {wanted:g}")
 
 
 # -------------------------------------------------

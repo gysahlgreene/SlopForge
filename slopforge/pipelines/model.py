@@ -1093,7 +1093,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
-                      target_size=asset.get("target_size"), pivot=asset.get("pivot"))
+                      target_size=asset.get("target_size"), pivot=asset.get("pivot"),
+                      arm_thickness=asset.get("arm_thickness"))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
                                    real_scale=bool(asset.get("target_size")))
@@ -1200,7 +1201,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
-                  pivot=asset.get("pivot"), kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
+                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
+                  kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
                   kit_tile_size=kit[1] if kit else None)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
@@ -1346,7 +1348,7 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot") if asset.get(key)}
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness") if asset.get(key)}
 
 
 CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}

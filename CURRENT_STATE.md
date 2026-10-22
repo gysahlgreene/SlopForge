@@ -577,3 +577,22 @@ Recipe resume kept regenerating architecture modules (2026-10-22, M2).
   pipeline, with only the image backend faked. Resume generates nothing new and reuses both. Before the fix it
   regenerated the architecture child's six concepts.
 - **Not verified live:** a kit resume on the H100.
+
+Kit joints: declared wall thickness and corner arm thickness (2026-10-22, issue #90).
+- **Cause:** thickness was a free axis, so it followed each concept. Generated stone walls measured 0.74–0.88 m and
+  corner arms 0.98–1.16 m, and in `corner_joint` the corner stepped out past the walls.
+- **Change:**
+  - Walls and doorways declare their thickness through `target_size`, as `[3, 0.75, 3]`.
+  - A corner declares `arm_thickness`. Blender finds its open side and measures each arm away from the joint. It
+    then rescales piecewise across the arms only, so the outer bounds stay exact.
+  - Inspection records `arm_thickness`, and `environment-check` compares it with the declared value.
+  - The stone kit's layouts put walls inside the cell edges with their outer faces on them, like the corner's arms.
+    The courtyard is now closed by four auto-turned corners.
+- **Live (fresh run, H100):**
+  - corner arms measured 1.09 and 1.12 m, set to 0.75 and re-measured at 0.750 and 0.749;
+  - the walls and doorway came out at exactly 0.75 m;
+  - `environment-check` passed, and both scenes built with no errors or seam gaps. The corner joint is flush.
+- **Tests:**
+  - recipe validation and the flags reaching Blender;
+  - `environment-check` for arm thickness;
+  - an opt-in Blender test: an L with 1.2 m arms comes out with 0.75 m arms inside an unchanged 3 × 3 × 3 m box.

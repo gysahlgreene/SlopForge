@@ -100,6 +100,13 @@ def _validate_kit_constraints(definition, child_ids):
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
         if rule.get("footprint") not in (None, "corner"):
             raise ValueError(f"kit_constraints.modules.{child_id}.footprint must be corner (an L that opens one side)")
+        arm = rule.get("arm_thickness")
+        if arm is not None:
+            sides = [value for value in (rule.get("target_size") or [None, None])[:2] if value is not None]
+            if (rule.get("footprint") != "corner" or not isinstance(arm, (int, float)) or isinstance(arm, bool)
+                    or not math.isfinite(arm) or arm <= 0 or (sides and arm >= min(sides) / 2)):
+                raise ValueError(f"kit_constraints.modules.{child_id}.arm_thickness needs footprint: corner and a "
+                                 "positive thickness under half the corner's side")
         target = rule.get("target_size")
         if target is not None and (not isinstance(target, list) or len(target) != 3
                                    or all(value is None for value in target)
@@ -711,6 +718,8 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
             asset["pivot"] = pivot
         if rule.get("footprint"):
             asset["footprint"] = rule["footprint"]
+        if rule.get("arm_thickness"):
+            asset["arm_thickness"] = rule["arm_thickness"]
         material = constraints.get("material")
         if material and child["id"] in constraints.get("modules", {}) and asset_types[child["type"]].get("pipeline") == "model":
             # Every declared module takes its base colour from the kit's texture child once that is approved.

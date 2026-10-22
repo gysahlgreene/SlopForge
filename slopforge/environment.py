@@ -77,6 +77,12 @@ def validate_environment_kit(recipe_asset, manifest):
         quadrants = measured.get("footprint_quadrants")
         if module_rules.get(child_id, {}).get("footprint") == "corner" and quadrants and min(quadrants) > 0.15:
             errors.append("the corner module has no open side: its footprint fills every quarter")
+        wanted = module_rules.get(child_id, {}).get("arm_thickness")
+        arms = measured.get("arm_thickness")
+        tolerance = module_rules.get(child_id, {}).get("snap_tolerance", snap_tolerance)
+        if wanted is not None and (not arms or any(abs(arm - wanted) > tolerance for arm in arms)):
+            errors.append(f"corner arms measure {arms} against the declared {wanted:g} m: walls will not continue "
+                          "them flush")
         objects = measured.get("objects") or []
         if objects:
             pivot = module_rules.get(child_id, {}).get("pivot", constraints.get("pivot", "center"))

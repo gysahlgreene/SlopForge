@@ -517,6 +517,43 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             self.assertLess(quadrants[0], 0.2)
             self.assertTrue(all(value > 0.3 for value in quadrants[1:]), quadrants)  # arms 0.2 wide: 0.375 and 0.61
 
+    def test_corner_arms_are_brought_to_the_declared_thickness_inside_unchanged_bounds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb = root / "corner.glb"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            # An L with thick arms (0.4 of its 1 m side); its open quarter is +X+Y.
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for loc, scale in (((-0.3, 0, 0.5), (0.4, 1.0, 1.0)), ((0, -0.3, 0.5), (1.0, 0.4, 1.0))):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+    bpy.context.object.scale = scale
+bpy.ops.object.select_all(action='SELECT')
+bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
+bpy.ops.object.join()
+bpy.ops.object.transform_apply(location=True, scale=True)
+bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.subdivide(number_cuts=8); bpy.ops.object.mode_set(mode='OBJECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            blend, report = root / "corner.blend", root / "corner.json"
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "corner.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "20000", "--surface-source", str(maps[0]),
+                            "--target-size", "3,3,3", "--arm-thickness", "0.75"], check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(blend), str(report), "20000", "--real-scale"],
+                           check=True, capture_output=True, text=True)
+            measured = json.loads(report.read_text())["measured"]
+        self.assertEqual([round(value, 2) for value in measured["dimensions"]], [3.0, 3.0, 3.0])
+        # Before: arms 1.2 m thick (0.4 of 3 m). After: the declared 0.75 m.
+        for thickness in measured["arm_thickness"]:
+            self.assertAlmostEqual(thickness, 0.75, delta=0.05)
+
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderLocalRepairTests(unittest.TestCase):
