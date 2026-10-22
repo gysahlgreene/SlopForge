@@ -479,7 +479,9 @@ avoid: [environment]
         self.record["materials"] = [{"region": "lens", "class": "emissive", "color": "#e0a030",
                                      "description": "amber glass"}]
         calls = []
-        with self.assertRaisesRegex(StageFailure, "lens"):
+        # A mesh-aware workflow checks for Blender first; CI has none, and this test is about the emitter check.
+        with patch("slopforge.pipelines.model.blender_executable", return_value="blender"), \
+                self.assertRaisesRegex(StageFailure, "lens"):
             self._approve(lambda *_args, **_kwargs: calls.append(1))  # the harness cutout is plain grey
         self.assertEqual(calls, [])
         execution = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])[
