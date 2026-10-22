@@ -445,3 +445,16 @@ Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Live check (H100):** a pending job deleted through ComfyUI's queue API was reported lost in 2.3 s, while a running job checked every 2 s completed normally.
 - **Not verified live:** an actual service restart, and a dropped download.
 - **Follow-up (2026-10-22):** four glass-experiment runs lost finished outputs when the login hold expired and ComfyUI restarted during their downloads, because five retries lasted only 15 s. Downloads now retry a dropped connection for up to 2 minutes, with backoff capped at 30 s; a test checks that the window outlasts 60 s and ends by 120 s.
+
+Recipe resume kept regenerating architecture modules (2026-10-22, M2).
+- **Cause:** concept generation started an execution record (lineage) only for the `prop` type. The model
+  pipeline already built identity inputs for every 3D type, but they were dropped. On `recipe resume`, every
+  `architecture` child's reuse check failed with "candidate execution identity is unknown". The resume then
+  generated new concepts for modules already approved for 3D. This is what the 2026-10-18 stone ruin kit's
+  resume did, against `docs/ENVIRONMENT-KITS.md`.
+- **Change:** concepts get lineage whenever the pipeline supplies identity inputs, which it does for every 3D
+  type.
+- **Regression test:** a recipe with an architecture child and a prop child runs through the real concept
+  pipeline, with only the image backend faked. Resume generates nothing new and reuses both. Before the fix it
+  regenerated the architecture child's six concepts.
+- **Not verified live:** a kit resume on the H100.

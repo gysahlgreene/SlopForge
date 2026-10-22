@@ -16,7 +16,7 @@ from .validation import validate_image
 from .failures import StageFailure, failure_record
 
 
-def _record_prop_downstream_not_run(execution, failure):
+def _record_downstream_not_run(execution, failure):
     names = ("conditioning_preparation", "mesh_workflow_execution", "material_generation",
              "material_map_acquisition", "material_assembly_export", "final_publication")
     execution["blocked_stages"] = [
@@ -55,8 +55,9 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
     asset = manifest["assets"][key]
     seeds = [secrets.randbits(32) for _ in range(count)]
     execution = None
-    if asset_type.get("name") == "prop":
-        basis = dict(identity_inputs or {})
+    # Every 3D type's concepts get lineage, so recipe resume can prove an approved module's concepts unchanged.
+    if identity_inputs is not None:
+        basis = dict(identity_inputs)
         basis["candidate_attempts"] = [{"seed": seeds[index],
                                         "variation": variations[index] if variations is not None else None}
                                        for index in range(count)]
@@ -145,8 +146,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
         save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         if interrupted:
             if execution:
-                if asset_type.get("name") == "prop":
-                    _record_prop_downstream_not_run(execution, failure)
+                _record_downstream_not_run(execution, failure)
                 finish_execution(execution, "failed", failure=failure)
                 save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
             raise interrupted
@@ -162,8 +162,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                            failure_record(RuntimeError("No valid candidates were generated"),
                                           stage="concept_generation", attempt=1,
                                           operation="candidate_generation"))
-            if asset_type.get("name") == "prop":
-                _record_prop_downstream_not_run(execution, failure)
+            _record_downstream_not_run(execution, failure)
             finish_execution(execution, "failed", failure=failure)
             save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         raise RuntimeError(f"No valid candidates generated for {name}; see manifest candidate errors")
