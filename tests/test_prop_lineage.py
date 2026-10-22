@@ -480,6 +480,52 @@ avoid: [environment]
             "assets"]["prop:relay"]["executions"][-1]["failure"]
         self.assertEqual((failure["category"], failure["operation"]), ("configuration", "kit_material_preflight"))
 
+    def _guided_concepts(self, guide, rendered, calls, **options):
+        def backend(_root, _config, workflow, _prompt, destination, _prefix, _seed, metadata, **kwargs):
+            calls.append((Path(workflow).name, kwargs.get("conditioning")))
+            Image.new("RGB", (512, 512), "teal").save(destination)
+            metadata.write_text(json.dumps({"workflow": "image.json"}))
+
+        def render(_root, _config, destination, shape, ratio, width, height):
+            rendered.append((shape, ratio, width, height))
+            Image.new("L", (width, height), int(ratio * 100)).save(destination)
+        with patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend), \
+                patch("slopforge.pipelines.model._render_shape_guide", side_effect=render):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "stump", "Short stump", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A short stump", shape_guide=guide,
+                                   **options)
+        return self.record["executions"][-1]
+
+    def _configure_guided_workflow(self):
+        for pipeline in (self.config["asset_pipeline"], self.config["_quality_base_pipeline"]):
+            pipeline["workflows"]["guided_image"] = "image_character_pose_api.json"
+
+    def test_shape_guide_routes_the_concept_through_the_guided_graph_and_joins_its_identity(self):
+        self._configure_guided_workflow()
+        rendered, calls = [], []
+        half = self._guided_concepts(("cylinder", 0.5), rendered, calls, aspect="landscape")
+        three_quarters = self._guided_concepts(("cylinder", 0.75), rendered, calls, aspect="landscape")
+        # The guide is rendered for the concept canvas the aspect selects.
+        self.assertEqual(rendered, [("cylinder", 0.5, 1152, 896), ("cylinder", 0.75, 1152, 896)])
+        workflow, conditioning = calls[0]
+        self.assertEqual(workflow, "image_character_pose_api.json")
+        guide = conditioning["references"][0]
+        self.assertEqual((guide["category"], guide["strength"]), ("shape_guide", 0.65))
+        self.assertEqual(conditioning["workflow_inputs"][0],
+                         {"image": {"node": "pose_image", "input": "image"},
+                          "strength": {"node": "pose_control", "input": "strength"}})
+        self.assertEqual(half["identity_inputs"]["workflow"]["identifier"], "image_character_pose_api.json")
+        self.assertNotEqual(half["identity_sha256"], three_quarters["identity_sha256"])
+
+    def test_shape_guide_needs_the_guided_workflow_and_refuses_character_concepts(self):
+        with self.assertRaisesRegex(ValueError, "guided_image"):
+            self._guided_concepts(("box", 1.25), [], [])
+        self._configure_guided_workflow()
+        self.asset_type = {**self.asset_type, "prompt_mode": "character"}
+        with self.assertRaisesRegex(ValueError, "shape guide"):
+            self._guided_concepts(("box", 1.25), [], [])
+
     def test_concept_aspect_is_refused_for_character_concepts(self):
         with self.assertRaisesRegex(ValueError, "aspect"):
             generate_prop_concepts(self.root, self.config, {**self.asset_type, "prompt_mode": "character"}, self.style,

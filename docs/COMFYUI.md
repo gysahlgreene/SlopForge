@@ -112,7 +112,9 @@ The legacy Hunyuan3D v2 graph is assembled by `processing/comfy_generate_3d.py` 
 
 TRELLIS.2 profiles use the models from [Comfy-Org TRELLIS.2](https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main): `diffusion_models/trellis_2_int8_convrot.safetensors` or `diffusion_models/trellis_2_bf16.safetensors`, `clip_vision/dino_v3_vit_l.safetensors`, and both `vae/trellis_2_{shape,texture}_vae_bf16.safetensors`. Check upstream terms and model availability before downloading.
 
-H100 profiles generate character concepts with `image_character_pose_api.json` (`workflows.character_image`): the Z-Image graph above plus `models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors` from [alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) (Apache-2.0; the sidecar records its SHA-256). It needs ComfyUI's `ModelPatchLoader` and `ZImageFunControlnet` nodes (present in 0.37.0).
+H100 profiles generate character concepts with `image_character_pose_api.json` (`workflows.character_image`): the Z-Image graph above plus `models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union-2.1-2602-8steps.safetensors` from [alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) (Apache-2.0; the sidecar records its SHA-256). It needs ComfyUI's `ModelPatchLoader` and `ZImageFunControlnet` nodes (present in 0.37.0). The same graph is
+`workflows.guided_image`, which a prop concept uses with `generate --shape-guide`; the ControlNet reads that guide
+as depth.
 
 The H100 final Pixal3D graph uses `diffusion_models/pixal3d_bf16.safetensors`, `clip_vision/dino_v3_L_naf_fp32.safetensors`, and the TRELLIS.2 shape and texture VAEs. The Pixal3D and DINO files are from [Comfy-Org/Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D/tree/main); the workflow sidecar records verified SHA-256 hashes for all four installed files.
 

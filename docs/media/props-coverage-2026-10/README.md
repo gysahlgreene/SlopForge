@@ -16,8 +16,9 @@ qualification protocol: there is one run per brief and no record committed in ad
 | F2 | Organic: tree stump, with this change | Pass, first mesh attempt, through Unity | Concept fit 0.95; UV area 0.084 |
 | G1 | Glass part: brass lantern globe | Pass, first mesh attempt, through Unity | 6.7% glass found; the globe reads as frosted glass |
 
-**Concept stage:** every stump concept (12 of 12) was taller than wide, although the brief and the landscape
-canvas asked for wider than tall. The lantern globes were drawn see-through despite the solid wording.
+**Concept stage:** every stump concept's trunk (12 of 12) was taller than its diameter, although the brief and
+the landscape canvas asked for wider than tall. The outlines measured near square only because the roots and
+mushrooms widen them. The [concept proportion test](../concept-proportion-2026-10/README.md) followed this up. The lantern globes were drawn see-through despite the solid wording.
 
 ## What changed as a result
 

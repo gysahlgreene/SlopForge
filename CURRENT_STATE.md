@@ -436,8 +436,43 @@ Prop coverage exploration (2026-10-22; [evidence](docs/media/props-coverage-2026
 - **Re-run:** with these changes the stump passed on its first seed (fit 0.95) and imported into Unity.
 - **Open:**
   - TRELLIS copied the canister's front strip onto its unseen sides as darker blue panels (#63). The declared strip itself was found (0.67%) and glows in Unity;
-  - every stump concept was taller than wide against the brief;
+  - every stump concept's trunk was taller than wide against the brief (followed up by the shape guide below);
   - lantern globes are drawn see-through despite the solid wording.
+
+Concept proportions and the shape guide (2026-10-22, issue #65; [evidence](docs/media/concept-proportion-2026-10/README.md)).
+- **Cause:** the concept model's prior for a tree stump outweighs the brief. On fixed seeds no wording made the
+  trunk wider than tall: the brief as written, a square canvas, a stated ratio, "cut low", "very thick" and "a wide,
+  low drum" gave 0–2 of 6 each. The original 12 concepts measured near square only because the roots and mushrooms
+  widen the outline; their trunks measured 1.27–2.06 against 1.19 for an as-tall-as-wide cylinder.
+- **Change:** `generate --shape-guide cylinder|box:<height/width>`.
+  - It renders a depth guide of that envelope with Blender (`blender/shape_guide.py`), on the canvas `--aspect`
+    sets.
+  - It routes the concept through `workflows.guided_image`: the installed Z-Image ControlNet Union graph the
+    character concepts use, now set on the h100 profiles.
+  - The strength is 0.65. The guide's hash and strength join the concept identity.
+  - The guide is rendered without dither or metadata, so a repeated request gives the same bytes.
+  - It is opt-in, for props only.
+- **Evidence (H100, fixed seeds):**
+  - At 0.65, 6 of 6 trunks were wider than tall on the test seeds, and 6 of 6 on fresh seeds, with the roots,
+    moss and mushrooms kept.
+  - At 0.5, 2 of 6. At 0.8, 6 of 6, but the roots were lost.
+  - A pot kept its handles, lid knob and feet under a guide. A crate kept its open top and straps but turned to the
+    guide's angle.
+- **Live run:** through the CLI, `--shape-guide cylinder:0.5` gave six squat concepts, two with mushrooms on the
+  top. The approved one passed on the first mesh attempt (fit 0.92) and imported into Unity. Its mesh measures
+  whole h/w 0.55 and trunk 0.79, against 1.01 and 1.67 for the unguided coverage stump.
+- **Tests:**
+  - the guide's routing, reference, slot and identity;
+  - an actionable error without `guided_image`;
+  - refusal for character concepts;
+  - CLI parsing and refusal for image types;
+  - opt-in Blender tests (skipped without Blender) of the guide's proportion, background and byte stability.
+- **Not verified:**
+  - more than one brief in depth;
+  - more than one guided run to Unity;
+  - visual approval.
+  The moss came out yellower on the mesh than in the concept, which is the known gap that small-part colour is not
+  checked.
 
 Lost ComfyUI jobs and download retries (2026-10-21, issue #76).
 - **Change:** `wait_for_completion` asks `/queue` straight after a dropped connection recovers, and otherwise every 30 s. A job that is neither queued, running nor in history (read again, to cover a job that finishes in between) stops as an `environment` failure marked `remote_lost` and `remote_terminal`, so `--resume` can queue it again. `download_output` retries transport failures up to five times with backoff, and does not retry HTTP errors.
@@ -529,3 +564,16 @@ Shared kit material and corner footprint check (2026-10-22, M2; [evidence](docs/
   - visual approval, Play mode and lightmapping;
   - more than two runs of one kit.
   Module thickness is still undeclared, so the corner joint steps out.
+
+Recipe resume kept regenerating architecture modules (2026-10-22, M2).
+- **Cause:** concept generation started an execution record (lineage) only for the `prop` type. The model
+  pipeline already built identity inputs for every 3D type, but they were dropped. On `recipe resume`, every
+  `architecture` child's reuse check failed with "candidate execution identity is unknown". The resume then
+  generated new concepts for modules already approved for 3D. This is what the 2026-10-18 stone ruin kit's
+  resume did, against `docs/ENVIRONMENT-KITS.md`.
+- **Change:** concepts get lineage whenever the pipeline supplies identity inputs, which it does for every 3D
+  type.
+- **Regression test:** a recipe with an architecture child and a prop child runs through the real concept
+  pipeline, with only the image backend faked. Resume generates nothing new and reuses both. Before the fix it
+  regenerated the architecture child's six concepts.
+- **Not verified live:** a kit resume on the H100.
