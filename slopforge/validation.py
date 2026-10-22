@@ -316,8 +316,7 @@ def apply_module_stretch(validation, stretch, maximum):
     validation.setdefault("limits", {})["max_axis_stretch"] = maximum
     if stretch > maximum:
         validation["errors"] = [*validation.get("errors", []),
-            f"the module was stretched {stretch:g} times along one axis to reach its declared size (limit {maximum:g}): "
-            "approve a concept closer to the module's proportions"]
+            f"the module was stretched {stretch:g} times along one axis to reach its declared size (limit {maximum:g})"]
         validation["failure_codes"] = [*validation.get("failure_codes", []), "module_stretch"]
         validation["status"] = "failed"
     return validation

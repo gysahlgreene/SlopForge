@@ -966,8 +966,11 @@ class PropComponentBudgetTests(unittest.TestCase):
         fitted = apply_module_stretch(_quality_report(component_count=1), 1.11, 1.3)
         unlimited = apply_module_stretch(_quality_report(component_count=1), 1.45, None)
         self.assertIn("module_stretch", squeezed["failure_codes"])
-        self.assertIn("approve a concept", squeezed["errors"][-1])
+        self.assertIn("stretched 1.45 times", squeezed["errors"][-1])
         self.assertFalse(candidate_quality_rejection(squeezed))
+        from slopforge.pipelines.model import _validation_failure
+        stop = _validation_failure(squeezed, stage="material_assembly_export", attempt=1)
+        self.assertEqual(stop["remedy"], "approve a concept closer to the module's proportions")
         self.assertEqual((fitted["status"], fitted["measured"]["axis_stretch"]), ("passed", 1.11))
         self.assertEqual((unlimited["status"], unlimited["failure_codes"]), ("passed", []))  # no limit declared
 

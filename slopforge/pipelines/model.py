@@ -858,13 +858,18 @@ def _validation_failure(validation, *, stage, attempt):
     if not isinstance(validation, dict) or validation.get("status") != "failed":
         return None
     retryable = candidate_quality_rejection(validation)
+    if retryable:
+        remedy = "generate another mesh candidate within the configured budget"
+    elif validation.get("failure_codes") == ["module_stretch"]:
+        remedy = "approve a concept closer to the module's proportions"  # the stretch comes from the concept
+    else:
+        remedy = "inspect the validation report and correct the deterministic failure"
     failure = StageFailure(
         "candidate_quality" if retryable else "processing_validation",
         "Candidate failed validation" + (f" ({', '.join(validation['failure_codes'])})"
                                          if validation.get("failure_codes") else ""),
         operation="validate_model_outputs",
-        remedy=("generate another mesh candidate within the configured budget" if retryable else
-                "inspect the validation report and correct the deterministic failure"),
+        remedy=remedy,
         stage=stage,
         evidence={"validation": validation},
     )
@@ -2615,11 +2620,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 stage="material_generation", attempt=max(attempted, 1), operation="model_approval")
             retry_state = "yes" if last_failure["retryable"] else "no"
             details = "; ".join(attempt_errors + failures) or last_failure["message"]
+            message = last_failure["message"].removesuffix(f" — remedy: {last_failure['remedy']}")  # said once, last
             raise ValueError(
                 f"No qualified model after {attempted} attempts "
                 f"(stage={last_failure['stage']}, category={last_failure['category']}, "
                 f"retryable={retry_state}, retry_budget={attempts}): "
-                f"message={last_failure['message']}; {details}; remedy: {last_failure['remedy']}")
+                f"message={message}; {details}; remedy: {last_failure['remedy']}")
         first = viable[0]
         asset["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
         asset["generator"] = {"workflow": {"concept": concept_workflow, "mesh": mesh_info.get("workflow"),

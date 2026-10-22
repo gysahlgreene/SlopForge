@@ -567,7 +567,7 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("stage=material_assembly_export", str(failure.exception))
         self.assertIn("message=material_assembly_export", str(failure.exception))
         self.assertIn("Candidate failed validation", str(failure.exception))
-        self.assertIn("remedy:", str(failure.exception))
+        self.assertEqual(str(failure.exception).count("remedy:"), 1)  # M2-v1 S1 printed it twice
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["validation"]["status"], "failed")
         self.assertTrue(any("Pipeline stopped: No qualified model after 1 attempts" in error
