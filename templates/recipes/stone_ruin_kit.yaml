@@ -15,8 +15,8 @@ version: 1
 description: A modular weathered-stone ruin kit with floor, wall, doorway, corner and column modules.
 kit_constraints:
   grid_size: 1.0
-  snap_tolerance: 0.1
-  pivot_tolerance: 0.15
+  snap_tolerance: 0.05
+  pivot_tolerance: 0.05
   max_dimension: 8.0
   pivot: bottom_center
   material:
