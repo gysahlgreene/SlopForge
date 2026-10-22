@@ -435,7 +435,7 @@ Prop coverage exploration (2026-10-22; [evidence](docs/media/props-coverage-2026
 - **Shattered-mesh check replaced:** with that padding, UV area no longer separated shattered bottles (0.11–0.12) from whole stumps (0.10–0.19), so props now retry on a concept silhouette fit under 0.8 (`concept_fit`; shattered 0.71–0.75, whole 0.86–0.99) instead of UV area. The owner accepted 0.8 on 2026-10-22.
 - **Re-run:** with these changes the stump passed on its first seed (fit 0.95) and imported into Unity.
 - **Open:**
-  - the canister's cyan strip baked darker and was only partly found (0.67%);
+  - TRELLIS copied the canister's front strip onto its unseen sides as darker blue panels (#63). The declared strip itself was found (0.67%) and glows in Unity;
   - every stump concept was taller than wide against the brief;
   - lantern globes are drawn see-through despite the solid wording.
 
