@@ -6,7 +6,8 @@ Follow the [product contract and document precedence](docs/PRODUCT_CONTRACT.md),
 [pipeline contract](docs/PIPELINE_CONTRACT.md),
 [quality contract](docs/QUALITY_CONTRACT.md), and [roadmap](ROADMAP.md).
 M0 core reliability was closed by the owner on 2026-10-21 ([exit record](docs/M0-EXIT-RECORD.md));
-M1 Props is the active milestone. Historical
+M1 Props reached Provisional for static props; on 2026-10-22 the owner moved the focus to M2 Modular environments,
+now the active milestone ([epic #89](https://github.com/gysahlgreene/SlopForge/issues/89)). Historical
 humanoid work is bounded evidence, not the next production milestone.
 
 ## M0 package tracking
