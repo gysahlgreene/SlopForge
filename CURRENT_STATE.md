@@ -646,3 +646,25 @@ Standalone structures at real size, with concept checks (2026-10-22, issue #92; 
   - the architecture limits match the prop ones.
 - **Not verified:** a part limit for structures (#94). The bunker invented a second door, has a white patch, and
   its small hazard stripes faded unchecked.
+
+Kit protocol criterion M2-v1 closed with no status (2026-10-23; [evidence](docs/media/kits-provisional-2026-10/README.md)).
+- **Runs:** six at commit `d3d6c31`, two each of the stone, timber and sci-fi kits.
+  - K1 (stone) passed every criterion.
+  - T1 failed on corner arms (0.351/0.335 m against 0.4 m), a code bug.
+  - S1 stopped at the sci-fi wall's 1.49 stretch.
+  - K2, T2 and S2 lost a concept job that waited more than 600 s in the shared GPU queue. ComfyUI's history shows
+    all three succeeded after 2–13 s of execution.
+- **Fixes, each with a regression test:**
+  - the corner arm rescale reads the bounds after bottom-centring;
+  - queue time no longer counts toward a ComfyUI job's timeout (bounded at 3 h);
+  - a stretch stop states its own remedy once;
+  - the stone kit checks at the record's 0.05 m;
+  - a kit material can declare roughness (stone 0.75), after K1's floor came out at 0.22 beside walls at 0.67;
+  - the sci-fi wall renders on a portrait canvas.
+- **Sci-fi wall test:** on S1's six seeds, through the h100 `final` shape stage, square-canvas walls reconstructed
+  1.27–1.64 times wider than tall (one within 1.3) and portrait ones 1.15–1.28 (all six). S1's own wall reproduced
+  its run value of 1.49. Concept outlines did not predict mesh proportions.
+- **Next:** criterion [M2-v2](docs/media/kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md) reruns all six.
+- **Not verified:** the kit roughness and the arm fix in a live kit run; the owner's visual review. The timber
+  kit's outer wall faces come out as bare timber, with its plaster only on the inside, and its finish (0.50–0.59) is
+  as generated.

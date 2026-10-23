@@ -56,8 +56,8 @@ module before its kit texture stops before any inference and names the texture t
   its mean, softened to 60%.
 
 With `roughness`, each module's roughness map is also moved to that mean, keeping its own variation softened to
-60%. In M2-v1 run K1 (2026-10-23), TRELLIS decoded the flagstone floor at 0.22 beside walls at 0.67, so Unity
-rendered a glossy floor that reflected the blue sky.
+60%, and UV padding takes the declared value. In M2-v1 run K1 (2026-10-23), TRELLIS decoded the flagstone floor at
+0.22 beside walls at 0.67, so Unity rendered a glossy floor that reflected the blue sky.
 
 So every module gets the swatch's hue and, when declared, the kit's finish. Each one keeps its block-to-block light
 and dark, and its own normal and metallic maps. The seamless swatch's hash, the tile size and the roughness join the
@@ -116,6 +116,13 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
 - **No retry:** another mesh seed from the same concept would stretch again, so approval stops and asks for a
   concept closer to the module's proportions. A doorway concept on 2026-10-22 stretched 1.45 to fit 3 × 3 m.
 - **In `environment-check`:** the limit is applied too.
+- **The canvas:** a child's `aspect` (`square`, `portrait` or `landscape`) sets its concept canvas. Corners use
+  landscape. Sci-fi walls use portrait: on M2-v1 run S1's six seeds, square-canvas walls reconstructed 1.27–1.64
+  times wider than tall and portrait ones 1.15–1.28. Stone and timber walls stayed within 1.15 on square canvases.
+  - **Concept outlines don't predict it:** S1's wall concept outline was 1.09 tall for its width, but its mesh was
+    1.49 times wider than tall.
+  - **Measure the mesh instead:** compare a change on fixed seeds through TRELLIS's detailed shape, built from the
+    RGBA cut-out the pipeline sends ([evidence](media/kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md)).
 
 **Budgets:**
 - **Declaring them:** a module rule can declare `face_budget`, the faces it is decimated to on the GPU and in

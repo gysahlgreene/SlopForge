@@ -58,7 +58,8 @@ Each fix has a regression test. They are on branch `fix/m2-v1-findings`.
    mean, keeping 60% of its own variation. The stone kit declares 0.75.
 6. **Sci-fi wall proportions (S1).** All six sci-fi wall concepts on the square canvas came out wider than tall.
    Their outlines did not show it: the selected one measured 1.09 tall for its width, but its mesh was 1.49 times
-   wider than tall. The check is on mesh proportions; see the M2-v2 record for the change tested.
+   wider than tall. On S1's six seeds, a portrait canvas brought all six walls within the limit; see the
+   [M2-v2 record](../kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md).
 
 ## Measured values
 
