@@ -182,7 +182,10 @@ def flythrough(scene, terrain):
         (px, ph, pz), (lx, lh, lz) = _catmull_rom(positions, k, t), _catmull_rom(targets, k, t)
         ground = float(terrain.ground(px, pz))
         (wx, wz), (tx, tz) = terrain.world(px, pz), terrain.world(lx, lz)
-        out.append({"from": [wx, ground + max(ph, 1.2), wz], "to": [tx, float(terrain.ground(lx, lz)) + lh, tz]})
+        # Every frame names its field of view: without one, Unity rendered the 2026-10-23 live flythrough at 0 degrees,
+        # 360 frames of flat colour.
+        out.append({"name": f"frame_{f:04d}", "fov": fly.get("fov", 50), "from": [wx, ground + max(ph, 1.2), wz],
+                    "to": [tx, float(terrain.ground(lx, lz)) + lh, tz]})
     return out
 
 

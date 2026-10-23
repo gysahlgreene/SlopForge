@@ -54,8 +54,8 @@ kit_constraints:
       - null
       pivot: bottom_center
     ruin_arch:
-      target_size:
-      - null
+      target_size:                         # a declared width turns the long side onto x, so the layout's turn holds
+      - 3.8
       - null
       - 3.6
       pivot: bottom_center
@@ -392,7 +392,7 @@ scene:
         - {model: ruin_column, at: [-2.6, -4.6], turn: 10}
         - {model: ruin_column, at: [0.6, -4.6], turn: 100}
         - {model: ruin_drum, at: [3.4, -5.0], turn: 160}
-        - {model: ruin_arch, at: [6.3, 0], turn: 0}
+        - {model: ruin_arch, at: [6.3, 0], turn: 90}   # faces the arch camera to the east
       floor:                               # floor tiles, their tops just above the grass; two cells are lost
         model: ruin_floor
         cells: [[-3, 0], [-3, 3], [0, -3], [0, 0], [0, 3], [3, -3], [3, 0]]

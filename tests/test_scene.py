@@ -91,6 +91,7 @@ class ScenePlanTests(unittest.TestCase):
         self.assertAlmostEqual(crate["y"], planned["floor_y"] + 0.05)
         frames = planner.flythrough(self.scene, self.terrain)
         self.assertEqual(len(frames), 360)
+        self.assertTrue(all(frame["fov"] == 50 for frame in frames))  # a frame without one rendered at 0 degrees
         for frame in frames:
             x, y, z = frame["from"]
             self.assertGreaterEqual(y, float(self.terrain.ground(x - off, z - off)) + 1.19)
@@ -157,3 +158,22 @@ class SceneRenderTests(unittest.TestCase):
             self.assertTrue((root / "Assets/Art/Generated/Scenes/run/blade_palette.png").is_file())
             self.assertIn("ffmpeg", " ".join(report.get("warnings", [])))
             self.assertFalse(list((root / "Assets/Editor").glob("*.cs")))  # the editor script is removed afterwards
+            self.assertEqual(report["scene_source"], "recipe run")
+
+            # A layout change in the project's recipe file reaches the render without regenerating the children.
+            changed = copy.deepcopy(definition)
+            changed["scene"]["structures"][0]["pieces"][0]["turn"] = 90
+            (root / "ai/recipes").mkdir(parents=True)
+            (root / "ai/recipes/test.yaml").write_text(yaml.safe_dump(changed))
+            manifest["assets"]["recipe:run"]["recipe_instance"]["definition_path"] = "ai/recipes/test.yaml"
+            with patch.object(unity_natural_scene, "make_vegetation", side_effect=vegetation), \
+                    patch.object(unity_natural_scene, "unity_cli", return_value="unity"), \
+                    patch.object(unity_natural_scene.subprocess, "run", side_effect=unity), \
+                    patch.object(unity_natural_scene.shutil, "which", return_value=None):
+                again = unity_natural_scene.render_scene(root, config, manifest, "run")
+            self.assertEqual(again["scene_source"], "ai/recipes/test.yaml")
+            self.assertNotEqual(again["scene_sha256"], report["scene_sha256"])
+            changed["scene"]["structures"][0]["props"].append({"model": "anvil", "at": [0, 0], "height": 1})
+            (root / "ai/recipes/test.yaml").write_text(yaml.safe_dump(changed))
+            with self.assertRaisesRegex(ValueError, "anvil"):  # a file naming a child the run lacks stops early
+                unity_natural_scene.render_scene(root, config, manifest, "run")

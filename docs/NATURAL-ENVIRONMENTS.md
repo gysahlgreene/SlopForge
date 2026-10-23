@@ -111,6 +111,11 @@ ground. It holds:
 2. **In Unity** (`slopforge/unity_natural_scene.py`): it builds the terrain, materials, objects, cards and blades,
    sets the lighting, bakes the global illumination, reopens the scene so the baked data loads, and renders.
 
+**Changing the layout after the children exist:** `scene-render` reads the scene block from the project's recipe
+file (`ai/recipes/<recipe>.yaml`), not from the run's copy, so a turn, camera or light can change without
+regenerating anything. It checks the block against the run's children before building, and the report records
+`scene_source` and `scene_sha256`. Without the file, the run's own copy is used.
+
 **Outputs** go to `ai/assets/scenes/<run>/`: `stills/<name>.png` (1600 × 900), `frames/` (1280 × 720),
 `flythrough.mp4` and `flythrough.gif` when ffmpeg is installed, and `report.json`. The scene is saved at
 `<output>/Scenes/<run>.unity`, and the recipe run records a `scene.render` artifact.
@@ -128,6 +133,18 @@ ground. It holds:
 - **Turning a model's own transform dropped its FBX axis rotation** and laid cliff chunks on their sides. Every
   object gets an identity root, as kit prefabs do.
 - **Batch-mode renders don't draw terrain detail grass:** 296,000 painted tufts showed none. Grass is mesh geometry.
+- **A frame without a field of view renders at 0 degrees.** The first live flythrough was 360 frames of flat colour.
+  Every frame now carries the flythrough's `fov` (default 50).
+- **A module sized by height alone keeps whatever facing the reconstruction gave it.** The prototype's arch came out
+  long along y and the live run's along x, so the same `turn` showed it side-on. Declare a horizontal size for any
+  piece whose facing matters: the long side then turns onto x, and the layout's turn holds.
+- **TRELLIS sometimes textures a mesh mostly black,** even on the side the concept shows. The live cliff's view
+  from the concept's side had 0.48 of the concept's median lightness; the other 17 live models had 0.71–1.20. The
+  black is in TRELLIS's own texture, not the bake. The colour checks compare only hue and saturation, so it
+  published. Three lightness measures over 125 published models did not separate it from accepted timber modules,
+  whose dark beams on light plaster shift those measures, so there is no check yet. Next check: label those 125
+  concept-side views by eye and calibrate against the labels. Until then, review each 3D child's preview for black
+  patches before publishing it.
 
 **Measured:** a stills-only render of the full scene over the prototype's assets took 82 s, with 145 objects,
 2.0 million grass blades, 6,600 cover cards and a 34 s lighting bake.

@@ -56,8 +56,11 @@ out a wedge and the room had curved corners.
   - some of T2's plaster panels carry dark curved streaks;
   - K1's outer walls show dark gouges;
   - S1's pillars have green patches.
+  - S2's pillar is near-black where its concept is grey metal. TRELLIS's own texture is black (96% of its texels),
+    so this is a generation failure that no check catches yet. It was found on 2026-10-23, after the run, while
+    tracing a black cliff in the moorland scene; see [Natural environments](../../NATURAL-ENVIRONMENTS.md).
 
-  K2, T1 and S2, shown in the README, are the cleanest of each pair.
+  K2, T1 and S2, shown in the README, were judged the cleanest of each pair before S2's pillar was noticed.
 - **Sci-fi colours:** the corners are whiter than the grey walls. The kit has no shared material.
 - **Shadowed faces:** faces turned away from the light read blue-grey; the sky lights them.
 

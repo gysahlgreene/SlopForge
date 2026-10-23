@@ -1,6 +1,7 @@
 """Render a recipe's scene in Unity: plan it (``scene``), build the plants it names, then build, light, bake and render
 it with a generated editor script. Writes stills, flythrough frames and, with ffmpeg, an MP4 and a GIF."""
 import copy
+import hashlib
 import json
 import shutil
 import subprocess
@@ -10,6 +11,7 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import yaml
 from PIL import Image
 
 from . import scene as planner
@@ -61,11 +63,16 @@ def render_scene(root, config, manifest, run, *, frames=True):
     recipe_asset = manifest["assets"].get(asset_key("recipe", run))
     if not recipe_asset or "recipe_instance" not in recipe_asset:
         raise KeyError(f"No recipe run named {run!r}")
-    definition = recipe_asset["recipe_instance"]["definition"]
+    instance = recipe_asset["recipe_instance"]
+    # Layout, cameras and light come from the project's recipe file, so they can change after the children exist
+    # (2026-10-23: the arch's turn was wrong for its regenerated mesh); the run's own copy if the file is gone.
+    recipe_file = root / instance.get("definition_path", "")
+    from_file = bool(instance.get("definition_path")) and recipe_file.is_file()
+    definition = yaml.safe_load(recipe_file.read_text()) if from_file else instance["definition"]
     if "scene" not in definition:
         raise ValueError(f"Recipe {definition.get('id')!r} has no scene block")
     scene = copy.deepcopy(definition["scene"])
-    planner.validate_scene(scene, recipe_asset["recipe_instance"]["stages"].keys())
+    planner.validate_scene(scene, instance["stages"].keys())
     output_root = config["asset_pipeline"]["output_root"]
     generated = root / output_root / "Scenes" / run
     generated.mkdir(parents=True, exist_ok=True)
@@ -180,6 +187,8 @@ def render_scene(root, config, manifest, run, *, frames=True):
         report["video"] = (out_dir / "flythrough.mp4").relative_to(root).as_posix()
     elif flight:
         report.setdefault("warnings", []).append("ffmpeg is not installed: frames were written but not encoded")
+    report["scene_source"] = instance["definition_path"] if from_file else "recipe run"
+    report["scene_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True).encode()).hexdigest()
     report["planned"] = {"placements": len(placements), "cover": sum(len(g["items"]) for g in cover),
                          "structures": len(structures), "plants": sorted(plants)}
     (out_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
