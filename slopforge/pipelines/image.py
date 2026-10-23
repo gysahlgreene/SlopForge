@@ -1,3 +1,6 @@
+import copy
+import shutil
+import tempfile
 from pathlib import Path
 
 from ..backends.comfyui import generate_image
@@ -8,6 +11,7 @@ from ..provenance import file_sha256
 from ..config import workflow_node_inputs
 from ..style import build_prompt, style_identity
 from ..surface import make_cutout, make_tiling_material
+from ..validation import validate_image
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
@@ -51,12 +55,40 @@ def generate(project_root, config, asset_type, style, name, description, count, 
 
 
 def approve(project_root, config, asset_type, manifest, key, number, force=False):
-    result = approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
     processing = asset_type.get("processing")
-    if not processing or result["status"] == "failed":
-        return result
+    if not processing:
+        return approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
     root = Path(project_root).resolve()
-    asset = manifest["assets"][key]
+    snapshot = copy.deepcopy(manifest["assets"][key])
+    # Processing runs after the published image is replaced, so a failure puts back the files and the record the
+    # saved manifest still describes (2026-10-23 audit: a failed cut-out left an uncut image under the old record).
+    name = snapshot.get("outputs", {}).get("image")
+    published = [root / name, (root / name).with_suffix("")] if name else []  # the image and its tiling maps
+    with tempfile.TemporaryDirectory(prefix="slopforge-approve-") as backup:
+        saved = {}
+        for index, path in enumerate(published):
+            if path.exists():
+                saved[path] = Path(backup) / str(index)
+                (shutil.copytree if path.is_dir() else shutil.copy2)(path, saved[path])
+        try:
+            result = approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+            if result["status"] == "failed":
+                return result
+            return _process(root, config, asset_type, manifest["assets"][key], processing)
+        except BaseException:
+            image = manifest["assets"][key].get("outputs", {}).get("image")
+            for path in {*published, *((root / image, (root / image).with_suffix("")) if image else ())}:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+            for path, kept in saved.items():
+                (shutil.copytree if kept.is_dir() else shutil.copy2)(kept, path)
+            manifest["assets"][key] = snapshot
+            raise
+
+
+def _process(root, config, asset_type, asset, processing):
     image = root / asset["outputs"]["image"]
     if processing == "cutout":
         size = make_cutout(root, config, image, image)
@@ -68,4 +100,9 @@ def approve(project_root, config, asset_type, manifest, key, number, force=False
         asset["processing"] = {"kind": "tiling_material", **provenance}
     else:
         raise ValueError(f"Asset type {asset_type['name']} declares unknown processing {processing!r}")
-    return result
+    # Measure what is published now, not the image before processing.
+    asset["validation"] = validate_image(image, expected_format=asset_type.get("format", "PNG"),
+                                         require_alpha=bool(asset_type.get("alpha_required", False)),
+                                         report_path=image.relative_to(root))
+    asset["status"] = "ready" if asset["validation"]["status"] != "failed" else "failed"
+    return asset["validation"]

@@ -17,7 +17,8 @@ from PIL import Image
 from . import scene as planner
 from .manifest import asset_key
 from .unity_material import unity_cli
-from .vegetation import make_vegetation
+from .unity_scene import OPEN_SIDE_YAW
+from .vegetation import is_current, make_vegetation
 
 
 def _child(manifest, recipe_asset, child_id):
@@ -58,7 +59,10 @@ def blade_palette(basecolor, destination, columns=16, seed=3):
 
 
 def render_scene(root, config, manifest, run, *, frames=True):
-    """Plan and render the scene of recipe run ``run``; returns Unity's report with the written files."""
+    """Plan and render the scene of recipe run ``run``; returns Unity's report with the written files.
+
+    The render is built in ``scenes/<run>.partial`` and replaces ``scenes/<run>`` only when Unity finishes with no
+    errors; the render it replaces moves to ``scenes/<run>.previous``. A failed render stays in ``.partial``."""
     root = Path(root).resolve()
     recipe_asset = manifest["assets"].get(asset_key("recipe", run))
     if not recipe_asset or "recipe_instance" not in recipe_asset:
@@ -76,7 +80,8 @@ def render_scene(root, config, manifest, run, *, frames=True):
     output_root = config["asset_pipeline"]["output_root"]
     generated = root / output_root / "Scenes" / run
     generated.mkdir(parents=True, exist_ok=True)
-    out_dir = root / "ai/assets/scenes" / run
+    final_dir = root / "ai/assets/scenes" / run
+    out_dir = final_dir.with_name(f"{run}.partial")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     (out_dir / "stills").mkdir(parents=True)
@@ -85,10 +90,12 @@ def render_scene(root, config, manifest, run, *, frames=True):
     for plant, spec in scene.get("plants", {}).items():
         name = f"{run}_{plant}"
         record = manifest["assets"].get(asset_key("vegetation", name))
-        if not record or record.get("generator", {}).get("seed") != spec["seed"]:
-            record = make_vegetation(root, config, manifest, name, spec["species"], spec["height"], spec["seed"],
-                                     _child(manifest, recipe_asset, spec["bark"])["name"],
-                                     [_child(manifest, recipe_asset, f)["name"] for f in spec["foliage"]])
+        bark = _child(manifest, recipe_asset, spec["bark"])["name"]
+        foliage = [_child(manifest, recipe_asset, f)["name"] for f in spec["foliage"]]
+        if not record or not is_current(root, manifest, record, spec["species"], spec["height"], spec["seed"], bark,
+                                        foliage):
+            record = make_vegetation(root, config, manifest, name, spec["species"], spec["height"], spec["seed"], bark,
+                                     foliage)
         plants[plant] = record
 
     terrain = planner.Terrain(scene)
@@ -164,7 +171,7 @@ def render_scene(root, config, manifest, run, *, frames=True):
         editor.mkdir(parents=True, exist_ok=True)
         class_name = f"SlopForgeNaturalScene_{uuid.uuid4().hex}"
         script = editor / f"{class_name}.cs"
-        script.write_text(_SCRIPT.replace("CLASS_NAME", class_name)
+        script.write_text(_SCRIPT.replace("CLASS_NAME", class_name).replace("OPEN_SIDE_YAW\n", OPEN_SIDE_YAW)
                           .replace("REQUEST_PATH", json.dumps(str(scratch / "request.json"))))
         started = time.monotonic()
         try:
@@ -191,6 +198,18 @@ def render_scene(root, config, manifest, run, *, frames=True):
     report["scene_sha256"] = hashlib.sha256(json.dumps(scene, sort_keys=True).encode()).hexdigest()
     report["planned"] = {"placements": len(placements), "cover": sum(len(g["items"]) for g in cover),
                          "structures": len(structures), "plants": sorted(plants)}
+    if not report["errors"]:
+        previous = final_dir.with_name(f"{run}.previous")
+        if final_dir.exists():
+            if previous.exists():
+                shutil.rmtree(previous)
+            final_dir.rename(previous)
+        out_dir.rename(final_dir)
+        out_dir = final_dir
+    report["stills"] = [(out_dir / "stills" / Path(path).name).relative_to(root).as_posix() for path in report["stills"]]
+    if report.get("video"):
+        report["video"] = (out_dir / "flythrough.mp4").relative_to(root).as_posix()
+    report["report"] = (out_dir / "report.json").relative_to(root).as_posix()
     (out_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
@@ -229,6 +248,7 @@ public static class CLASS_NAME
     }
     [Serializable] public class Report { public string scene; public string[] stills; public int frames, objects, blades, cover; public float bake_seconds; public string[] errors; }
 
+OPEN_SIDE_YAW
     static Color C(float[] v) { return new Color(v[0], v[1], v[2]); }
     static float[] Floats(string path, int count)
     {
@@ -316,7 +336,6 @@ public static class CLASS_NAME
             AssetDatabase.CreateAsset(tl, gen + "layer_" + i + ".terrainlayer");
             terrainLayers.Add(tl);
         }
-        var prefabs = new Dictionary<string, GameObject>();
         foreach (var plant in request.plants)
         {
             Cutout(plant.leaves, 0.45f); NormalMap(plant.bark_normal);
@@ -378,22 +397,7 @@ public static class CLASS_NAME
             {
                 var go = Wrap(piece.fbx, new Vector3(piece.x, s.floor_y, piece.z), piece.yaw, 1f);
                 if (piece.auto)  // an L corner turns its open side toward the structure's centre, read from the mesh
-                {
-                    var b0 = Bounds(go); var counts = new int[4];
-                    foreach (var f in go.GetComponentsInChildren<MeshFilter>())
-                        foreach (var v in f.sharedMesh.vertices)
-                        { var q = f.transform.TransformPoint(v) - b0.center; counts[(q.x >= 0 ? 0 : 1) + (q.z >= 0 ? 0 : 2)]++; }
-                    var open = Array.IndexOf(counts, counts.Min());
-                    var opening = new Vector3(open % 2 == 0 ? 1f : -1f, 0f, open < 2 ? 1f : -1f);
-                    var wanted = new Vector3(s.x - piece.x, 0f, s.z - piece.z);
-                    var best = 0f; var bestDot = float.NegativeInfinity;
-                    for (var turn = 0; turn < 4; turn++)
-                    {
-                        var dot = Vector3.Dot(Quaternion.Euler(0f, 90f * turn, 0f) * opening, wanted);
-                        if (dot > bestDot) { bestDot = dot; best = 90f * turn; }
-                    }
-                    go.transform.rotation = Quaternion.Euler(0f, best, 0f);
-                }
+                    go.transform.rotation = Quaternion.Euler(0f, OpenSideYaw(go, new Vector3(s.x, 0f, s.z), piece.fbx, errors, out _), 0f);
                 var box = Bounds(go);
                 var bottom = piece.floor ? s.floor_y + 0.06f - box.size.y : s.floor_y - 0.04f;
                 go.transform.position += Vector3.up * (bottom - box.min.y);
@@ -574,7 +578,7 @@ public static class CLASS_NAME
         // Stills, then flythrough frames.
         var stills = new List<string>();
         camera.clearFlags = CameraClearFlags.Skybox; camera.farClipPlane = 600f;
-        Texture2D Shoot(Shot shot, int width, int height)
+        byte[] Shoot(Shot shot, int width, int height)
         {
             var target = new RenderTexture(width, height, 24);
             camera.targetTexture = target; camera.fieldOfView = shot.fov;
@@ -584,14 +588,17 @@ public static class CLASS_NAME
             RenderTexture.active = target;
             var image = new Texture2D(width, height, TextureFormat.RGB24, false);
             image.ReadPixels(new Rect(0, 0, width, height), 0, 0); image.Apply();
-            RenderTexture.active = null; camera.targetTexture = null; target.Release();
-            return image;
+            RenderTexture.active = null; camera.targetTexture = null;
+            var png = image.EncodeToPNG();
+            // Destroy both: the editor does not free native textures, and 366 shots held about 2 GB.
+            UnityEngine.Object.DestroyImmediate(image); target.Release(); UnityEngine.Object.DestroyImmediate(target);
+            return png;
         }
         Directory.CreateDirectory(Path.Combine(request.out_dir, "stills"));
         foreach (var shot in request.stills)
         {
             var path = Path.Combine(request.out_dir, "stills", shot.name + ".png");
-            File.WriteAllBytes(path, Shoot(shot, request.still_size[0], request.still_size[1]).EncodeToPNG());
+            File.WriteAllBytes(path, Shoot(shot, request.still_size[0], request.still_size[1]));
             stills.Add(path);
         }
         if (request.frames.Length > 0)
@@ -599,7 +606,7 @@ public static class CLASS_NAME
             Directory.CreateDirectory(Path.Combine(request.out_dir, "frames"));
             for (var f = 0; f < request.frames.Length; f++)
                 File.WriteAllBytes(Path.Combine(request.out_dir, "frames", $"frame_{f:0000}.png"),
-                                   Shoot(request.frames[f], request.frame_size[0], request.frame_size[1]).EncodeToPNG());
+                                   Shoot(request.frames[f], request.frame_size[0], request.frame_size[1]));
         }
         var report = new Report { scene = request.scene_path, stills = stills.ToArray(), frames = request.frames.Length,
             objects = objects, blades = blades, cover = cards, bake_seconds = bakeSeconds, errors = errors.ToArray() };

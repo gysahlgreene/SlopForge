@@ -719,9 +719,8 @@ def _run(args):
     if args.command == "scene-render":
         from .unity_natural_scene import render_scene
         report = render_scene(root, config, manifest, args.name, frames=not args.stills_only)
-        out = root / "ai/assets/scenes" / args.name / "report.json"
         register_artifact(manifest, asset_key("recipe", args.name), "scene.render", "data.scene_render",
-                          out.relative_to(root).as_posix(), status="failed" if report["errors"] else "ready",
+                          report["report"], status="failed" if report["errors"] else "ready",
                           provenance={"processor": "slopforge.unity_natural_scene", "scene": report["scene"]},
                           approval_status="not_required", validation={"errors": report["errors"]})
         save_manifest(manifest_path, manifest)
@@ -741,7 +740,8 @@ def _run(args):
         report = unity_scene.build_kit_scene(root, args.name, args.layout, placements,
                                              grid=constraints.get("grid_size", 1.0),
                                              tolerance=constraints.get("snap_tolerance", 0.05),
-                                             render=str(output.with_suffix(".png")))
+                                             render=str(output.with_suffix(".png")),
+                                             output_root=config["asset_pipeline"]["output_root"])
         output.write_text(json.dumps(report, indent=2) + "\n")
         register_artifact(manifest, selector, f"kit.scene.{args.layout}", "data.environment_scene",
                           output.relative_to(root).as_posix(), status="failed" if report["errors"] else "ready",

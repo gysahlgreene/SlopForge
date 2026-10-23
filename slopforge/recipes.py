@@ -48,7 +48,7 @@ def _ordered_children(definition):
 
 
 # Where a module's origin sits: walls and columns stand on it (bottom_center), a floor's walkable top is at it.
-PIVOTS = {"center", "bottom_center", "top_center", "origin"}
+PIVOTS = {"center", "bottom_center", "top_center"}  # the pivots blender/prepare_model.py can place
 
 
 def _validate_kit_constraints(definition, child_ids):

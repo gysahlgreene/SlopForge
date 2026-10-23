@@ -9,8 +9,9 @@ from pathlib import Path
 from .unity_material import unity_cli
 
 
-def build_kit_scene(project_root, kit, layout, placements, *, grid, tolerance, render):
-    """Build Assets/Art/Generated/Scenes/<kit>_<layout>.unity from published modules; returns Unity's report.
+def build_kit_scene(project_root, kit, layout, placements, *, grid, tolerance, render,
+                    output_root="Assets/Art/Generated"):
+    """Build <output_root>/Scenes/<kit>_<layout>.unity from published modules; returns Unity's report.
 
     placements: dicts with module, fbx (asset path), pivot, x, y, z and rotation (degrees as text, or "auto").
     """
@@ -24,10 +25,11 @@ def build_kit_scene(project_root, kit, layout, placements, *, grid, tolerance, r
         request, report = Path(scratch) / "request.json", Path(scratch) / "report.json"
         request.write_text(json.dumps({
             "kit": kit, "layout": layout, "grid": grid, "tolerance": tolerance,
-            "prefab_folder": f"Assets/Art/Generated/Prefabs/{kit}",
-            "scene_path": f"Assets/Art/Generated/Scenes/{kit}_{layout}.unity",
+            "prefab_folder": f"{output_root}/Prefabs/{kit}",
+            "scene_path": f"{output_root}/Scenes/{kit}_{layout}.unity",
             "report_path": str(report), "render_path": str(Path(render).resolve()), "placements": placements}))
-        script.write_text(_SCRIPT.replace("CLASS_NAME", class_name).replace("REQUEST_PATH", json.dumps(str(request))))
+        script.write_text(_SCRIPT.replace("CLASS_NAME", class_name).replace("REQUEST_PATH", json.dumps(str(request)))
+                          .replace("OPEN_SIDE_YAW\n", OPEN_SIDE_YAW))
         try:
             subprocess.run([cli, "run", str(root), "--timeout", "900", "--", "-executeMethod", f"{class_name}.Build"],
                            check=True)
@@ -36,6 +38,43 @@ def build_kit_scene(project_root, kit, layout, placements, *, grid, tolerance, r
             script.with_suffix(".cs.meta").unlink(missing_ok=True)
         return json.loads(report.read_text())
 
+
+# Shared with unity_natural_scene's structures, which turn their corners the same way.
+OPEN_SIDE_YAW = r'''    // Turns a module whose top-down footprint has one nearly empty quadrant (an L corner) so that quadrant faces the
+    // layout's centre. Reads the placed mesh, so it needs no assumption about the FBX axes.
+    static float OpenSideYaw(GameObject go, Vector3 centre, string module, List<string> errors, out Vector3 opening)
+    {
+        opening = Vector3.zero;
+        var renderers = go.GetComponentsInChildren<Renderer>();
+        var box = renderers[0].bounds;
+        foreach (var renderer in renderers) box.Encapsulate(renderer.bounds);
+        var counts = new int[4];
+        foreach (var filter in go.GetComponentsInChildren<MeshFilter>())
+            foreach (var vertex in filter.sharedMesh.vertices)
+            {
+                var point = filter.transform.TransformPoint(vertex) - box.center;
+                counts[(point.x >= 0 ? 0 : 1) + (point.z >= 0 ? 0 : 2)]++;
+            }
+        var open = Array.IndexOf(counts, counts.Min());
+        if (counts[open] > 0.1f * counts.Average())
+        {
+            errors.Add(module + " has rotation auto but no open side");
+            return 0f;
+        }
+        opening = new Vector3(open % 2 == 0 ? 1f : -1f, 0f, open < 2 ? 1f : -1f);
+        var wanted = centre - go.transform.position;
+        wanted.y = 0f;
+        var best = 0f;
+        var bestDot = float.NegativeInfinity;
+        for (var turn = 0; turn < 4; turn++)
+        {
+            var dot = Vector3.Dot(Quaternion.Euler(0f, 90f * turn, 0f) * opening, wanted);
+            if (dot > bestDot) { bestDot = dot; best = 90f * turn; }
+        }
+        return best;
+    }
+
+'''
 
 _SCRIPT = r'''using System;
 using System.Collections.Generic;
@@ -160,38 +199,7 @@ public static class CLASS_NAME
         Debug.Log("SLOPFORGE_KIT_SCENE " + request.scene_path);
     }
 
-    // Turns a module whose top-down footprint has one nearly empty quadrant (an L corner) so that quadrant faces the
-    // layout's centre. Reads the placed mesh, so it needs no assumption about the FBX axes.
-    static float OpenSideYaw(GameObject go, Vector3 centre, string module, List<string> errors, out Vector3 opening)
-    {
-        opening = Vector3.zero;
-        var box = WorldBounds(go);
-        var counts = new int[4];
-        foreach (var filter in go.GetComponentsInChildren<MeshFilter>())
-            foreach (var vertex in filter.sharedMesh.vertices)
-            {
-                var point = filter.transform.TransformPoint(vertex) - box.center;
-                counts[(point.x >= 0 ? 0 : 1) + (point.z >= 0 ? 0 : 2)]++;
-            }
-        var open = Array.IndexOf(counts, counts.Min());
-        if (counts[open] > 0.1f * counts.Average())
-        {
-            errors.Add(module + " has rotation auto but no open side");
-            return 0f;
-        }
-        opening = new Vector3(open % 2 == 0 ? 1f : -1f, 0f, open < 2 ? 1f : -1f);
-        var wanted = centre - go.transform.position;
-        wanted.y = 0f;
-        var best = 0f;
-        var bestDot = float.NegativeInfinity;
-        for (var turn = 0; turn < 4; turn++)
-        {
-            var dot = Vector3.Dot(Quaternion.Euler(0f, 90f * turn, 0f) * opening, wanted);
-            if (dot > bestDot) { bestDot = dot; best = 90f * turn; }
-        }
-        return best;
-    }
-
+OPEN_SIDE_YAW
     static Bounds WorldBounds(GameObject go)
     {
         var renderers = go.GetComponentsInChildren<Renderer>();

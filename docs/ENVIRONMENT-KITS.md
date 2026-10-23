@@ -85,11 +85,11 @@ slopforge --project ~/UnityProjects/MyGame environment-scene ruin courtyard
 ```
 
 What it does in Unity (batch mode):
-- **Prefabs:** each module becomes a prefab under `Assets/Art/Generated/Prefabs/<run>/`. It gets an identity
+- **Prefabs:** each module becomes a prefab under `<output_root>/Prefabs/<run>/`. It gets an identity
   root, which hides the FBX axis rotation, a mesh collider and static flags (batching, occlusion, reflection
   probes). Lightmap contribution is left off, because it needs lightmap UVs that would change the published import
   settings.
-- **Scene:** it places the layout in `Assets/Art/Generated/Scenes/<run>_<layout>.unity` and renders four views.
+- **Scene:** it places the layout in `<output_root>/Scenes/<run>_<layout>.unity` and renders four views.
 - **Checks:**
   - each module stands at its placement height for its pivot;
   - it has a collider and is static;

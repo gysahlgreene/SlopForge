@@ -10,7 +10,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
-from slopforge.vegetation import build_leaf_atlas, make_vegetation
+from slopforge.vegetation import build_leaf_atlas, is_current, make_vegetation
 
 ROOT = Path(__file__).resolve().parents[1]
 BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
@@ -65,6 +65,32 @@ class VegetationTests(unittest.TestCase):
                 make_vegetation(root, config, manifest, "oak_b", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
             with self.assertRaisesRegex(ValueError, "Species"):
                 make_vegetation(root, config, manifest, "palm", "palm", 9.0, 11, "oak_bark", ["oak_sprig"])
+            with self.assertRaisesRegex(ValueError, "Asset name"):  # would write outside the output folder
+                make_vegetation(root, config, manifest, "../../x", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+
+    def test_a_built_plant_is_reused_only_while_its_spec_and_sources_match(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(root)
+            config = {"asset_pipeline": {"output_root": "Assets/Art/Generated"}}
+
+            def fake_blender(command, **_):
+                Path(command[command.index("--") + 1]).write_bytes(b"fbx")
+                Path(command[command.index("--") + 2]).write_text(json.dumps({"species": "oak"}))
+            with patch("slopforge.vegetation.subprocess.run", side_effect=fake_blender), \
+                    patch("slopforge.vegetation.blender_executable", return_value="blender"):
+                record = make_vegetation(root, config, manifest, "oak_a", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+            spec = ("oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+            self.assertTrue(is_current(root, manifest, record, *spec))
+            # 2026-10-23 audit: only the seed was compared, so a new height or species kept the old tree.
+            self.assertFalse(is_current(root, manifest, record, "oak", 12.0, 11, "oak_bark", ["oak_sprig"]))
+            self.assertFalse(is_current(root, manifest, record, "pine", 9.0, 11, "oak_bark", ["oak_sprig"]))
+            _cutout(root / "sprig.png", (150, 60, 40))  # the foliage was re-approved with a new image
+            self.assertFalse(is_current(root, manifest, record, *spec))
+            _cutout(root / "sprig.png", (60, 140, 40))
+            self.assertTrue(is_current(root, manifest, record, *spec))
+            (root / record["outputs"]["fbx"]).unlink()
+            self.assertFalse(is_current(root, manifest, record, *spec))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")

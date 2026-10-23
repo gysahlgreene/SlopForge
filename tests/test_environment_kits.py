@@ -109,6 +109,9 @@ class EnvironmentKitTests(unittest.TestCase):
                                                        "modules": {"floor": {"pivot": "top_center"}}}}, {"floor"})
         with self.assertRaisesRegex(ValueError, "pivot"):
             _validate_kit_constraints({"kit_constraints": {"modules": {"floor": {"pivot": "corner"}}}}, {"floor"})
+        # 2026-10-23 audit: "origin" passed here, then Blender rejected it after the GPU had made the mesh.
+        with self.assertRaisesRegex(ValueError, "pivot"):
+            _validate_kit_constraints({"kit_constraints": {"modules": {"floor": {"pivot": "origin"}}}}, {"floor"})
 
     def test_layouts_place_model_children_on_quarter_turns(self):
         from slopforge.recipes import _validate_layouts
@@ -364,12 +367,13 @@ class EnvironmentKitTests(unittest.TestCase):
             calls = []
 
             def build(root, kit_name, layout, placements, **options):
-                calls.append((kit_name, layout, len(placements), options["grid"], options["tolerance"]))
+                calls.append((kit_name, layout, len(placements), options["grid"], options["tolerance"],
+                              options["output_root"]))  # the project's, not a hard-coded folder
                 return {"scene": "Assets/Art/Generated/Scenes/ruin_court.unity", "render": options["render"],
                         "errors": ["wall 1 seam gap 0.2 m"], "instances": [], "seams": []}
             with patch("slopforge.unity_scene.build_kit_scene", side_effect=build):
                 self.assertEqual(main(["--project", str(project), "environment-scene", "ruin", "court"]), 1)
-            self.assertEqual(calls, [("ruin", "court", 3, 1.0, 0.05)])
+            self.assertEqual(calls, [("ruin", "court", 3, 1.0, 0.05, "Assets/Art/Generated")])
             report = json.loads((project / "ai/assets/environment_scenes/ruin_court.json").read_text())
             self.assertEqual(report["errors"], ["wall 1 seam gap 0.2 m"])
             artifact = load_manifest(path)["assets"]["recipe:ruin"]["artifacts"]["kit.scene.court"]
