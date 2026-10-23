@@ -27,7 +27,7 @@ from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               make_metallic_gloss, unity_cli)
 from ..emitters import concept_emitter_mask, project_to_texture
-from ..kit_material import kit_swatch, make_seamless, match_roughness
+from ..kit_material import kit_texture, match_hue, match_roughness
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
@@ -1176,9 +1176,14 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
+    kit = kit_texture(root, context["manifest"], asset) if asset.get("kit_material") else None
+    kit_settings = {}
+    if kit:
+        kit_settings = {"kit_texture_sha256": file_sha256(kit), "kit_hue_shift": match_hue(paths["basecolor"], kit)}
     kit_roughness = (asset.get("kit_material") or {}).get("roughness")
     if kit_roughness is not None:
         match_roughness(paths["roughness"], kit_roughness)
+        kit_settings["kit_roughness"] = kit_roughness
     glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
@@ -1201,23 +1206,13 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     budget = _face_budget(config["asset_pipeline"], asset_type, asset)
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
     assembly_inputs = [*material_refs, *(lineage or {}).get("assembly_inputs", [])]
-    kit = kit_swatch(root, context["manifest"], asset) if asset.get("kit_material") else None
-    kit_settings = {}
-    if kit:
-        make_seamless(kit[0], paths["directory"] / "kit_swatch.png")
-        kit_settings = {"kit_material_sha256": file_sha256(paths["directory"] / "kit_swatch.png"),
-                        "kit_tile_size": kit[1]}
-        if kit_roughness is not None:
-            kit_settings["kit_roughness"] = kit_roughness
     _lineage_start(lineage, "material_assembly_export", number, (),
                    {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
                    parents=assembly_inputs)
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
-                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
-                  kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
-                  kit_tile_size=kit[1] if kit else None)
+                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"))
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -2247,10 +2242,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             check_emitters_in_concept(asset.get("materials"), paths["cutout"])
         if asset.get("kit_material"):
             if not workflow:
-                raise StageFailure("configuration", "A kit material is baked by the mesh-aware material stage",
+                raise StageFailure("configuration", "A kit material is applied by the mesh-aware material stage",
                                    operation="kit_material_preflight",
                                    remedy="configure asset_pipeline.workflows.model (the h100 profiles set it)")
-            kit_swatch(root, manifest, asset)  # an unapproved kit texture stops here, before mesh inference
+            kit_texture(root, manifest, asset)  # an unapproved kit texture stops here, before mesh inference
         print("3D stage: mesh and PBR generation..." if workflow else "3D stage: Hunyuan3D mesh generation...", flush=True)
         material_candidates = []
         viable = []

@@ -705,3 +705,20 @@ Kit protocol criterion M2-v3: all six runs pass, so modular kits are Provisional
   - the owner's visual review (invented wall outsides, T2's streaked plaster, sci-fi corners whiter than its walls);
   - Play mode, lightmapping and LODs;
   - a failure rate.
+
+Kit look after owner review (2026-10-23; [evidence](docs/media/kits-hue-match-2026-10/README.md)).
+- **Owner review:** the Provisional kits are "nowhere near as good as the props".
+- **Measured:**
+  - kit modules carry 130–340 px/m of texture, against 640–1,050 for props;
+  - TRELLIS rebuilds flat architecture as lumpy relief, and wall backs are invented;
+  - the stone swatch bake flattened the stone to grey.
+- **Hybrid prototype, rejected:** exact Blender geometry with a generated tiling material (about 1,000 px/m).
+  Beside the TRELLIS modules in Unity, the owner preferred the reconstruction's form.
+- **Change, the owner's choice:** a stone module keeps its own generated colours. The kit texture shifts only its
+  average CIELAB tint, so lightness and variation stay; the matte finish stays too. The swatch bake, its tile
+  size and the Blender `--kit-material` path are removed.
+- **Tests:** hue-match and recipe tests; `make verify`.
+- **Not verified:**
+  - a protocol run with this stage, since M2-v3's Provisional status is for commit `5ceac3b`;
+  - texture density beyond 2048²;
+  - invented wall backs.
