@@ -18,6 +18,13 @@ Before this change these structures were scaled to a 1 m largest side, and `arch
 checks. They now get the owner-accepted concept fit (at least 0.8) and colour limits. All three passed on their
 first mesh attempt.
 
+| Stone well | Stone shrine | Sci-fi bunker |
+| :---: | :---: | :---: |
+| ![Stone well turntable](stone_well_turntable.gif) | ![Stone shrine turntable](stone_shrine_turntable.gif) | ![Sci-fi bunker turntable](scifi_bunker_turntable.gif) |
+
+The turntables were rendered on 2026-10-23 with `blender/render_turntable.py` from each structure's material
+candidate `.blend`.
+
 ![Stone well: concept, Blender views, Unity URP renders](stone_well.jpg)
 ![Stone shrine](stone_shrine.jpg)
 ![Sci-fi bunker](scifi_bunker.jpg)

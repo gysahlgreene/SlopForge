@@ -25,8 +25,8 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | --- | --- | --- |
 | [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
-| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; six structures as lit turntables |
-| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, with a live rerun from a fresh project in progress | The flythrough above; six stills |
+| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
+| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
@@ -151,15 +151,19 @@ For the stone kit, approve its `stone` texture first: every module takes its tin
 
 [Protocol evidence →](docs/media/kits-provisional-2026-10-v3/README.md) · [Earlier rounds: v1](docs/media/kits-provisional-2026-10/README.md), [v2](docs/media/kits-provisional-2026-10-v2/README.md) · [Environment kits guide →](docs/ENVIRONMENT-KITS.md) · [M2 epic →](https://github.com/gysahlgreene/SlopForge/issues/89)
 
-**Standalone structures** use the `architecture` asset type, with the same brief-declared materials as props:
+**Standalone structures** use the `architecture` asset type, with the same brief-declared materials as props. They are
+generated at real size with `generate --target-size`, and get the same concept-fit and colour checks as props:
 
-| Stone well | Market stall | Stone shrine |
+| Stone well, 3.2 m | Stone shrine, 3.5 m | Sci-fi bunker, 3.0 m |
 | :---: | :---: | :---: |
-| <img src="docs/media/structure-showcase-2026-10/stone_well_turntable.gif" width="240" alt="Stone well turntable"> | <img src="docs/media/structure-showcase-2026-10/market_stall_turntable.gif" width="240" alt="Market stall turntable"> | <img src="docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif" width="240" alt="Stone shrine turntable"> |
-| **Watchtower** | **Ruined arch** | **Sci-fi bunker** |
-| <img src="docs/media/structure-showcase-2026-10/watchtower_turntable.gif" width="240" alt="Watchtower turntable"> | <img src="docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif" width="240" alt="Ruined arch turntable"> | <img src="docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif" width="240" alt="Sci-fi bunker turntable"> |
+| <img src="docs/media/structures-real-size-2026-10/stone_well_turntable.gif" width="240" alt="Stone well with a shingled roof, winch and bucket, turning"> | <img src="docs/media/structures-real-size-2026-10/stone_shrine_turntable.gif" width="240" alt="Pale stone shrine with a pediment, two columns and a bronze basin, turning"> | <img src="docs/media/structures-real-size-2026-10/scifi_bunker_turntable.gif" width="240" alt="Concrete sci-fi bunker with a hazard-striped steel door and roof vents, turning"> |
+| **Ruined arch, 3.6 m** | **Broken window wall, 3 m** | **Weathered corner, 3 m** |
+| <img src="docs/media/natural-live-2026-10/ruin_arch_turntable.gif" width="240" alt="Mossy granite archway with moulded piers, turning"> | <img src="docs/media/natural-live-2026-10/ruin_window_turntable.gif" width="240" alt="Stepped broken granite wall with an arched window, turning"> | <img src="docs/media/natural-live-2026-10/ruin_corner_turntable.gif" width="240" alt="Weathered L-shaped granite wall corner with moss, turning"> |
 
-These are one run each (2026-10-18), not yet visually approved. Structures are now generated at real size with `generate --target-size`, and they get the same concept-fit and colour checks as props. Rerun that way, the well, shrine and bunker passed on their first attempts ([real-size evidence](docs/media/structures-real-size-2026-10/README.md)). [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md)
+The top row is one real-size run each (2026-10-22), and each passed on its first mesh attempt. The bunker's white patch
+and invented second door are single-image limits. The bottom row is ruin pieces from the
+[live moorland run](docs/media/natural-live-2026-10/README.md) (2026-10-23). None of them is visually approved yet.
+[Real-size evidence →](docs/media/structures-real-size-2026-10/README.md) · [The first structure run →](docs/media/structure-showcase-2026-10/README.md)
 
 ## Scenes and natural environments
 
