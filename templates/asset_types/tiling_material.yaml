@@ -6,6 +6,9 @@ prompt_mode: material
 # Approval makes the surface tile seamlessly at 2048 x 2048 and derives normal, roughness and height maps, for
 # terrain layers and bark (slopforge/surface.py).
 processing: tiling_material
+# cut: join along least-difference paths, keeping every original pixel (ground, bark). repaint: the image model
+# repaints the seam cross, for patterned surfaces such as dressed stone.
+seams: cut
 requirements:
   - surface only, filling the whole frame
   - flat orthographic view, top-down for ground and front-facing for walls and bark

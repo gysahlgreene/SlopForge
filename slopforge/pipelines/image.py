@@ -63,7 +63,7 @@ def approve(project_root, config, asset_type, manifest, key, number, force=False
         asset["processing"] = {"kind": "cutout", "size": list(size), "sha256": file_sha256(image)}
     elif processing == "tiling_material":
         paths, provenance = make_tiling_material(root, config, image, asset.get("generation_prompt") or asset["description"],
-                                                 image.with_suffix(""))
+                                                 image.with_suffix(""), seams=asset_type.get("seams", "cut"))
         asset["outputs"].update({f"tiling_{name}": path.relative_to(root).as_posix() for name, path in paths.items()})
         asset["processing"] = {"kind": "tiling_material", **provenance}
     else:

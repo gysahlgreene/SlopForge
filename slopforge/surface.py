@@ -39,6 +39,48 @@ def make_cutout(root, config, source, destination):
             return image.crop(box).size
 
 
+def _cheapest_path(cost):
+    """Column index per row of the cheapest top-to-bottom path through cost (rows x columns), moving at most one
+    column per row."""
+    total = cost.copy()
+    for row in range(1, len(total)):
+        previous = total[row - 1]
+        total[row] += np.minimum(np.minimum(np.r_[np.inf, previous[:-1]], previous), np.r_[previous[1:], np.inf])
+    path = [int(np.argmin(total[-1]))]
+    for row in range(len(total) - 2, -1, -1):
+        column = path[-1]
+        low, high = max(column - 1, 0), min(column + 2, total.shape[1])
+        path.append(low + int(np.argmin(total[row, low:high])))
+    return path[::-1]
+
+
+def _cover_seam(image, band):
+    """Roll image by half its width, so it wraps left to right but has a seam down its middle, then cover that seam
+    with the unrolled image's own middle, joined along a least-difference path on each side."""
+    w = image.shape[1]
+    rolled = np.roll(image, w // 2, 1)
+    difference = ((image - rolled) ** 2).sum(2)
+    keep = np.zeros(difference.shape, bool)
+    width = int(band * w)
+    for start, stop in ((w // 2 - width, w // 2 - 4), (w // 2 + 4, w // 2 + width)):
+        for row, offset in enumerate(_cheapest_path(difference[:, start:stop])):
+            column = start + offset
+            if start < w // 2:
+                keep[row, column:w // 2] = True
+            else:
+                keep[row, w // 2:column] = True
+    soft = np.asarray(Image.fromarray((keep * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.5))) / 255.0
+    return image * soft[..., None] + rolled * (1 - soft[..., None])
+
+
+def cut_seams(image, band=0.12):
+    """A tiling copy of image whose every pixel is the source's own: seamless left to right first, then top to
+    bottom. Covering both seams of a fully rolled image at once ran the source's own edges out to the tile's edges
+    inside the bands, leaving a short seam there."""
+    across = _cover_seam(image, band)
+    return np.transpose(_cover_seam(np.transpose(across, (1, 0, 2)), band), (1, 0, 2))
+
+
 def blur(array, radius):
     """Gaussian blur by FFT, which wraps around, so maps derived from a tile still tile."""
     height, width = array.shape
@@ -97,35 +139,42 @@ def _run(client, root, workflow_path, image, bind, out, prompt=None, seed=None):
     return {"workflow": resolved.name, "workflow_sha256": file_sha256(resolved), "prompt_id": prompt_id}
 
 
-def make_tiling_material(root, config, source, prompt, out_dir, seed=7):
+def make_tiling_material(root, config, source, prompt, out_dir, seed=7, seams="cut"):
     """A seamless 2048 tile from a generated surface, and its derived maps; returns paths and provenance.
 
-    The image is rolled by half so its seams cross the middle; the image model repaints that cross with the
-    surface's own prompt, keeping every other pixel. RealESRGAN's upscale is mixed 35% with a plain Lanczos
-    resize: alone it smeared fine speckle into paint-like strokes. Broad brightness drift is flattened, so tiles
-    don't show as light and dark squares.
+    seams="cut" joins the half-rolled image along least-difference paths and keeps every original pixel; it made
+    the approved prototype's ground and bark. seams="repaint" lets the image model repaint the seam cross from the
+    surface's prompt, for patterned surfaces such as dressed stone; on meadow grass it repainted a darker, busier
+    cross that showed as bands every repeat (2026-10-23 live run). RealESRGAN's upscale is mixed 35% with a plain
+    Lanczos resize: alone it smeared fine speckle into paint-like strokes. Broad brightness drift is flattened, so
+    tiles don't show as light and dark squares.
     """
+    if seams not in ("cut", "repaint"):
+        raise ValueError(f"Tiling seams must be cut or repaint, got {seams!r}")
     root, out_dir = Path(root), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     client = ComfyUIClient(comfy_url(config))
-    provenance = {"source_sha256": file_sha256(source)}
+    provenance = {"source_sha256": file_sha256(source), "seams": seams}
     with Image.open(source) as image:
         original = np.asarray(image.convert("RGB"))
     h, w = original.shape[:2]
-    rolled = np.roll(np.roll(original, h // 2, 0), w // 2, 1)
-    band = w // 8
-    mask = np.zeros((h, w), np.uint8)
-    mask[:, w // 2 - band:w // 2 + band] = 255
-    mask[h // 2 - band:h // 2 + band, :] = 255
     with tempfile.TemporaryDirectory(prefix="slopforge-surface-") as scratch:
         scratch = Path(scratch)
-        Image.fromarray(np.dstack([rolled, 255 - mask])).save(scratch / "seam_input.png")
-        provenance["seamless"] = _run(client, root, SEAMLESS_WORKFLOW, scratch / "seam_input.png", "seam_source",
-                                      scratch / "painted.png", prompt=prompt, seed=seed)
-        with Image.open(scratch / "painted.png") as image:
-            painted = np.asarray(image.convert("RGB").resize((w, h))).astype(np.float64)
-        soft = np.asarray(Image.fromarray(mask).filter(ImageFilter.GaussianBlur(6))).astype(np.float64)[..., None] / 255
-        seamless = painted * soft + rolled.astype(np.float64) * (1 - soft)
+        if seams == "cut":
+            seamless = cut_seams(original.astype(np.float64))
+        else:
+            rolled = np.roll(np.roll(original, h // 2, 0), w // 2, 1)
+            band = w // 8
+            mask = np.zeros((h, w), np.uint8)
+            mask[:, w // 2 - band:w // 2 + band] = 255
+            mask[h // 2 - band:h // 2 + band, :] = 255
+            Image.fromarray(np.dstack([rolled, 255 - mask])).save(scratch / "seam_input.png")
+            provenance["seamless"] = _run(client, root, SEAMLESS_WORKFLOW, scratch / "seam_input.png", "seam_source",
+                                          scratch / "painted.png", prompt=prompt, seed=seed)
+            with Image.open(scratch / "painted.png") as image:
+                painted = np.asarray(image.convert("RGB").resize((w, h))).astype(np.float64)
+            soft = np.asarray(Image.fromarray(mask).filter(ImageFilter.GaussianBlur(6))).astype(np.float64)[..., None] / 255
+            seamless = painted * soft + rolled.astype(np.float64) * (1 - soft)
         pad = 64
         Image.fromarray(np.pad(seamless.round().astype(np.uint8), ((pad, pad), (pad, pad), (0, 0)), mode="wrap")).save(
             scratch / "upscale_input.png")

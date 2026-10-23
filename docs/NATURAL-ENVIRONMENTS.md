@@ -21,10 +21,16 @@ its maps, beside the published image in `<output>/Materials/<name>/`:
 - `normal.png` (OpenGL, as Unity expects), `roughness.png` and `height.png`.
 
 The steps, in `slopforge/surface.py`:
-1. **Seams:** the image is rolled by half its size, so its seams cross the middle. The image model repaints that
-   cross from the surface's own prompt (`image_seamless_inpaint_api.json`), and every other pixel is kept. In the
-   prototype this made the stone texture tile. Its grass, dirt, gravel and rock layers were instead joined along
-   least-difference cut paths, which also tiled. The two haven't been compared side by side.
+1. **Seams** (`seams` on the asset type, `cut` by default):
+   - **`cut`** makes the tile seamless left to right, then top to bottom. Each pass rolls the image by half, so its
+     edges wrap, then covers the seam this leaves down the middle with the image's own middle, joined along a
+     least-difference path on each side. Every pixel is the source's own.
+   - **`repaint`** lets the image model repaint the seam cross from the surface's prompt
+     (`image_seamless_inpaint_api.json`), for patterned surfaces such as dressed stone.
+   - **Found in the live run:** on meadow grass, `repaint` painted a darker, busier cross that showed as bands every
+     repeat, so `cut`, which made the approved prototype's ground and bark, is the default.
+   - **Found by a test:** the prototype covered both seams of a fully rolled image at once. Inside the bands, that ran
+     the source's own edges out to the tile's edges, leaving a short seam there; one direction at a time doesn't.
 2. **Resolution:** RealESRGAN's 4× upscale (`image_upscale_esrgan_api.json`) is mixed 35% with a plain Lanczos
    resize. Alone, it smeared granite's fine speckle into paint-like strokes. Both resizes wrap at the edges: a plain
    resize clamps there and leaves a faint seam.
