@@ -5,8 +5,6 @@ ground surface from a written brief, on the H100 `final` tier, with no manual re
 that "should show off a mix of things": a natural environment, some ruins and a few props, with a camera moving
 through each element. After four rounds on its look, the owner called it "perfect".
 
-![The flythrough: the path, the chapel and its camp, the heather and the tor, and a rise over the groves](flythrough.webp)
-
 | | |
 | :---: | :---: |
 | <img src="overview.jpg" width="400" alt="Overview: a winding gravel path past groves of oak, birch and pine to a granite tor"> | <img src="path.jpg" width="400" alt="Along the path toward the knoll and tor"> |
@@ -46,8 +44,9 @@ and the wildflower and heather cards were brightened 15%. The pipeline's `scene-
 ## Status
 
 **Experimental.** This is one prototype run, approved for its look. The prototype's steps are now SlopForge features
-(PR #102): the `moorland_ruin` recipe carries every brief that made this scene, and `scene-render` assembles it. A
-live rerun of the recipe from a fresh project is in progress; this page will record it.
+(PR #102): the `moorland_ruin` recipe carries every brief that made this scene, and `scene-render` assembles it. The
+[live run](../natural-live-2026-10/README.md) rebuilt it from a blank project, and its flythrough replaced this
+prototype's in the README.
 
 **Not checked:**
 - **Play mode, frame rate and memory:** 2 million mesh grass blades would be too heavy for a game.

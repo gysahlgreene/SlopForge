@@ -4,9 +4,9 @@
 
 **Turn an asset brief into a reviewed 3D game asset.**
 
-![A camera flies over a golden-hour moorland in Unity: down a gravel path, through the arch of a broken stone chapel to a small camp of props, past heather to a granite tor and over groves of oak, birch and pine](docs/media/natural-showcase-2026-10/flythrough.webp)
+![A camera flies over a golden-hour moorland in Unity: over groves of oak, birch and pine and a winding gravel path, through the arch of a broken stone chapel to a small camp of props, then past heather to a granite tor](docs/media/natural-live-2026-10/flythrough.webp)
 
-<sub>Every rock, ruin, prop, tree, flower and ground surface in this Unity scene was generated from a written brief, with no manual repair. [How it was made →](#scenes-and-natural-environments)</sub>
+<sub>Every rock, ruin, prop, tree, flower and ground surface in this Unity scene was generated from a written brief and assembled by one recipe, with no manual repair. [How it was made →](#scenes-and-natural-environments)</sub>
 
 [![Verify](https://img.shields.io/github/actions/workflow/status/gysahlgreene/SlopForge/ci.yml?branch=main&label=verify&style=flat-square)](https://github.com/gysahlgreene/SlopForge/actions/workflows/ci.yml)
 [![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776ab?style=flat-square)](docs/INSTALL.md)
@@ -163,8 +163,8 @@ These are one run each (2026-10-18), not yet visually approved. Structures are n
 
 ## Scenes and natural environments
 
-**A whole scene from briefs** (2026-10-23). The flythrough at the top is one Unity scene in which SlopForge made
-everything:
+**A whole scene from briefs** (2026-10-23). The flythrough at the top is one Unity scene that SlopForge built from
+one recipe, in a blank project:
 - **Rocks:** boulders, outcrops and a granite tor of cliff chunks.
 - **A broken stone chapel:** jagged walls, a window, a weathered corner, a freestanding arch, columns, fallen drums
   and cracked flagstones.
@@ -177,7 +177,7 @@ everything:
 
 | Inside the chapel | Through the arch | Below the tor |
 | :---: | :---: | :---: |
-| <img src="docs/media/natural-showcase-2026-10/camp.jpg" width="280" alt="Inside the broken chapel: cracked flagstones, a crate, a lantern and a pot by the north wall"> | <img src="docs/media/natural-showcase-2026-10/arch.jpg" width="280" alt="The chapel's freestanding arch with columns and fallen drums in tall grass"> | <img src="docs/media/natural-showcase-2026-10/tor.jpg" width="280" alt="Heather on a grassy knoll below a granite tor of cliff chunks"> |
+| <img src="docs/media/natural-live-2026-10/camp.jpg" width="280" alt="Inside the broken chapel: flagstones, a crate, a lantern and a pot by the north wall"> | <img src="docs/media/natural-live-2026-10/arch.jpg" width="280" alt="The chapel's freestanding arch with columns and fallen drums in tall grass"> | <img src="docs/media/natural-live-2026-10/tor.jpg" width="280" alt="Heather on a grassy knoll below a granite tor of cliff chunks"> |
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame recipe run moorland_ruin --name moor
@@ -193,12 +193,13 @@ slopforge --project ~/UnityProjects/MyGame scene-render moor
   renders stills and the flythrough.
 
 **What the evidence supports:**
-- **Approved, not yet repeated:** the owner judged this scene's look "perfect", but it is one prototype run. A live
-  rerun of the recipe from a fresh project is in progress.
+- **Approved, then rebuilt:** the owner judged a prototype's look "perfect". The recipe then rebuilt the scene from
+  a blank project, which is the footage shown. That run found three faults, now fixed, and the agent reselected two
+  concepts, one of them for a mesh TRELLIS textured black. It is one run, and the owner has not reviewed it yet.
 - **Not a game level:** this is a showcase render. Play mode, frame rate, LODs and wind are not checked, and 2 million
   mesh grass blades would be too heavy for a game.
 
-[Scene evidence →](docs/media/natural-showcase-2026-10/README.md) · [Natural environments guide →](docs/NATURAL-ENVIRONMENTS.md)
+[Live run evidence →](docs/media/natural-live-2026-10/README.md) · [The approved prototype →](docs/media/natural-showcase-2026-10/README.md) · [Natural environments guide →](docs/NATURAL-ENVIRONMENTS.md)
 
 ## Materials and textures
 

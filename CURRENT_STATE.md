@@ -724,7 +724,8 @@ Kit look after owner review (2026-10-23; [evidence](docs/media/kits-hue-match-20
   - invented wall backs.
 
 Natural environments and scenes (2026-10-23; [guide](docs/NATURAL-ENVIRONMENTS.md),
-[prototype evidence](docs/media/natural-showcase-2026-10/README.md)). Experimental.
+[prototype evidence](docs/media/natural-showcase-2026-10/README.md),
+[live run](docs/media/natural-live-2026-10/README.md)). Experimental.
 - **Built:** `foliage` and `tiling_material` image types, `vegetation` (procedural trees and shrubs from approved
   bark and foliage), and `scene-render`, which assembles a recipe's `scene` block in Unity with probe-volume GI and
   renders stills and a flythrough. `moorland_ruin` ships the prototype the owner approved ("this is perfect").
@@ -736,6 +737,8 @@ Natural environments and scenes (2026-10-23; [guide](docs/NATURAL-ENVIRONMENTS.m
     - the arch rendered side-on: its size was declared by height only, so its facing was the reconstruction's;
     - the camp floor had dark insets: the agent chose a concept with a broken diamond centre.
   - **Interventions:** fresh selections for the cliff and the floor; the arch now declares its width and turns 90.
+  - **Final render** at `d29fb05`: 85 s, 140 objects, 2.0 million blades, a 33 s bake, six stills and 360 frames,
+    no errors. Against the prototype it matches except for seeded placement (the grove still differs).
 - **Change:** `scene-render` reads the scene block from the project's recipe file, so a layout change needs no
   regeneration; the report records the source and hash.
 - **Found:** TRELLIS sometimes textures a mesh mostly black on the concept's side. The cliff and S2's M2-v3 pillar
