@@ -52,7 +52,8 @@ No broad category/workflow/profile is claimed Qualified here.
 | Body-deformation benchmark | Partially working; historical asset-specific review | [Diagnostic benchmark](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed delivered body rig and Unity motion; source visual quality rejected; separate final-tier source pending review, not covered by rig approval |
 | Fine detail/material fidelity and general rig recovery | Known unreliable | Recovery and benchmark reports retain visual defects; prior humanoid test 3's recovered rig remains rejected as recorded before this task; it is not promoted by these contracts |
 | Cross-brief/category repeatability | Provisional (static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
-| Modular environment, mechanical and creature/Generic runtime quality | Unverified | Recipes, kits and rig tooling are capabilities; representative visual, performance, deformation and runtime evidence is still required |
+| Modular environment kits | Provisional (stone ruin, timber house and sci-fi corridor kits, `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0 assembled scenes) | [Criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md): all six runs (three kits × two) pass every owner-accepted criterion, from size, pivot, stretch, corner shape and joints to concept fit, colour, budgets, the matching stone material and the Unity scene checks; M2-v1 and M2-v2 and their failures are kept. No visual approval by the owner; Play mode, lightmapping and LODs are unchecked; two runs per kit cannot measure a failure rate |
+| Mechanical and creature/Generic runtime quality | Unverified | Rig tooling is a capability; representative visual, performance, deformation and runtime evidence is still required |
 | Complete readiness/qualification claims | Props: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
 The recovery report historically described qualification of a failure class. Under
@@ -687,3 +688,19 @@ Kit protocol criterion M2-v2: five of six runs pass, so not Provisional (2026-10
 - **Next:** criterion [M2-v3](docs/media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md) reruns all six.
 - **Not verified:** the owner's visual review. The walls' invented outsides differ from their fronts, and the
   sci-fi corners are whiter than its walls.
+
+Kit protocol criterion M2-v3: all six runs pass, so modular kits are Provisional (2026-10-23; [evidence](docs/media/kits-provisional-2026-10-v3/README.md)).
+- **Scope:** the stone ruin, timber house and sci-fi corridor kits; `h100`/`final`; commit `5ceac3b`; Unity
+  6000.6.3f1 / URP 17.6.0.
+- **Runs:** two per kit. Each was built from a fresh blank Unity project through `environment-scene`, and every
+  owner-accepted criterion passed. One intervention was used, a permitted fresh selection for K2's corner after a
+  stretch stop.
+- **Live checks of the M2-v2 fixes:**
+  - both timber corners, from high-angle concepts, came out clean Ls with 0.400 m arms and a taper of 1.02–1.04;
+  - six solid-block corner seeds were retried;
+  - no job timed out or was lost.
+- **Not verified:**
+  - the wedge check in a live run (none occurred; it is tested on T2's M2-v2 mesh);
+  - the owner's visual review (invented wall outsides, T2's streaked plaster, sci-fi corners whiter than its walls);
+  - Play mode, lightmapping and LODs;
+  - a failure rate.
