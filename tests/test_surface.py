@@ -8,6 +8,9 @@ import numpy as np
 from PIL import Image
 
 from slopforge import surface
+from slopforge.backends.comfyui import ComfyUIError
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class SurfaceTests(unittest.TestCase):
@@ -40,7 +43,7 @@ class SurfaceTests(unittest.TestCase):
             client = Mock()
             client.upload_input.side_effect = lambda path, folder: {"name": Path(path).name, "subfolder": folder}
             client.queue_workflow.side_effect = ["seam", "up"]
-            client.list_outputs.return_value = [{"filename": "out.png"}]
+            client.list_outputs.return_value = [{"filename": "out.png", "subfolder": "", "type": "output"}]
             uploads = []
 
             def download(output, destination):  # the image model "repaints" by returning its input; ESRGAN by 4x
@@ -82,6 +85,38 @@ class SurfaceTests(unittest.TestCase):
             with patch("slopforge.pipelines.image.approve_image_candidate", return_value={"status": "passed"}), \
                     self.assertRaisesRegex(ValueError, "unknown processing"):
                 image.approve(root, {}, {"name": "x", "processing": "sharpen"}, manifest, "foliage:tuft", 1)
+
+    def test_a_surface_job_that_saves_nothing_names_its_workflow(self):
+        client = Mock()
+        client.upload_input.return_value = {"name": "in.png"}
+        client.list_outputs.return_value = [{"filename": "preview.png", "subfolder": "", "type": "temp"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (4, 4)).save(root / "in.png")
+            with self.assertRaisesRegex(ComfyUIError, "image_upscale_esrgan_api.json finished without saving"):
+                surface._run(client, ROOT, "image_upscale_esrgan_api.json", root / "in.png", "upscale_source", root / "out.png")
+        client.download_output.assert_not_called()
+
+    def test_failed_processing_restores_the_published_image_and_its_record(self):
+        from slopforge.pipelines import image
+        record = {"outputs": {"image": "Foliage/tuft.png"}, "description": "tuft", "status": "ready",
+                  "processing": {"kind": "cutout", "sha256": "old"}}
+        manifest = {"assets": {"foliage:tuft": dict(record)}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Foliage").mkdir()
+            Image.new("RGBA", (4, 4), (10, 200, 10, 255)).save(root / "Foliage/tuft.png")  # the approved cut-out
+
+            def approve_new(*_args, **_kwargs):  # publishes candidate 2's uncut image, as the real approval does
+                Image.new("RGB", (4, 4), (255, 255, 255)).save(root / "Foliage/tuft.png")
+                manifest["assets"]["foliage:tuft"]["candidates"] = {"selected": 2}
+                return {"status": "passed"}
+            with patch("slopforge.pipelines.image.approve_image_candidate", side_effect=approve_new), \
+                    patch("slopforge.pipelines.image.make_cutout", side_effect=RuntimeError("rembg failed")), \
+                    self.assertRaisesRegex(RuntimeError, "rembg"):
+                image.approve(root, {}, {"name": "foliage", "processing": "cutout"}, manifest, "foliage:tuft", 2, True)
+            self.assertEqual(Image.open(root / "Foliage/tuft.png").getpixel((0, 0)), (10, 200, 10, 255))
+            self.assertEqual(manifest["assets"]["foliage:tuft"], record)
 
     def test_cut_seams_tile_and_keep_the_source_pixels(self):
         rng = np.random.default_rng(4)

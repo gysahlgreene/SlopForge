@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-from .backends.comfyui import ComfyUIClient, python_executable
+from .backends.comfyui import ComfyUIClient, ComfyUIError, python_executable
 from .paths import comfy_url, resolve_workflow, tool_root
 from .provenance import file_sha256
 
@@ -135,7 +135,11 @@ def _run(client, root, workflow_path, image, bind, out, prompt=None, seed=None):
             node["inputs"]["seed"] = seed
     prompt_id = client.queue_workflow(graph)
     entry = client.wait_for_completion(prompt_id, timeout=900)
-    client.download_output(client.list_outputs(entry)[0], out)
+    saved = [item for item in client.list_outputs(entry) if item["type"] == "output"]  # not preview temp images
+    if not saved:
+        raise ComfyUIError(f"{resolved.name} finished without saving an image", category="inference",
+                           operation="surface")
+    client.download_output(saved[0], out)
     return {"workflow": resolved.name, "workflow_sha256": file_sha256(resolved), "prompt_id": prompt_id}
 
 

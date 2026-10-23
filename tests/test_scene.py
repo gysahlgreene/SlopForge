@@ -1,5 +1,6 @@
 import copy
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -159,6 +160,21 @@ class SceneRenderTests(unittest.TestCase):
             self.assertIn("ffmpeg", " ".join(report.get("warnings", [])))
             self.assertFalse(list((root / "Assets/Editor").glob("*.cs")))  # the editor script is removed afterwards
             self.assertEqual(report["scene_source"], "recipe run")
+            scenes = root / "ai/assets/scenes"
+            self.assertEqual(report["report"], "ai/assets/scenes/run/report.json")
+            self.assertFalse((scenes / "run.partial").exists())
+
+            # 2026-10-23 audit: the old render was deleted before Unity ran, so a failed re-render lost it.
+            def failing_unity(command, **_):
+                raise subprocess.CalledProcessError(1, command)
+            with patch.object(unity_natural_scene, "make_vegetation", side_effect=vegetation), \
+                    patch.object(unity_natural_scene, "unity_cli", return_value="unity"), \
+                    patch.object(unity_natural_scene.subprocess, "run", side_effect=failing_unity), \
+                    patch.object(unity_natural_scene.shutil, "which", return_value=None):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    unity_natural_scene.render_scene(root, config, manifest, "run")
+            self.assertTrue((scenes / "run/report.json").is_file())  # the last good render is untouched
+            self.assertTrue((scenes / "run.partial").is_dir())  # and the failed one is kept to inspect
 
             # A layout change in the project's recipe file reaches the render without regenerating the children.
             changed = copy.deepcopy(definition)
@@ -172,6 +188,8 @@ class SceneRenderTests(unittest.TestCase):
                     patch.object(unity_natural_scene.shutil, "which", return_value=None):
                 again = unity_natural_scene.render_scene(root, config, manifest, "run")
             self.assertEqual(again["scene_source"], "ai/recipes/test.yaml")
+            self.assertTrue((scenes / "run.previous/report.json").is_file())  # the render it replaced
+            self.assertFalse((scenes / "run.partial").exists())
             self.assertNotEqual(again["scene_sha256"], report["scene_sha256"])
             changed["scene"]["structures"][0]["props"].append({"model": "anvil", "at": [0, 0], "height": 1})
             (root / "ai/recipes/test.yaml").write_text(yaml.safe_dump(changed))

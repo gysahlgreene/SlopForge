@@ -14,6 +14,7 @@ from .backends.blender import blender_environment
 from .manifest import asset_key
 from .paths import blender_executable, tool_root
 from .provenance import file_sha256
+from .taxonomy import validate_asset_name
 
 SPECIES = ("oak", "birch", "pine", "shrub")
 # Per-quarter tints, so repeated sprigs vary across a crown.
@@ -47,15 +48,31 @@ def _ready(manifest, asset_type, name, output):
     return asset
 
 
+def _sources(root, manifest, bark, foliage):
+    bark_asset = _ready(manifest, "tiling_material", bark, "tiling_basecolor")
+    leaves = [_ready(manifest, "foliage", item, "image") for item in foliage]
+    return bark_asset, leaves, {
+        "bark": {"name": bark, "sha256": file_sha256(root / bark_asset["outputs"]["tiling_basecolor"])},
+        "foliage": [{"name": item["name"], "sha256": file_sha256(root / item["outputs"]["image"])} for item in leaves]}
+
+
+def is_current(root, manifest, record, species, height, seed, bark, foliage):
+    """Whether a built plant still matches its spec and the bark and foliage it was built from, so it can be reused."""
+    root = Path(root).resolve()
+    return (record.get("generator") == {"tool": "blender/vegetation.py", "species": species, "height": height, "seed": seed}
+            and record.get("sources") == _sources(root, manifest, bark, foliage)[2]
+            and all((root / path).is_file() for path in record.get("outputs", {}).values()))
+
+
 def make_vegetation(root, config, manifest, name, species, height, seed, bark, foliage):
     """Build and publish one tree or shrub; returns its manifest record."""
+    validate_asset_name(name)
     if species not in SPECIES:
         raise ValueError(f"Species must be one of {', '.join(SPECIES)}, got {species!r}")
     if not height > 0:
         raise ValueError("Vegetation height must be positive")
     root = Path(root).resolve()
-    bark_asset = _ready(manifest, "tiling_material", bark, "tiling_basecolor")
-    leaves = [_ready(manifest, "foliage", item, "image") for item in foliage]
+    bark_asset, leaves, sources = _sources(root, manifest, bark, foliage)
     folder = root / config["asset_pipeline"]["output_root"] / "Vegetation" / name
     materials = folder / "Materials"
     materials.mkdir(parents=True, exist_ok=True)
@@ -74,9 +91,7 @@ def make_vegetation(root, config, manifest, name, species, height, seed, bark, f
               "status": "ready", "updated_at": datetime.now(timezone.utc).isoformat(),
               "description": f"{species}, {height:g} m, seed {seed}",
               "generator": {"tool": "blender/vegetation.py", "species": species, "height": height, "seed": seed},
-              "sources": {"bark": {"name": bark, "sha256": file_sha256(root / bark_asset["outputs"]["tiling_basecolor"])},
-                          "foliage": [{"name": item["name"], "sha256": file_sha256(root / item["outputs"]["image"])}
-                                      for item in leaves]},
+              "sources": sources,
               "outputs": {role: path.relative_to(root).as_posix() for role, path in outputs.items()},
               "validation": {"status": "passed", "errors": [], "warnings": [], "measured": report}}
     manifest["assets"][key] = record
