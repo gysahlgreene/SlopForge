@@ -1,0 +1,11 @@
+name: foliage
+pipeline: image
+output_folder: Foliage
+format: PNG
+# Approval removes the background and crops to the plant: a cut-out for cards in Unity (slopforge/surface.py).
+processing: cutout
+requirements:
+  - a single plant element such as a leafy twig, a grass tuft, a flower clump or a shrub
+  - seen from the side, filling most of the frame
+  - isolated on a plain pure white background with crisp edges
+avoid: [ground, soil, pots, cast shadows, several separate plants, text]

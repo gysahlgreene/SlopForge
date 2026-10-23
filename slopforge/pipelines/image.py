@@ -7,6 +7,7 @@ from ..paths import resolve_workflow
 from ..provenance import file_sha256
 from ..config import workflow_node_inputs
 from ..style import build_prompt, style_identity
+from ..surface import make_cutout, make_tiling_material
 
 
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
@@ -50,4 +51,21 @@ def generate(project_root, config, asset_type, style, name, description, count, 
 
 
 def approve(project_root, config, asset_type, manifest, key, number, force=False):
-    return approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+    result = approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+    processing = asset_type.get("processing")
+    if not processing or result["status"] == "failed":
+        return result
+    root = Path(project_root).resolve()
+    asset = manifest["assets"][key]
+    image = root / asset["outputs"]["image"]
+    if processing == "cutout":
+        size = make_cutout(root, config, image, image)
+        asset["processing"] = {"kind": "cutout", "size": list(size), "sha256": file_sha256(image)}
+    elif processing == "tiling_material":
+        paths, provenance = make_tiling_material(root, config, image, asset.get("generation_prompt") or asset["description"],
+                                                 image.with_suffix(""), seams=asset_type.get("seams", "cut"))
+        asset["outputs"].update({f"tiling_{name}": path.relative_to(root).as_posix() for name, path in paths.items()})
+        asset["processing"] = {"kind": "tiling_material", **provenance}
+    else:
+        raise ValueError(f"Asset type {asset_type['name']} declares unknown processing {processing!r}")
+    return result

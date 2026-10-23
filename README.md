@@ -4,9 +4,9 @@
 
 **Turn an asset brief into a reviewed 3D game asset.**
 
-![Seven generated props turning on a dark stage: a stone lantern, a glazed jug, a mossy tree stump, a supply crate, a cast-iron pot, a sci-fi fuel canister and a brass lantern](docs/media/props-lineup-2026-10/props_lineup.gif)
+![A camera flies over a golden-hour moorland in Unity: over groves of oak, birch and pine and a winding gravel path, through the arch of a broken stone chapel to a small camp of props, then past heather to a granite tor](docs/media/natural-live-2026-10/flythrough.webp)
 
-<sub>Each prop was generated from a written brief on an H100 and imported into Unity, with no manual repair.</sub>
+<sub>Every rock, ruin, prop, tree, flower and ground surface in this Unity scene was generated from a written brief and assembled by one recipe, with no manual repair. [How it was made →](#scenes-and-natural-environments)</sub>
 
 [![Verify](https://img.shields.io/github/actions/workflow/status/gysahlgreene/SlopForge/ci.yml?branch=main&label=verify&style=flat-square)](https://github.com/gysahlgreene/SlopForge/actions/workflows/ci.yml)
 [![Python 3.10–3.14](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776ab?style=flat-square)](docs/INSTALL.md)
@@ -26,11 +26,14 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; six structures as lit turntables |
+| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, with a live rerun from a fresh project in progress | The flythrough above; six stills |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
 ## Props
+
+![Seven generated props turning on a dark stage: a stone lantern, a glazed jug, a mossy tree stump, a supply crate, a cast-iron pot, a sci-fi fuel canister and a brass lantern](docs/media/props-lineup-2026-10/props_lineup.gif)
 
 **Three briefs, two independent runs each** (2026-10-21):
 
@@ -158,6 +161,46 @@ For the stone kit, approve its `stone` texture first: every module takes its tin
 
 These are one run each (2026-10-18), not yet visually approved. Structures are now generated at real size with `generate --target-size`, and they get the same concept-fit and colour checks as props. Rerun that way, the well, shrine and bunker passed on their first attempts ([real-size evidence](docs/media/structures-real-size-2026-10/README.md)). [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md)
 
+## Scenes and natural environments
+
+**A whole scene from briefs** (2026-10-23). The flythrough at the top is one Unity scene that SlopForge built from
+one recipe, in a blank project:
+- **Rocks:** boulders, outcrops and a granite tor of cliff chunks.
+- **A broken stone chapel:** jagged walls, a window, a weathered corner, a freestanding arch, columns, fallen drums
+  and cracked flagstones.
+- **A camp of props:** a crate, a jug and a stone lantern from the Provisional prop protocol, and a pot, a stump
+  and a brass lantern from single coverage runs.
+- **Ground:** meadow, forest floor, gravel and granite tiling materials, with 2 million grass blades coloured from
+  the meadow.
+- **Plants:** heather and wildflower cards, and oak, birch and pine trees built from generated bark and leaf
+  cut-outs.
+
+| Inside the chapel | Through the arch | Below the tor |
+| :---: | :---: | :---: |
+| <img src="docs/media/natural-live-2026-10/camp.jpg" width="280" alt="Inside the broken chapel: flagstones, a crate, a lantern and a pot by the north wall"> | <img src="docs/media/natural-live-2026-10/arch.jpg" width="280" alt="The chapel's freestanding arch with columns and fallen drums in tall grass"> | <img src="docs/media/natural-live-2026-10/tor.jpg" width="280" alt="Heather on a grassy knoll below a granite tor of cliff chunks"> |
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run moorland_ruin --name moor
+slopforge --project ~/UnityProjects/MyGame approve moor_boulder 1      # each child in turn; 3D ones then approve-texture
+slopforge --project ~/UnityProjects/MyGame scene-render moor
+```
+
+**How it works:**
+- **The recipe:** [`moorland_ruin`](templates/recipes/moorland_ruin.yaml) carries the 30 briefs and a `scene` block:
+  terrain rules, plants, scatter, structures, lighting and cameras.
+- **Planning:** `scene-render` builds the trees and plans every placement in Python.
+- **In Unity:** it builds and lights the scene, bakes global illumination from probe volumes with sky occlusion, and
+  renders stills and the flythrough.
+
+**What the evidence supports:**
+- **Approved, then rebuilt:** the owner judged a prototype's look "perfect". The recipe then rebuilt the scene from
+  a blank project, which is the footage shown. That run found three faults, now fixed, and the agent reselected two
+  concepts, one of them for a mesh TRELLIS textured black. It is one run, and the owner has not reviewed it yet.
+- **Not a game level:** this is a showcase render. Play mode, frame rate, LODs and wind are not checked, and 2 million
+  mesh grass blades would be too heavy for a game.
+
+[Live run evidence →](docs/media/natural-live-2026-10/README.md) · [The approved prototype →](docs/media/natural-showcase-2026-10/README.md) · [Natural environments guide →](docs/NATURAL-ENVIRONMENTS.md)
+
 ## Materials and textures
 
 ![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
@@ -220,13 +263,14 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Static props | **Provisional** for `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import. Three briefs × two independent runs passed every stage and owner-accepted threshold ([criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md)). Four more prop kinds passed end to end in single exploratory runs; the stump passed only after a UV fix prompted by its failed first run. Not Qualified: six runs cannot measure a failure rate. |
 | Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096². Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. The colour of small parts is not checked. |
-| Structures and modular kits | Two live runs of the stone ruin kit went from a fresh project to a 25-piece Unity courtyard. Modules came out at their declared 3 m sizes and pivots, with colliders and static flags, no seam gaps, and matching stone from a shared kit material. Six standalone structures were generated (2026-10-18). Not qualified: M2 criteria are not declared yet ([#94](https://github.com/gysahlgreene/SlopForge/issues/94)), and joints, stretch, budgets and visual approval are open. |
+| Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. |
+| Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe reproduce it, with a live rerun in progress. Rendering only: no Play mode or performance check. |
 | Mesh/material preparation and Unity delivery | 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode. Publication through `approve-texture` is shown on one live asset. Play mode and in-scene checks are not run. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
 | Safe Unity replacement/reimport | Implemented for props: republishing keeps GUIDs and texture references, and a prefab follows a republished mesh. If a GUID changes, approval stops and the previous files are restored. Checked by an opt-in live Unity test; a deleted `.meta` is only exercised on a fresh checkout. |
 
-Full finger animation is not available on the diagnostic humanoid rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge does not assemble game scenes or ship sprites; the pipeline remains a qualified asset workflow rather than a game engine.
+Full finger animation is not available on the diagnostic humanoid rig. Reference-input plumbing exists, but the bundled concept graph is text-only. SlopForge assembles showcase scenes for review, not game levels, and does not ship sprites; the pipeline remains a qualified asset workflow rather than a game engine.
 
 ## Find your way around
 

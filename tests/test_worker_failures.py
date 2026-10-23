@@ -458,3 +458,37 @@ class WorkerJournalStageIdentityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelWorkflowMemoryRetryTests(unittest.TestCase):
+    """A remote out-of-memory failure frees ComfyUI's cache and runs the workflow once more (2026-10-23)."""
+
+    def _client(self, outcomes):
+        from unittest.mock import Mock
+        client = Mock()
+        client.queue_workflow.side_effect = [f"p{n}" for n in range(len(outcomes))]
+        client.wait_for_completion.side_effect = outcomes
+        return client
+
+    def test_out_of_memory_frees_and_retries_once(self):
+        from processing.comfy_generate_3d import run_model_workflow
+        from slopforge.backends.comfyui import ComfyUIError
+        oom = ComfyUIError("ComfyUI generation p0 failed: ... (out of memory) ...", category="inference",
+                           operation="wait_for_completion", evidence={"remote_terminal": True})
+        client = self._client([oom, {"outputs": {}}])
+        self.assertEqual(run_model_workflow({"1": {}}, client), ({"outputs": {}}, "p1"))
+        client.free_memory.assert_called_once()
+        client = self._client([oom, oom])
+        with self.assertRaises(ComfyUIError):
+            run_model_workflow({"1": {}}, client)
+        self.assertEqual(client.queue_workflow.call_count, 2)  # once more, not forever
+
+    def test_other_remote_failures_are_not_retried(self):
+        from processing.comfy_generate_3d import run_model_workflow
+        from slopforge.backends.comfyui import ComfyUIError
+        failed = ComfyUIError("ComfyUI generation p0 failed: missing node", category="inference",
+                              operation="wait_for_completion", evidence={"remote_terminal": True})
+        client = self._client([failed])
+        with self.assertRaises(ComfyUIError):
+            run_model_workflow({"1": {}}, client)
+        client.free_memory.assert_not_called()

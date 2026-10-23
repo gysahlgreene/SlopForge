@@ -223,6 +223,10 @@ class ComfyUIClient:
     def node_types(self):
         return self.json("GET", "/object_info")
 
+    def free_memory(self):
+        """Ask ComfyUI to unload its models and free cached GPU memory."""
+        return self.json("POST", "/free", {"unload_models": True, "free_memory": True})
+
     def upload_file(self, path, subfolder="slopforge"):
         path = Path(path)
         if not path.is_file():

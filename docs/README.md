@@ -22,6 +22,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Materials and textures](MATERIALS.md): declared material regions, PBR maps, normal bake, emission and checks
 - [Candidate review board](REVIEW-BOARD.md) and [quality tiers](QUALITY-TIERS.md)
 - [Recipes](RECIPES.md) and [environment kits](ENVIRONMENT-KITS.md)
+- [Natural environments](NATURAL-ENVIRONMENTS.md): rocks, tiling ground and bark, foliage cut-outs
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
 - [Unity delivery](UNITY.md)

@@ -352,12 +352,19 @@ def write_flat_normal(normal):
     normal.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixel) + chunk(b"IEND", b""))
 
 
-def run_model_workflow(workflow, client, *args):
+def run_model_workflow(workflow, client, *args, memory_retry=True):
     prompt_id = client.queue_workflow(workflow)
     print(f"Queued 3D generation: {prompt_id}", flush=True)
     try:
         return client.wait_for_completion(prompt_id), prompt_id
     except ComfyUIError as exc:
+        # A remote out-of-memory failure is the cache of earlier jobs, not this one: a texture bake failed holding
+        # 77 GiB after seven back-to-back approvals, and passed once ComfyUI freed its memory (2026-10-23).
+        if (memory_retry and (exc.evidence or {}).get("remote_terminal") is True
+                and "out of memory" in str(exc).lower()):
+            print("ComfyUI ran out of GPU memory; freeing its cache and queueing once more", flush=True)
+            client.free_memory()
+            return run_model_workflow(workflow, client, *args, memory_retry=False)
         # Tag at known boundary (execution → inference); never infer
         # retryability from message text.
         exc.category = exc.category or "inference"
