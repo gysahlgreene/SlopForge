@@ -1,0 +1,43 @@
+schema_version: 1
+id: image.upscale_esrgan
+version: 1
+capabilities:
+- upscale
+workflow_sha256: fd7ce153745922ebb956933dce937a456b71cdf91263c44cb1b0d36e0890cefd
+nodes:
+- class: ImageUpscaleWithModel
+  source: ComfyUI core
+  revision: unknown
+- class: LoadImage
+  source: ComfyUI core
+  revision: unknown
+- class: SaveImage
+  source: ComfyUI core
+  revision: unknown
+- class: UpscaleModelLoader
+  source: ComfyUI core
+  revision: unknown
+models:
+- name: RealESRGAN_x4plus.safetensors
+  source: https://github.com/xinntao/Real-ESRGAN
+  license: BSD-3-Clause
+  license_source: https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE
+  sha256: unknown
+inputs:
+- name: image
+  type: image/png
+outputs:
+- name: image
+  type: image/png
+profiles:
+- h100
+- h100_final
+estimated_resource_class: standard_gpu
+tested_on:
+- profile: h100
+  backend: comfyui
+  date: '2026-10-23'
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms for the exact installed weights.
+limitations:
+- Node revisions and model file hashes are not exposed by the ComfyUI API and remain unverified.

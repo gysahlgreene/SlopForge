@@ -1,0 +1,37 @@
+{
+  "upscale_source": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "upscale_input.png"
+    }
+  },
+  "upscale_model": {
+    "class_type": "UpscaleModelLoader",
+    "inputs": {
+      "model_name": "RealESRGAN_x4plus.safetensors"
+    }
+  },
+  "upscale": {
+    "class_type": "ImageUpscaleWithModel",
+    "inputs": {
+      "upscale_model": [
+        "upscale_model",
+        0
+      ],
+      "image": [
+        "upscale_source",
+        0
+      ]
+    }
+  },
+  "save": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "upscale",
+        0
+      ],
+      "filename_prefix": "slopforge/upscale"
+    }
+  }
+}
