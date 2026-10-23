@@ -39,7 +39,7 @@ walls grey. A kit can name one texture child as its material:
 
 ```yaml
 kit_constraints:
-  material: {source: stone, tile_size: 2.0, roughness: 0.75}   # metres per repeat; the kit's finish
+  material: {source: stone, roughness: 0.75}   # the kit's tint and finish
 children:
   - id: stone
     type: texture
@@ -50,24 +50,24 @@ children:
 module before its kit texture stops before any inference and names the texture to approve.
 
 **What happens to each module** declared in `kit_constraints.modules`, in its mesh-aware material stage:
-- the texture is made seamless;
-- it is box-projected at `tile_size` metres per repeat;
-- its base colour is re-baked as the swatch × baked ambient occlusion × the module's own brightness relative to
-  its mean, softened to 60%.
+- **Tint:** its base colour keeps its own generated colours, weathering and lightness. Only its average CIELAB
+  a and b, its tint, move to the kit texture's. UV padding is left as it is.
+- **Finish:** with `roughness`, its roughness map moves to that mean, keeping its own variation softened to 60%.
+  UV padding takes the declared value.
 
-With `roughness`, each module's roughness map is also moved to that mean, keeping its own variation softened to
-60%, and UV padding takes the declared value. In M2-v1 run K1 (2026-10-23), TRELLIS decoded the flagstone floor at
-0.22 beside walls at 0.67, so Unity rendered a glossy floor that reflected the blue sky.
+The kit texture's hash, the tint shift and the roughness join the module's assembly-stage settings.
 
-So every module gets the swatch's hue and, when declared, the kit's finish. Each one keeps its block-to-block light
-and dark, and its own normal and metallic maps. The seamless swatch's hash, the tile size and the roughness join the
-module's assembly-stage settings.
+**Why tint, not a baked swatch:** until 2026-10-23 each module's base colour was re-baked from the seamless
+swatch. That made modules match, but flattened them to the same light grey and read as clay. On the same meshes
+in Unity, the owner chose each module's own colours with the tint matched
+([comparison](media/kits-hue-match-2026-10/README.md)).
 
-**Unity mip levels:** the bake leaves nothing black outside the UV islands. Uncovered texels take the module's
-mean colour, as TRELLIS's own maps do. A first live run left them black, and Unity's smaller mips blended that into
-island edges as black patches on column capitals and the doorway frame.
+**Why a finish:** in M2-v1 run K1, TRELLIS decoded the flagstone floor at roughness 0.22 beside walls at 0.67, so
+Unity rendered a glossy floor that reflected the blue sky.
 
-**Limits:** the colour of an invented back face is replaced, but its brightness pattern is kept at 60%.
+**Limits:**
+- Lightness still differs between modules: K2's stone modules averaged L 48–60 against the texture's 73.
+- The tint of an invented back face is matched like the rest, but its pattern stays invented.
 
 ## Layouts and the Unity test scene
 

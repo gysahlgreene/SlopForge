@@ -79,10 +79,8 @@ def _validate_kit_constraints(definition, child_ids):
         raise ValueError("kit_constraints.modules must map known child ids to rules")
     material = constraints.get("material")
     if material is not None:
-        tile = material.get("tile_size") if isinstance(material, dict) else None
-        if (not isinstance(material, dict) or material.get("source") not in child_ids or
-                not isinstance(tile, (int, float)) or isinstance(tile, bool) or not math.isfinite(tile) or tile <= 0):
-            raise ValueError("kit_constraints.material needs a source child id and a positive tile_size in metres")
+        if not isinstance(material, dict) or material.get("source") not in child_ids:
+            raise ValueError("kit_constraints.material needs a source child id")
         roughness = material.get("roughness")
         if roughness is not None and (not isinstance(roughness, (int, float)) or isinstance(roughness, bool)
                                       or not 0 <= roughness <= 1):
@@ -747,10 +745,9 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
             asset["max_stretch"] = stretch
         material = constraints.get("material")
         if material and child["id"] in constraints.get("modules", {}) and asset_types[child["type"]].get("pipeline") == "model":
-            # Every declared module takes its base colour from the kit's texture child once that is approved.
+            # Every declared module takes its tint from the kit's texture child once that is approved.
             source = next(item for item in children if item["id"] == material["source"])
-            asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}"),
-                                     "tile_size": material["tile_size"]}
+            asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}")}
             if material.get("roughness") is not None:
                 asset["kit_material"]["roughness"] = material["roughness"]
         manifest["assets"][key] = asset

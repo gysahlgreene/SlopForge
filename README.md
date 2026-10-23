@@ -107,7 +107,7 @@ size, checked, published to Unity as a prefab, and placed by the kit's layout. T
 
 | Kit | Modules | One look across the kit | Protocol runs |
 | --- | --- | --- | --- |
-| `stone_ruin_kit` | floor, wall, doorway, corner, column | one stone texture and finish shared by every module | 2 of 2 passed |
+| `stone_ruin_kit` | floor, wall, doorway, corner, column | one stone texture sets every module's tint and finish | 2 of 2 passed |
 | `timber_house_kit` | floor, wall, window, doorway, corner | dark oak beams and lime plaster, declared per module | 2 of 2 passed |
 | `scifi_corridor_kit` | floor, wall, doorway, corner, pillar | painted panels, steel and a cyan light strip | 2 of 2 passed |
 
@@ -132,7 +132,7 @@ slopforge --project ~/UnityProjects/MyGame environment-check house
 slopforge --project ~/UnityProjects/MyGame environment-scene house room
 ```
 
-For the stone kit, approve its `stone` texture first: every module takes its colour and finish from it.
+For the stone kit, approve its `stone` texture first: every module takes its tint and finish from it, and keeps its own generated colours and weathering.
 
 **What the evidence supports:**
 - Two independent runs of each kit passed every check on the H100 `final` tier through Unity 6000.6.3f1 / URP

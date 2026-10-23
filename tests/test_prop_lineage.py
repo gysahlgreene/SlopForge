@@ -470,7 +470,7 @@ avoid: [environment]
         self._concept_candidates()
         for pipeline in (self.config["asset_pipeline"], self.config["_quality_base_pipeline"]):
             pipeline["workflows"]["model"] = "trellis2_image_to_model_api.json"
-        self.record["kit_material"] = {"asset_key": "texture:ruin_stone", "tile_size": 2}
+        self.record["kit_material"] = {"asset_key": "texture:ruin_stone"}
         calls = []
         with patch("slopforge.pipelines.model.blender_executable", return_value="blender"), \
                 self.assertRaisesRegex(StageFailure, "ruin_stone"):
