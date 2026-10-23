@@ -9,9 +9,9 @@ code inventories. This ordering replaces the earlier humanoid-preview-first sequ
 | --- | --- | --- |
 | M0 Core reliability | Closed by the owner on 2026-10-21; [exit record](docs/M0-EXIT-RECORD.md) with its gaps | The concrete core exit evidence below, with requirements/enforcement gaps visible |
 | M1 Props | Provisional for static props on `h100`/`final` ([v5](docs/media/props-provisional-2026-10-v5/README.md)); the owner moved the focus to M2 on 2026-10-22, and #63 and #65 remain open; known limits in the M0 exit record | Representative static prop production through separate visual, structural, technical, style, performance and Unity gates under declared criteria |
-| M2 Modular environments | Active since 2026-10-22 ([epic #89](https://github.com/gysahlgreene/SlopForge/issues/89)): **Provisional** for modular kits on `h100`/`final` (2026-10-23, criterion [M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)): the stone ruin, timber house and sci-fi corridor kits, two runs each, pass the owner-accepted M2 criteria (#94) through assembled Unity scenes; the owner's visual review is pending | Reviewed modules assemble at declared scale/pivots, meet connection/repetition needs and project budgets, and work together in Unity |
+| M2 Modular environments | Active since 2026-10-22 ([epic #89](https://github.com/gysahlgreene/SlopForge/issues/89)): **Provisional** for modular kits on `h100`/`final` (2026-10-23, criterion [M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)): the stone ruin, timber house and sci-fi corridor kits, two runs each, pass the owner-accepted M2 criteria (#94) through assembled Unity scenes. The owner reviewed the look on 2026-10-23 and judged it well below the props'; not approved, and the stone kit's material step has changed since (#101). Owner-directed on 2026-10-23: natural environments and showcase scenes, **Experimental** ([live run](docs/media/natural-live-2026-10/README.md)) | Reviewed modules assemble at declared scale/pivots, meet connection/repetition needs and project budgets, and work together in Unity |
 | M3 Weapons/mechanical assets | After environments | Reviewed shapes/materials, moving-part hierarchy/pivots and functional motion where required, with project/runtime checks |
-| M4 Humanoids | After mechanical assets; historical asset-specific checks plus three automatically rigged generated characters (deformation unapproved, no Unity evidence for them) | Representative source acceptance, rig readiness, deformation, compatible animation and Unity playback under declared criteria |
+| M4 Humanoids | After mechanical assets; historical asset-specific checks plus four automatically rigged generated characters in four art styles (deformation unapproved, no Unity evidence for them) | Representative source acceptance, rig readiness, deformation, compatible animation and Unity playback under declared criteria |
 | M5 Creatures/Generic rigs | After humanoids | Category-appropriate skeletons, deformation, animation compatibility and Generic runtime playback under declared criteria |
 | M6 Broader automation | After category reliability | Reduced intervention across evidenced stages while preserving provenance, recovery, requirements and human review authority |
 
@@ -34,7 +34,7 @@ and [M0 milestone](https://github.com/gysahlgreene/SlopForge/milestone/1).
 Malformed/ambiguous `earliest_stale_stage` records now fail closed in
 [PR #38](https://github.com/gysahlgreene/SlopForge/pull/38) (`f63239a`), closing
 [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28). The helper still
-has no production callers. M0 remains active until all core exit evidence below is met.
+has no production callers; it is kept as the planned resume building block.
 
 The owner closed M0 on 2026-10-21 on the [M0 exit evidence record](docs/M0-EXIT-RECORD.md), which maps each item below to
 its evidence and gaps for static props on `h100`/`final`.
@@ -65,8 +65,7 @@ or claim category qualification from a core smoke test.
 ## Active character quality work (bounded parallel follow-up)
 
 User-directed follow-up to M0; does not reorder milestones or claim qualification.
-See [SESSION-HANDOFF](docs/SESSION-HANDOFF.md) for branch status, dirty diff scope,
-and resumption instructions.
+The [historical session handoff](docs/SESSION-HANDOFF.md) records its 2026-10-18 worktrees.
 
 Early humanoid smoke tests are permitted only as bounded architectural checks when
 needed to test core boundaries (such as rig handoff or engine delivery). Record the

@@ -54,10 +54,12 @@ Continue with provider setup and rigging only after reviewing the readiness repo
 ## Coordinate an environment kit
 
 ```sh
-slopforge --project ~/UnityProjects/MyGame recipe run starter_environment_kit --name refinery
-slopforge --project ~/UnityProjects/MyGame review
-slopforge --project ~/UnityProjects/MyGame recipe resume refinery
-slopforge --project ~/UnityProjects/MyGame environment-check refinery
+slopforge --project ~/UnityProjects/MyGame recipe run stone_ruin_kit --name ruin
+slopforge --project ~/UnityProjects/MyGame approve ruin_stone 1          # the kit texture first
+slopforge --project ~/UnityProjects/MyGame approve ruin_wall 1           # then each module in turn
+slopforge --project ~/UnityProjects/MyGame approve-texture ruin_wall 1
+slopforge --project ~/UnityProjects/MyGame environment-check ruin
+slopforge --project ~/UnityProjects/MyGame environment-scene ruin courtyard
 ```
 
-The kit recipe generates separate modules and validates configured dimensions, grid placement, and pivots. It does not assemble a room scene or guarantee a coherent visual set; inspect and approve each module.
+The stone ruin, timber house and sci-fi corridor kits are Provisional ([criterion M2-v3](media/kits-provisional-2026-10-v3/README.md)): each module is generated at its declared size, checked, published as a prefab, and placed by the kit's layout, and `environment-scene` checks the assembly in Unity. Inspect and approve each module; the owner judged the kits' look below the props'. The older `starter_environment_kit` recipe is outside that scope. See [environment kits](ENVIRONMENT-KITS.md).

@@ -7,7 +7,7 @@ Unity is an output target, not a generation dependency. Initialize an existing U
 - `ai/workflows/` for project-specific workflow overrides.
 - `Assets/Art/Generated/` folders for supported asset types.
 
-SlopForge writes ordinary GLB, Blend, FBX, and material files under the configured Unity `output_root`. Unity owns `.meta` files. Character animation setup can create a controller and character prefab through an explicit command; SlopForge does not assemble scenes or levels.
+SlopForge writes ordinary GLB, Blend, FBX, and material files under the configured Unity `output_root`. Unity owns `.meta` files. Character animation setup can create a controller and character prefab through an explicit command. `environment-scene` assembles a kit layout and `scene-render` a recipe's showcase scene, both for review; SlopForge does not build game levels.
 
 The Unity Editor may be closed during generation. Open the project afterward to import the new files and let Unity create `.meta` files.
 

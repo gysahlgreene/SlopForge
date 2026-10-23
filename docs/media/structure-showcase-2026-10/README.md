@@ -1,5 +1,7 @@
 # Structure showcase — six buildings from brief to PBR
 
+> **Superseded.** Structures are now generated at real size ([real-size evidence](../structures-real-size-2026-10/README.md)), and the modular kits are Provisional ([M2-v3](../kits-provisional-2026-10-v3/README.md)). This page records the first run.
+
 Six standalone structures generated on 2026-10-18 from written briefs through the normal CLI
 (`generate architecture` → `approve`), with no manual repair. Each was rendered as a lit
 turntable in Blender, and each strip shows the selected concept, the generated PBR maps and
@@ -29,8 +31,8 @@ two review renders.
 
 ## Conditions
 
-- Generation behaviour of SlopForge commit `01ff304` (the later kit `--target-size` option does
-  not apply to standalone structures); compute profile `h100`, quality tier `final`, the
+- Generation behaviour of SlopForge commit `01ff304`, before structures could be generated at real size
+  (`generate --target-size` came later); compute profile `h100`, quality tier `final`, the
   `architecture` asset type (60,000-face budget).
 - Model workflow `model.trellis2.h100` v5: TRELLIS.2 bf16, 1536 shape upsample, UDF remesh at
   384, GPU decimation to the budget, 4096² base color/roughness/metallic and normal bakes.

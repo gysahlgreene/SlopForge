@@ -25,8 +25,8 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | --- | --- | --- |
 | [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
-| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; six structures as lit turntables |
-| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, with a live rerun from a fresh project in progress | The flythrough above; six stills |
+| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
+| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
@@ -95,7 +95,7 @@ Inspect the concept, mesh views, materials, and validation report before each ap
 | :---: | :---: | :---: | :---: |
 | <img src="docs/media/character-styles-2026-10/realistic_walk.gif" width="180" alt="Realistic mercenary walking"> | <img src="docs/media/character-styles-2026-10/hero_walk.gif" width="180" alt="Stylized hero walking"> | <img src="docs/media/character-styles-2026-10/anime_walk.gif" width="180" alt="Anime adventurer walking"> | <img src="docs/media/character-styles-2026-10/painted_walk.gif" width="180" alt="Hand-painted dwarf walking"> |
 
-Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk are solid; the models are not yet game quality: forms are lumpy, faces soft and fingers fused, the limits of current open single-image 3D generation. Experimental and unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
+Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk improved through owner review but are not approved; the models are not yet game quality: forms are lumpy, faces soft and fingers fused, the limits of current open single-image 3D generation. Experimental and unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
 
 Unity playback is shown separately: an earlier test character has a valid Unity Humanoid Avatar and plays a retargeted walk ([Unity evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)).
 
@@ -121,7 +121,8 @@ All six runs passed every owner-accepted check, so modular kits on this tier are
   - Unity finds no seam gap wider than 1 mm.
 - **The pieces keep their shape:** no module is stretched more than 1.3 times to reach its size. A corner that
   reconstructs as a solid block or a wedge is rejected, and the next seed is tried.
-- **The pieces match their concepts:** concept fit is at least 0.89, and colour stays within the accepted limits.
+- **The pieces match their concepts:** concept fit is at least 0.89, and colour stays within the accepted limits
+  (hue and saturation; lightness is not checked).
 - **Ready for a scene:** each piece is a prefab with a mesh collider and static flags. Floors use 15k faces, walls
   and corners 40k, columns 20k, and every map is 2048².
 
@@ -141,25 +142,33 @@ For the stone kit, approve its `stone` texture first: every module takes its tin
 - Two independent runs of each kit passed every check on the H100 `final` tier through Unity 6000.6.3f1 / URP
   17.6.0. That makes the kits Provisional.
 - Two runs per kit cannot measure a failure rate, so nothing is Qualified.
-- The owner has not yet visually approved the scenes.
+- The status is for commit `5ceac3b`. The stone kit's material step has since changed: modules now keep their own
+  colours with the kit's tint matched (#101). No protocol run covers that yet.
+- The owner reviewed the scenes on 2026-10-23 and judged them well below the props. They are not approved.
 
 **Known limits:**
 - **Unseen wall backs are invented:** the timber walls' outsides are bare wood, the sci-fi walls' outsides dark.
 - **Some texture blemishes remain:** streaked plaster, gouges and green patches in some runs.
 - **The sci-fi corners are whiter than its walls,** because that kit has no shared material.
+- **S2's pillar is near-black** where its concept is grey metal: TRELLIS sometimes textures a mesh mostly black, and
+  no check catches it yet.
 - **Not covered:** Unity is checked in editor batch renders, with no Play mode, lightmaps or LODs.
 
 [Protocol evidence →](docs/media/kits-provisional-2026-10-v3/README.md) · [Earlier rounds: v1](docs/media/kits-provisional-2026-10/README.md), [v2](docs/media/kits-provisional-2026-10-v2/README.md) · [Environment kits guide →](docs/ENVIRONMENT-KITS.md) · [M2 epic →](https://github.com/gysahlgreene/SlopForge/issues/89)
 
-**Standalone structures** use the `architecture` asset type, with the same brief-declared materials as props:
+**Standalone structures** use the `architecture` asset type, with the same brief-declared materials as props. They are
+generated at real size with `generate --target-size`, and get the same concept-fit and colour checks as props:
 
-| Stone well | Market stall | Stone shrine |
+| Stone well, 3.2 m tall | Stone shrine, 3.5 m tall | Sci-fi bunker, 3.0 m tall |
 | :---: | :---: | :---: |
-| <img src="docs/media/structure-showcase-2026-10/stone_well_turntable.gif" width="240" alt="Stone well turntable"> | <img src="docs/media/structure-showcase-2026-10/market_stall_turntable.gif" width="240" alt="Market stall turntable"> | <img src="docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif" width="240" alt="Stone shrine turntable"> |
-| **Watchtower** | **Ruined arch** | **Sci-fi bunker** |
-| <img src="docs/media/structure-showcase-2026-10/watchtower_turntable.gif" width="240" alt="Watchtower turntable"> | <img src="docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif" width="240" alt="Ruined arch turntable"> | <img src="docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif" width="240" alt="Sci-fi bunker turntable"> |
+| <img src="docs/media/structures-real-size-2026-10/stone_well_turntable.gif" width="240" alt="Stone well with a shingled roof, winch and bucket, turning"> | <img src="docs/media/structures-real-size-2026-10/stone_shrine_turntable.gif" width="240" alt="Pale stone shrine with a pediment, two columns and a bronze basin, turning"> | <img src="docs/media/structures-real-size-2026-10/scifi_bunker_turntable.gif" width="240" alt="Concrete sci-fi bunker with a hazard-striped steel door and roof vents, turning"> |
+| **Ruined arch, 3.6 m tall** | **Broken window wall, 3 m long** | **Weathered corner, 3 m across** |
+| <img src="docs/media/natural-live-2026-10/ruin_arch_turntable.gif" width="240" alt="Mossy granite archway with moulded piers, turning"> | <img src="docs/media/natural-live-2026-10/ruin_window_turntable.gif" width="240" alt="Stepped broken granite wall with an arched window, turning"> | <img src="docs/media/natural-live-2026-10/ruin_corner_turntable.gif" width="240" alt="Weathered L-shaped granite wall corner with moss, turning"> |
 
-These are one run each (2026-10-18), not yet visually approved. Structures are now generated at real size with `generate --target-size`, and they get the same concept-fit and colour checks as props. Rerun that way, the well, shrine and bunker passed on their first attempts ([real-size evidence](docs/media/structures-real-size-2026-10/README.md)). [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md)
+The top row is one real-size run each (2026-10-22), and each passed on its first mesh attempt. The bunker's white patch
+and invented second door are single-image limits. The bottom row is ruin pieces from the
+[live moorland run](docs/media/natural-live-2026-10/README.md) (2026-10-23). None of them is visually approved yet.
+[Real-size evidence →](docs/media/structures-real-size-2026-10/README.md) · [The first structure run →](docs/media/structure-showcase-2026-10/README.md)
 
 ## Scenes and natural environments
 
@@ -168,8 +177,8 @@ one recipe, in a blank project:
 - **Rocks:** boulders, outcrops and a granite tor of cliff chunks.
 - **A broken stone chapel:** jagged walls, a window, a weathered corner, a freestanding arch, columns, fallen drums
   and cracked flagstones.
-- **A camp of props:** a crate, a jug and a stone lantern from the Provisional prop protocol, and a pot, a stump
-  and a brass lantern from single coverage runs.
+- **A camp of props:** a crate, a jug, a stone lantern, a pot, a stump and a brass lantern, from the briefs of the
+  prop protocol and coverage runs, each generated once by the recipe.
 - **Ground:** meadow, forest floor, gravel and granite tiling materials, with 2 million grass blades coloured from
   the meadow.
 - **Plants:** heather and wildflower cards, and oak, birch and pine trees built from generated bark and leaf
@@ -205,7 +214,9 @@ slopforge --project ~/UnityProjects/MyGame scene-render moor
 
 ![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
 
-Every 3D asset gets mesh-aware PBR materials generated with its geometry: base color, roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an emission map, at 4096² on the H100 final profile.
+<sub>The maps of a stone lantern from the 2026-10-18 showcase, made before the colour and metal checks below. The [Provisional prop runs](docs/media/props-provisional-2026-10-v5/README.md) show current output.</sub>
+
+Every 3D asset gets mesh-aware PBR materials generated with its geometry: base color, roughness, metallic, a baked tangent-space normal map and, for declared glowing parts, an emission map, at 4096² on the H100 final profile (kit modules declare 2048²).
 
 - **Material regions:** the brief declares `nonmetal`, `metal`, `emissive[#rrggbb]` or `glass[#rrggbb]` per region. Glass faces get a second, transparent URP material in Unity.
 - **Reconstruction-ready concepts:** every 3D concept prompt asks for even lighting, matte non-metals, thick parts, and glowing or glass parts drawn as solid surfaces so they reconstruct whole.
@@ -234,11 +245,11 @@ flowchart LR
     Motion --> Playback[Animation + Unity validation]
 ```
 
-- **Generate:** props, collectibles, architecture, and humanoid character candidates using configurable ComfyUI workflows.
+- **Generate:** props, collectibles, architecture, kit modules, foliage cut-outs, tiling ground and bark materials, and humanoid character candidates using configurable ComfyUI workflows; trees and shrubs with `vegetation`.
 - **Prepare:** inspect geometry, preserve sources, process meshes and PBR maps, and render review views and turntables in Blender.
 - **Review:** compare candidates, approve explicitly, and retain failed attempts and processing evidence.
 - **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
-- **Deliver:** export models/materials, assemble kit layouts into Unity scenes, and prepare character animation tooling for Unity.
+- **Deliver:** export models/materials, assemble kit layouts into Unity scenes, render whole scenes with `scene-render`, and prepare character animation tooling for Unity.
 
 ## Quick start
 
@@ -262,10 +273,10 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | --- | --- |
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Static props | **Provisional** for `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import. Three briefs × two independent runs passed every stage and owner-accepted threshold ([criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md)). Four more prop kinds passed end to end in single exploratory runs; the stump passed only after a UV fix prompted by its failed first run. Not Qualified: six runs cannot measure a failure rate. |
-| Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096². Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. The colour of small parts is not checked. |
-| Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. |
-| Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe reproduce it, with a live rerun in progress. Rendering only: no Play mode or performance check. |
-| Mesh/material preparation and Unity delivery | 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode. Publication through `approve-texture` is shown on one live asset. Play mode and in-scene checks are not run. |
+| Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096² by default (2048² for kit modules). Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. The colour of small parts is not checked. |
+| Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. The stone kit's material step changed after that commit (#101) and has no protocol run. Standalone structures are generated at real size, one run each. |
+| Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe rebuilt it once from a blank project ([live run](docs/media/natural-live-2026-10/README.md)). Rendering only: no Play mode or performance check. |
+| Mesh/material preparation and Unity delivery | 28 of the 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode (two stopped earlier). Every M2-v3 kit module and every moorland model was published with `approve-texture`; kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps. Play mode is not run. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
 | Safe Unity replacement/reimport | Implemented for props: republishing keeps GUIDs and texture references, and a prefab follows a republished mesh. If a GUID changes, approval stops and the previous files are restored. Checked by an opt-in live Unity test; a deleted `.meta` is only exercised on a fresh checkout. |

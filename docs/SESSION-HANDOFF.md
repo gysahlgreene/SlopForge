@@ -1,5 +1,9 @@
 # Session handoff — repeatable character quality pipeline
 
+> **Historical (2026-10-18).** This page records the worktrees and issues of that date and is no longer kept
+> current: M0 and #26 closed on 2026-10-21, and the props and kits protocols have run since. Start from
+> [AGENTS](../AGENTS.md), the [roadmap](../ROADMAP.md) and [current state](../CURRENT_STATE.md).
+
 > Read on return: [AGENTS](../AGENTS.md) → [contracts](PRODUCT_CONTRACT.md) / [roadmap](../ROADMAP.md) / [current state](../CURRENT_STATE.md). Inspect preserved worktrees. Review full dirty diff against the applicable plan/spec below. Then freshly verify before any claim. Baseline at audit start was `main` at `e56d188`.
 
 ## Props and materials track (2026-10-18)

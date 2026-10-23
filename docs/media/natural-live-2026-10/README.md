@@ -17,6 +17,14 @@ The agent selected every concept. No asset was repaired by hand.
 | <img src="camp.jpg" width="400" alt="Inside the broken chapel: flagstones and the camp of props"> | <img src="arch.jpg" width="400" alt="The chapel's arch facing the camera, with columns and drums"> |
 | <img src="tor.jpg" width="400" alt="Heather below the granite tor"> | <img src="grove.jpg" width="400" alt="Pines and a shrub in the grove, the tor beyond"> |
 
+## Ruin pieces
+
+Four of the chapel's eight pieces, as Blender turntables of the published models:
+
+| Arch | Window wall | Corner | Wall |
+| :---: | :---: | :---: | :---: |
+| ![Arch turntable](ruin_arch_turntable.gif) | ![Window wall turntable](ruin_window_turntable.gif) | ![Corner turntable](ruin_corner_turntable.gif) | ![Wall turntable](ruin_wall_turntable.gif) |
+
 ## The run
 
 - **Children:** 30, all made by the recipe:

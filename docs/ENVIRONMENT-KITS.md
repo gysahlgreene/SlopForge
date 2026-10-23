@@ -16,7 +16,7 @@ slopforge --project ~/UnityProjects/MyGame recipe resume lunar_refinery
 slopforge --project ~/UnityProjects/MyGame environment-check lunar_refinery
 ```
 
-Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See the [structure showcase](media/structure-showcase-2026-10/README.md) for a five-module kit.
+Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See [criterion M2-v3](media/kits-provisional-2026-10-v3/README.md) for three five-module kits.
 
 A module's `pivot` (or the kit's default `pivot`) places its origin in the exported FBX:
 - `bottom_center` for walls, doorways, corners and columns, which stand on their origin;
@@ -144,8 +144,8 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
   Architecture's is 60,000 faces and 4096² maps on the final tier; a flat 3 × 3 m floor tile used 59,988.
 - **Reporting:** `environment-check` reports each module's faces and map texels (base colour, normal,
   metallic/smoothness and emission), and the kit's totals under `budgets`.
-- **Not yet:** a kit-wide limit waits for the owner's M2 criteria
-  ([#94](https://github.com/gysahlgreene/SlopForge/issues/94)).
+- **Not yet:** a kit-wide limit. The owner's M2 criteria
+  ([#94](https://github.com/gysahlgreene/SlopForge/issues/94), closed) set per-module budgets only.
 
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 

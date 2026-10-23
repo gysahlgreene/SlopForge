@@ -1,5 +1,7 @@
 # Shared kit material (2026-10-22)
 
+> **Superseded.** The swatch bake on this page was removed in #101: modules now keep their own colours with the kit's tint matched ([kit look](../kits-hue-match-2026-10/README.md)).
+
 The first assembled courtyard ([kit scene evidence](../kit-scene-2026-10/README.md)) showed that kit modules
 generated one at a time do not match. The columns came out sandy, the walls grey, and the wall backs had rusty
 invented patches. The owner chose one shared material per kit. This page records how it was tried, the two

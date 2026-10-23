@@ -128,7 +128,7 @@ accuracy as important), and v5 better than v3. The v5 set is Provisional for its
 - Colour drift in a small part is not checked, because only the dominant colour is compared.
 - Jug ribbing shows in Unity.
 - A crate's open top can be reconstructed closed.
-- Glass and transparent parts (#44).
+- Glass and transparent parts (handled after closure, issue #44).
 - Invented hidden sides (#63).
 - A lost ComfyUI job is not detected (fixed after closure, issue #76).
 - Output downloads are not retried (fixed after closure, issue #76).

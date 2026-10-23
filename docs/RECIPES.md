@@ -1,6 +1,6 @@
 # 3D recipe orchestration
 
-Recipes in `ai/recipes/<id>.yaml` coordinate related 3D assets. `slopforge init` installs `character_3d_pack` and `starter_environment_kit`. A recipe describes children, asset types, prompts, dependencies, and optional generation counts. The runner calls the existing model or supporting image pipeline for each child and records progress, dependencies, and provenance in the manifest.
+Recipes in `ai/recipes/<id>.yaml` coordinate related 3D assets. `slopforge init` installs every bundled recipe: `character_3d_pack`, `starter_environment_kit`, the `stone_ruin_kit`, `timber_house_kit` and `scifi_corridor_kit` modular kits, and the `moorland_ruin` scene. A recipe describes children, asset types, prompts, dependencies, and optional generation counts. The runner calls the existing model or supporting image pipeline for each child and records progress, dependencies, and provenance in the manifest.
 
 A small recipe can coordinate a character and an associated prop:
 
