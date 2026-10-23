@@ -1,0 +1,436 @@
+# A moorland showcase scene (2026-10-23 prototype; owner: "this is perfect"). Every prompt below is the one that
+# made the approved scene. Build each child, then `slopforge scene-render <run>` assembles the scene block below.
+id: moorland_ruin
+version: 1
+description: 'A moorland showcase: rocks, ground and bark surfaces, foliage, a broken stone chapel and a small camp, assembled
+  into a Unity scene with scene-render.'
+kit_constraints:
+  grid_size: 1.0
+  snap_tolerance: 0.05
+  pivot_tolerance: 0.05
+  max_dimension: 8.0
+  pivot: bottom_center
+  modules:
+    boulder:
+      target_size:
+      - null
+      - null
+      - 1.4
+      pivot: bottom_center
+    rock:
+      target_size:
+      - null
+      - null
+      - 0.7
+      pivot: bottom_center
+    outcrop:
+      target_size:
+      - null
+      - null
+      - 0.6
+      pivot: bottom_center
+    cliff:
+      target_size:
+      - null
+      - null
+      - 3.5
+      pivot: bottom_center
+    ruin_wall:
+      target_size:
+      - 3
+      - null
+      - null
+      pivot: bottom_center
+    ruin_window:
+      target_size:
+      - 3
+      - null
+      - null
+      pivot: bottom_center
+    ruin_corner:
+      target_size:
+      - 3
+      - null
+      - null
+      pivot: bottom_center
+    ruin_arch:
+      target_size:
+      - null
+      - null
+      - 3.6
+      pivot: bottom_center
+    ruin_column:
+      target_size:
+      - null
+      - null
+      - 2.4
+      pivot: bottom_center
+    ruin_drum:
+      target_size:
+      - 1.3
+      - null
+      - null
+      pivot: bottom_center
+    ruin_blocks:
+      target_size:
+      - 2.6
+      - null
+      - null
+      pivot: bottom_center
+    ruin_floor:
+      target_size:
+      - 3
+      - 3
+      - null
+      pivot: bottom_center
+children:
+- id: meadow_grass
+  type: tiling_material
+  description: Meadow grass ground
+  generation_prompt: 'Seamless tileable texture of short wild meadow grass: dense green blades, a few dry yellow tufts,
+    small clover leaves and tiny white flowers, natural variation. Seen from directly above, flat top-down orthographic
+    view filling the whole frame, evenly lit, no shadows, no horizon, no perspective, no border, no text.'
+- id: forest_dirt
+  type: tiling_material
+  description: Forest floor ground
+  generation_prompt: 'Seamless tileable texture of damp forest floor: dark brown soil scattered with fallen brown and orange
+    leaves, small twigs, pine needles and a few small pebbles. Seen from directly above, flat top-down orthographic view
+    filling the whole frame, evenly lit, no shadows, no horizon, no perspective, no border, no text.'
+- id: gravel_path
+  type: tiling_material
+  description: Gravel path ground
+  generation_prompt: 'Seamless tileable texture of a grey gravel path: small rounded and angular pebbles in grey and beige
+    tones, packed into dusty soil. Seen from directly above, flat top-down orthographic view filling the whole frame, evenly
+    lit, no shadows, no horizon, no perspective, no border, no text.'
+- id: granite_rock
+  type: tiling_material
+  description: Granite slope ground
+  generation_prompt: 'Seamless tileable texture of a weathered grey granite rock surface: rough fractured stone with fine
+    speckle, thin cracks, pale lichen spots and a little green moss in the cracks. Seen from directly above, flat top-down
+    orthographic view filling the whole frame, evenly lit, no shadows, no horizon, no perspective, no border, no text.'
+- id: oak_bark
+  type: tiling_material
+  description: Oak bark
+  generation_prompt: 'Seamless tileable texture of old oak tree bark: deep vertical furrows and rough ridges, grey-brown
+    bark with small patches of green moss and pale lichen. Flat front-facing orthographic view filling the whole frame,
+    evenly lit, no shadows, no border, no text.'
+- id: birch_bark
+  type: tiling_material
+  description: Silver birch bark
+  generation_prompt: 'Seamless tileable texture of silver birch bark: white papery bark with dark grey-black horizontal
+    lenticels and rough dark cracked patches, a few peeling curls. Flat front-facing orthographic view filling the whole
+    frame, evenly lit, no shadows, no border, no text.'
+- id: pine_bark
+  type: tiling_material
+  description: Scots pine bark
+  generation_prompt: 'Seamless tileable texture of Scots pine bark: thick reddish-brown and grey plates separated by deep
+    dark fissures. Flat front-facing orthographic view filling the whole frame, evenly lit, no shadows, no border, no text.'
+- id: oak_sprig
+  type: foliage
+  description: Leafy oak branch tip
+  generation_prompt: 'The leafy tip of an oak branch: a thin brown twig with many overlapping green lobed oak leaves, some
+    leaves lighter yellow-green and some darker, seen from the side, evenly lit, isolated on a plain pure white background,
+    crisp edges, no ground, no shadow.'
+- id: birch_sprig
+  type: foliage
+  description: Drooping birch twig
+  generation_prompt: A thin drooping silver birch twig with many small triangular serrated bright green leaves along it,
+    seen from the side, evenly lit, isolated on a plain pure white background, crisp edges, no ground, no shadow.
+- id: pine_sprig
+  type: foliage
+  description: Scots pine branch tip
+  generation_prompt: 'A single Scots pine branch tip: a brown twig densely covered with long dark green paired needles fanning
+    out, seen from the side, evenly lit, isolated on a plain pure white background, crisp edges, no ground, no shadow.'
+- id: wildflowers
+  type: foliage
+  description: Daisies and buttercups
+  generation_prompt: 'A single small clump of wild meadow flowers: white ox-eye daisies and yellow buttercups on thin green
+    stems with a few leaves, seen from the side, evenly lit, isolated on a plain pure white background, crisp edges, no
+    ground, no shadow.'
+- id: heather
+  type: foliage
+  description: Flowering heather clump
+  generation_prompt: A single low clump of flowering purple heather with tiny pink-purple flowers on woody green stems,
+    seen from the side, evenly lit, isolated on a plain pure white background, crisp edges, no ground, no shadow.
+- id: boulder
+  type: prop
+  description: Large mossy granite boulder
+  generation_prompt: One large weathered granite boulder, rounded and slightly flattened, wider than it is tall, with natural
+    cracks and pits, patches of green moss and pale lichen on its top and in its cracks. A complete stone, front three-quarter
+    view from slightly above, isolated on a plain light-grey background.
+  materials:
+  - 'rock=nonmetal: weathered grey granite with patches of green moss and pale lichen'
+  aspect: landscape
+- id: rock
+  type: prop
+  description: Medium angular granite rock
+  generation_prompt: One medium angular granite rock with sharp broken faces and worn edges, a few moss patches in its crevices
+    and pale lichen spots. A complete stone, front three-quarter view from slightly above, isolated on a plain light-grey
+    background.
+  materials:
+  - 'rock=nonmetal: weathered grey granite with patches of green moss and pale lichen'
+- id: outcrop
+  type: prop
+  description: Low flat granite outcrop
+  generation_prompt: One low flat granite rock outcrop slab, much wider than it is tall, with layered stepped edges, cracks
+    across its top, and green moss growing in the cracks and along its base. A complete stone, front three-quarter view
+    from above, isolated on a plain light-grey background.
+  materials:
+  - 'rock=nonmetal: weathered grey granite with patches of green moss and pale lichen'
+  aspect: landscape
+- id: cliff
+  type: prop
+  description: Craggy granite cliff chunk
+  generation_prompt: One tall craggy granite cliff chunk, a vertical rock wall section about twice as wide as it is deep,
+    with deep vertical cracks, small ledges, and green moss on the ledges, flat bottom. A complete rock, front three-quarter
+    view, isolated on a plain light-grey background.
+  materials:
+  - 'rock=nonmetal: weathered grey granite with patches of green moss and pale lichen'
+  aspect: landscape
+- id: ruin_wall
+  type: architecture
+  description: Ruined granite wall section
+  generation_prompt: 'One section of a ruined weathered grey granite block wall about three metres long: large dressed stone
+    blocks laid in courses with deep mortar joints, the top broken into a jagged stepped outline where blocks have fallen,
+    tallest at one end and much lower at the other, a few blocks cracked and chipped, green moss along the broken top and
+    in the joints, thick even depth, flat bottom. Both faces built alike. Front three-quarter view from slightly above,
+    showing the broken top, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_window
+  type: architecture
+  description: Ruined granite wall with a window
+  generation_prompt: One ruined section of a weathered grey granite block wall about three metres long with a tall round-arched
+    window opening through it, the wall top broken into a jagged stepped outline above and beside the window, dressed stone
+    blocks in courses, chipped edges, green moss in the joints and on the broken top, thick even depth, flat bottom. Both
+    faces built alike. Front three-quarter view from slightly above, isolated on a plain light-grey background.
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_corner
+  type: architecture
+  description: Ruined granite building corner
+  generation_prompt: 'One ruined corner of a weathered grey granite building: two short block walls meeting at a right angle
+    in an L, tallest at the corner and breaking away in jagged steps along each arm, dressed stone blocks in courses with
+    deep joints, chipped edges, green moss on the broken tops, thick even depth, flat bottom. Seen from a high front three-quarter
+    angle looking into the inside of the L, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_arch
+  type: architecture
+  description: Freestanding ruined stone archway
+  generation_prompt: 'One freestanding ruined archway of weathered grey granite: two thick square stone piers joined by
+    a round arch of wedge-shaped voussoir stones with a carved keystone, one pier top chipped away, a few small blocks missing
+    above the arch, moss and lichen patches, flat bottom. Front three-quarter view, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_column
+  type: architecture
+  description: Broken granite column
+  generation_prompt: 'One broken weathered grey granite column standing upright: a square stepped base and a thick round
+    fluted shaft snapped off at a jagged angle about two thirds up, chipped edges, cracks, moss on the base and on the broken
+    top. Front three-quarter view, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: portrait
+- id: ruin_drum
+  type: architecture
+  description: Fallen column drum
+  generation_prompt: One fallen round fluted column drum section of weathered grey granite lying on its side, chipped edges,
+    one end broken, moss and lichen patches. Front three-quarter view from slightly above, isolated on a plain light-grey
+    background.
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_blocks
+  type: architecture
+  description: Pile of fallen granite blocks
+  generation_prompt: 'One small pile of fallen weathered grey granite building blocks: five or six large dressed blocks
+    tumbled against each other at different angles with a few broken stones, chipped edges, moss on their tops. Front three-quarter
+    view from slightly above, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: ruin_floor
+  type: architecture
+  description: Overgrown flagstone floor
+  generation_prompt: 'One square section of an old ruined flagstone floor, low and flat: large weathered grey flagstones,
+    several cracked, one missing with dark soil showing, short grass and moss growing in the joints, straight clean outer
+    edges and a flat underside. Viewed from a high three-quarter angle, isolated on a plain light-grey background.'
+  materials:
+  - 'stone=nonmetal: weathered grey granite blocks with green moss and pale lichen'
+  aspect: landscape
+- id: supply_crate
+  type: prop
+  description: Wooden supply crate
+  generation_prompt: Front three-quarter view of one sturdy medieval wooden supply crate that is taller than it is wide,
+    about one and a quarter times as tall as it is wide. Weathered oak planks with clear wood grain and small knots. Dark
+    wrought-iron corner brackets on every corner and two horizontal iron straps around the body, all with round rivet heads.
+    Complete object, isolated on a plain light-grey background.
+  materials:
+  - 'planks=nonmetal: weathered oak with visible grain'
+  - 'brackets=metal: dark wrought iron with rivets'
+- id: brass_lantern
+  type: prop
+  description: Brass hurricane lantern
+  generation_prompt: Front three-quarter view of one brass hurricane lantern, taller than it is wide. A rounded glass globe
+    in the middle, drawn as a solid smooth pale surface with a faint sheen, nothing visible through it. Brass wire guards
+    around the globe. A ring handle on top. A round brass base. Complete object, isolated on a plain light-grey background.
+  materials:
+  - 'frame=metal: aged brass'
+  - 'globe=glass: clear glass'
+  aspect: portrait
+- id: ceramic_jug
+  type: prop
+  description: Glazed ceramic jug
+  generation_prompt: Front three-quarter view of one rustic glazed ceramic jug that is taller than it is wide. A round belly
+    and a short neck. One side handle in a thick loop, with a strip of rough twine wrapped around the handle. A natural
+    tan cork stopper in the neck. Deep cobalt-blue glossy glaze that thins to warm brown clay at the rim and base. Complete
+    object, isolated on a plain light-grey background.
+  materials:
+  - 'jug=nonmetal: glossy cobalt glaze over brown clay'
+  - 'stopper=nonmetal: natural cork'
+  - 'twine=nonmetal: rough natural twine'
+- id: iron_pot
+  type: prop
+  description: Cast-iron cooking pot
+  generation_prompt: Front three-quarter view of one heavy cast-iron cooking pot, wider than it is tall. A round pot body
+    with a thick rolled rim. Two chunky loop handles, one on each side. A domed lid with a round knob on top. Three short
+    stubby feet underneath. Dark matte cast iron with faint rust at the edges. The back matches the front. Complete object,
+    isolated on a plain light-grey background.
+  materials:
+  - 'pot=metal: dark cast iron'
+- id: stone_lantern
+  type: prop
+  description: Weathered stone lantern
+  generation_prompt: Front three-quarter view of one squat carved Japanese-style stone lantern for a fantasy ruin. A four-sided
+    upturned roof with radial ribs and a round finial on top. Below the roof, a square light box with one window on each
+    of its four sides; each window is filled flush with a solid opaque off-white rice-paper panel behind a simple dark wooden
+    lattice. A chamfered middle tier. A chunky square base. Rough matte grey granite with fine black-and-white speckle and
+    small chips, no polish. Seen in daylight. Complete object, isolated on a plain light-grey background.
+  materials:
+  - 'stone body=nonmetal: rough matte speckled grey granite'
+  - 'paper panels=emissive: opaque off-white rice paper'
+  - 'lattice=nonmetal: dark stained wood'
+- id: tree_stump
+  type: prop
+  description: Mossy tree stump with mushrooms
+  generation_prompt: Front three-quarter view of one short mossy tree stump, wider than it is tall. Rough brown bark around
+    the sides. A flat cut top showing pale wood rings. Three red-capped mushrooms with white spots growing from one side.
+    Thick green moss patches on the bark. Short chunky roots at the base. Complete object, isolated on a plain light-grey
+    background.
+  materials:
+  - 'bark=nonmetal: rough brown bark'
+  - 'rings=nonmetal: pale cut wood'
+  - 'mushrooms=nonmetal: red caps with white spots'
+  - 'moss=nonmetal: green moss'
+# The scene that scene-render assembles. Coordinates are metres within the dressed area: x east, z north, and every
+# height is above the ground. Surfaces, foliage and models name children above; plants are built from them.
+scene:
+  terrain:
+    size: 400           # square terrain, wide enough that its edge is past the fog
+    dressed: 100        # the dressed area in the middle
+    height: 12          # metres of relief at full height
+    noise: {amplitude: 0.28, scale: 0.025, octaves: 5}
+    hills:
+      - {at: [62, 70], radius: [22, 14], height: 0.38}
+    path: {x: 42, swing: 9, width: 4}      # x = 42 + 9 sin(2 pi z / 100); lowered 8% across its width
+    layers:                                # the first is the base; later layers take their share from it
+      - {surface: meadow_grass, tile: 4}
+      - {surface: forest_dirt, tile: 3, patches: {scale: 0.09, above: 0.55}, path_edge: [4, 2, 0.6]}
+      - {surface: gravel_path, tile: 2.5, path: [2.2, 0.8]}
+      - {surface: granite_rock, tile: 5, slope: [16, 26]}
+  plants:                                  # heights are the prototype's measured heights
+    oak_a: {species: oak, height: 11.6, seed: 11, bark: oak_bark, foliage: [oak_sprig]}
+    oak_b: {species: oak, height: 9.7, seed: 12, bark: oak_bark, foliage: [oak_sprig]}
+    oak_c: {species: oak, height: 12.8, seed: 13, bark: oak_bark, foliage: [oak_sprig]}
+    birch_a: {species: birch, height: 13.6, seed: 31, bark: birch_bark, foliage: [birch_sprig]}
+    birch_b: {species: birch, height: 12.5, seed: 32, bark: birch_bark, foliage: [birch_sprig]}
+    pine_a: {species: pine, height: 14.0, seed: 41, bark: pine_bark, foliage: [pine_sprig]}
+    pine_b: {species: pine, height: 12.1, seed: 42, bark: pine_bark, foliage: [pine_sprig]}
+    shrub_a: {species: shrub, height: 2.6, seed: 71, bark: oak_bark, foliage: [oak_sprig]}
+    shrub_b: {species: shrub, height: 2.5, seed: 72, bark: oak_bark, foliage: [oak_sprig]}
+    shrub_c: {species: shrub, height: 2.8, seed: 73, bark: oak_bark, foliage: [oak_sprig]}
+  clear:                                   # nothing is scattered this close to the flythrough's path or a still's camera
+    camera_path: 4.5
+  scatter:
+    - {assets: [cliff], count: 7, around: {at: [62, 68], radius: [9, 5], angles: [-1.1, 1.1], even: true}, scale: [1.1, 1.7], sink: 0.12}
+    - {assets: [boulder], count: 9, around: {at: [62, 64], radius: [13, 0], angles: [-1.3, 1.3], spread: [4, 5]}, scale: [0.6, 1.3], sink: 0.25}
+    - {assets: [outcrop], count: 7, area: [10, 10, 90, 60], scale: [0.9, 1.7], sink: 0.3}
+    - {assets: [rock], count: 12, path_edge: {z: [8, 68], offset: 3.5, spread: 2}, scale: [0.6, 1.2], sink: 0.2}
+    - {assets: [boulder], count: 5, area: [8, 8, 92, 48], scale: [0.5, 1.1], sink: 0.25}
+    - {assets: {pine_a: 3, pine_b: 3, birch_a: 2, birch_b: 2}, count: 7, cluster: {at: [14, 78], spread: [22, 18]}, scale: [0.85, 1.2], sink: 0.02, avoid_path: 6, avoid: [{at: [62, 70], radius: 20}]}
+    - {assets: {oak_a: 2, oak_b: 2, oak_c: 2, birch_a: 2, birch_b: 2}, count: 7, cluster: {at: [84, 26], spread: [22, 18]}, scale: [0.85, 1.2], sink: 0.02, avoid_path: 6}
+    - {assets: {oak_a: 2, oak_b: 2, oak_c: 2, birch_a: 2, birch_b: 2}, count: 7, cluster: {at: [18, 22], spread: [22, 18]}, scale: [0.85, 1.2], sink: 0.02, avoid_path: 6}
+    - {assets: {pine_a: 3, pine_b: 3, birch_a: 2, birch_b: 2}, count: 7, cluster: {at: [88, 88], spread: [22, 18]}, scale: [0.85, 1.2], sink: 0.02, avoid_path: 6, avoid: [{at: [62, 70], radius: 20}]}
+    - {assets: [oak_a, oak_b, oak_c], count: 5, area: [10, 10, 90, 80], scale: [0.9, 1.2], sink: 0.02, avoid_path: 6, avoid: [{at: [62, 70], radius: 20}]}
+    - {assets: [pine_a, pine_b], count: 8, around: {at: [62, 70], radius: [24, 18], angles: [0, 6.283]}, scale: [0.85, 1.2], sink: 0.02}
+    - {assets: [shrub_a, shrub_b, shrub_c], count: 60, area: [5, 5, 95, 90], scale: [0.5, 1.0], sink: 0.05, avoid_path: 2.5}
+  grass:                                   # blade geometry, coloured from the base layer's texture
+    layer: meadow_grass                  # the blades take their colours from this layer's texture
+    density: [250, 35]                     # blades per square metre near a still's camera, and from 60 m away
+    fade: [10, 60]
+  cover:                                   # foliage cards
+    - {foliage: wildflowers, count: 4100, size: [0.28, 0.45], aspect: 0.95, min_weight: 0.7, noise: {scale: 0.08, above: 0.55}}
+    - {foliage: heather, count: 2500, size: [0.3, 0.5], aspect: 1.15, near: {at: [62, 70], radius: 30}, avoid_path: 2, fraction: 0.8}
+  structures:
+    - id: chapel
+      at: [24, 46]
+      flatten: [9, 15]                     # level within 9 m, blending back to the slope by 15 m
+      clear: 10.5                          # no scatter, cover or blades this close, except blades outside floor tiles
+      cover_clear: 7
+      pieces:                              # at: metres from the structure's centre
+        - {model: ruin_corner, at: [-4.5, 4.5], turn: auto}
+        - {model: ruin_window, at: [-1.5, 5.4], turn: 0, align: {max_z: 6}}
+        - {model: ruin_wall, at: [1.5, 5.4], turn: 180, align: {max_z: 6}}
+        - {model: ruin_blocks, at: [4.6, 4.4], turn: 25}
+        - {model: ruin_wall, at: [-5.4, 1.5], turn: 90, align: {min_x: -6}}
+        - {model: ruin_drum, at: [-4.4, -2.6], turn: 65}
+        - {model: ruin_column, at: [-2.6, -4.6], turn: 10}
+        - {model: ruin_column, at: [0.6, -4.6], turn: 100}
+        - {model: ruin_drum, at: [3.4, -5.0], turn: 160}
+        - {model: ruin_arch, at: [6.3, 0], turn: 0}
+      floor:                               # floor tiles, their tops just above the grass; two cells are lost
+        model: ruin_floor
+        cells: [[-3, 0], [-3, 3], [0, -3], [0, 0], [0, 3], [3, -3], [3, 0]]
+      rubble: {models: [rock, outcrop], count: 5, area: [-6.8, -5, -4.4, -1.5], scale: [0.35, 0.75]}
+      props:                               # height: the prop is scaled to this many metres tall; above_floor: metres above the floor
+        - {model: supply_crate, at: [-2.4, 3.9], height: 0.75, above_floor: 0.05, turn: 15}
+        - {model: brass_lantern, at: [-2.4, 3.9], height: 0.35, above_floor: 0.8, turn: 0}
+        - {model: ceramic_jug, at: [-1.5, 4.3], height: 0.42, above_floor: 0.05, turn: 140}
+        - {model: iron_pot, at: [-0.4, 1.6], height: 0.45, above_floor: 0.05, turn: 60}
+        - {model: stone_lantern, at: [5.0, -1.9], height: 1.1, above_floor: 0, turn: 15}
+        - {model: tree_stump, at: [-7.6, -6.4], height: 0.75, above_floor: 0, turn: 200}
+  lighting:
+    sun: {pitch: 17, yaw: 35, colour: [1.0, 0.8, 0.6], intensity: 2.1}
+    sky: {tint: [0.56, 0.58, 0.64], ground: [0.82, 0.79, 0.74], thickness: 1.25, exposure: 1.05}
+    fog: {start: 55, end: 320, colour: [0.84, 0.8, 0.73]}
+    grade: {exposure: 0.42, contrast: 12, saturation: -2, temperature: 10, tint: 2, bloom: 0.3, vignette: 0.18}
+    ambient_occlusion: {intensity: 0.9, radius: 0.8, direct: 0.4}
+    gi: {probe_spacing: 1.5, sky_occlusion: true}
+  cameras:
+    stills:                                # from and to: [x, height above ground, z]
+      - {name: overview, from: [20, 16, 6], to: [58, 1, 62], fov: 50}
+      - {name: path, from: [36, 2.2, 30], to: [52, 2, 62], fov: 55}
+      - {name: tor, from: [70, 2.4, 52], to: [60, 2.5, 72], fov: 50}
+      - {name: grove, from: [16, 1.7, 74], to: [62, 2.5, 64], fov: 55}
+      - {name: camp, from: [27, 1.7, 42.5], to: [22.5, 0.9, 49.5], fov: 55}
+      - {name: arch, from: [40, 2.4, 44], to: [24, 1.8, 47], fov: 45}
+    flythrough:
+      seconds: 12
+      fps: 30
+      fov: 50
+      keys:                                # each element in turn
+        - {from: [50, 32, -28], to: [50, 2, 55]}
+        - {from: [42, 10, 8], to: [42, 2, 40]}
+        - {from: [38, 2.4, 26], to: [26, 1.5, 44]}
+        - {from: [35, 2.4, 46], to: [24, 1.4, 46]}
+        - {from: [30.8, 1.8, 46], to: [23, 1.0, 48]}
+        - {from: [26, 1.7, 43.5], to: [22.5, 0.8, 49.5]}
+        - {from: [30, 3, 50], to: [62, 1, 70]}
+        - {from: [48, 2.6, 60], to: [62, 1, 70]}
+        - {from: [70, 4, 58], to: [86, 2.5, 86]}
+        - {from: [72, 20, 64], to: [36, 2, 42]}

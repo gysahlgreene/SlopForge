@@ -65,9 +65,69 @@ slopforge vegetation oak_a --species oak --height 10 --seed 11 --bark oak_bark -
 - the bark's base colour and normal map, and a report of faces, leaf cards and dimensions.
 
 The manifest records a `vegetation` asset with the species, height, seed, and the hashes of its bark and foliage.
-Oaks, birches and pines run 2,200–4,900 faces and shrubs about 600–800, most of them leaf cards.
+Oaks, birches and pines run 2,900–4,900 faces and shrubs about 600–800, most of them leaf cards.
 
 **Limits:** the scene builder creates the Unity materials for bark and leaves (alpha-clipped, both sides drawn);
 there is no standalone Unity prefab yet. No wind, LODs or billboards.
 
-**Limits:** this records what was built and checked on 2026-10-23; scenes follow.
+## Scenes
+
+A recipe can carry a `scene` block, which `scene-render` assembles in Unity. The shipped
+[`moorland_ruin`](../templates/recipes/moorland_ruin.yaml) recipe is the 2026-10-23 prototype that the owner
+approved: rocks, a broken stone chapel, a camp of props, meadow and heather, and oak, birch and pine groves.
+
+```sh
+slopforge recipe run moorland_ruin --name moor
+# approve each child; publish the 3D children with approve-texture
+slopforge scene-render moor            # add --stills-only to skip the flythrough
+```
+
+**The scene block** works in metres within the dressed area (x east, z north). Every height in it is above the
+ground. It holds:
+- **`terrain`:** size, relief, noise, hills, a winding path, and layers. The first layer is the base; the others claim
+  their share by slope, by distance from the path, or as noise patches.
+- **`plants`:** each tree or shrub's species, height, seed, bark and foliage; `scene-render` builds any that are
+  missing with `vegetation`.
+- **`scatter`:** models and plants placed in an area, a cluster, around a point or along the path's edges, at a
+  random turn and scale, sunk a little into the ground.
+- **`grass`:** blade geometry, coloured from a layer's texture, dense near each still's camera and thinning away.
+- **`cover`:** foliage cards such as wildflowers and heather, by layer weight, noise, and distance from a point.
+- **`structures`:** pieces at fixed positions, turns and aligned edges, with `turn: auto` turning an L corner's open
+  side inward, floor tiles, rubble, and props scaled to a height `above_floor`.
+- **`lighting`:** sun, sky, fog, colour grade, ambient occlusion, and global illumination from adaptive probe
+  volumes with sky occlusion.
+- **`cameras`:** named stills and a flythrough through keys.
+
+**What `scene-render` does:**
+1. **In Python** (`slopforge/scene.py`, tested without Unity): the heightmap, the layer weights, every scatter and
+   cover placement, the grass density grid, the structures, and the camera paths. Nothing is scattered within 4.5 m
+   of the flythrough's path or a still's camera.
+2. **In Unity** (`slopforge/unity_natural_scene.py`): it builds the terrain, materials, objects, cards and blades,
+   sets the lighting, bakes the global illumination, reopens the scene so the baked data loads, and renders.
+
+**Outputs** go to `ai/assets/scenes/<run>/`: `stills/<name>.png` (1600 × 900), `frames/` (1280 × 720),
+`flythrough.mp4` and `flythrough.gif` when ffmpeg is installed, and `report.json`. The scene is saved at
+`<output>/Scenes/<run>.unity`, and the recipe run records a `scene.render` artifact.
+
+**Project-wide settings it changes**, which other scenes in the project share:
+- the URP asset's light probe system becomes Adaptive Probe Volumes;
+- shadow distance becomes 160 m, with four cascades;
+- every renderer's Screen Space Ambient Occlusion takes the scene's settings.
+
+**Found while building it:**
+- **YAML 1.1 reads the key `on` as `true`.** A prop's height above the floor and the grass layer were both silently
+  lost. Scene validation now refuses any key that reads as true or false.
+- **Tiles need sunken ground.** At grass level, the terrain drew over the floor tiles' slightly domed tops, so the
+  ground sinks 0.3 m under each tile.
+- **Turning a model's own transform dropped its FBX axis rotation** and laid cliff chunks on their sides. Every
+  object gets an identity root, as kit prefabs do.
+- **Batch-mode renders don't draw terrain detail grass:** 296,000 painted tufts showed none. Grass is mesh geometry.
+
+**Measured:** a stills-only render of the full scene over the prototype's assets took 82 s, with 145 objects,
+2.0 million grass blades, 6,600 cover cards and a 34 s lighting bake.
+
+**Limits:**
+- Rendering only: no Play mode, frame-rate or memory check. Grass is plain meshes, not GPU-instanced details, which
+  would likely be too heavy for a game at this density.
+- No wind, LODs or impostors.
+- Placements are seeded and repeatable, but differ from the prototype's, which used Unity's random numbers.

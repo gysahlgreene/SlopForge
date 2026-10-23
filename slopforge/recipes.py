@@ -205,6 +205,9 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe child {child['id']!r} aspect must be square, portrait or landscape "
                              "on a 3D asset type")
     _validate_layouts(definition, children, asset_types)
+    if definition.get("scene") is not None:
+        from .scene import validate_scene
+        validate_scene(definition["scene"], [child["id"] for child in children])
     material = (definition.get("kit_constraints") or {}).get("material")
     if material and asset_types.get(next(child["type"] for child in children if child["id"] == material["source"]),
                                     {}).get("pipeline") != "image":

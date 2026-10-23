@@ -20,7 +20,7 @@ from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation", "scene-render"}
 
 
 def parser():
@@ -183,6 +183,10 @@ def parser():
     vegetation.add_argument("--bark", required=True, help="Approved tiling_material asset for the bark")
     vegetation.add_argument("--foliage", action="append", required=True,
                             help="Approved foliage asset; repeat for up to four leaf atlas quarters")
+    scene_render = sub.add_parser("scene-render", help="Build, light and render a recipe run's scene in Unity: stills "
+                                                       "and a flythrough video")
+    scene_render.add_argument("name", help="Recipe run whose recipe has a scene block")
+    scene_render.add_argument("--stills-only", action="store_true", help="Skip the flythrough frames and video")
     environment_scene = sub.add_parser("environment-scene",
                                        help="Build a Unity test scene from a kit layout, with prefabs and snapping checks")
     environment_scene.add_argument("name", help="Environment recipe instance whose modules are published to Unity")
@@ -712,6 +716,17 @@ def _run(args):
         save_manifest(manifest_path, manifest)
         print(json.dumps({"name": record["name"], **record["outputs"], **record["validation"]["measured"]}, indent=2))
         return 0
+    if args.command == "scene-render":
+        from .unity_natural_scene import render_scene
+        report = render_scene(root, config, manifest, args.name, frames=not args.stills_only)
+        out = root / "ai/assets/scenes" / args.name / "report.json"
+        register_artifact(manifest, asset_key("recipe", args.name), "scene.render", "data.scene_render",
+                          out.relative_to(root).as_posix(), status="failed" if report["errors"] else "ready",
+                          provenance={"processor": "slopforge.unity_natural_scene", "scene": report["scene"]},
+                          approval_status="not_required", validation={"errors": report["errors"]})
+        save_manifest(manifest_path, manifest)
+        print(json.dumps({key: report.get(key) for key in ("scene", "stills", "video", "planned", "errors")}, indent=2))
+        return 1 if report["errors"] else 0
     if args.command == "environment-scene":
         from . import unity_scene
         from .environment import scene_placements
