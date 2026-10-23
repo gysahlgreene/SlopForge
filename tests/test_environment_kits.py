@@ -175,13 +175,14 @@ class EnvironmentKitTests(unittest.TestCase):
             (project / "Assets").mkdir(parents=True)
             init_project(project)
             definition = {"id": "mini", "version": 1, "description": "A wall, a crate and their stone",
-                          "kit_constraints": {"material": {"source": "stone", "tile_size": 2},
+                          "kit_constraints": {"material": {"source": "stone", "tile_size": 2, "roughness": 0.75},
                                               "modules": {"wall": {"target_size": [3, None, 3]}}},
                           "children": [{"id": "stone", "type": "texture", "description": "Granite surface"},
                                        {"id": "wall", "type": "architecture", "description": "A wall"},
                                        {"id": "crate", "type": "prop", "description": "A crate"}]}
             recipe = project / "ai/recipes/mini.yaml"
-            for bad in ({"source": "wall", "tile_size": 2}, {"source": "stone", "tile_size": 0}):
+            for bad in ({"source": "wall", "tile_size": 2}, {"source": "stone", "tile_size": 0},
+                        {"source": "stone", "tile_size": 2, "roughness": 1.5}):
                 recipe.write_text(json.dumps({**definition, "kit_constraints": {
                     **definition["kit_constraints"], "material": bad}}))
                 with self.subTest(material=bad), self.assertRaisesRegex(ValueError, "material"):
@@ -194,7 +195,7 @@ class EnvironmentKitTests(unittest.TestCase):
                 recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
                                    "mini", instance_name="ruin")
         self.assertEqual(manifest["assets"]["architecture:ruin_wall"]["kit_material"],
-                         {"asset_key": "texture:ruin_stone", "tile_size": 2})
+                         {"asset_key": "texture:ruin_stone", "tile_size": 2, "roughness": 0.75})
         self.assertNotIn("kit_material", manifest["assets"]["prop:ruin_crate"])  # not a declared module
         with patch("slopforge.backends.blender.subprocess.run") as run, \
                 patch("slopforge.backends.blender.blender_executable", return_value="blender"):

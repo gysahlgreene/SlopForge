@@ -39,7 +39,7 @@ walls grey. A kit can name one texture child as its material:
 
 ```yaml
 kit_constraints:
-  material: {source: stone, tile_size: 2.0}   # metres per repeat
+  material: {source: stone, tile_size: 2.0, roughness: 0.75}   # metres per repeat; the kit's finish
 children:
   - id: stone
     type: texture
@@ -55,9 +55,13 @@ module before its kit texture stops before any inference and names the texture t
 - its base colour is re-baked as the swatch × baked ambient occlusion × the module's own brightness relative to
   its mean, softened to 60%.
 
-So every module gets the swatch's hue. Each one keeps its block-to-block light and dark, and its own normal,
-roughness and metallic maps. The seamless swatch's hash and the tile size join the module's assembly-stage
-settings.
+With `roughness`, each module's roughness map is also moved to that mean, keeping its own variation softened to
+60%. In M2-v1 run K1 (2026-10-23), TRELLIS decoded the flagstone floor at 0.22 beside walls at 0.67, so Unity
+rendered a glossy floor that reflected the blue sky.
+
+So every module gets the swatch's hue and, when declared, the kit's finish. Each one keeps its block-to-block light
+and dark, and its own normal and metallic maps. The seamless swatch's hash, the tile size and the roughness join the
+module's assembly-stage settings.
 
 **Unity mip levels:** the bake leaves nothing black outside the UV islands. Uncovered texels take the module's
 mean colour, as TRELLIS's own maps do. A first live run left them black, and Unity's smaller mips blended that into

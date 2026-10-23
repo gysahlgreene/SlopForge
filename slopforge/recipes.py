@@ -83,6 +83,10 @@ def _validate_kit_constraints(definition, child_ids):
         if (not isinstance(material, dict) or material.get("source") not in child_ids or
                 not isinstance(tile, (int, float)) or isinstance(tile, bool) or not math.isfinite(tile) or tile <= 0):
             raise ValueError("kit_constraints.material needs a source child id and a positive tile_size in metres")
+        roughness = material.get("roughness")
+        if roughness is not None and (not isinstance(roughness, (int, float)) or isinstance(roughness, bool)
+                                      or not 0 <= roughness <= 1):
+            raise ValueError("kit_constraints.material.roughness must be a number from 0 to 1")
     for child_id, rule in modules.items():
         if not isinstance(rule, dict):
             raise ValueError(f"kit_constraints.modules.{child_id} must be a mapping")
@@ -747,6 +751,8 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
             source = next(item for item in children if item["id"] == material["source"])
             asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}"),
                                      "tile_size": material["tile_size"]}
+            if material.get("roughness") is not None:
+                asset["kit_material"]["roughness"] = material["roughness"]
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",

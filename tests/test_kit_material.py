@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 from slopforge.failures import StageFailure
-from slopforge.kit_material import kit_swatch, make_seamless
+from slopforge.kit_material import kit_swatch, make_seamless, match_roughness
 
 ROOT = Path(__file__).resolve().parents[1]
 BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
@@ -41,6 +41,19 @@ class KitMaterialTests(unittest.TestCase):
             texture.update(status="ready", outputs={"image": "stone.png"})
             self.assertEqual(kit_swatch(root, {"assets": {"texture:ruin_stone": texture}}, asset),
                              (root / "stone.png", 2.0))
+
+    def test_module_roughness_moves_to_the_kits_finish_and_keeps_its_variation(self):
+        # M2-v1 K1: a flagstone floor decoded at 0.22 beside walls at 0.67 read as a glossy, sky-blue floor.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "roughness.png"
+            glossy = np.zeros((64, 64), np.uint8)  # black UV padding on the left
+            glossy[:, 16:40], glossy[:, 40:] = 46, 66  # two islands around 0.22
+            Image.fromarray(glossy).convert("RGB").save(path)
+            match_roughness(path, 0.75)
+            result = np.asarray(Image.open(path)).astype(float)[..., 0] / 255
+        islands = result[:, 16:]
+        self.assertAlmostEqual(islands.mean(), 0.75, delta=0.02)
+        self.assertGreater(result[:, 40:].mean(), result[:, 16:40].mean() + 0.1)  # its own rougher island stays rougher
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
