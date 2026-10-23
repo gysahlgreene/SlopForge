@@ -30,9 +30,9 @@ merged in [PR #35](https://github.com/gysahlgreene/SlopForge/pull/35) (`460dc2f`
 and issue #31 is closed. The malformed/ambiguous `earliest_stale_stage` helper
 was hardened in [PR #38](https://github.com/gysahlgreene/SlopForge/pull/38)
 (`f63239a`); [issue #28](https://github.com/gysahlgreene/SlopForge/issues/28) is
-closed. The helper still has no production callers. M0 is not complete.
+closed. The helper still has no production callers; it is kept as the planned resume building block.
 
-The only open M0 issue is #26; packages 1–3 are closed.
+M0 closed on 2026-10-21 with its epic, #26; packages 1–3 are closed.
 
 Contracts describe intended behavior. The inventory below separates recorded
 historical evidence, current implementation inspection, and checks performed during
@@ -48,14 +48,16 @@ No broad category/workflow/profile is claimed Qualified here.
 | Package 3 failure handling | Merged; deterministic offline verification passed | Structured failure records, bounded topology-budget mesh retries, resume accounting, and unknown remote-outcome stop are merged in PR #36. See the [Package 3 plan](docs/superpowers/plans/2026-10-14-failure-classification-retries.md) and verification record below. No live inference, visual, Unity runtime, or qualification claim |
 | Texture-mask failure recovery | Verified working for the recorded failure class | [Recovery report](docs/media/texture-mask-recovery-2026-10/README.md): wrong transparency/foreground polarity, explicit inversion in four graphs, static/queue preflight, native loader/crop checks for narrow/broad/RGB inputs |
 | Corrected material generation and Blender delivery | Partially working | Recovery report retains failed input/seed, a fresh humanoid and a repeat through colored 4096² maps, resolved textures, FBX and four-view renders; atlases vary; surface blotches, face/detail defects and three fresh-model components remain |
-| Unity prop delivery | Partially working; 30 protocol runs imported | Criteria v1–v5 (2026-10-20/21): fresh H100 runs imported through `unity-preview` into Unity 6000.6.3f1 / URP 17.6.0 with the Lit material assigned and a four-view batch render (latest: [v5](docs/media/props-provisional-2026-10-v5/README.md), 6 of 6). Publication through `approve-texture` is shown on one live asset and by the opt-in Unity identity test (#74). Play mode and in-scene checks are not run |
+| Unity prop delivery | Partially working; 28 of 30 protocol runs imported | Criteria v1–v5 (2026-10-20/21): fresh H100 runs imported through `unity-preview` into Unity 6000.6.3f1 / URP 17.6.0 with the Lit material assigned and a four-view batch render (latest: [v5](docs/media/props-provisional-2026-10-v5/README.md), 6 of 6); B2 in v2 and v4 stopped before Unity. Publication through `approve-texture` covers every M2-v3 kit module and every moorland model, and the opt-in Unity identity test (#74). Kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps; Play mode is not run |
 | Humanoid import and movement | Partially working; historical asset-specific evidence | [Humanoid test 1](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md): valid Avatar and walk movement; arm deformation under review, topology defects; not production-cleared |
 | Body-deformation benchmark | Partially working; historical asset-specific review | [Diagnostic benchmark](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed delivered body rig and Unity motion; source visual quality rejected; separate final-tier source pending review, not covered by rig approval |
 | Fine detail/material fidelity and general rig recovery | Known unreliable | Recovery and benchmark reports retain visual defects; prior humanoid test 3's recovered rig remains rejected as recorded before this task; it is not promoted by these contracts |
 | Cross-brief/category repeatability | Provisional (static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
-| Modular environment kits | Provisional (stone ruin, timber house and sci-fi corridor kits, `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0 assembled scenes) | [Criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md): all six runs (three kits × two) pass every owner-accepted criterion, from size, pivot, stretch, corner shape and joints to concept fit, colour, budgets, the matching stone material and the Unity scene checks; M2-v1 and M2-v2 and their failures are kept. No visual approval by the owner; Play mode, lightmapping and LODs are unchecked; two runs per kit cannot measure a failure rate |
+| Modular environment kits | Provisional (stone ruin, timber house and sci-fi corridor kits, `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0 assembled scenes) | [Criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md): all six runs (three kits × two) pass every owner-accepted criterion, from size, pivot, stretch, corner shape and joints to concept fit, colour, budgets, the matching stone material and the Unity scene checks; M2-v1 and M2-v2 and their failures are kept. The stone kit's material step changed after `5ceac3b` (#101) and has no protocol run. The owner reviewed the look on 2026-10-23 ("nowhere near as good as the props"); not approved. S2's pillar is near-black against its grey concept, a failure no check catches yet. Play mode, lightmapping and LODs are unchecked; two runs per kit cannot measure a failure rate |
+| Standalone structures | Experimental; generated at real size, one run each | [Real-size evidence](docs/media/structures-real-size-2026-10/README.md): well, shrine and bunker passed their first mesh attempts with concept-fit and colour checks (2026-10-22); not visually approved; no part limit declared |
+| Scenes and natural environments | Experimental; one live run | `foliage`, `tiling_material`, `vegetation` and `scene-render`; the owner approved the [prototype](docs/media/natural-showcase-2026-10/README.md), and the recipe rebuilt it from a blank project ([live run](docs/media/natural-live-2026-10/README.md)). Rendering only: no Play mode, frame rate or memory check |
 | Mechanical and creature/Generic runtime quality | Unverified | Rig tooling is a capability; representative visual, performance, deformation and runtime evidence is still required |
-| Complete readiness/qualification claims | Props: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
+| Complete readiness/qualification claims | Props and modular kits: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Modular kits have the owner-accepted M2 criteria (#94, [M2-v3 record](docs/media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md)). Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
 The recovery report historically described qualification of a failure class. Under
 the quality contract this is bounded regression/recovery evidence, not a complete
@@ -78,9 +80,8 @@ plan are in `docs/superpowers/specs/2026-10-16-character-source-quality-design.m
 and `docs/superpowers/plans/2026-10-16-character-source-quality.md`.
 
 This is a separate user-directed bounded track, not a roadmap reordering.
-Do not change milestone order or claim qualification. See
-[SESSION-HANDOFF](docs/SESSION-HANDOFF.md) for branch status, dirty diff scope,
-and verified resumption instructions.
+Do not change milestone order or claim qualification. The
+[historical session handoff](docs/SESSION-HANDOFF.md) records its 2026-10-18 worktrees.
 
 ## Remaining gaps after Package 1
 
@@ -118,8 +119,8 @@ These gaps remain outside Package 1 or require separate evidence.
   Reconcile operational wording in a separate implementation/documentation follow-up.
 - **Evidence coverage:** offline fixtures and historical examples do not establish
   cross-brief consistency, declared performance thresholds, fresh Unity playback,
-  or every category's visual/deformation gates. The new provisional protocol has
-  not been run here; six runs would still require declared qualification criteria.
+  or every category's visual/deformation gates. The provisional protocol has since
+  run for props (v1–v5) and kits (M2-v1–v3) under declared criteria.
 
 ## Verification during Package 1 implementation
 
@@ -746,3 +747,29 @@ Natural environments and scenes (2026-10-23; [guide](docs/NATURAL-ENVIRONMENTS.m
   timber modules, so there is no check yet. Next: label those views by eye and calibrate.
 - **Tests:** `tests/test_scene.py` (frame field of view; recipe-file scene source and its validation).
 - **Not verified:** Play mode, frame rate and memory; a second live run; the owner's review of the live footage.
+
+Repository audit (2026-10-23): a review of code changed since the 2026-10-20 review (kits, the ComfyUI backend,
+natural environments, scenes) and of every public doc. The 2026-10-20 review's 20 findings were all confirmed fixed.
+- **Code fixes**, each with a regression test:
+  - `scene-render` builds in `<run>.partial` and replaces `<run>` only on success; the replaced render moves to
+    `<run>.previous`. It used to delete the last render before Unity ran.
+  - A tree is reused only while its species, height, seed and bark and foliage hashes match.
+  - The scene script destroys each shot's textures (about 2 GB leaked over 366 shots).
+  - Approving a foliage or tiling image restores the published files and record if processing fails, and
+    re-measures the processed image.
+  - Kits reject pivot `origin` at recipe validation (Blender rejected it after the GPU work).
+  - `vegetation` validates its name; a surface job that saves nothing raises a named error; `environment-scene`
+    uses the project's output root.
+  - Both scene builders share one corner auto-turn; only kits refuse a corner without a nearly empty quadrant.
+    Merging the rule into scenes first failed the moorland render on its weathered ruin corner.
+- **Docs:** stale and contradictory claims corrected across the README, roadmap, current state and guides (M0
+  status, 28 of 30 prop runs in Unity, publication coverage, the kits' status after #101, S2's black pillar, the
+  live run, owner reviews, closed issues); the docs index lists the current evidence and marks superseded pages;
+  the session handoff is marked historical; the README's structure table shows the real-size structures and the
+  live run's ruin pieces.
+- **Verified:** `make verify`. In Unity 6000.6.3f1 on copies of the M2-v3 K2 project and the moorland live run:
+  `environment-scene` turned K2's four corners exactly as the original run, and a stills-only `scene-render`
+  reused all ten trees, swapped in, kept the previous render, and matched the live run's stills pixel for pixel.
+- **Not verified:** a full flythrough after the texture fix (the stills path is the same code); a failed foliage
+  re-approval against a live ComfyUI.
+- **Left as is:** the kit and prop four-view renders look alike but differ by design (sizes, a top view, lighting).

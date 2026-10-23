@@ -16,7 +16,8 @@ The agent selected concepts for evaluation only. Nothing here is visually approv
 
 Before this change these structures were scaled to a 1 m largest side, and `architecture` had none of the prop
 checks. They now get the owner-accepted concept fit (at least 0.8) and colour limits. All three passed on their
-first mesh attempt.
+first mesh attempt. The hue differences are measured, not checked: all three concepts are near-grey (chroma 2.3–8.8,
+below the check's 10), so the colour check skips them.
 
 | Stone well | Stone shrine | Sci-fi bunker |
 | :---: | :---: | :---: |
@@ -39,4 +40,4 @@ candidate `.blend`.
 The colour check uses the median of the concept's colour, which is near-grey here, so it skips the bunker; the
 colour of small parts like the stripes is not checked.
 
-**Not decided yet:** a part limit for structures awaits the owner (#94).
+**Not decided yet:** a part limit for structures. The owner's M2 criteria (#94, closed 2026-10-23) cover kit modules only.

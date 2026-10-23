@@ -92,14 +92,15 @@ slopforge scene-render moor            # add --stills-only to skip the flythroug
 ground. It holds:
 - **`terrain`:** size, relief, noise, hills, a winding path, and layers. The first layer is the base; the others claim
   their share by slope, by distance from the path, or as noise patches.
-- **`plants`:** each tree or shrub's species, height, seed, bark and foliage; `scene-render` builds any that are
-  missing with `vegetation`.
+- **`plants`:** each tree or shrub's species, height, seed, bark and foliage. `scene-render` builds a plant with
+  `vegetation` unless one already matches its species, height, seed and the hashes of its bark and foliage, so
+  editing a plant or re-approving its bark rebuilds it.
 - **`scatter`:** models and plants placed in an area, a cluster, around a point or along the path's edges, at a
   random turn and scale, sunk a little into the ground.
 - **`grass`:** blade geometry, coloured from a layer's texture, dense near each still's camera and thinning away.
 - **`cover`:** foliage cards such as wildflowers and heather, by layer weight, noise, and distance from a point.
-- **`structures`:** pieces at fixed positions, turns and aligned edges, with `turn: auto` turning an L corner's open
-  side inward, floor tiles, rubble, and props scaled to a height `above_floor`.
+- **`structures`:** pieces at fixed positions, turns and aligned edges, with `turn: auto` turning an L corner's
+  emptiest quadrant inward (the same turn as `environment-scene`, without its rule that the quadrant be nearly empty), floor tiles, rubble, and props scaled to a height `above_floor`.
 - **`lighting`:** sun, sky, fog, colour grade, ambient occlusion, and global illumination from adaptive probe
   volumes with sky occlusion.
 - **`cameras`:** named stills and a flythrough through keys.
@@ -119,6 +120,11 @@ regenerating anything. It checks the block against the run's children before bui
 **Outputs** go to `ai/assets/scenes/<run>/`: `stills/<name>.png` (1600 × 900), `frames/` (1280 × 720),
 `flythrough.mp4` and `flythrough.gif` when ffmpeg is installed, and `report.json`. The scene is saved at
 `<output>/Scenes/<run>.unity`, and the recipe run records a `scene.render` artifact.
+
+**A failed render keeps the last good one.** The render is built in `scenes/<run>.partial` and replaces
+`scenes/<run>` only when Unity finishes with no errors; the render it replaces moves to `scenes/<run>.previous`.
+After a failure, `<run>` is untouched and `.partial` holds what was made, for diagnosis. So a `--stills-only` render
+keeps the last flythrough in `.previous`.
 
 **Project-wide settings it changes**, which other scenes in the project share:
 - the URP asset's light probe system becomes Adaptive Probe Volumes;
