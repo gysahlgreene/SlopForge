@@ -372,6 +372,22 @@ with patch.object(client, 'validate_workflow'), patch.object(client, 'json', sid
             client.wait_for_completion("prompt-42", timeout=60, queue_check_interval=0)
         self.assertTrue(raised.exception.evidence["remote_lost"])
 
+    def test_health_retries_a_dropped_connection_only_when_asked(self):
+        # M2-v2 run T2: the mesh worker's one health check timed out while the service was up.
+        client = ComfyUIClient("http://remote:8188")
+        dropped = ComfyUIError("timed out", category="environment", operation="http_get")
+        client.json = Mock(side_effect=[dropped, dropped, {"system": {}}])
+        with patch("slopforge.backends.comfyui.time.sleep"):
+            self.assertEqual(client.health(retry_window=120), {"system": {}})
+        self.assertEqual(client.json.call_count, 3)
+        client.json = Mock(side_effect=[dropped, {"system": {}}])
+        with self.assertRaises(ComfyUIError):
+            client.health()  # doctor and the CLI still fail fast
+        client.json = Mock(side_effect=ComfyUIError("bad JSON", category="inference", operation="http_get"))
+        with patch("slopforge.backends.comfyui.time.sleep"), self.assertRaises(ComfyUIError):
+            client.health(retry_window=120)
+        self.assertEqual(client.json.call_count, 1)  # a server answer is final
+
     def test_queued_reads_running_and_pending_prompts(self):
         client = ComfyUIClient("http://remote:8188")
         client.json = Mock(return_value={"queue_running": [[0, "a", {}, {}, []]], "queue_pending": [[1, "b", {}, {}, []]]})

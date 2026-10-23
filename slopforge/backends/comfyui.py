@@ -204,8 +204,21 @@ class ComfyUIClient:
                                category="inference", operation=f"http_{method.lower()}",
                                evidence={"endpoint": path}) from exc
 
-    def health(self):
-        return self.json("GET", "/system_stats")
+    def health(self, retry_window=0):
+        """The service's stats; with retry_window, a dropped connection is retried for that many seconds.
+
+        A worker's one health check timed out while the service was up and cost a mesh attempt (M2-v2 run T2).
+        """
+        deadline, attempt = time.monotonic() + retry_window, 0
+        while True:
+            try:
+                return self.json("GET", "/system_stats")
+            except ComfyUIError as exc:
+                delay = min(2 ** attempt, 30)
+                if exc.category != "environment" or time.monotonic() + delay >= deadline:
+                    raise
+                attempt += 1
+                time.sleep(delay)
 
     def node_types(self):
         return self.json("GET", "/object_info")

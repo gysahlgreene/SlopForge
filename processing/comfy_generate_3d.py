@@ -430,7 +430,7 @@ def main():
 
     client = ComfyUIClient(COMFY_URL)
     try:
-        health = client.health()
+        health = client.health(retry_window=120)
     except ComfyUIError as exc:
         # Tag at known boundary (health → environment).
         if not exc.category:
