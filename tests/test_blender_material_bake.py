@@ -558,6 +558,34 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
         # Before: arms 1.2 m thick (0.4 of 3 m). After: the declared 0.75 m.
         for thickness in measured["arm_thickness"]:
             self.assertAlmostEqual(thickness, 0.75, delta=0.05)
+        self.assertLess(max(measured["arm_taper"]), 1.05)  # even slabs
+
+    def test_wedge_corner_measures_its_arms_tapering(self):
+        # M2-v2 run T2: a corner filled diagonally inside its L passed the open-quarter check.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, report = root / "wedge.glb", root / "wedge.json"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("wedge"); bm = bmesh.new()
+corners = [(-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5)]  # a right-angled triangle: its open quarter is +X+Y
+bottom = [bm.verts.new((x, y, 0)) for x, y in corners]; top = [bm.verts.new((x, y, 3)) for x, y in corners]
+bm.faces.new(bottom[::-1]); bm.faces.new(top)
+for i in range(3):
+    bm.faces.new((bottom[i], bottom[(i + 1) % 3], top[(i + 1) % 3], top[i]))
+bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=12, use_grid_fill=True)
+bm.to_mesh(mesh); bpy.context.collection.objects.link(bpy.data.objects.new("wedge", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(glb), str(report), "20000", "--real-scale"],
+                           check=True, capture_output=True, text=True)
+            measured = json.loads(report.read_text())["measured"]
+        self.assertLessEqual(min(measured["footprint_quadrants"]), 0.15)  # it passes the open-quarter check
+        self.assertGreater(min(measured["arm_taper"]), 1.25)
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")

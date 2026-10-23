@@ -213,6 +213,29 @@ def corner_profile(points, quadrants, minimum, maximum):
     return (ox, oy), [along_y[int(0.98 * (len(along_y) - 1))], along_x[int(0.98 * (len(along_x) - 1))]]
 
 
+def arm_taper(points, signs, minimum, maximum):
+    """Each arm's thickness across the middle of its far half over that across its end (at least 1).
+
+    An L's arms are even slabs: 1.00-1.03 on every M2 corner published by 2026-10-23. M2-v2 run T2's corner came out
+    a wedge whose arms thinned from 2.9 m beside the other arm to 0.46 m at the end; it passed the open-quarter
+    check. Thickness is the 98th percentile of the distance from the arm's outer face, as in corner_profile.
+    """
+    ox, oy = signs
+    outer = (minimum[0] if ox > 0 else maximum[0], minimum[1] if oy > 0 else maximum[1])
+    spans = (maximum[0] - minimum[0], maximum[1] - minimum[1])
+    ratios = []
+    for axis in (0, 1):  # the arm along y is measured across x, and the other way round
+        other, thickness = 1 - axis, []
+        for start, end in ((0.5, 0.75), (0.75, 1.0)):  # along the arm, from the other arm's outer face
+            across = sorted(abs(p[axis] - outer[axis]) for p in points
+                            if start * spans[other] <= abs(p[other] - outer[other]) <= end * spans[other])
+            if not across:
+                return None
+            thickness.append(across[int(0.98 * (len(across) - 1))])
+        ratios.append(round(max(thickness) / max(min(thickness), 1e-6), 3))
+    return ratios
+
+
 def inspect(source, face_budget, real_scale=False):
     errors, warnings = [], []
     extension = source.suffix.lower()
@@ -319,9 +342,10 @@ def inspect(source, face_budget, real_scale=False):
                 "nonmanifold_edge_count": nonmanifold_edges, "component_details": component_records,
                 "topology_diagnostics": topology_records, "face_budget": face_budget,
                 "footprint_quadrants": footprint_quadrants(objects, minimum, maximum)}
-    corner = corner_profile([obj.matrix_world @ vertex.co for obj in objects for vertex in obj.data.vertices],
-                            measured["footprint_quadrants"], minimum, maximum)
+    points = [obj.matrix_world @ vertex.co for obj in objects for vertex in obj.data.vertices]
+    corner = corner_profile(points, measured["footprint_quadrants"], minimum, maximum)
     measured["arm_thickness"] = corner[1] if corner else None
+    measured["arm_taper"] = arm_taper(points, corner[0], minimum, maximum) if corner else None
     stretches = [float(obj["slopforge_axis_stretch"]) for obj in objects if "slopforge_axis_stretch" in obj]
     measured["axis_stretch"] = max(stretches) if stretches else None
     if faces > face_budget:

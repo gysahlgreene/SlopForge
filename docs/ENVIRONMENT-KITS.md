@@ -108,6 +108,14 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
 - **Placement:** with one thickness, place walls inside a cell edge with their outer face on it, as the corner's
   arms are, and they continue the corner flush.
 - **Check:** `environment-check` compares each published corner's measured arm thickness with the declared one.
+- **Wedges are retried:** inspection records `arm_taper`, each arm's thickness across the middle of its far half
+  over that across its end.
+  - An L's arms are even slabs: every corner published by 2026-10-23 measured 1.00–1.01.
+  - In M2-v2 run T2 a timber corner came out a wedge, filled diagonally inside its L. It passed the open-quarter
+    check because its open quarter was empty. Its arms measured 1.72 and 1.82, and the kit check failed it on
+    0.27 m arms.
+  - Above 1.25 the candidate fails as `module_taper`, and the next seed is tried, as for a solid block. The 1.25
+    limit is set from that evidence; the owner has not set it.
 
 **Stretch:**
 - **What it is:** sizing a module to its declared size stretches it when its concept's proportions differ. Blender

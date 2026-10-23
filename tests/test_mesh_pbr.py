@@ -97,7 +97,7 @@ class MeshPBRTests(unittest.TestCase):
 
             class Client:
                 def __init__(self, _url): self.calls = 0; self.missing_shape_output = False; self.queued_facts = []
-                def health(self): return {"system": {"comfyui_version": "0.3.1"}, "devices": []}
+                def health(self, retry_window=0): return {"system": {"comfyui_version": "0.3.1"}, "devices": []}
                 def upload_input(self, _path, folder): return {"name": f"upload{folder}.png", "subfolder": folder}
                 def queue_workflow(self, _workflow):
                     self.calls += 1

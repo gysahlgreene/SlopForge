@@ -23,6 +23,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "uv_area_budget",
     "concept_fit",
     "module_footprint",
+    "module_taper",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -381,6 +382,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "uv_area_budget": ("uv_area_sum", "min_uv_area"),
         "concept_fit": ("concept_fit", "min_concept_fit"),
         "module_footprint": ("open_quadrant", "max_open_quadrant"),
+        "module_taper": ("corner_taper", "max_arm_taper"),
     }
 
     for code in codes:

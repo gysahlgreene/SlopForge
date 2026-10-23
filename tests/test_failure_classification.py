@@ -986,3 +986,13 @@ class PropComponentBudgetTests(unittest.TestCase):
         self.assertNotIn("module_footprint", corner.get("failure_codes", []))
         self.assertEqual(corner["measured"]["open_quadrant"], 0.0)
         self.assertNotIn("module_footprint", wall.get("failure_codes", []))
+        # M2-v2 T2: a wedge leaves its open quarter empty, but its arms thin toward their ends.
+        report = _quality_report(component_count=1)
+        report["measured"]["arm_taper"] = [1.724, 1.816]
+        wedge = apply_module_footprint(report, [0.44, 0.40, 0.47, 0.02], "corner")
+        self.assertEqual(wedge["failure_codes"], ["module_taper"])
+        self.assertIn("wedge", wedge["errors"][-1])
+        self.assertTrue(candidate_quality_rejection(wedge))
+        report = _quality_report(component_count=1)
+        report["measured"]["arm_taper"] = [1.002, 1.007]
+        self.assertEqual(apply_module_footprint(report, [0.31, 0.55, 0.37, 0.0], "corner").get("failure_codes", []), [])
