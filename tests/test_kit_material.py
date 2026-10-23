@@ -51,8 +51,8 @@ class KitMaterialTests(unittest.TestCase):
             Image.fromarray(glossy).convert("RGB").save(path)
             match_roughness(path, 0.75)
             result = np.asarray(Image.open(path)).astype(float)[..., 0] / 255
-        islands = result[:, 16:]
-        self.assertAlmostEqual(islands.mean(), 0.75, delta=0.02)
+        self.assertAlmostEqual(result.mean(), 0.75, delta=0.01)
+        self.assertAlmostEqual(result[:, :16].min(), 0.75, delta=0.01)  # padding, not glossy black
         self.assertGreater(result[:, 40:].mean(), result[:, 16:40].mean() + 0.1)  # its own rougher island stays rougher
 
 

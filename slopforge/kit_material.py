@@ -55,7 +55,7 @@ def match_roughness(path, target, keep=0.6):
     with Image.open(path) as image:
         mode = image.mode
         pixels = np.asarray(image.convert("L")).astype(np.float32) / 255
-    covered = pixels[pixels > 0.002]  # UV padding outside the islands can be black
-    mean = float(covered.mean()) if covered.size else 1.0
-    result = target * (1 - keep + keep * pixels / mean)
+    covered = pixels > 0.002  # black UV padding outside the islands takes the kit's value, for Unity's mips
+    mean = float(pixels[covered].mean()) if covered.any() else 1.0
+    result = np.where(covered, target * (1 - keep + keep * pixels / mean), target)
     Image.fromarray(np.clip(result * 255 + 0.5, 0, 255).astype(np.uint8)).convert(mode).save(path)

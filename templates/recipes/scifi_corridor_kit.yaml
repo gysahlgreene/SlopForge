@@ -79,6 +79,9 @@ children:
 - id: wall
   type: architecture
   description: A straight sci-fi corridor wall panel.
+  # On a square canvas the S1 seeds' walls reconstructed 1.27-1.64 times wider than tall (one of six within the 1.3
+  # stretch limit); on portrait, 1.15-1.28 (six of six). M2-v1 finding, 2026-10-23.
+  aspect: portrait
   generation_prompt: 'One straight modular sci-fi corridor wall section, as wide as it is tall: large matte light
     grey painted steel panels with recessed seams and small rivets, a dark grey steel base trim along the bottom,
     and one horizontal cyan light strip across the middle, shown unlit as a solid flat cyan surface. Thick even
