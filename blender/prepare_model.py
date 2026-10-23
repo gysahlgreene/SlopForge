@@ -5,7 +5,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally
-from inspect_model import topology_edge_counts
+from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
 TARGET_FACES = 30000
@@ -485,12 +485,46 @@ if not reuse_stage_mesh and not mesh_only:
         coords = [vertex.co for vertex in obj.data.vertices]
         low = Vector([min(co[axis] for co in coords) for axis in range(3)])
         high = Vector([max(co[axis] for co in coords) for axis in range(3)])
-        obj.data.transform(Matrix.Translation(Vector((-(low.x + high.x) / 2.0, -(low.y + high.y) / 2.0, -low.z))))
+        recentre = Vector((-(low.x + high.x) / 2.0, -(low.y + high.y) / 2.0, -low.z))
+        obj.data.transform(Matrix.Translation(recentre))
         obj.data.update()
         obj.location = Vector((0.0, 0.0, 0.0))  # geometry is now bottom-centred in its own space
+        # The arm rescale below reads these bounds: from before recentring, an off-centre corner's open side was
+        # missed and its arms were left as generated (M2-v1 timber corner, 2026-10-23).
+        low, high = low + recentre, high + recentre
         bpy.context.view_layer.update()
         print(f"Scaled to target size {[round(v, 4) for v in high - low]}; "
               f"axis stretch ratio {max(factors) / min(factors):.3f}")
+        # Kept on the object so inspection can report it: a large stretch means the concept's proportions did not
+        # fit the module (issue #91). Only the axes that shape its face count: a wall's declared thickness squeezes
+        # its depth on purpose (2026-10-22: wall 1.36 over all axes, 1.19 over its face).
+        sizes = high - low
+        face = [factor for axis, factor in enumerate(factors) if sizes[axis] >= 0.5 * max(sizes)]
+        obj["slopforge_axis_stretch"] = round(max(face) / min(face), 4)
+        if "--arm-thickness" in sys.argv:
+            # A kit corner's arms take the kit's declared wall thickness, so walls continue them flush; the outer
+            # bounds stay exact. 2026-10-22: generated arms were about 1 m against 0.74 m walls (issue #90).
+            wanted = float(sys.argv[sys.argv.index("--arm-thickness") + 1])
+            bounds = ([low.x, low.y, low.z], [high.x, high.y, high.z])
+            corner = corner_profile([vertex.co.copy() for vertex in obj.data.vertices],
+                                    footprint_quadrants([obj], *bounds), *bounds)
+            if corner is None:
+                print("--arm-thickness: no open side found, so the corner is left as is")
+            else:
+                (ox, oy), (arm_x, arm_y) = corner
+                outer = (low.x if ox > 0 else high.x, low.y if oy > 0 else high.y)
+                spans = (high.x - low.x, high.y - low.y)
+
+                def rescale(distance, current, span):
+                    # Piecewise linear across the side: the arm takes the wanted thickness, the rest fills the span.
+                    if distance <= current:
+                        return distance * wanted / current
+                    return wanted + (distance - current) * (span - wanted) / (span - current)
+                for vertex in obj.data.vertices:
+                    vertex.co.x = outer[0] + ox * rescale(abs(vertex.co.x - outer[0]), arm_x, spans[0])
+                    vertex.co.y = outer[1] + oy * rescale(abs(vertex.co.y - outer[1]), arm_y, spans[1])
+                obj.data.update()
+                print(f"Corner arms {arm_x:.3f} and {arm_y:.3f} set to {wanted:g}")
 
 
 # -------------------------------------------------

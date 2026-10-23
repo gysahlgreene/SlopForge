@@ -1,3 +1,4 @@
+import yaml
 import json
 import os
 import tempfile
@@ -566,7 +567,7 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("stage=material_assembly_export", str(failure.exception))
         self.assertIn("message=material_assembly_export", str(failure.exception))
         self.assertIn("Candidate failed validation", str(failure.exception))
-        self.assertIn("remedy:", str(failure.exception))
+        self.assertEqual(str(failure.exception).count("remedy:"), 1)  # M2-v1 S1 printed it twice
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["validation"]["status"], "failed")
         self.assertTrue(any("Pipeline stopped: No qualified model after 1 attempts" in error
@@ -719,6 +720,31 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
                                        "--shape-guide", "box:1"]), 1)
         self.assertIn("--shape-guide applies to 3D asset types", error.getvalue())
+
+    def test_generate_gives_a_3d_asset_a_real_size_standing_on_its_base(self):
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            # A leading '-' needs the = form: argparse would otherwise read it as another option.
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "well", "A stone well",
+                                       "--target-size=-,-,3.2"]), 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["prop:well"]
+        self.assertEqual((record["target_size"], record["pivot"]), ([None, None, 3.2], "bottom_center"))
+        for spec, message in (("3,3", "three sizes"), ("-,-,-", "at least one"), ("3,-,0", "positive")):
+            with redirect_stderr(StringIO()) as error:
+                self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "arch", "An arch",
+                                           f"--target-size={spec}"]), 1)
+            self.assertIn(message, error.getvalue())
+        with redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
+                                       "--target-size", "1,1,1"]), 1)
+        self.assertIn("--target-size applies to 3D asset types", error.getvalue())
+
+    def test_architecture_uses_the_owner_accepted_concept_fit_and_colour_limits(self):
+        templates = Path(__file__).resolve().parents[1] / "templates/asset_types"
+        architecture, prop = (yaml.safe_load((templates / f"{name}.yaml").read_text()) for name in ("architecture", "prop"))
+        for key in ("min_concept_fit", "max_concept_hue_difference", "min_concept_chroma_ratio"):
+            self.assertEqual(architecture[key], prop[key], key)
+        self.assertNotIn("max_components", architecture)  # a structure's part limit awaits the owner (#94)
 
     def test_doctor_uses_project_root_environment(self):
         with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \

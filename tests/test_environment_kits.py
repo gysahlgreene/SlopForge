@@ -175,13 +175,14 @@ class EnvironmentKitTests(unittest.TestCase):
             (project / "Assets").mkdir(parents=True)
             init_project(project)
             definition = {"id": "mini", "version": 1, "description": "A wall, a crate and their stone",
-                          "kit_constraints": {"material": {"source": "stone", "tile_size": 2},
+                          "kit_constraints": {"material": {"source": "stone", "tile_size": 2, "roughness": 0.75},
                                               "modules": {"wall": {"target_size": [3, None, 3]}}},
                           "children": [{"id": "stone", "type": "texture", "description": "Granite surface"},
                                        {"id": "wall", "type": "architecture", "description": "A wall"},
                                        {"id": "crate", "type": "prop", "description": "A crate"}]}
             recipe = project / "ai/recipes/mini.yaml"
-            for bad in ({"source": "wall", "tile_size": 2}, {"source": "stone", "tile_size": 0}):
+            for bad in ({"source": "wall", "tile_size": 2}, {"source": "stone", "tile_size": 0},
+                        {"source": "stone", "tile_size": 2, "roughness": 1.5}):
                 recipe.write_text(json.dumps({**definition, "kit_constraints": {
                     **definition["kit_constraints"], "material": bad}}))
                 with self.subTest(material=bad), self.assertRaisesRegex(ValueError, "material"):
@@ -194,7 +195,7 @@ class EnvironmentKitTests(unittest.TestCase):
                 recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
                                    "mini", instance_name="ruin")
         self.assertEqual(manifest["assets"]["architecture:ruin_wall"]["kit_material"],
-                         {"asset_key": "texture:ruin_stone", "tile_size": 2})
+                         {"asset_key": "texture:ruin_stone", "tile_size": 2, "roughness": 0.75})
         self.assertNotIn("kit_material", manifest["assets"]["prop:ruin_crate"])  # not a declared module
         with patch("slopforge.backends.blender.subprocess.run") as run, \
                 patch("slopforge.backends.blender.blender_executable", return_value="blender"):
@@ -232,6 +233,88 @@ class EnvironmentKitTests(unittest.TestCase):
                                    "stone_ruin_kit", instance_name="ruin")
         self.assertEqual(manifest["assets"]["architecture:ruin_corner"]["footprint"], "corner")
         self.assertNotIn("footprint", manifest["assets"]["architecture:ruin_wall"])
+
+    def test_corner_arm_thickness_is_declared_passed_on_and_checked(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        from slopforge.recipes import _validate_kit_constraints
+        for bad in ({"arm_thickness": 0.75}, {"footprint": "corner", "arm_thickness": 0},
+                    {"footprint": "corner", "arm_thickness": 2.0, "target_size": [3, 3, 3]}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "arm_thickness"):
+                _validate_kit_constraints({"kit_constraints": {"modules": {"corner": bad}}}, {"corner"})
+        _validate_kit_constraints({"kit_constraints": {"modules": {"corner": {
+            "footprint": "corner", "arm_thickness": 0.75, "target_size": [3, 3, 3]}}}}, {"corner"})
+        with patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, arm_thickness=0.75)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--arm-thickness") + 1], "0.75")
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"snap_tolerance": 0.05,
+            "modules": {"corner": {"footprint": "corner", "arm_thickness": 0.75}}}},
+            "stages": {"corner": {"asset_key": "architecture:corner", "asset_id": "corner-id"}}}}
+        for arms, status in (([0.76, 0.74], "passed"), ([1.0, 0.75], "failed")):
+            manifest = {"assets": {"architecture:corner": {"type": "architecture", "status": "ready",
+                "validation": {"measured": {"dimensions": [3.0, 3.0, 3.0], "bounds_min": [0, 0, 0],
+                    "bounds_max": [3, 3, 3], "transforms_applied": True, "footprint_quadrants": [0.8, 0.9, 0.8, 0.0],
+                    "arm_thickness": arms}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["corner"]["status"], status)
+
+    def test_max_stretch_is_declared_copied_and_checked(self):
+        from unittest.mock import patch
+        from slopforge import recipes
+        from slopforge.recipes import _validate_kit_constraints
+        for bad in ({"max_stretch": 0.9}, {"modules": {"wall": {"max_stretch": True}}}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "max_stretch"):
+                _validate_kit_constraints({"kit_constraints": bad}, {"wall"})
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"max_stretch": 1.3,
+            "modules": {"doorway": {}}}},
+            "stages": {"doorway": {"asset_key": "architecture:doorway", "asset_id": "door-id"}}}}
+        for stretch, status in ((1.12, "passed"), (1.45, "failed")):
+            manifest = {"assets": {"architecture:doorway": {"type": "architecture", "status": "ready",
+                "validation": {"measured": {"dimensions": [3.0, 0.75, 3.0], "bounds_min": [0, 0, 0],
+                    "bounds_max": [3, 0.75, 3], "transforms_applied": True, "axis_stretch": stretch}}}}}
+            self.assertEqual(validate_environment_kit(recipe, manifest)["modules"]["doorway"]["status"], status)
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "game"
+            (project / "Assets").mkdir(parents=True)
+            init_project(project)
+            from slopforge.config import load_project
+            from slopforge.style import load_style
+            config = load_project(project)
+            manifest = load_manifest(project / "ai/assets/manifest.json")
+            with patch("slopforge.recipes.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                    patch("slopforge.recipes.image.generate", return_value=[{"number": 1, "status": "candidate"}]):
+                recipes.run_recipe(project, config, load_style(project, config), load_taxonomy(project), manifest,
+                                   "stone_ruin_kit", instance_name="ruin")
+        self.assertEqual(manifest["assets"]["architecture:ruin_doorway"]["max_stretch"], 1.3)
+        self.assertNotIn("max_stretch", manifest["assets"]["texture:ruin_stone"])
+
+    def test_module_budgets_are_declared_applied_and_totalled(self):
+        from slopforge.pipelines.model import _face_budget, _fit_texture_size
+        from slopforge.recipes import _validate_kit_constraints
+        from PIL import Image
+        for bad in ({"face_budget": 0}, {"texture_size": 3000}, {"texture_size": 8192}):
+            with self.subTest(rule=bad), self.assertRaisesRegex(ValueError, "face_budget|texture_size"):
+                _validate_kit_constraints({"kit_constraints": {"modules": {"floor": bad}}}, {"floor"})
+        pipeline = {"model_budgets": {"architecture_faces": 60000}}
+        self.assertEqual(_face_budget(pipeline, {"face_budget": "architecture_faces"}, {}), 60000)
+        self.assertEqual(_face_budget(pipeline, {"face_budget": "architecture_faces"}, {"face_budget": 8000}), 8000)
+        with tempfile.TemporaryDirectory() as temporary:
+            maps = {key: Path(temporary) / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
+            for path in maps.values():
+                Image.new("RGB", (64, 64), "grey").save(path)
+            _fit_texture_size(maps, 32)
+            self.assertEqual({Image.open(path).size for path in maps.values()}, {(32, 32)})
+        recipe = {"name": "ruin", "recipe_instance": {"definition": {"kit_constraints": {"modules": {}}},
+            "stages": {name: {"asset_key": f"architecture:{name}", "asset_id": name} for name in ("floor", "wall")}}}
+        measured = lambda faces, size: {"dimensions": [3.0, 3.0, 0.2], "bounds_min": [0, 0, 0], "bounds_max": [3, 3, 0.2],
+                                        "transforms_applied": True, "face_count": faces, "texture_size": [size, size]}
+        manifest = {"assets": {
+            "architecture:floor": {"type": "architecture", "status": "ready", "validation": {"measured": measured(8000, 1024)}},
+            "architecture:wall": {"type": "architecture", "status": "ready", "validation": {"measured": measured(30000, 2048)}}}}
+        report = validate_environment_kit(recipe, manifest)
+        self.assertEqual(report["modules"]["floor"]["map_texels"], 4 * 1024 * 1024)
+        self.assertEqual(report["budgets"], {"faces": 38000, "map_texels": 4 * (1024 ** 2 + 2048 ** 2)})
 
     def test_validation_checks_a_top_center_pivot(self):
         recipe = {"name": "court", "recipe_instance": {"definition": {"kit_constraints": {

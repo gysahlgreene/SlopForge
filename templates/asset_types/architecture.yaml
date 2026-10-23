@@ -2,6 +2,12 @@ name: architecture
 pipeline: model
 output_folder: Models
 face_budget: architecture_faces
+# The owner-accepted prop limits (2026-10-21/22). Every 2026-10-22 structure and kit module fitted its concept at
+# 0.92-0.97; their stone concepts are near grey, so the colour check skips them. A part limit for structures,
+# which can have separate pieces, awaits the owner (issue #94).
+max_concept_hue_difference: 4
+min_concept_chroma_ratio: 0.6
+min_concept_fit: 0.8
 requirements:
   - structural asset with strong large-scale massing
   - show full structure and major openings clearly

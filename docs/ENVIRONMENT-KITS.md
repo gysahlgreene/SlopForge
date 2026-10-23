@@ -16,7 +16,7 @@ slopforge --project ~/UnityProjects/MyGame recipe resume lunar_refinery
 slopforge --project ~/UnityProjects/MyGame environment-check lunar_refinery
 ```
 
-Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See the [structure showcase](media/structure-showcase-2026-10/README.md) for a five-module kit.
+Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See the [structure showcase](media/structure-showcase-2026-10/README.md) for a five-module kit.
 
 A module's `pivot` (or the kit's default `pivot`) places its origin in the exported FBX:
 - `bottom_center` for walls, doorways, corners and columns, which stand on their origin;
@@ -39,7 +39,7 @@ walls grey. A kit can name one texture child as its material:
 
 ```yaml
 kit_constraints:
-  material: {source: stone, tile_size: 2.0}   # metres per repeat
+  material: {source: stone, tile_size: 2.0, roughness: 0.75}   # metres per repeat; the kit's finish
 children:
   - id: stone
     type: texture
@@ -55,9 +55,13 @@ module before its kit texture stops before any inference and names the texture t
 - its base colour is re-baked as the swatch × baked ambient occlusion × the module's own brightness relative to
   its mean, softened to 60%.
 
-So every module gets the swatch's hue. Each one keeps its block-to-block light and dark, and its own normal,
-roughness and metallic maps. The seamless swatch's hash and the tile size join the module's assembly-stage
-settings.
+With `roughness`, each module's roughness map is also moved to that mean, keeping its own variation softened to
+60%, and UV padding takes the declared value. In M2-v1 run K1 (2026-10-23), TRELLIS decoded the flagstone floor at
+0.22 beside walls at 0.67, so Unity rendered a glossy floor that reflected the blue sky.
+
+So every module gets the swatch's hue and, when declared, the kit's finish. Each one keeps its block-to-block light
+and dark, and its own normal and metallic maps. The seamless swatch's hash, the tile size and the roughness join the
+module's assembly-stage settings.
 
 **Unity mip levels:** the bake leaves nothing black outside the UV islands. Uncovered texels take the module's
 mean colour, as TRELLIS's own maps do. A first live run left them black, and Unity's smaller mips blended that into
@@ -94,6 +98,54 @@ What it does in Unity (batch mode):
   check fails.
 
 A corner's open side is read from the placed mesh, so it needs no assumption about the FBX axes.
+
+**Joints:**
+- **Declared thickness:** declare walls and doorways with their thickness as part of `target_size`, such as
+  `[3, 0.75, 3]`, and give the corner the same `arm_thickness`.
+- **Why:** the corner's arms lie inside its bounds, so Blender finds its open side, measures each arm, and rescales
+  across the arms only, keeping the outer bounds exact. Generated stone corners had arms of 0.98–1.16 m against
+  walls of 0.74–0.88 m, so in the first `corner_joint` scene the corner stepped out past the walls.
+- **Placement:** with one thickness, place walls inside a cell edge with their outer face on it, as the corner's
+  arms are, and they continue the corner flush.
+- **Check:** `environment-check` compares each published corner's measured arm thickness with the declared one.
+- **Wedges are retried:** inspection records `arm_taper`, each arm's thickness across the middle of its far half
+  over that across its end.
+  - An L's arms are even slabs: every corner published by 2026-10-23 measured 1.00–1.01.
+  - In M2-v2 run T2 a timber corner came out a wedge, filled diagonally inside its L. It passed the open-quarter
+    check because its open quarter was empty. Its arms measured 1.72 and 1.82, and the kit check failed it on
+    0.27 m arms.
+  - Above 1.25 the candidate fails as `module_taper`, and the next seed is tried, as for a solid block. The 1.25
+    limit is set from that evidence; the owner has not set it.
+- **Show the arms' tops:** timber corners seen from eye level, looking straight into the L, mostly reconstructed as
+  wedges or solid blocks.
+  - On T2's six seeds through the shape stage: one solid block, four wedges, and one L stretched past 1.3.
+  - Seen from a high angle with the flat tops of both arms showing: three Ls and three solid blocks
+    ([evidence](media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md)).
+  - The timber kit's corner asks for that view. The stone and sci-fi corners passed on eye-level views.
+
+**Stretch:**
+- **What it is:** sizing a module to its declared size stretches it when its concept's proportions differ. Blender
+  records the ratio (`axis_stretch`).
+- **The limit:** `max_stretch` (kit-wide or per module) fails a module that stretches past it, as `module_stretch`.
+- **No retry:** another mesh seed from the same concept would stretch again, so approval stops and asks for a
+  concept closer to the module's proportions. A doorway concept on 2026-10-22 stretched 1.45 to fit 3 × 3 m.
+- **In `environment-check`:** the limit is applied too.
+- **The canvas:** a child's `aspect` (`square`, `portrait` or `landscape`) sets its concept canvas. Corners use
+  landscape. Sci-fi walls use portrait: on M2-v1 run S1's six seeds, square-canvas walls reconstructed 1.27–1.64
+  times wider than tall and portrait ones 1.15–1.28. Stone and timber walls stayed within 1.15 on square canvases.
+  - **Concept outlines don't predict it:** S1's wall concept outline was 1.09 tall for its width, but its mesh was
+    1.49 times wider than tall.
+  - **Measure the mesh instead:** compare a change on fixed seeds through TRELLIS's detailed shape, built from the
+    RGBA cut-out the pipeline sends ([evidence](media/kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md)).
+
+**Budgets:**
+- **Declaring them:** a module rule can declare `face_budget`, the faces it is decimated to on the GPU and in
+  Blender, and `texture_size`, its maps' resolution (256 to 4096). Otherwise it takes its asset type's budget.
+  Architecture's is 60,000 faces and 4096² maps on the final tier; a flat 3 × 3 m floor tile used 59,988.
+- **Reporting:** `environment-check` reports each module's faces and map texels (base colour, normal,
+  metallic/smoothness and emission), and the kit's totals under `budgets`.
+- **Not yet:** a kit-wide limit waits for the owner's M2 criteria
+  ([#94](https://github.com/gysahlgreene/SlopForge/issues/94)).
 
 `kit_constraints` lives in the recipe definition and is snapshotted into each recipe run. It sets a grid, tolerances, maximum module dimensions, pivot expectations, and optional snap axes per child. `environment-check` reads the saved Blender measurements for bounds, dimensions, origins, and applied transforms. It writes a typed validation artifact at `ai/assets/environment_checks/<name>.json`; incomplete packs produce a partial report and a nonzero exit, while failed geometry checks remain visible in the manifest.
 

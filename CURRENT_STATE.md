@@ -6,7 +6,8 @@ Follow the [product contract and document precedence](docs/PRODUCT_CONTRACT.md),
 [pipeline contract](docs/PIPELINE_CONTRACT.md),
 [quality contract](docs/QUALITY_CONTRACT.md), and [roadmap](ROADMAP.md).
 M0 core reliability was closed by the owner on 2026-10-21 ([exit record](docs/M0-EXIT-RECORD.md));
-M1 Props is the active milestone. Historical
+M1 Props reached Provisional for static props; on 2026-10-22 the owner moved the focus to M2 Modular environments,
+now the active milestone ([epic #89](https://github.com/gysahlgreene/SlopForge/issues/89)). Historical
 humanoid work is bounded evidence, not the next production milestone.
 
 ## M0 package tracking
@@ -52,7 +53,8 @@ No broad category/workflow/profile is claimed Qualified here.
 | Body-deformation benchmark | Partially working; historical asset-specific review | [Diagnostic benchmark](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md): reviewed delivered body rig and Unity motion; source visual quality rejected; separate final-tier source pending review, not covered by rig approval |
 | Fine detail/material fidelity and general rig recovery | Known unreliable | Recovery and benchmark reports retain visual defects; prior humanoid test 3's recovered rig remains rejected as recorded before this task; it is not promoted by these contracts |
 | Cross-brief/category repeatability | Provisional (static props, `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import) | [Criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md): all six runs (three briefs × two) pass every stage and owner-accepted threshold, including the colour check; earlier criteria v1–v4 and their failures are kept. Two runs per brief cannot measure a failure rate; Qualified is out of scope |
-| Modular environment, mechanical and creature/Generic runtime quality | Unverified | Recipes, kits and rig tooling are capabilities; representative visual, performance, deformation and runtime evidence is still required |
+| Modular environment kits | Provisional (stone ruin, timber house and sci-fi corridor kits, `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0 assembled scenes) | [Criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md): all six runs (three kits × two) pass every owner-accepted criterion, from size, pivot, stretch, corner shape and joints to concept fit, colour, budgets, the matching stone material and the Unity scene checks; M2-v1 and M2-v2 and their failures are kept. No visual approval by the owner; Play mode, lightmapping and LODs are unchecked; two runs per kit cannot measure a failure rate |
+| Mechanical and creature/Generic runtime quality | Unverified | Rig tooling is a capability; representative visual, performance, deformation and runtime evidence is still required |
 | Complete readiness/qualification claims | Props: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
 The recovery report historically described qualification of a failure class. Under
@@ -577,3 +579,129 @@ Recipe resume kept regenerating architecture modules (2026-10-22, M2).
   pipeline, with only the image backend faked. Resume generates nothing new and reuses both. Before the fix it
   regenerated the architecture child's six concepts.
 - **Not verified live:** a kit resume on the H100.
+
+Kit joints: declared wall thickness and corner arm thickness (2026-10-22, issue #90).
+- **Cause:** thickness was a free axis, so it followed each concept. Generated stone walls measured 0.74–0.88 m and
+  corner arms 0.98–1.16 m, and in `corner_joint` the corner stepped out past the walls.
+- **Change:**
+  - Walls and doorways declare their thickness through `target_size`, as `[3, 0.75, 3]`.
+  - A corner declares `arm_thickness`. Blender finds its open side and measures each arm away from the joint. It
+    then rescales piecewise across the arms only, so the outer bounds stay exact.
+  - Inspection records `arm_thickness`, and `environment-check` compares it with the declared value.
+  - The stone kit's layouts put walls inside the cell edges with their outer faces on them, like the corner's arms.
+    The courtyard is now closed by four auto-turned corners.
+- **Live (fresh run, H100):**
+  - corner arms measured 1.09 and 1.12 m, set to 0.75 and re-measured at 0.750 and 0.749;
+  - the walls and doorway came out at exactly 0.75 m;
+  - `environment-check` passed, and both scenes built with no errors or seam gaps. The corner joint is flush.
+- **Tests:**
+  - recipe validation and the flags reaching Blender;
+  - `environment-check` for arm thickness;
+  - an opt-in Blender test: an L with 1.2 m arms comes out with 0.75 m arms inside an unchanged 3 × 3 × 3 m box.
+
+Kit module stretch limit and recipe child aspect (2026-10-22, issue #91).
+- **Cause:** sizing a module to its declared size stretches it when its concept's proportions differ.
+  - One doorway stretched 1.45 to 3 × 3 m.
+  - Square-canvas stone corners came out taller than their arms are long and stretched 1.40.
+- **Change:**
+  - Blender records `axis_stretch` over the axes that shape the module's face. A declared thin axis is left out, so
+    a wall's thickness doesn't count: 1.36 over all axes, 1.19 over its face.
+  - `max_stretch` (kit-wide or per module) fails a module past it as `module_stretch`. This is not retryable: another
+    mesh seed from the same concept would stretch again, so approval stops and asks for a concept closer to the
+    module's shape. `environment-check` applies the limit too.
+  - Recipe children can declare `aspect`. It is applied at generation and again on resume, so the identity
+    matches.
+  - The stone kit's corner uses `landscape` and the kit sets `max_stretch: 1.3`, which the owner accepted for M2.
+- **Evidence:**
+  - *Fixed seeds:* square-canvas corners measured h/w 1.01–1.17; on landscape all six were about cube-proportioned
+    (0.70–0.88).
+  - *Live fresh run:* stretch was floor 1.00, wall 1.10, doorway 1.25, corner 1.03 and column 1.00, all within 1.3.
+- **Tests:**
+  - the stretch rule is not retryable, and is copied and checked;
+  - a child aspect sets the canvas and survives resume;
+  - an opt-in Blender test: a 1 × 0.9 face sized to 3 × 3 reports 1.11.
+
+Kit budgets (2026-10-22, issue #93; [evidence](docs/media/kit-budgets-2026-10/README.md)).
+- **Change:** module rules can declare `face_budget`, used on the GPU, in Blender and in the stage identities, and
+  `texture_size`, which resizes the maps. `environment-check` reports each module's faces and map texels, and the
+  kit's totals.
+- **Owner decision:** after a close-up comparison, the owner accepted floor 15k faces, walls, doorway and corner
+  40k, column 20k, and all maps at 2048². The stone kit declares them.
+- **Live:** a fresh stone kit at these budgets built its scenes with no check errors. Totals were 100,177 faces
+  and 83.9M map texels, against about 230k faces and 335M texels before.
+- **Tests:**
+  - budget validation;
+  - the asset override and the map resize;
+  - kit totals.
+- **Not verified:** the comparison used Blender's decimation at one distance.
+
+Standalone structures at real size, with concept checks (2026-10-22, issue #92; [evidence](docs/media/structures-real-size-2026-10/README.md)).
+- **Change:**
+  - `generate --target-size=x,y,z` gives any 3D asset a real size in metres, with `-` keeping an axis in
+    proportion. Such an asset stands on a bottom-centre pivot.
+  - `architecture` gets the owner-accepted prop limits for concept fit (0.8) and colour. Every 2026-10-22
+    structure and kit module fitted at 0.92–0.97.
+- **Live:** the well, shrine and bunker came out at exactly their declared 3.2, 3.5 and 3.0 m heights on
+  bottom-centre pivots, and passed concept fit (0.93–0.98) and the colour check on their first attempts.
+- **Tests:**
+  - CLI parsing, refusal for image types, and the size and pivot recorded on the asset;
+  - the architecture limits match the prop ones.
+- **Not verified:** a part limit for structures (#94). The bunker invented a second door, has a white patch, and
+  its small hazard stripes faded unchecked.
+
+Kit protocol criterion M2-v1 closed with no status (2026-10-23; [evidence](docs/media/kits-provisional-2026-10/README.md)).
+- **Runs:** six at commit `d3d6c31`, two each of the stone, timber and sci-fi kits.
+  - K1 (stone) passed every criterion.
+  - T1 failed on corner arms (0.351/0.335 m against 0.4 m), a code bug.
+  - S1 stopped at the sci-fi wall's 1.49 stretch.
+  - K2, T2 and S2 lost a concept job that waited more than 600 s in the shared GPU queue. ComfyUI's history shows
+    all three succeeded after 2–13 s of execution.
+- **Fixes, each with a regression test:**
+  - the corner arm rescale reads the bounds after bottom-centring;
+  - queue time no longer counts toward a ComfyUI job's timeout (bounded at 3 h);
+  - a stretch stop states its own remedy once;
+  - the stone kit checks at the record's 0.05 m;
+  - a kit material can declare roughness (stone 0.75), after K1's floor came out at 0.22 beside walls at 0.67;
+  - the sci-fi wall renders on a portrait canvas.
+- **Sci-fi wall test:** on S1's six seeds, through the h100 `final` shape stage, square-canvas walls reconstructed
+  1.27–1.64 times wider than tall (one within 1.3) and portrait ones 1.15–1.28 (all six). S1's own wall reproduced
+  its run value of 1.49. Concept outlines did not predict mesh proportions.
+- **Next:** criterion [M2-v2](docs/media/kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md) reruns all six.
+- **Not verified:** the kit roughness and the arm fix in a live kit run; the owner's visual review. The timber
+  kit's outer wall faces come out as bare timber, with its plaster only on the inside, and its finish (0.50–0.59) is
+  as generated.
+
+Kit protocol criterion M2-v2: five of six runs pass, so not Provisional (2026-10-23; [evidence](docs/media/kits-provisional-2026-10-v2/README.md)).
+- **Runs:** six at commit `5c17d4d`, all built and rendered in Unity.
+  - K1, K2, T1, S1 and S2 pass every criterion.
+  - T2 fails Joints: its timber corner reconstructed as a wedge, and its arms measured 0.27 m against 0.4 m.
+- **Live checks of the M2-v1 fixes:**
+  - no concept job timed out;
+  - T1's corner arms measure 0.400 m;
+  - the sci-fi walls stretch 1.15 and 1.24;
+  - every stone module's roughness averages 0.75.
+- **Fixes, with regression tests:**
+  - **Wedge corners:** inspection records each arm's taper. Published L corners measured 1.00–1.01 and the wedge
+    1.72–1.82. Above 1.25 a corner fails as the retryable `module_taper`. The limit is agent-set.
+  - **Health check:** the mesh worker retries it for 2 minutes. One timeout had cost T2 an attempt.
+  - **Timber corner view:** the corner brief asks for a high angle that shows the arms' tops. On T2's six seeds
+    through the shape stage, eye-level concepts gave no usable L, and high-angle ones gave three.
+- **Next:** criterion [M2-v3](docs/media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md) reruns all six.
+- **Not verified:** the owner's visual review. The walls' invented outsides differ from their fronts, and the
+  sci-fi corners are whiter than its walls.
+
+Kit protocol criterion M2-v3: all six runs pass, so modular kits are Provisional (2026-10-23; [evidence](docs/media/kits-provisional-2026-10-v3/README.md)).
+- **Scope:** the stone ruin, timber house and sci-fi corridor kits; `h100`/`final`; commit `5ceac3b`; Unity
+  6000.6.3f1 / URP 17.6.0.
+- **Runs:** two per kit. Each was built from a fresh blank Unity project through `environment-scene`, and every
+  owner-accepted criterion passed. One intervention was used, a permitted fresh selection for K2's corner after a
+  stretch stop.
+- **Live checks of the M2-v2 fixes:**
+  - both timber corners, from high-angle concepts, came out clean Ls with 0.400 m arms and a taper of 1.02–1.04;
+  - six solid-block corner seeds were retried;
+  - no job timed out or was lost.
+- **Not verified:**
+  - the wedge check in a live run (none occurred; it is tested on T2's M2-v2 mesh);
+  - the owner's visual review (invented wall outsides, T2's streaked plaster, sci-fi corners whiter than its walls);
+  - Play mode, lightmapping and LODs;
+  - a failure rate.

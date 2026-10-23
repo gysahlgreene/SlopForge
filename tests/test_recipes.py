@@ -1779,3 +1779,43 @@ class ModelChildResumeTests(unittest.TestCase):
             stages = manifest["assets"]["recipe:ruin"]["recipe_instance"]["stages"]
             for child in ("wall", "crate"):
                 self.assertEqual(stages[child]["reuse_decisions"][-1], {"reusable": True, "reasons": []}, child)
+
+
+class RecipeChildAspectTests(unittest.TestCase):
+    def test_child_aspect_sets_its_canvas_and_resume_keeps_it(self):
+        # 2026-10-22: stone-kit corners on the square canvas were taller than their arms are long and stretched 1.40
+        # to 3 x 3 x 3 m; on landscape all six fixed seeds came out about cube-proportioned.
+        from PIL import Image
+        from slopforge.config import load_project, workflow_node_inputs
+        from slopforge.initializer import init_project
+        from slopforge.style import load_style
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "game"
+            (root / "Assets").mkdir(parents=True)
+            init_project(root)
+            recipe = {"id": "mini_kit", "version": 1, "description": "One corner",
+                      "children": [{"id": "corner", "type": "architecture", "description": "A corner",
+                                    "aspect": "landscape"}]}
+            (root / "ai/recipes/mini_kit.yaml").write_text(yaml.safe_dump(recipe))
+            config = load_project(root)
+            style, types = load_style(root, config), load_taxonomy(root)
+            manifest = load_manifest(root / config["asset_pipeline"]["manifest"])
+            canvases = []
+
+            def backend(_root, config, workflow, _prompt, destination, _prefix, _seed, metadata, **_kwargs):
+                canvases.append(workflow_node_inputs(config, "image", Path(workflow).name).get("57:13"))
+                Image.new("RGB", (64, 64), "grey").save(destination)
+                metadata.write_text(json.dumps({"workflow": "image.json"}))
+            with patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+                recipes.run_recipe(root, config, style, types, manifest, "mini_kit", instance_name="ruin")
+                generated = len(canvases)
+                recipes.resume_recipe(root, config, style, types, manifest, "ruin")
+            self.assertEqual(canvases[0], {"width": 1152, "height": 896})
+            self.assertEqual(len(canvases), generated)
+            decision = manifest["assets"]["recipe:ruin"]["recipe_instance"]["stages"]["corner"]["reuse_decisions"][-1]
+            self.assertEqual(decision, {"reusable": True, "reasons": []})
+            recipe["children"][0]["aspect"] = "wide"
+            (root / "ai/recipes/mini_kit.yaml").write_text(yaml.safe_dump(recipe))
+            with self.assertRaisesRegex(ValueError, "aspect"):
+                recipes.load_recipe(root, "mini_kit", types)

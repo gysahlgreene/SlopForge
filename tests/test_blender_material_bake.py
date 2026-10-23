@@ -463,14 +463,16 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             probe = root / "probe.py"
             probe.write_text("""import bpy, json, sys
 obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
-json.dump(list(obj.dimensions), open(sys.argv[-1], 'w'))
+json.dump(list(obj.dimensions) + [obj.get("slopforge_axis_stretch")], open(sys.argv[-1], 'w'))
 """)
             subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
                            check=True, capture_output=True, text=True)
-            x, y, z = json.loads(result.read_text())
+            x, y, z, stretch = json.loads(result.read_text())
             self.assertAlmostEqual(x, 3.0, places=3)  # the 1.0-long side was turned onto X
             self.assertAlmostEqual(z, 3.0, places=3)
             self.assertLess(y, 1.0)  # free thickness keeps a proportional size
+            # The face (1.0 x 0.9 scaled to 3 x 3) stretched 1.11; the thin depth axis does not count.
+            self.assertAlmostEqual(stretch, 1.111, places=2)
 
     def test_declared_pivot_places_the_origin_and_inspection_reads_real_scale_and_footprint(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -516,6 +518,74 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             quadrants = origins["bottom_center"]["measured"]["footprint_quadrants"]
             self.assertLess(quadrants[0], 0.2)
             self.assertTrue(all(value > 0.3 for value in quadrants[1:]), quadrants)  # arms 0.2 wide: 0.375 and 0.61
+
+    def test_corner_arms_are_brought_to_the_declared_thickness_inside_unchanged_bounds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb = root / "corner.glb"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            # An L with thick arms (0.4 of its 1 m side); its open quarter is +X+Y.
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for loc, scale in (((-0.3, 0, 0.5), (0.4, 1.0, 1.0)), ((0, -0.3, 0.5), (1.0, 0.4, 1.0))):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+    bpy.context.object.scale = scale
+bpy.ops.object.select_all(action='SELECT')
+bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
+bpy.ops.object.join()
+# Off-centre, as a generated mesh can be: the M2-v1 timber corner's rescale read bounds from before recentring.
+bpy.context.object.location = (0.7, 0.4, 0.2)
+bpy.ops.object.transform_apply(location=True, scale=True)
+bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.subdivide(number_cuts=8); bpy.ops.object.mode_set(mode='OBJECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            blend, report = root / "corner.blend", root / "corner.json"
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "corner.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "20000", "--surface-source", str(maps[0]),
+                            "--target-size", "3,3,3", "--arm-thickness", "0.75"], check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(blend), str(report), "20000", "--real-scale"],
+                           check=True, capture_output=True, text=True)
+            measured = json.loads(report.read_text())["measured"]
+        self.assertEqual([round(value, 2) for value in measured["dimensions"]], [3.0, 3.0, 3.0])
+        self.assertAlmostEqual(measured["axis_stretch"], 1.0, places=2)  # the 1 m L scaled evenly to 3 m
+        # Before: arms 1.2 m thick (0.4 of 3 m). After: the declared 0.75 m.
+        for thickness in measured["arm_thickness"]:
+            self.assertAlmostEqual(thickness, 0.75, delta=0.05)
+        self.assertLess(max(measured["arm_taper"]), 1.05)  # even slabs
+
+    def test_wedge_corner_measures_its_arms_tapering(self):
+        # M2-v2 run T2: a corner filled diagonally inside its L passed the open-quarter check.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, report = root / "wedge.glb", root / "wedge.json"
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("wedge"); bm = bmesh.new()
+corners = [(-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5)]  # a right-angled triangle: its open quarter is +X+Y
+bottom = [bm.verts.new((x, y, 0)) for x, y in corners]; top = [bm.verts.new((x, y, 3)) for x, y in corners]
+bm.faces.new(bottom[::-1]); bm.faces.new(top)
+for i in range(3):
+    bm.faces.new((bottom[i], bottom[(i + 1) % 3], top[(i + 1) % 3], top[i]))
+bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=12, use_grid_fill=True)
+bm.to_mesh(mesh); bpy.context.collection.objects.link(bpy.data.objects.new("wedge", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/inspect_model.py"), "--", str(glb), str(report), "20000", "--real-scale"],
+                           check=True, capture_output=True, text=True)
+            measured = json.loads(report.read_text())["measured"]
+        self.assertLessEqual(min(measured["footprint_quadrants"]), 0.15)  # it passes the open-quarter check
+        self.assertGreater(min(measured["arm_taper"]), 1.25)
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")

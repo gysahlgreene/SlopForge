@@ -77,6 +77,16 @@ def validate_environment_kit(recipe_asset, manifest):
         quadrants = measured.get("footprint_quadrants")
         if module_rules.get(child_id, {}).get("footprint") == "corner" and quadrants and min(quadrants) > 0.15:
             errors.append("the corner module has no open side: its footprint fills every quarter")
+        limit = module_rules.get(child_id, {}).get("max_stretch", constraints.get("max_stretch"))
+        stretch = measured.get("axis_stretch")
+        if limit is not None and stretch is not None and stretch > limit:
+            errors.append(f"stretched {stretch:g} times along one axis to its declared size (limit {limit:g})")
+        wanted = module_rules.get(child_id, {}).get("arm_thickness")
+        arms = measured.get("arm_thickness")
+        tolerance = module_rules.get(child_id, {}).get("snap_tolerance", snap_tolerance)
+        if wanted is not None and (not arms or any(abs(arm - wanted) > tolerance for arm in arms)):
+            errors.append(f"corner arms measure {arms} against the declared {wanted:g} m: walls will not continue "
+                          "them flush")
         objects = measured.get("objects") or []
         if objects:
             pivot = module_rules.get(child_id, {}).get("pivot", constraints.get("pivot", "center"))
@@ -96,13 +106,19 @@ def validate_environment_kit(recipe_asset, manifest):
                         for i, value in enumerate(origin)) for origin in measured["origins"]):
                 errors.append("one or more object pivots fall outside the module bounds")
 
+        size = measured.get("texture_size") or [0, 0]
         results[child_id] = {"status": "failed" if errors else "passed", "asset_id": asset.get("id"),
-                             "dimensions": dimensions, "errors": errors}
+                             "dimensions": dimensions, "faces": measured.get("face_count"),
+                             # basecolor, normal, metallic/smoothness and emission at one size
+                             "map_texels": 4 * size[0] * size[1], "errors": errors}
         failed |= bool(errors)
 
     status = "failed" if failed else "partial" if pending else "passed"
+    measured_modules = [result for result in results.values() if "map_texels" in result]
+    budgets = {"faces": sum(result.get("faces") or 0 for result in measured_modules),
+               "map_texels": sum(result["map_texels"] for result in measured_modules)}
     return {"schema_version": 1, "kit": recipe_asset.get("name"), "status": status,
-            "constraints": constraints, "modules": results}
+            "constraints": constraints, "modules": results, "budgets": budgets}
 
 
 def scene_placements(recipe_asset, manifest, layout_name):

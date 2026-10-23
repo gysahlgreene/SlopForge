@@ -25,7 +25,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | --- | --- | --- |
 | [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
-| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | Standalone structures and real-scale kit modules generated end to end | Six structures and a modular stone-kit courtyard as lit turntables |
+| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; six structures as lit turntables |
 | Weapons and mechanical assets, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
@@ -100,19 +100,63 @@ Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), 
 
 ## Structures and environments
 
+**Three modular kits, assembled in Unity** (2026-10-23). Every module is generated from a written brief at its real
+size, checked, published to Unity as a prefab, and placed by the kit's layout. There is no manual repair:
+
+![A stone ruin courtyard, a timber house room and a sci-fi corridor room, each assembled in Unity from five generated modules](docs/media/kits-provisional-2026-10-v3/kits_lineup.jpg)
+
+| Kit | Modules | One look across the kit | Protocol runs |
+| --- | --- | --- | --- |
+| `stone_ruin_kit` | floor, wall, doorway, corner, column | one stone texture and finish shared by every module | 2 of 2 passed |
+| `timber_house_kit` | floor, wall, window, doorway, corner | dark oak beams and lime plaster, declared per module | 2 of 2 passed |
+| `scifi_corridor_kit` | floor, wall, doorway, corner, pillar | painted panels, steel and a cyan light strip | 2 of 2 passed |
+
+All six runs passed every owner-accepted check, so modular kits on this tier are **Provisional**:
+- **The pieces fit:**
+  - every module is within 5 cm of its declared size and pivot on a 3 m grid;
+  - corner arms are as thick as the walls, so joints run flush;
+  - Unity finds no seam gap wider than 1 mm.
+- **The pieces keep their shape:** no module is stretched more than 1.3 times to reach its size. A corner that
+  reconstructs as a solid block or a wedge is rejected, and the next seed is tried.
+- **The pieces match their concepts:** concept fit is at least 0.89, and colour stays within the accepted limits.
+- **Ready for a scene:** each piece is a prefab with a mesh collider and static flags. Floors use 15k faces, walls
+  and corners 40k, columns 20k, and every map is 2048².
+
+Unity checks the assembly; it isn't judged by eye.
+
+```sh
+slopforge --project ~/UnityProjects/MyGame recipe run timber_house_kit --name house
+slopforge --project ~/UnityProjects/MyGame approve house_wall 1          # then each module in turn
+slopforge --project ~/UnityProjects/MyGame approve-texture house_wall 1
+slopforge --project ~/UnityProjects/MyGame environment-check house
+slopforge --project ~/UnityProjects/MyGame environment-scene house room
+```
+
+For the stone kit, approve its `stone` texture first: every module takes its colour and finish from it.
+
+**What the evidence supports:**
+- Two independent runs of each kit passed every check on the H100 `final` tier through Unity 6000.6.3f1 / URP
+  17.6.0. That makes the kits Provisional.
+- Two runs per kit cannot measure a failure rate, so nothing is Qualified.
+- The owner has not yet visually approved the scenes.
+
+**Known limits:**
+- **Unseen wall backs are invented:** the timber walls' outsides are bare wood, the sci-fi walls' outsides dark.
+- **Some texture blemishes remain:** streaked plaster, gouges and green patches in some runs.
+- **The sci-fi corners are whiter than its walls,** because that kit has no shared material.
+- **Not covered:** Unity is checked in editor batch renders, with no Play mode, lightmaps or LODs.
+
+[Protocol evidence →](docs/media/kits-provisional-2026-10-v3/README.md) · [Earlier rounds: v1](docs/media/kits-provisional-2026-10/README.md), [v2](docs/media/kits-provisional-2026-10-v2/README.md) · [Environment kits guide →](docs/ENVIRONMENT-KITS.md) · [M2 epic →](https://github.com/gysahlgreene/SlopForge/issues/89)
+
+**Standalone structures** use the `architecture` asset type, with the same brief-declared materials as props:
+
 | Stone well | Market stall | Stone shrine |
 | :---: | :---: | :---: |
 | <img src="docs/media/structure-showcase-2026-10/stone_well_turntable.gif" width="240" alt="Stone well turntable"> | <img src="docs/media/structure-showcase-2026-10/market_stall_turntable.gif" width="240" alt="Market stall turntable"> | <img src="docs/media/structure-showcase-2026-10/stone_shrine_turntable.gif" width="240" alt="Stone shrine turntable"> |
 | **Watchtower** | **Ruined arch** | **Sci-fi bunker** |
 | <img src="docs/media/structure-showcase-2026-10/watchtower_turntable.gif" width="240" alt="Watchtower turntable"> | <img src="docs/media/structure-showcase-2026-10/ruined_arch_turntable.gif" width="240" alt="Ruined arch turntable"> | <img src="docs/media/structure-showcase-2026-10/scifi_bunker_turntable.gif" width="240" alt="Sci-fi bunker turntable"> |
 
-Standalone structures use the `architecture` asset type with the same brief-declared materials as props. Modular kits are recipes whose modules declare real sizes, so pieces snap on a shared grid:
-
-| Modular stone kit courtyard |
-| :---: |
-| <img src="docs/media/structure-showcase-2026-10/stone_ruin_kit_turntable.gif" width="360" alt="Stone ruin kit courtyard turntable"> |
-
-The floor, wall, doorway and column modules come out at their declared 3 m sizes and pass the kit's grid and pivot rules; the courtyard is assembled from them in Blender as a demonstration. One run each, not yet visually approved or imported into Unity; the kit's corner module reconstructed incorrectly. [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md) · [Environment kits →](docs/ENVIRONMENT-KITS.md)
+These are one run each (2026-10-18), not yet visually approved. Structures are now generated at real size with `generate --target-size`, and they get the same concept-fit and colour checks as props. Rerun that way, the well, shrine and bunker passed on their first attempts ([real-size evidence](docs/media/structures-real-size-2026-10/README.md)). [Structure evidence and limits →](docs/media/structure-showcase-2026-10/README.md)
 
 ## Materials and textures
 
@@ -151,7 +195,7 @@ flowchart LR
 - **Prepare:** inspect geometry, preserve sources, process meshes and PBR maps, and render review views and turntables in Blender.
 - **Review:** compare candidates, approve explicitly, and retain failed attempts and processing evidence.
 - **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
-- **Deliver:** export models/materials and prepare character animation tooling for Unity.
+- **Deliver:** export models/materials, assemble kit layouts into Unity scenes, and prepare character animation tooling for Unity.
 
 ## Quick start
 
@@ -176,7 +220,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Generation, candidate tracking, recipes, provenance | Implemented; offline tests and selected live GPU runs. Visual quality depends on the model and brief. |
 | Static props | **Provisional** for `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import. Three briefs × two independent runs passed every stage and owner-accepted threshold ([criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md)). Four more prop kinds passed end to end in single exploratory runs; the stump passed only after a UV fix prompted by its failed first run. Not Qualified: six runs cannot measure a failure rate. |
 | Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096². Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. The colour of small parts is not checked. |
-| Structures and modular kits | Six standalone structures and a five-module stone kit generated on the H100 profile; kit modules keep declared real sizes and pass grid/pivot rules on their measurements. One run each; visual approval, corner reconstruction and Unity evidence pending. |
+| Structures and modular kits | Two live runs of the stone ruin kit went from a fresh project to a 25-piece Unity courtyard. Modules came out at their declared 3 m sizes and pivots, with colliders and static flags, no seam gaps, and matching stone from a shared kit material. Six standalone structures were generated (2026-10-18). Not qualified: M2 criteria are not declared yet ([#94](https://github.com/gysahlgreene/SlopForge/issues/94)), and joints, stretch, budgets and visual approval are open. |
 | Mesh/material preparation and Unity delivery | 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode. Publication through `approve-texture` is shown on one live asset. Play mode and in-scene checks are not run. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |

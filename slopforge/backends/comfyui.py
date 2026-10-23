@@ -204,8 +204,21 @@ class ComfyUIClient:
                                category="inference", operation=f"http_{method.lower()}",
                                evidence={"endpoint": path}) from exc
 
-    def health(self):
-        return self.json("GET", "/system_stats")
+    def health(self, retry_window=0):
+        """The service's stats; with retry_window, a dropped connection is retried for that many seconds.
+
+        A worker's one health check timed out while the service was up and cost a mesh attempt (M2-v2 run T2).
+        """
+        deadline, attempt = time.monotonic() + retry_window, 0
+        while True:
+            try:
+                return self.json("GET", "/system_stats")
+            except ComfyUIError as exc:
+                delay = min(2 ** attempt, 30)
+                if exc.category != "environment" or time.monotonic() + delay >= deadline:
+                    raise
+                attempt += 1
+                time.sleep(delay)
 
     def node_types(self):
         return self.json("GET", "/object_info")
@@ -327,15 +340,19 @@ class ComfyUIClient:
         return result.get(prompt_id)
 
     def queued(self, prompt_id):
-        """Whether ComfyUI still holds the prompt as running or pending."""
+        """Whether ComfyUI still holds the prompt: "running", "pending", or None."""
         queue = self.json("GET", "/queue")
-        return any(isinstance(item, list) and len(item) > 1 and item[1] == prompt_id
-                   for key in ("queue_running", "queue_pending") for item in queue.get(key) or [])
+        for key, state in (("queue_running", "running"), ("queue_pending", "pending")):
+            if any(isinstance(item, list) and len(item) > 1 and item[1] == prompt_id for item in queue.get(key) or []):
+                return state
+        return None
 
-    def wait_for_completion(self, prompt_id, timeout=3600, poll_interval=1, queue_check_interval=30):
+    def wait_for_completion(self, prompt_id, timeout=3600, poll_interval=1, queue_check_interval=30,
+                            max_queue_wait=10800):
         deadline = time.monotonic() + timeout
         transport_failures = 0
         last_queue_check = time.monotonic()
+        queued_for = 0.0
         try:
             while time.monotonic() < deadline:
                 try:
@@ -365,11 +382,19 @@ class ComfyUIClient:
                 elif recovered or time.monotonic() - last_queue_check >= queue_check_interval:
                     # A service restart drops queued jobs (2026-10-21, H100): neither queued nor in history means
                     # lost. History is read again because ComfyUI records a finished job before it leaves the queue.
-                    last_queue_check = time.monotonic()
+                    now = time.monotonic()
                     try:
-                        held = self.queued(prompt_id) or self.history(prompt_id) is not None
+                        state = self.queued(prompt_id)
+                        held = state or self.history(prompt_id) is not None
                     except ComfyUIError:
-                        held = True  # cannot tell yet; keep polling
+                        state, held = None, True  # cannot tell yet; keep polling
+                    if state == "pending":
+                        # Time behind other jobs is not this job's run time: M2-v1 concepts that ran for 2-13 s timed
+                        # out after 600 s queued behind mesh jobs (2026-10-23). The extension is bounded.
+                        waited = max(0.0, min(now - last_queue_check, max_queue_wait - queued_for))
+                        queued_for += waited
+                        deadline += waited
+                    last_queue_check = now
                     if not held:
                         raise ComfyUIError(
                             f"ComfyUI no longer has generation {prompt_id}: it is not queued, running or in "
@@ -383,10 +408,12 @@ class ComfyUIClient:
                 category="interruption", operation="wait_for_completion",
                 evidence={"prompt_id": prompt_id, "outcome_unknown": True}) from exc
         raise ComfyUIError(
-            f"Timed out waiting for ComfyUI history for prompt {prompt_id}",
+            f"Timed out waiting for ComfyUI history for prompt {prompt_id}"
+            + (f" after {queued_for:.0f} s queued behind other jobs" if queued_for else ""),
             category="inference",
             operation="wait_for_completion",
-            evidence={"prompt_id": prompt_id, "timeout": timeout, "outcome_unknown": True},
+            evidence={"prompt_id": prompt_id, "timeout": timeout, "queued_seconds": round(queued_for),
+                      "outcome_unknown": True},
         )
 
     def list_outputs(self, history):

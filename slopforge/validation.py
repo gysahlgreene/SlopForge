@@ -284,10 +284,13 @@ def apply_concept_fit(validation, view, minimum):
 # A module declared as an L corner must leave one quarter of its footprint nearly empty. Real stone corners measured
 # 0.00 there (others 0.69-0.92); one that reconstructed as a solid block measured 0.86 in every quarter (2026-10-22).
 MAX_OPEN_QUADRANT = 0.15
+# Published M2 L corners measured 1.00-1.01 and M2-v2 run T2's wedge 1.72-1.82 (2026-10-23); not owner-set.
+MAX_ARM_TAPER = 1.25
 
 
 def apply_module_footprint(validation, quadrants, footprint):
-    """Fail a kit module whose footprint lacks its declared shape (retryable quality code)."""
+    """Fail a kit module whose footprint lacks its declared shape (retryable quality codes): a corner with no open
+    side (module_footprint), or whose arms taper like a wedge (module_taper)."""
     if footprint != "corner" or not quadrants:
         return validation
     opening = round(min(quadrants), 3)
@@ -298,6 +301,37 @@ def apply_module_footprint(validation, quadrants, footprint):
             f"the corner module has no open side (emptiest quarter of its footprint {opening}, limit "
             f"{MAX_OPEN_QUADRANT}): it reconstructed as a solid block, so another seed is tried"]
         validation["failure_codes"] = [*validation.get("failure_codes", []), "module_footprint"]
+        validation["status"] = "failed"
+        return validation
+    taper = validation["measured"].get("arm_taper")
+    if taper:
+        validation["measured"]["corner_taper"] = max(taper)
+        validation.setdefault("limits", {})["max_arm_taper"] = MAX_ARM_TAPER
+        if max(taper) > MAX_ARM_TAPER:
+            validation["errors"] = [*validation.get("errors", []),
+                f"the corner's arms are not even slabs (thickness changes {max(taper):g} times along their far half, "
+                f"limit {MAX_ARM_TAPER}): it reconstructed as a wedge, so another seed is tried"]
+            validation["failure_codes"] = [*validation.get("failure_codes", []), "module_taper"]
+            validation["status"] = "failed"
+    return validation
+
+
+def apply_module_stretch(validation, stretch, maximum):
+    """Fail a kit module whose declared size stretched its concept's proportions past the kit's limit.
+
+    Not retryable: the stretch comes from the approved concept, so another mesh seed would stretch it again
+    (2026-10-22: a doorway concept stretched 1.45 to fit 3 x 3 m).
+    """
+    if stretch is None:
+        return validation
+    validation.setdefault("measured", {})["axis_stretch"] = stretch
+    if maximum is None:
+        return validation
+    validation.setdefault("limits", {})["max_axis_stretch"] = maximum
+    if stretch > maximum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the module was stretched {stretch:g} times along one axis to reach its declared size (limit {maximum:g})"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "module_stretch"]
         validation["status"] = "failed"
     return validation
 

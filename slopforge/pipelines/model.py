@@ -1,4 +1,5 @@
 import json
+import math
 import copy
 import os
 import secrets
@@ -26,9 +27,9 @@ from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               make_metallic_gloss, unity_cli)
 from ..emitters import concept_emitter_mask, project_to_texture
-from ..kit_material import kit_swatch, make_seamless
+from ..kit_material import kit_swatch, make_seamless, match_roughness
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_concept_fit, apply_declared_glass, apply_module_footprint,
+                          apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
                           concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -857,13 +858,18 @@ def _validation_failure(validation, *, stage, attempt):
     if not isinstance(validation, dict) or validation.get("status") != "failed":
         return None
     retryable = candidate_quality_rejection(validation)
+    if retryable:
+        remedy = "generate another mesh candidate within the configured budget"
+    elif validation.get("failure_codes") == ["module_stretch"]:
+        remedy = "approve a concept closer to the module's proportions"  # the stretch comes from the concept
+    else:
+        remedy = "inspect the validation report and correct the deterministic failure"
     failure = StageFailure(
         "candidate_quality" if retryable else "processing_validation",
         "Candidate failed validation" + (f" ({', '.join(validation['failure_codes'])})"
                                          if validation.get("failure_codes") else ""),
         operation="validate_model_outputs",
-        remedy=("generate another mesh candidate within the configured budget" if retryable else
-                "inspect the validation report and correct the deterministic failure"),
+        remedy=remedy,
         stage=stage,
         evidence={"validation": validation},
     )
@@ -1054,7 +1060,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             candidate["artifacts"].extend(map_refs)
             map_started = False
             candidate["stage_attempts"]["material_map_acquisition"] = number
-        face_budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+        face_budget = _face_budget(pipeline, asset_type, asset)
         textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
         assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
@@ -1093,7 +1099,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
-                      target_size=asset.get("target_size"), pivot=asset.get("pivot"))
+                      target_size=asset.get("target_size"), pivot=asset.get("pivot"),
+                      arm_thickness=asset.get("arm_thickness"))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
                                    real_scale=bool(asset.get("target_size")))
@@ -1158,6 +1165,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
     for key in ("basecolor", "normal", "roughness", "metallic"):
         shutil.copy2(mesh_path.parent / mesh_info["textures"][key], paths[key])
+    if asset.get("texture_size"):
+        _fit_texture_size({key: paths[key] for key in ("basecolor", "normal", "roughness", "metallic")},
+                          asset["texture_size"])
     declared = asset.get("materials") or []
     declares_metal = any(item.get("class") == "metal" for item in declared)
     generator_metallic = None
@@ -1166,6 +1176,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
+    kit_roughness = (asset.get("kit_material") or {}).get("roughness")
+    if kit_roughness is not None:
+        match_roughness(paths["roughness"], kit_roughness)
     glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
@@ -1185,7 +1198,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
          ("surface", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")]
         + [(paths["generator"], "generation.metadata")])
     artifacts.extend(material_refs)
-    budget = int(config["asset_pipeline"]["model_budgets"].get(asset_type.get("face_budget"), 30000))
+    budget = _face_budget(config["asset_pipeline"], asset_type, asset)
     textures = [paths[key] for key in ("basecolor", "normal", "roughness", "metallic", "emission")]
     assembly_inputs = [*material_refs, *(lineage or {}).get("assembly_inputs", [])]
     kit = kit_swatch(root, context["manifest"], asset) if asset.get("kit_material") else None
@@ -1194,13 +1207,16 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         make_seamless(kit[0], paths["directory"] / "kit_swatch.png")
         kit_settings = {"kit_material_sha256": file_sha256(paths["directory"] / "kit_swatch.png"),
                         "kit_tile_size": kit[1]}
+        if kit_roughness is not None:
+            kit_settings["kit_roughness"] = kit_roughness
     _lineage_start(lineage, "material_assembly_export", number, (),
                    {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
                    parents=assembly_inputs)
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
-                  pivot=asset.get("pivot"), kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
+                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
+                  kit_material=paths["directory"] / "kit_swatch.png" if kit else None,
                   kit_tile_size=kit[1] if kit else None)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
@@ -1227,6 +1243,10 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_glass(validation, glass_fraction)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
+    validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
+                                      asset.get("max_stretch"))
+    with Image.open(paths["basecolor"]) as image:
+        validation.setdefault("measured", {})["texture_size"] = list(image.size)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
@@ -1343,10 +1363,26 @@ def _generate_views(root, config, python, concept, directory, slots, settings, e
     return refs, attempts
 
 
+def _face_budget(pipeline, asset_type, asset, default=30000):
+    """A kit module's declared face budget, else its asset type's: a flat floor tile need not spend a doorway's 60k
+    faces (2026-10-22 kit: a 3 x 3 m floor used 59,988)."""
+    budget = asset.get("face_budget") or pipeline.get("model_budgets", {}).get(asset_type.get("face_budget"), default)
+    return int(budget) if budget is not None else None
+
+
+def _fit_texture_size(maps, size):
+    """Resize a kit module's generated maps to its declared texture size (a texture-memory budget)."""
+    for path in maps.values():
+        with Image.open(path) as image:
+            if image.size != (size, size):
+                image.resize((size, size), Image.LANCZOS).save(path)
+
+
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot") if asset.get(key)}
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size")
+            if asset.get(key)}
 
 
 CONTROL_SLOT = {"image": {"node": "pose_image", "input": "image"}, "strength": {"node": "pose_control", "input": "strength"}}
@@ -1471,6 +1507,22 @@ SHAPE_GUIDES = ("cylinder", "box")
 # Stump concepts, 2026-10-22 (docs/media/concept-proportion-2026-10): at 0.5 most trunks stayed taller than wide;
 # at 0.8 the concept copied the primitive and lost the brief's roots.
 SHAPE_GUIDE_STRENGTH = 0.65
+
+
+def parse_target_size(spec):
+    """'-,-,3.2' -> [None, None, 3.2]: a real size in metres per axis (x, y, z up); '-' keeps that axis in proportion."""
+    parts = str(spec).split(",")
+    if len(parts) != 3:
+        raise ValueError(f"--target-size needs three sizes in metres, such as -,-,3.2; got {spec!r}")
+    try:
+        sizes = [None if part.strip() == "-" else float(part) for part in parts]
+    except ValueError:
+        raise ValueError(f"--target-size sizes are metres or '-', such as -,-,3.2; got {spec!r}") from None
+    if all(size is None for size in sizes):
+        raise ValueError("--target-size needs at least one size; '-' keeps an axis in proportion")
+    if any(size is not None and not (math.isfinite(size) and size > 0) for size in sizes):
+        raise ValueError(f"--target-size sizes must be positive, got {spec!r}")
+    return sizes
 
 
 def parse_shape_guide(spec):
@@ -1627,8 +1679,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
     mesh_ref = next((artifact for stage in reversed(parent_execution.get("stages", []) if parent_execution else [])
                      for artifact in reversed(stage.get("outputs", []))
                      if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
-    processing_settings = {"face_budget": int(pipeline.get("model_budgets", {}).get(
-                               asset_type.get("face_budget"), 30000)),
+    processing_settings = {"face_budget": _face_budget(pipeline, asset_type, asset),
                            "material_scale": float(pipeline.get("material_scale", 3.0)),
                            "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
     processed_reuse = processed_mesh_reuse_decision(root, asset, mesh_ref, processing_settings) \
@@ -2075,7 +2126,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                 "configured_inputs": workflow_node_inputs(config, "model", Path(workflow).name) if workflow else {}}},
         "quality": {"tier": pipeline.get("selected_quality_tier", "normal"),
                     "settings": pipeline.get("quality_settings", {})},
-        "mesh": {"face_budget": pipeline.get("model_budgets", {}).get(asset_type.get("face_budget")),
+        "mesh": {"face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                  "voxel_resolution": asset_type.get("voxel_resolution"), "seeds": mesh_seeds,
                  "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")},
         "material_prompt": material_prompt, "material_count": material_count,
@@ -2246,7 +2297,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             mesh_settings = {"seed": mesh_seed, "workflow": workflow or "hunyuan3d_image_to_model_api",
                              "workflow_identity": execution["identity_inputs"]["workflows"]["model"],
                              "quality": mesh_quality,
-                             "face_budget": pipeline["model_budgets"].get(asset_type.get("face_budget")),
+                             "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
             scope_sha256 = execution_identity({
@@ -2312,7 +2363,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 if mesh_outputs is None:
                     config["_journal_context"] = journal_context
                     if workflow:
-                        budget = int(pipeline["model_budgets"].get(asset_type.get("face_budget"), 30000))
+                        budget = _face_budget(pipeline, asset_type, asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
@@ -2574,11 +2625,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 stage="material_generation", attempt=max(attempted, 1), operation="model_approval")
             retry_state = "yes" if last_failure["retryable"] else "no"
             details = "; ".join(attempt_errors + failures) or last_failure["message"]
+            message = last_failure["message"].removesuffix(f" — remedy: {last_failure['remedy']}")  # said once, last
             raise ValueError(
                 f"No qualified model after {attempted} attempts "
                 f"(stage={last_failure['stage']}, category={last_failure['category']}, "
                 f"retryable={retry_state}, retry_budget={attempts}): "
-                f"message={last_failure['message']}; {details}; remedy: {last_failure['remedy']}")
+                f"message={message}; {details}; remedy: {last_failure['remedy']}")
         first = viable[0]
         asset["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
         asset["generator"] = {"workflow": {"concept": concept_workflow, "mesh": mesh_info.get("workflow"),

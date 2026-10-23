@@ -44,3 +44,18 @@ def kit_swatch(root, manifest, asset):
             "base colour from it", operation="kit_material_preflight",
             remedy=f"approve a concept for {name} (slopforge approve {name} <number>), then approve this module again")
     return path, float(spec["tile_size"])
+
+
+def match_roughness(path, target, keep=0.6):
+    """Move a kit module's roughness map to the kit's declared mean, keeping its own variation softened to `keep`.
+
+    M2-v1 run K1 (2026-10-23): TRELLIS decoded the flagstone floor at roughness 0.22 beside walls at 0.67, so Unity
+    showed a glossy floor reflecting the sky.
+    """
+    with Image.open(path) as image:
+        mode = image.mode
+        pixels = np.asarray(image.convert("L")).astype(np.float32) / 255
+    covered = pixels > 0.002  # black UV padding outside the islands takes the kit's value, for Unity's mips
+    mean = float(pixels[covered].mean()) if covered.any() else 1.0
+    result = np.where(covered, target * (1 - keep + keep * pixels / mean), target)
+    Image.fromarray(np.clip(result * 255 + 0.5, 0, 255).astype(np.uint8)).convert(mode).save(path)

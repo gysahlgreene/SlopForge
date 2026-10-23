@@ -10,6 +10,7 @@ from .manifest import add_dependency, asset_key, new_record, register_artifact, 
 from .failures import failure_record
 from .config import select_quality_tier
 from .libraries import list_libraries, resolve_library
+from .paths import resolve_workflow
 from .pipelines import image, model
 from .pipelines.reuse import artifact_integrity
 from .conditioning import resolve_conditioning
@@ -68,6 +69,11 @@ def _validate_kit_constraints(definition, child_ids):
     pivot = constraints.get("pivot")
     if pivot is not None and pivot not in PIVOTS:
         raise ValueError("kit_constraints.pivot is unsupported")
+    stretches = [constraints.get("max_stretch")] + [rule.get("max_stretch") for rule in
+                                                    (constraints.get("modules") or {}).values() if isinstance(rule, dict)]
+    if any(value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool)
+                                  or not math.isfinite(value) or value < 1) for value in stretches):
+        raise ValueError("kit_constraints max_stretch must be a ratio of at least 1")
     modules = constraints.get("modules", {})
     if not isinstance(modules, dict) or not set(modules) <= child_ids:
         raise ValueError("kit_constraints.modules must map known child ids to rules")
@@ -77,6 +83,10 @@ def _validate_kit_constraints(definition, child_ids):
         if (not isinstance(material, dict) or material.get("source") not in child_ids or
                 not isinstance(tile, (int, float)) or isinstance(tile, bool) or not math.isfinite(tile) or tile <= 0):
             raise ValueError("kit_constraints.material needs a source child id and a positive tile_size in metres")
+        roughness = material.get("roughness")
+        if roughness is not None and (not isinstance(roughness, (int, float)) or isinstance(roughness, bool)
+                                      or not 0 <= roughness <= 1):
+            raise ValueError("kit_constraints.material.roughness must be a number from 0 to 1")
     for child_id, rule in modules.items():
         if not isinstance(rule, dict):
             raise ValueError(f"kit_constraints.modules.{child_id} must be a mapping")
@@ -100,6 +110,18 @@ def _validate_kit_constraints(definition, child_ids):
             raise ValueError(f"kit_constraints.modules.{child_id}.pivot is unsupported")
         if rule.get("footprint") not in (None, "corner"):
             raise ValueError(f"kit_constraints.modules.{child_id}.footprint must be corner (an L that opens one side)")
+        budget, size = rule.get("face_budget"), rule.get("texture_size")
+        if budget is not None and (type(budget) is not int or budget < 100):
+            raise ValueError(f"kit_constraints.modules.{child_id}.face_budget must be a whole number of faces (at least 100)")
+        if size is not None and (type(size) is not int or size not in (256, 512, 1024, 2048, 4096)):
+            raise ValueError(f"kit_constraints.modules.{child_id}.texture_size must be a power of two from 256 to 4096")
+        arm = rule.get("arm_thickness")
+        if arm is not None:
+            sides = [value for value in (rule.get("target_size") or [None, None])[:2] if value is not None]
+            if (rule.get("footprint") != "corner" or not isinstance(arm, (int, float)) or isinstance(arm, bool)
+                    or not math.isfinite(arm) or arm <= 0 or (sides and arm >= min(sides) / 2)):
+                raise ValueError(f"kit_constraints.modules.{child_id}.arm_thickness needs footprint: corner and a "
+                                 "positive thickness under half the corner's side")
         target = rule.get("target_size")
         if target is not None and (not isinstance(target, list) or len(target) != 3
                                    or all(value is None for value in target)
@@ -180,6 +202,10 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe child {child['id']!r} references unknown library {library!r}")
         if child.get("quality_tier") is not None and not isinstance(child["quality_tier"], str):
             raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
+        if child.get("aspect") is not None and (child_type.get("pipeline") != "model" or
+                                                child["aspect"] not in model.CONCEPT_ASPECTS):
+            raise ValueError(f"Recipe child {child['id']!r} aspect must be square, portrait or landscape "
+                             "on a 3D asset type")
     _validate_layouts(definition, children, asset_types)
     material = (definition.get("kit_constraints") or {}).get("material")
     if material and asset_types.get(next(child["type"] for child in children if child["id"] == material["source"]),
@@ -219,7 +245,7 @@ def _model(root, config, style, asset_type, child, manifest, key):
     return model.generate(root, config, asset_type, style, manifest["assets"][key]["name"],
                           child["description"], count, manifest, key,
                           generation_prompt=_child_prompt(style, asset_type, child), reference_entries=references,
-                          variations=child.get("variations"))
+                          variations=child.get("variations"), aspect=child.get("aspect"))
 
 
 PIPELINE_HANDLERS = {"image": _image, "model": _model}
@@ -711,12 +737,22 @@ def run_recipe(project_root, config, style, asset_types, manifest, recipe_name, 
             asset["pivot"] = pivot
         if rule.get("footprint"):
             asset["footprint"] = rule["footprint"]
+        if rule.get("arm_thickness"):
+            asset["arm_thickness"] = rule["arm_thickness"]
+        for budget in ("face_budget", "texture_size"):
+            if rule.get(budget):
+                asset[budget] = rule[budget]
+        stretch = rule.get("max_stretch", constraints.get("max_stretch"))
+        if stretch and child["id"] in constraints.get("modules", {}):
+            asset["max_stretch"] = stretch
         material = constraints.get("material")
         if material and child["id"] in constraints.get("modules", {}) and asset_types[child["type"]].get("pipeline") == "model":
             # Every declared module takes its base colour from the kit's texture child once that is approved.
             source = next(item for item in children if item["id"] == material["source"])
             asset["kit_material"] = {"asset_key": asset_key(source["type"], f"{instance_name}_{source['id']}"),
                                      "tile_size": material["tile_size"]}
+            if material.get("roughness") is not None:
+                asset["kit_material"]["roughness"] = material["roughness"]
         manifest["assets"][key] = asset
         set_parent(manifest, key, recipe_key)
         stages[child["id"]] = {"asset_key": key, "asset_id": asset["id"], "status": "pending",
@@ -789,6 +825,10 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                                  if child.get("reference_library") else None)
             conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)
             workflow, conditioning = model.concept_route(child_config, asset_types[child["type"]], conditioning)
+            if child.get("aspect"):
+                # Generation set the canvas this way, so an unchanged child keeps its concept identity.
+                child_config = model._with_concept_aspect(child_config, asset_types[child["type"]],
+                                                          resolve_workflow(root, workflow), child["aspect"])
             requested_child["requested_image_workflow"] = workflow
             requested_child["requested_conditioning"] = {
                 "strategy": conditioning["strategy"],
