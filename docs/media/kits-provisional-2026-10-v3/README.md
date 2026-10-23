@@ -52,7 +52,12 @@ out a wedge and the room had curved corners.
   - the timber walls' outsides are bare timber;
   - the sci-fi walls' outsides are dark;
   - the stone walls' outsides are flatter than their block faces.
-- **T2's plaster:** some panels carry dark curved streaks in their texture.
+- **Texture blemishes:**
+  - some of T2's plaster panels carry dark curved streaks;
+  - K1's outer walls show dark gouges;
+  - S1's pillars have green patches.
+
+  K2, T1 and S2, shown in the README, are the cleanest of each pair.
 - **Sci-fi colours:** the corners are whiter than the grey walls. The kit has no shared material.
 - **Shadowed faces:** faces turned away from the light read blue-grey; the sky lights them.
 
