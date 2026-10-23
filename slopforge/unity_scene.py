@@ -40,11 +40,11 @@ def build_kit_scene(project_root, kit, layout, placements, *, grid, tolerance, r
 
 
 # Shared with unity_natural_scene's structures, which turn their corners the same way.
-OPEN_SIDE_YAW = r'''    // Turns a module whose top-down footprint has one nearly empty quadrant (an L corner) so that quadrant faces the
-    // layout's centre. Reads the placed mesh, so it needs no assumption about the FBX axes.
-    static float OpenSideYaw(GameObject go, Vector3 centre, string module, List<string> errors, out Vector3 opening)
+OPEN_SIDE_YAW = r'''    // Turns a module so the emptiest quadrant of its top-down footprint (an L corner's open side) faces centre. Reads
+    // the placed mesh, so it needs no assumption about the FBX axes. openShare is that quadrant's vertex count over the
+    // average quadrant's: near 0 for a kit corner, higher for a weathered ruin corner, which still turns correctly.
+    static float OpenSideYaw(GameObject go, Vector3 centre, out Vector3 opening, out float openShare)
     {
-        opening = Vector3.zero;
         var renderers = go.GetComponentsInChildren<Renderer>();
         var box = renderers[0].bounds;
         foreach (var renderer in renderers) box.Encapsulate(renderer.bounds);
@@ -56,11 +56,7 @@ OPEN_SIDE_YAW = r'''    // Turns a module whose top-down footprint has one nearl
                 counts[(point.x >= 0 ? 0 : 1) + (point.z >= 0 ? 0 : 2)]++;
             }
         var open = Array.IndexOf(counts, counts.Min());
-        if (counts[open] > 0.1f * counts.Average())
-        {
-            errors.Add(module + " has rotation auto but no open side");
-            return 0f;
-        }
+        openShare = counts[open] / (float)counts.Average();
         opening = new Vector3(open % 2 == 0 ? 1f : -1f, 0f, open < 2 ? 1f : -1f);
         var wanted = centre - go.transform.position;
         wanted.y = 0f;
@@ -148,8 +144,15 @@ public static class CLASS_NAME
             go.transform.SetParent(layoutRoot.transform, false);
             go.transform.position = new Vector3(placement.x, placement.y, placement.z);
             var opening = Vector3.zero;
-            var yaw = placement.rotation == "auto" ? OpenSideYaw(go, centre, placement.module, errors, out opening)
-                                                   : float.Parse(placement.rotation, CultureInfo.InvariantCulture);
+            var yaw = 0f;
+            if (placement.rotation != "auto")
+                yaw = float.Parse(placement.rotation, CultureInfo.InvariantCulture);
+            else
+            {
+                var turn = OpenSideYaw(go, centre, out opening, out var openShare);
+                if (openShare <= 0.1f) yaw = turn;  // a kit corner's open side is nearly empty
+                else { errors.Add(placement.module + " has rotation auto but no open side"); opening = Vector3.zero; }
+            }
             go.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
             var box = WorldBounds(go);
             bounds.Add(box);

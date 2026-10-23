@@ -397,7 +397,7 @@ OPEN_SIDE_YAW
             {
                 var go = Wrap(piece.fbx, new Vector3(piece.x, s.floor_y, piece.z), piece.yaw, 1f);
                 if (piece.auto)  // an L corner turns its open side toward the structure's centre, read from the mesh
-                    go.transform.rotation = Quaternion.Euler(0f, OpenSideYaw(go, new Vector3(s.x, 0f, s.z), piece.fbx, errors, out _), 0f);
+                    go.transform.rotation = Quaternion.Euler(0f, OpenSideYaw(go, new Vector3(s.x, 0f, s.z), out _, out _), 0f);
                 var box = Bounds(go);
                 var bottom = piece.floor ? s.floor_y + 0.06f - box.size.y : s.floor_y - 0.04f;
                 go.transform.position += Vector3.up * (bottom - box.min.y);
