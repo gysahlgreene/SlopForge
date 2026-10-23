@@ -20,7 +20,7 @@ from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation"}
 
 
 def parser():
@@ -174,6 +174,15 @@ def parser():
 
     environment_check = sub.add_parser("environment-check", help="Validate approved environment kit modules against their grid constraints")
     environment_check.add_argument("name", help="Completed environment recipe instance")
+    vegetation = sub.add_parser("vegetation", help="Build a tree or shrub from an approved bark tiling material and "
+                                                   "foliage cut-outs")
+    vegetation.add_argument("name")
+    vegetation.add_argument("--species", required=True, choices=("oak", "birch", "pine", "shrub"))
+    vegetation.add_argument("--height", type=float, required=True, help="Metres")
+    vegetation.add_argument("--seed", type=int, default=1)
+    vegetation.add_argument("--bark", required=True, help="Approved tiling_material asset for the bark")
+    vegetation.add_argument("--foliage", action="append", required=True,
+                            help="Approved foliage asset; repeat for up to four leaf atlas quarters")
     environment_scene = sub.add_parser("environment-scene",
                                        help="Build a Unity test scene from a kit layout, with prefabs and snapping checks")
     environment_scene.add_argument("name", help="Environment recipe instance whose modules are published to Unity")
@@ -696,6 +705,13 @@ def _run(args):
         print(json.dumps(report, indent=2))
         return 0 if report["status"] == "passed" else 1
 
+    if args.command == "vegetation":
+        from .vegetation import make_vegetation
+        record = make_vegetation(root, config, manifest, args.name, args.species, args.height, args.seed, args.bark,
+                                 args.foliage)
+        save_manifest(manifest_path, manifest)
+        print(json.dumps({"name": record["name"], **record["outputs"], **record["validation"]["measured"]}, indent=2))
+        return 0
     if args.command == "environment-scene":
         from . import unity_scene
         from .environment import scene_placements

@@ -44,4 +44,30 @@ tuft of tall wild meadow grass … isolated on a plain pure white background, cr
 
 Leaves read best as a sprig, not a single leaf: a rosette of leaves seen from above looked like a flower on a tree.
 
-**Limits:** this records what was built and checked on 2026-10-23; trees, scenes and their Unity materials follow.
+## Trees and shrubs
+
+`vegetation` builds a tree or shrub from an approved bark `tiling_material` and one to four `foliage` cut-outs:
+
+```sh
+slopforge vegetation oak_a --species oak --height 10 --seed 11 --bark oak_bark --foliage oak_sprig --foliage oak_sprig2
+```
+
+**What it makes**, in `<output>/Vegetation/<name>/`:
+- `<name>.fbx`, built by `blender/vegetation.py`:
+  - a tapered trunk that branches twice (oak, birch) or in level whorls narrowing to a point (pine), or several
+    leafy stems (shrub);
+  - bark UVs in metres, 1.5 m per repeat;
+  - crossed leaf cards, each showing one quarter of a 2 × 2 leaf atlas, with normals pointing out from the crown,
+    so Unity lights the canopy as one volume and not as flat cards;
+  - two material slots, `Bark` and `Leaves`, scaled to exactly the requested height;
+- `Materials/<name>_leaves.png`, the atlas: each foliage cut-out in a quarter, with a different tint, repeating if
+  fewer than four;
+- the bark's base colour and normal map, and a report of faces, leaf cards and dimensions.
+
+The manifest records a `vegetation` asset with the species, height, seed, and the hashes of its bark and foliage.
+Oaks, birches and pines run 2,200–4,900 faces and shrubs about 600–800, most of them leaf cards.
+
+**Limits:** the scene builder creates the Unity materials for bark and leaves (alpha-clipped, both sides drawn);
+there is no standalone Unity prefab yet. No wind, LODs or billboards.
+
+**Limits:** this records what was built and checked on 2026-10-23; scenes follow.
