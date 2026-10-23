@@ -88,6 +88,9 @@ Solid blocks have no open side and were rejected before this measure applies.
 3. **The mesh worker's start-up health check has no retry.** One network timeout costs an attempt. Polling during a
    job already retries.
 
+The fixes, and a test of a high-angle timber corner view, are in the
+[M2-v3 record](../kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md).
+
 ## Measured values
 
 Stretch is the face stretch to the declared size (limit 1.3). The open quarter is a corner's emptiest footprint

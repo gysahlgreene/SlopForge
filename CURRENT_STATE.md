@@ -668,3 +668,22 @@ Kit protocol criterion M2-v1 closed with no status (2026-10-23; [evidence](docs/
 - **Not verified:** the kit roughness and the arm fix in a live kit run; the owner's visual review. The timber
   kit's outer wall faces come out as bare timber, with its plaster only on the inside, and its finish (0.50–0.59) is
   as generated.
+
+Kit protocol criterion M2-v2: five of six runs pass, so not Provisional (2026-10-23; [evidence](docs/media/kits-provisional-2026-10-v2/README.md)).
+- **Runs:** six at commit `5c17d4d`, all built and rendered in Unity.
+  - K1, K2, T1, S1 and S2 pass every criterion.
+  - T2 fails Joints: its timber corner reconstructed as a wedge, and its arms measured 0.27 m against 0.4 m.
+- **Live checks of the M2-v1 fixes:**
+  - no concept job timed out;
+  - T1's corner arms measure 0.400 m;
+  - the sci-fi walls stretch 1.15 and 1.24;
+  - every stone module's roughness averages 0.75.
+- **Fixes, with regression tests:**
+  - **Wedge corners:** inspection records each arm's taper. Published L corners measured 1.00–1.01 and the wedge
+    1.72–1.82. Above 1.25 a corner fails as the retryable `module_taper`. The limit is agent-set.
+  - **Health check:** the mesh worker retries it for 2 minutes. One timeout had cost T2 an attempt.
+  - **Timber corner view:** the corner brief asks for a high angle that shows the arms' tops. On T2's six seeds
+    through the shape stage, eye-level concepts gave no usable L, and high-angle ones gave three.
+- **Next:** criterion [M2-v3](docs/media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md) reruns all six.
+- **Not verified:** the owner's visual review. The walls' invented outsides differ from their fronts, and the
+  sci-fi corners are whiter than its walls.

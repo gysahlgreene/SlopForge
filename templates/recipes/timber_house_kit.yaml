@@ -114,10 +114,13 @@ children:
   type: architecture
   description: A 90-degree half-timbered corner module.
   aspect: landscape
+  # Seen from eye level, T2's six concepts reconstructed as a solid block, four wedges and one L stretched 1.48; from
+  # high enough to show the arms' tops, as three Ls and three solid blocks (M2-v2 finding, 2026-10-23).
   generation_prompt: 'One L-shaped 90-degree corner wall module of half-timbered construction: two equal straight
     arms joined at a right angle, each a frame of thick dark oak beams with rough off-white lime plaster panels,
     a thick oak post at the joint, the same height as its arm length, thick even depth, flat ends and flat top.
-    Front three-quarter view, isolated on a plain light-grey background.'
+    Seen from a high front three-quarter angle, looking down into the inside of the L so the flat tops of both arms
+    show, isolated on a plain light-grey background.'
   materials:
   - 'beams=nonmetal: dark weathered oak timber beams'
   - 'panels=nonmetal: rough off-white lime plaster'

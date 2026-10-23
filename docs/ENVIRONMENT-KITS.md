@@ -116,6 +116,12 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
     0.27 m arms.
   - Above 1.25 the candidate fails as `module_taper`, and the next seed is tried, as for a solid block. The 1.25
     limit is set from that evidence; the owner has not set it.
+- **Show the arms' tops:** timber corners seen from eye level, looking straight into the L, mostly reconstructed as
+  wedges or solid blocks.
+  - On T2's six seeds through the shape stage: one solid block, four wedges, and one L stretched past 1.3.
+  - Seen from a high angle with the flat tops of both arms showing: three Ls and three solid blocks
+    ([evidence](media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md)).
+  - The timber kit's corner asks for that view. The stone and sci-fi corners passed on eye-level views.
 
 **Stretch:**
 - **What it is:** sizing a module to its declared size stretches it when its concept's proportions differ. Blender
