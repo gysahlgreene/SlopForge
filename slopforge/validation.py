@@ -337,6 +337,9 @@ def apply_module_stretch(validation, stretch, maximum):
 
 
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
+DARKENED_GRIDS = (8, 12, 16, 24)  # cell grids the darkened share is averaged over
+DARKENED_LIT = 30  # CIELAB L* above which a concept cell is lit enough to judge
+DARKENED_FRACTION = 0.6  # a base-colour cell under this share of the concept's lightness has turned dark
 
 
 def _lab(rgb):
@@ -349,6 +352,35 @@ def _lab(rgb):
     return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], -1)
 
 
+def _lightness_cells(rgba, n):
+    """CIELAB L* of an RGBA object image cropped to its bounds and averaged onto n x n cells, and which cells it
+    covers."""
+    mask = rgba[..., 3] > 200
+    ys, xs = np.nonzero(mask)
+    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    colour = Image.fromarray(rgba[..., :3].astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
+    cover = Image.fromarray((mask * 255).astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
+    return _lab(np.asarray(colour, dtype=float).reshape(-1, 3))[:, 0].reshape(n, n), np.asarray(cover) > 128
+
+
+def concept_darkened_share(cutout, view):
+    """Share of the object that is lit in the concept but dark in the base colour seen from the concept's side.
+
+    Both RGBA images are cropped to the object's bounds and averaged onto cells, so the concept's photograph and
+    the rendered map line up without pixel registration. A cell is darkened where the concept is lit and the map is
+    under DARKENED_FRACTION of the concept's lightness; the share is averaged over DARKENED_GRIDS so no one cell
+    size decides. Lightness statistics alone could not tell TRELLIS's black patches on light stone from dark oak
+    beams on plaster, which are dark in the concept too (2026-10-24, 147 concept-side views).
+    """
+    shares = []
+    for n in DARKENED_GRIDS:
+        (concept, concept_cover), (texture, texture_cover) = _lightness_cells(cutout, n), _lightness_cells(view, n)
+        both = concept_cover & texture_cover
+        darkened = (texture < DARKENED_FRACTION * concept) & (concept > DARKENED_LIT)
+        shares.append(float(darkened[both].mean()) if both.any() else 0.0)
+    return float(np.mean(shares))
+
+
 def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_report=None):
     """How far the candidate's base colour drifted from the approved concept's dominant colour.
 
@@ -356,14 +388,17 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
     it (view_path: the map rendered from the concept's fitted view), giving the CIE hue difference (dH*, weighted
     by both chromas) and the share of the concept's chroma kept. Without a view the whole map is used: hue agrees
     with the view within about 1, but hidden insides and bases lower the atlas's saturation, so it is not checked.
-    The concept is lit and the map is albedo, so lightness is not compared.
+    The concept is lit and the map is albedo, so overall lightness is not compared; with a view, the share of the
+    object the map turned dark is (concept_darkened_share).
     """
     with Image.open(cutout_path) as image:
         cut = np.asarray(image.convert("RGBA"), dtype=float)
+    darkened = None
     if view_path is not None:
         with Image.open(view_path) as image:
             view = np.asarray(image.convert("RGBA"), dtype=float)
         texture, source = view[..., :3][view[..., 3] > 200], "concept_view"
+        darkened = round(concept_darkened_share(cut, view), 3)
     else:
         with Image.open(basecolor_path) as image:
             step = max(1, image.width // 1024)  # a 4096 map at full size needs 400 MB of floats
@@ -375,16 +410,33 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
     hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
     fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
                 "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
-                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None}
+                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None, "concept_darkened_share": darkened}
     if view_report:
         fidelity["concept_view"] = {key: view_report.get(key) for key in ("status", "silhouette_iou", "reason")
                                     if view_report.get(key) is not None}
     return fidelity
 
 
-def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None):
-    """Fail a candidate whose base colour lost the concept's hue or saturation (retryable quality codes)."""
+def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None,
+                         max_darkened_share=None):
+    """Fail a candidate whose base colour lost the concept's hue or saturation, or turned dark where the concept is
+    light (retryable quality codes). Darkening is checked on near-grey concepts too: TRELLIS blackened grey stone."""
     validation.setdefault("measured", {}).update(fidelity)
+    darkened = fidelity.get("concept_darkened_share")
+    if max_darkened_share is not None and darkened is None:
+        validation["warnings"] = [*validation.get("warnings", []),
+            "darkening against the concept was not checked: no view from the concept's side "
+            f"({fidelity.get('concept_view', {}).get('reason', 'not rendered')})"]
+        if validation.get("status") == "passed":
+            validation["status"] = "passed_with_warnings"
+    elif max_darkened_share is not None:
+        validation.setdefault("limits", {})["max_concept_darkened_share"] = max_darkened_share
+        if darkened > max_darkened_share:
+            validation["errors"] = [*validation.get("errors", []),
+                f"base colour turned dark where the concept is light (concept_darkened_share {darkened}, limit "
+                f"{max_darkened_share}), so another seed is tried"]
+            validation["failure_codes"] = [*validation.get("failure_codes", []), "colour_darkened"]
+            validation["status"] = "failed"
     if fidelity["concept_chroma"] < MIN_CONCEPT_CHROMA:
         return validation
     limits = validation.setdefault("limits", {})

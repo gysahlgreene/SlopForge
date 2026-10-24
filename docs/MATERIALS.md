@@ -230,10 +230,17 @@ and none are declared yet.
   tried. The whole atlas is the wrong comparison: it includes hidden insides and bases. In the v4 protocol
   it gave a cobalt jug 0.42 of the concept's saturation, against 0.83 from the concept's side, and a teal
   jug a hue difference of 3.9, against 6.3. When no view fits, hue is checked on the atlas, and a warning
-  records that saturation was not checked. Lightness is not compared, because the concept is lit and the
-  map is albedo. Near-grey concepts (chroma under 10) are not checked. One dominant colour is compared, so a small part that
+  records that saturation was not checked. Overall lightness is not compared, because the concept is lit and
+  the map is albedo. Near-grey concepts (chroma under 10) are not checked for hue or saturation. One dominant colour is compared, so a small part that
   drifted is not caught. The crate's wood comes out about 9° yellower and 13–34% less saturated on every
   seed. It passes the check, and retrying would not fix it.
+- **Dark textures:** TRELLIS.2 sometimes textures a mesh mostly black on the side its concept shows: the
+  moorland cliff and the M2-v3 S2 pillar, both near-grey concepts the hue check skips. From the same fitted
+  view, `concept_darkened_share` crops the concept and the map to the object, averages them onto 8 to 24-cell
+  grids, and counts cells lit in the concept (L* over 30) but under 0.6 of its lightness in the map. Above 0.4
+  (`max_concept_darkened_share`), the candidate fails as `colour_darkened` and the next seed is tried; near-grey
+  concepts are checked too. Comparing by position is what separates black patches from dark oak beams on plaster,
+  which are dark in the concept as well. Calibration, cause and limits: [dark-texture check](media/dark-texture-check-2026-10/README.md).
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as

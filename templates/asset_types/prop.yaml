@@ -14,6 +14,10 @@ max_concept_hue_difference: 4
 # islands were padded by 4 texels (shattered 0.11-0.12, whole tree stumps 0.10-0.19).
 min_concept_fit: 0.8
 min_concept_chroma_ratio: 0.6
+# Calibrated 2026-10-24 on 147 labelled concept-side views: a base colour that turns over 0.4 of the object dark
+# where the concept is light fails as colour_darkened and the next seed is tried. The black-textured cliff, rock,
+# sci-fi pillar and glass bottles measured 0.45-0.86; every accepted model 0.37 or less (dark-beamed timber 0.28-0.36).
+max_concept_darkened_share: 0.4
 requirements:
   - physical object with a clean silhouette
   - plausible from multiple viewing angles

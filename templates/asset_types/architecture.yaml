@@ -7,6 +7,7 @@ face_budget: architecture_faces
 # structures, which can have separate pieces; the owner's M2 criteria (issue #94) cover kit modules only.
 max_concept_hue_difference: 4
 min_concept_chroma_ratio: 0.6
+max_concept_darkened_share: 0.4
 min_concept_fit: 0.8
 requirements:
   - structural asset with strong large-scale massing

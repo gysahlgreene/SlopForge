@@ -1242,7 +1242,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                                       asset.get("max_stretch"))
     with Image.open(paths["basecolor"]) as image:
         validation.setdefault("measured", {})["texture_size"] = list(image.size)
-    colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"))
+    colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"),
+                     asset_type.get("max_concept_darkened_share"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():

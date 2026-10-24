@@ -122,7 +122,7 @@ All six runs passed every owner-accepted check, so modular kits on this tier are
 - **The pieces keep their shape:** no module is stretched more than 1.3 times to reach its size. A corner that
   reconstructs as a solid block or a wedge is rejected, and the next seed is tried.
 - **The pieces match their concepts:** concept fit is at least 0.89, and colour stays within the accepted limits
-  (hue and saturation; lightness is not checked).
+  (hue and saturation; the check for textures turned dark came after these runs).
 - **Ready for a scene:** each piece is a prefab with a mesh collider and static flags. Floors use 15k faces, walls
   and corners 40k, columns 20k, and every map is 2048².
 
@@ -150,8 +150,9 @@ For the stone kit, approve its `stone` texture first: every module takes its tin
 - **Unseen wall backs are invented:** the timber walls' outsides are bare wood, the sci-fi walls' outsides dark.
 - **Some texture blemishes remain:** streaked plaster, gouges and green patches in some runs.
 - **The sci-fi corners are whiter than its walls,** because that kit has no shared material.
-- **S2's pillar is near-black** where its concept is grey metal: TRELLIS sometimes textures a mesh mostly black, and
-  no check catches it yet.
+- **S2's pillar is near-black** where its concept is grey metal: TRELLIS sometimes textures a mesh mostly black.
+  The [dark-texture check](docs/media/dark-texture-check-2026-10/README.md) now rejects such a texture; these runs
+  predate it.
 - **Not covered:** Unity is checked in editor batch renders, with no Play mode, lightmaps or LODs.
 
 [Protocol evidence →](docs/media/kits-provisional-2026-10-v3/README.md) · [Earlier rounds: v1](docs/media/kits-provisional-2026-10/README.md), [v2](docs/media/kits-provisional-2026-10-v2/README.md) · [Environment kits guide →](docs/ENVIRONMENT-KITS.md) · [M2 epic →](https://github.com/gysahlgreene/SlopForge/issues/89)
@@ -225,6 +226,7 @@ Every 3D asset gets mesh-aware PBR materials generated with its geometry: base c
   - it has more than five parts;
   - its silhouette does not fit the concept (this catches shattered meshes);
   - its colour drifts from the concept;
+  - its texture turns dark where the concept is light ([calibration](docs/media/dark-texture-check-2026-10/README.md));
   - a declared glowing or glass part is not found.
 
   A metallic map that contradicts an all-non-metal brief also fails before review. Placeholder normal maps cannot be approved.

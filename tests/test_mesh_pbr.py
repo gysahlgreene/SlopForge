@@ -479,6 +479,43 @@ class DeclaredMaterialTests(unittest.TestCase):
                     self.assertTrue(candidate_quality_rejection(validation))
                     self.assertIn(code, candidate["failure"]["message"])
 
+    def test_base_colour_that_turns_dark_where_the_concept_is_light_retries_the_next_seed(self):
+        # 2026-10-23 moorland cliff: TRELLIS textured light granite mostly black (darkened share 0.45), and the
+        # hue and saturation checks skip near-grey stone. Dark beams that are dark in the concept too stay accepted.
+        from slopforge.failures import candidate_quality_rejection
+        limits = {"max_concept_hue_difference": 4, "min_concept_chroma_ratio": 0.6, "max_concept_darkened_share": 0.4}
+        stone = [{"region": "rock", "class": "nonmetal", "description": "granite"}]
+        grey, black, beam = (150, 150, 146), (22, 22, 21), (45, 30, 22)
+
+        def picture(blackened, beams):
+            image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+            image.paste((*grey, 255), (16, 8, 48, 56))
+            for x in beams:  # dark vertical beams, as on a timber wall
+                image.paste((*beam, 255), (x, 8, x + 4, 56))
+            if blackened:  # the left 60% of the object turned near-black
+                image.paste((*black, 255), (16, 8, 35, 56))
+            return image
+        for blackened, beams, status in ((False, (), "candidate"), (True, (), "failed"),
+                                         (False, (20, 30, 40), "candidate")):
+            with self.subTest(blackened=blackened, beams=beams), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                picture(False, beams).save(root / "concept_cutout.png")
+
+                def view(_root, _config, _cutout, _mesh, paths, name, **_options):
+                    picture(blackened, beams).save(paths["directory"] / f"{name}_base.png")
+                    return {"status": "rendered", "silhouette_iou": 0.95}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, stone, 0, Image.new("RGB", (64, 64), grey),
+                                                cutout=root / "concept_cutout.png", limits=limits)
+                validation = candidate["validation"]
+                self.assertEqual(candidate["status"], status)
+                if status == "failed":
+                    self.assertEqual(validation["failure_codes"], ["colour_darkened"])
+                    self.assertGreater(validation["measured"]["concept_darkened_share"], 0.4)
+                    self.assertTrue(candidate_quality_rejection(validation))  # the next seed is tried
+                else:
+                    self.assertLess(validation["measured"]["concept_darkened_share"], 0.1)
+
     def test_without_a_concept_view_only_hue_is_checked_on_the_whole_map(self):
         # Hidden insides and bases lower the whole map's saturation (2026-10-21 jug: 0.42 of the concept's,
         # 0.83 from the concept's side), so a washed-out atlas alone must not fail the candidate.

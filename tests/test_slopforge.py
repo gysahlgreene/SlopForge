@@ -742,7 +742,7 @@ class SlopForgeTests(unittest.TestCase):
     def test_architecture_uses_the_owner_accepted_concept_fit_and_colour_limits(self):
         templates = Path(__file__).resolve().parents[1] / "templates/asset_types"
         architecture, prop = (yaml.safe_load((templates / f"{name}.yaml").read_text()) for name in ("architecture", "prop"))
-        for key in ("min_concept_fit", "max_concept_hue_difference", "min_concept_chroma_ratio"):
+        for key in ("min_concept_fit", "max_concept_hue_difference", "min_concept_chroma_ratio", "max_concept_darkened_share"):
             self.assertEqual(architecture[key], prop[key], key)
         self.assertNotIn("max_components", architecture)  # a structure's part limit awaits the owner (#94)
 
