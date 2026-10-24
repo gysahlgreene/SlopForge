@@ -2,6 +2,8 @@ name: weapon
 pipeline: model
 output_folder: Weapons
 face_budget: weapon_faces
+# The profile's weapon graph: TRELLIS.2 with Blender's reduction, also on h100_final.
+model_workflow: weapon_model
 # Weapons are drawn side-on on a wide canvas; --aspect overrides it per asset.
 aspect: wide
 # Held at the grip: the origin sits at the centre of the --part grip mask, the tip or muzzle points along -Y
