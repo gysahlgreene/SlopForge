@@ -1498,7 +1498,8 @@ def check_emitters_in_concept(materials, cutout):
 
 # Concept canvases (Z-Image buckets). On 2026-10-20 a "taller than wide" crate brief drew 0 of 6 crates taller than
 # wide on the square canvas and 6 of 6 on portrait with the proportion stated first (docs/media/concept-adherence-2026-10).
-CONCEPT_ASPECTS = {"square": (1024, 1024), "portrait": (896, 1152), "landscape": (1152, 896)}
+# wide: long objects such as weapons, drawn side-on (2.4:1).
+CONCEPT_ASPECTS = {"square": (1024, 1024), "portrait": (896, 1152), "landscape": (1152, 896), "wide": (1536, 640)}
 SHAPE_GUIDES = ("cylinder", "box")
 # Stump concepts, 2026-10-22 (docs/media/concept-proportion-2026-10): at 0.5 most trunks stayed taller than wide;
 # at 0.8 the concept copied the primitive and lost the brief's roots.
@@ -1604,6 +1605,7 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     workflow = pipeline["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
+    aspect = aspect or asset_type.get("aspect")
     guide_path = _shape_guide_image(root, config, asset_type, name, shape_guide, aspect) if shape_guide else None
     workflow, conditioning = concept_route(config, asset_type, conditioning, guide_path)
     workflow_path = resolve_workflow(root, workflow)

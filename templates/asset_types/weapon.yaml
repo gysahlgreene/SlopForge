@@ -1,0 +1,24 @@
+name: weapon
+pipeline: model
+output_folder: Weapons
+face_budget: weapon_faces
+# Weapons are drawn side-on on a wide canvas; --aspect overrides it per asset.
+aspect: wide
+# Sized weapons keep a centred origin until the grip pivot lands (M3, issue #107).
+pivot: center
+# The prop limits the owner accepted (2026-10-21 to 2026-10-24), not yet calibrated on weapons.
+max_components: 5
+max_concept_hue_difference: 4
+min_concept_chroma_ratio: 0.6
+max_concept_darkened_share: 0.4
+min_concept_fit: 0.8
+# Replaces the props' "no thin parts" rule, which a blade or a bowstring cannot follow.
+reconstruction_rule: >-
+  Crisp hard-surface forms with clean edges; blades, guards, limbs and barrels drawn with their real thickness,
+  not paper-thin; a bowstring drawn as one taut straight line; no loose straps, tassels, chains or floating parts
+requirements:
+  - one weapon in a flat side profile, lying horizontally, tip or muzzle pointing right, grip on the left
+  - the whole weapon in frame with margin at both ends
+  - each moving part drawn as a distinct piece
+  - complete object visible against a clean white background
+avoid: [hands, holsters, sheaths, scabbards, straps, mounts, multiple weapons, environment, cast shadow]

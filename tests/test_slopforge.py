@@ -746,6 +746,22 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(architecture[key], prop[key], key)
         self.assertNotIn("max_components", architecture)  # a structure's part limit awaits the owner (#94)
 
+    def test_weapons_use_the_prop_limits_a_wide_canvas_and_their_own_shape_rule(self):
+        templates = Path(__file__).resolve().parents[1] / "templates/asset_types"
+        weapon, prop = (yaml.safe_load((templates / f"{name}.yaml").read_text()) for name in ("weapon", "prop"))
+        for key in ("max_components", "min_concept_fit", "max_concept_hue_difference", "min_concept_chroma_ratio",
+                    "max_concept_darkened_share"):
+            self.assertEqual(weapon[key], prop[key], key)
+        self.assertEqual((weapon["aspect"], weapon["face_budget"]), ("wide", "weapon_faces"))
+        self.assertIn("bowstring", weapon["reconstruction_rule"])
+        (self.root / "ai/asset_types/weapon.yaml").write_text((templates / "weapon.yaml").read_text())
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "weapon", "sword", "A longsword",
+                                       "--target-size=-,1.1,-"]), 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["weapon:sword"]
+        self.assertEqual(record["pivot"], "center")  # the type's pivot, not the ground
+
     def test_doctor_uses_project_root_environment(self):
         with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \
                 patch("slopforge.doctor.run_doctor", return_value=0) as run_doctor:

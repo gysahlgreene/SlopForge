@@ -1815,7 +1815,7 @@ class RecipeChildAspectTests(unittest.TestCase):
             self.assertEqual(len(canvases), generated)
             decision = manifest["assets"]["recipe:ruin"]["recipe_instance"]["stages"]["corner"]["reuse_decisions"][-1]
             self.assertEqual(decision, {"reusable": True, "reasons": []})
-            recipe["children"][0]["aspect"] = "wide"
+            recipe["children"][0]["aspect"] = "panorama"
             (root / "ai/recipes/mini_kit.yaml").write_text(yaml.safe_dump(recipe))
             with self.assertRaisesRegex(ValueError, "aspect"):
                 recipes.load_recipe(root, "mini_kit", types)

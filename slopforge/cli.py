@@ -43,8 +43,9 @@ def parser():
     generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
     generate.add_argument("--material", action="append", default=[], dest="materials",
                           help="Declare a material region: 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
-    generate.add_argument("--aspect", choices=("square", "portrait", "landscape"),
-                          help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for wider")
+    generate.add_argument("--aspect", choices=tuple(model.CONCEPT_ASPECTS),
+                          help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for "
+                               "wider, wide for long objects such as weapons (an asset type can set its own default)")
     generate.add_argument("--target-size", metavar="X,Y,Z",
                           help="Real size of a 3D asset in metres (z up); '-' keeps an axis in proportion, such as "
                                "--target-size=-,-,3.2 for a structure 3.2 m tall (use = when it starts with '-'). "
@@ -950,8 +951,11 @@ def _run(args):
             record["materials"] = materials
         manifest["assets"][key] = record
     if target_size:
-        # Sized in metres, it is placed on the ground: Unity keeps the FBX origin as its pivot.
-        record.update({"target_size": target_size, "pivot": "bottom_center"})
+        # Sized in metres, it stands on the ground unless its type declares a pivot: Unity keeps the FBX origin.
+        pivot = recipe.get("pivot", "bottom_center")
+        if pivot not in recipes.PIVOTS:
+            raise ValueError(f"Asset type {asset_type} declares pivot {pivot!r}; use one of {', '.join(sorted(recipes.PIVOTS))}")
+        record.update({"target_size": target_size, "pivot": pivot})
     save_manifest(manifest_path, manifest)
 
     try:
