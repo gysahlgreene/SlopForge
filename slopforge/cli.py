@@ -15,6 +15,7 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
+from .parts import parse_part_spec, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -43,6 +44,9 @@ def parser():
     generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
     generate.add_argument("--material", action="append", default=[], dest="materials",
                           help="Declare a material region: 'region=nonmetal[#rrggbb]|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
+    generate.add_argument("--part", action="append", default=[], dest="parts",
+                          help="Declare a part to split from the mesh: 'name=grip[: description]' or "
+                               "'name=hinge|slide:x|y|z:min..max[: description]' (repeatable; docs/WEAPONS.md)")
     generate.add_argument("--aspect", choices=tuple(model.CONCEPT_ASPECTS),
                           help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for "
                                "wider, wide for long objects such as weapons (an asset type can set its own default)")
@@ -916,6 +920,9 @@ def _run(args):
     materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
     if materials and recipe["pipeline"] != "model":
         raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
+    parts = validate_parts([parse_part_spec(spec) for spec in getattr(args, "parts", [])])
+    if parts and recipe["pipeline"] != "model":
+        raise ValueError(f"--part applies to 3D asset types; {asset_type} is an image asset type")
     if getattr(args, "aspect", None) and recipe["pipeline"] != "model":
         raise ValueError(f"--aspect applies to 3D asset types; {asset_type} is an image asset type")
     if getattr(args, "shape_guide", None) and recipe["pipeline"] != "model":
@@ -944,11 +951,15 @@ def _run(args):
                        "style_version": style["version"], "status": "generating"})
         if materials:
             record["materials"] = materials
+        if parts:
+            record["parts"] = parts
     else:
         record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
         record["status"] = "generating"
         if materials:
             record["materials"] = materials
+        if parts:
+            record["parts"] = parts
         manifest["assets"][key] = record
     if target_size:
         # Sized in metres, it stands on the ground unless its type declares a pivot: Unity keeps the FBX origin.
