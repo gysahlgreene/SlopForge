@@ -729,6 +729,11 @@ class DeclaredMaterialTests(unittest.TestCase):
         self.assertIn("clear gap between each hand and the hips",
                       reconstruction_rules({"pipeline": "model", "prompt_mode": "character"}))
         self.assertNotIn("clear gap", reconstruction_rules({"pipeline": "model"}))
+        # A weapon's blade or bowstring cannot follow the props' "no thin parts" rule, so its type replaces it.
+        weapon = reconstruction_rules({"pipeline": "model", "reconstruction_rule": "Blades drawn with real thickness"})
+        self.assertIn("- Blades drawn with real thickness", weapon)
+        self.assertNotIn("no thin hollow tubes", weapon)
+        self.assertIn("no thin hollow tubes", reconstruction_rules({"pipeline": "model"}))
         from slopforge.config import load_project
         from slopforge.initializer import init_project
         from slopforge.style import build_prompt, load_style

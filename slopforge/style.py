@@ -87,7 +87,10 @@ def reconstruction_rules(asset_type, materials=()):
              "- Complete centered asset with margin around every extremity; plain neutral background, no scene or cast shadow",
              "- Soft even studio lighting that clearly reveals local color and material boundaries; no dramatic shadows or baked highlights",
              "- Sharp readable surface detail and distinct material regions; no depth of field, motion blur, text, or watermark",
-             "- Solid chunky forms with thick walls; no thin hollow tubes, open rings, wires, or paper-thin parts"]
+             # A type whose parts must stay thin (blades, strings) declares its own shape rule.
+             "- " + asset_type.get("reconstruction_rule",
+                                   "Solid chunky forms with thick walls; no thin hollow tubes, open rings, wires, "
+                                   "or paper-thin parts")]
     if asset_type.get("prompt_mode") == "character":
         # Hands touching the thighs reconstruct as fused geometry that tears when the arm moves.
         lines.append("- Arms held 30 to 45 degrees from the body with a clear gap between each hand and the hips "

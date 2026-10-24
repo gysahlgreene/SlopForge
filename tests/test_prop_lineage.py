@@ -465,6 +465,23 @@ avoid: [environment]
         self.assertNotEqual(square["identity_sha256"], portrait["identity_sha256"])
         self.assertEqual(workflow_node_inputs(self.config, "image", "image_text2img_api.json"), {})
 
+    def test_an_asset_type_can_set_its_concept_canvas(self):
+        # Weapons are drawn side-on on the wide canvas without passing --aspect each time.
+        from slopforge.config import workflow_node_inputs
+        used = []
+        def backend(_root, config, _workflow, _prompt, destination, _prefix, _seed, metadata, **_kwargs):
+            used.append(workflow_node_inputs(config, "image", "image_text2img_api.json"))
+            Image.new("RGB", (512, 512), "teal").save(destination)
+            metadata.write_text(json.dumps({"workflow": "image.json"}))
+        self.asset_type["aspect"] = "wide"
+        with patch("slopforge.candidates.secrets.randbits", return_value=17), \
+                patch("slopforge.pipelines.model.generate_image", side_effect=backend):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay")
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 1,
+                                   self.manifest, "prop:relay", generation_prompt="A copper relay", aspect="square")
+        self.assertEqual(used, [{"57:13": {"width": 1536, "height": 640}}, {"57:13": {"width": 1024, "height": 1024}}])
+
     def test_unapproved_kit_material_stops_before_mesh_inference(self):
         from slopforge.failures import StageFailure
         self._concept_candidates()

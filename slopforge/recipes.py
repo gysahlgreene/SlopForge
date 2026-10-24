@@ -202,7 +202,7 @@ def load_recipe(project_root, name, asset_types, *, reference_library=None):
             raise ValueError(f"Recipe child {child['id']!r} quality_tier must be a string")
         if child.get("aspect") is not None and (child_type.get("pipeline") != "model" or
                                                 child["aspect"] not in model.CONCEPT_ASPECTS):
-            raise ValueError(f"Recipe child {child['id']!r} aspect must be square, portrait or landscape "
+            raise ValueError(f"Recipe child {child['id']!r} aspect must be one of {', '.join(model.CONCEPT_ASPECTS)} "
                              "on a 3D asset type")
     _validate_layouts(definition, children, asset_types)
     if definition.get("scene") is not None:
@@ -825,10 +825,11 @@ def _execute(root, config, style, asset_types, manifest, recipe_key, *, child_id
                                  if child.get("reference_library") else None)
             conditioning = resolve_conditioning(root, child_config, style, reference_entries=reference_entries)
             workflow, conditioning = model.concept_route(child_config, asset_types[child["type"]], conditioning)
-            if child.get("aspect"):
+            aspect = child.get("aspect") or asset_types[child["type"]].get("aspect")
+            if aspect:
                 # Generation set the canvas this way, so an unchanged child keeps its concept identity.
                 child_config = model._with_concept_aspect(child_config, asset_types[child["type"]],
-                                                          resolve_workflow(root, workflow), child["aspect"])
+                                                          resolve_workflow(root, workflow), aspect)
             requested_child["requested_image_workflow"] = workflow
             requested_child["requested_conditioning"] = {
                 "strategy": conditioning["strategy"],
