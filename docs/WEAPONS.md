@@ -140,8 +140,8 @@ Splitting parts from the mesh along these masks is the next step (epic #107).
 - **Small detail and finish** (pistol, 2026-10-24):
   - small mechanisms such as a hammer, safety and slide stop stay soft;
   - grip checkering is lost;
-  - a small coloured region such as wooden grips can drift in colour, because the colour checks measure the whole
-    object;
+  - a small coloured region such as wooden grips can drift in colour, which the whole-object colour checks miss; the
+    weapon type shifts non-metal colours towards the concept's (`concept_colour_transfer`, see Materials);
   - generated steel is glossy where a concept shows it satin.
 - **Single mesh.** Every weapon is still one mesh. Moving parts are planned: each part split from the one generated
   mesh along a mask drawn on the concept.

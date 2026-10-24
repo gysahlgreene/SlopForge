@@ -76,6 +76,31 @@ The pistol's metal brightened to several base-colour lightnesses, against the co
 
 ![The pistol before the fixes and after both](metal_before_after.jpg)
 
+## Concept colours
+
+The runs of all three weapons at `61d7b1e` (P6, S3 and X3) passed on their first mesh attempt. Their projects predate the
+`concept_colour_transfer` key, so the step did not run. Each was then re-coloured offline by the material stage's own
+`match_concept_colours`, applied to its maps and concept-side renders:
+- The pistol's grips moved from orange-brown to the concept's rosewood: +7.7 a*, lightness up half way.
+- The sword's leather barely moved (+2.6 a*), and the crossbow's walnut only lightened slightly.
+
+![Concept, the pipeline today, and the concept colour shift, for each weapon](colour_transfer.jpg)
+
+**Live.** The first live run (P7) shifted nothing. Its grips' three wood tones each covered most of only 3, 0 and 2
+cells, because a cell rarely has one grain tone covering 60% of it. A cell now counts for its most common colour when
+it is mostly non-metal. The next live run (P8, `ab01409`) then shifted the grips by +9 a*:
+- passed on its first mesh attempt;
+- whole-object hue difference 0.09;
+- darkened share 0.01;
+- concept fit 0.96.
+
+Below: the concept, the pipeline's first pistol this session, and P8.
+
+![The concept, the first pipeline pistol, and the pistol with every fix](pistol_progress.jpg)
+
+The crossbow's bow reads silver against the concept's dark steel. Rendered with the generator's own base colour it
+looks the same, so the cause is its glossy roughness, not the metal step.
+
 ## Not adopted: Direct3D-S2
 
 Direct3D-S2 (MIT code and weights, a 1024³ sparse SDF) ran on the H100 in its own environment:
@@ -97,4 +122,8 @@ shape is cleaner. Using it would also need TRELLIS.2 to texture a foreign mesh.
   - its wood drifts from rosewood towards brown, which the whole-object colour checks do not catch;
   - small mechanisms (hammer, safety, slide stop) stay soft;
   - the finish is glossy where the concept is satin.
+- **Finish:** generated metal is glossier than the concepts show it: the pistol's satin steel and the crossbow's dark
+  bow both read as polished. Roughness is not yet matched to the concept.
+- **Existing projects:** a project keeps its own copy of the asset types, so one made before these changes needs
+  `model_workflow: weapon_model` and `concept_colour_transfer: true` added to its `weapon.yaml`.
 - **Not checked:** Unity, which renders these through URP, and moving parts.

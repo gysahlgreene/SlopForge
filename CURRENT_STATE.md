@@ -939,3 +939,20 @@ Weapons through the whole pipeline (2026-10-24, [evidence](docs/media/weapon-pip
   - one approved seed per weapon and graph, and the runs span three commits;
   - Unity and moving parts;
   - pistol grip checkering and colour, and soft small mechanisms, remain short of the concept.
+
+Concept colour transfer for weapons (2026-10-24, [evidence](docs/media/weapon-pipeline-2026-10/README.md#concept-colours)).
+- **Cause:** TRELLIS.2 decoded a pistol's rosewood grips orange-brown and darker on every seed (hue angle 43 against
+  37). The whole-object colour checks, ruled by its black steel, passed them.
+- **Change:** a type that sets `concept_colour_transfer` (the weapon type does) has its non-metal texels grouped into
+  three colours.
+  - Each colour's concept-side cells give the median CIELAB a*b* offset to the concept and a lightness ratio. A cell
+    counts for its most common colour when it is mostly non-metal.
+  - The offset is applied capped at 25, and lightness is raised half way, never lowered.
+  - The shifts are recorded as `concept_colour_transfer`. Props do not opt in yet.
+- **Live:** the pistol re-approved at `ab01409` passed on its first mesh, with grips shifted +9 a* (hue difference
+  0.09). Applied to a longsword and crossbow it barely moved them (+2.6 and +0.3 a*).
+- **Tests:** a drifted grip shifted to the concept's hue with metal untouched, and nothing changed without the key;
+  `make verify`.
+- **Not verified:**
+  - props;
+  - the first live run shifted nothing (fixed since: grain tones were measured one by one).

@@ -162,6 +162,20 @@ result against that declaration before anyone reviews it.
    check. With the step the slide reads as dark steel (gain 3.76, darkened share 0.013); a fixed
    floor of 0.48 instead read as chrome ([evidence](media/weapon-pipeline-2026-10/README.md)).
 
+   **Concept colours (types that opt in, `concept_colour_transfer`).** Non-metal texels are
+   grouped into three colours. Each colour's cells seen from the concept's side, where it covers
+   most of the cell and the concept is chromatic, give the median CIELAB a*b* offset to the
+   concept and a lightness ratio.
+   - The colour is shifted by that offset, capped at 25, and its lightness raised half way to the
+     concept, never lowered, since a lit concept is brighter than albedo.
+   - A colour with fewer than four cells borrows the nearest measured colour's shift, if it is
+     within 20.
+   - The shifts are recorded as `concept_colour_transfer`.
+   - Why: TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed (hue angle 43
+     against 37), and the whole-object colour checks, ruled by its black steel, passed them. On one
+     pistol the shift brought the grips to hue angle 35.5 and chroma 28 (concept 37.2 and 30).
+   - Weapons opt in; props do not yet.
+
 9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
