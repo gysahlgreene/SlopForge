@@ -8,7 +8,8 @@ from unittest.mock import patch
 from PIL import Image
 
 from slopforge.failures import StageFailure
-from slopforge.parts import check_part_masks, make_part_masks, parse_part_spec, validate_parts
+from slopforge.parts import (check_part_masks, make_part_masks, parse_part_box, parse_part_spec, set_part_boxes,
+                             validate_parts)
 
 
 class PartSpecTests(unittest.TestCase):
@@ -27,6 +28,19 @@ class PartSpecTests(unittest.TestCase):
             validate_parts([parse_part_spec("a=grip"), parse_part_spec("a=hinge:x:0..1")])
         with self.assertRaisesRegex(ValueError, "one grip"):
             validate_parts([parse_part_spec("a=grip"), parse_part_spec("b=grip")])
+
+    def test_approval_boxes_locate_declared_parts_on_the_concept(self):
+        # Text detection swapped a pistol's slide and grip; a box given on the approved concept found each part.
+        self.assertEqual(parse_part_box("slide=0.17,0.23,0.93,0.39"), ("slide", [0.17, 0.23, 0.93, 0.39]))
+        for bad in ("slide=0.5,0.2,0.4,0.3", "slide=0,0,1.2,1", "slide=0.1,0.2,0.3", "slide", "Slide=0,0,1,1"):
+            with self.subTest(spec=bad), self.assertRaisesRegex(ValueError, "--part-box must be"):
+                parse_part_box(bad)
+        parts = [parse_part_spec("grip=grip"), parse_part_spec("slide=slide:z:-0.03..0")]
+        boxed = set_part_boxes(parts, [parse_part_box("slide=0.17,0.23,0.93,0.39")])
+        self.assertEqual(boxed[1]["box"], [0.17, 0.23, 0.93, 0.39])
+        self.assertNotIn("box", boxed[0])
+        with self.assertRaisesRegex(ValueError, "undeclared part"):
+            set_part_boxes(parts, [parse_part_box("magazine=0,0,1,1")])
 
     def test_a_part_the_concept_does_not_show_stops_before_mesh_inference(self):
         parts = [parse_part_spec("grip=grip"), parse_part_spec("trigger=hinge:x:-20..0")]
@@ -55,6 +69,19 @@ class PartMaskRunTests(unittest.TestCase):
             make_part_masks({"asset_pipeline": {"tools": {}}}, self.root / "cutout.png", self.parts, self.root / "out")
         self.assertEqual(caught.exception.operation, "part_mask_preflight")
 
+    def test_a_local_run_sends_each_parts_box(self):
+        out, sent = self.root / "out", {}
+
+        def run(command, **kwargs):
+            sent.update(json.loads(Path(command[-1]).read_text()))
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "masks.json").write_text(json.dumps({"parts": {"grip": {"share": 0.3}}}))
+            return subprocess.CompletedProcess(command, 0, "", "")
+        parts = set_part_boxes(self.parts, [parse_part_box("grip=0.1,0.4,0.3,0.9")])
+        with patch("slopforge.parts.subprocess.run", side_effect=run):
+            make_part_masks({"asset_pipeline": {"tools": {"parts_python": "python"}}}, self.root / "cutout.png", parts, out)
+        self.assertEqual(sent["parts"], [{"name": "grip", "text": "the grip", "box": [0.1, 0.4, 0.3, 0.9]}])
+
     def test_a_remote_run_cleans_up_only_the_directory_it_made(self):
         out = self.root / "out"
         calls = []
@@ -73,6 +100,8 @@ class PartMaskRunTests(unittest.TestCase):
         with patch("slopforge.parts.subprocess.run", side_effect=run):
             report = make_part_masks(config, self.root / "cutout.png", self.parts, out)
         self.assertEqual(report["parts"]["grip"]["share"], 1.0)
+        uploaded = [command for command in calls if command[0] == "scp" and str(command[-1]).endswith("request.json")]
+        self.assertTrue(uploaded)
         self.assertTrue((out / "parts_overlay.png").is_file())
         self.assertEqual(calls[-1], ["ssh", "-o", "BatchMode=yes", "gpu", "rm", "-rf", "--", "/tmp/slopforge-parts-Ab12"])
 

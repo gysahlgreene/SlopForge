@@ -58,6 +58,31 @@ def parse_part_spec(spec):
     return part
 
 
+def parse_part_box(spec):
+    """'name=x0,y0,x1,y1' -> (name, box): where a part lies on the approved concept, as fractions of its width and
+    height from the top left. Given at approval, once the concept is chosen."""
+    name, separator, rest = spec.partition("=")
+    try:
+        box = [float(value) for value in rest.split(",")]
+    except ValueError:
+        box = []
+    if (not separator or not _NAME.match(name.strip()) or len(box) != 4 or not all(0 <= value <= 1 for value in box)
+            or box[0] >= box[2] or box[1] >= box[3]):
+        raise ValueError(f"--part-box must be 'name=x0,y0,x1,y1' as fractions of the concept (0-1, top left first), "
+                         f"got {spec!r}")
+    return name.strip(), box
+
+
+def set_part_boxes(parts, boxes):
+    """Copy approval-time boxes onto the declared parts; an unknown part name is an error."""
+    names = {part["name"] for part in parts}
+    unknown = sorted(name for name, _ in boxes if name not in names)
+    if unknown:
+        raise ValueError(f"--part-box names undeclared part(s) {', '.join(unknown)}; declared: {', '.join(sorted(names))}")
+    given = dict(boxes)
+    return [{**part, "box": given[part["name"]]} if part["name"] in given else part for part in parts]
+
+
 def validate_parts(parts):
     """Part names are unique, and at most one part is the grip."""
     names = [part["name"] for part in parts]
@@ -119,7 +144,8 @@ def make_part_masks(config, cutout, parts, out_dir):
                            "them is configured", operation="part_mask_preflight",
                            remedy="set tools.parts_python (and tools.parts_host for a GPU host); see docs/WEAPONS.md")
     out_dir = Path(out_dir)
-    request = {"parts": [{"name": part["name"], "text": part["text"]} for part in parts], **models}
+    request = {"parts": [{key: part[key] for key in ("name", "text", "box") if key in part} for part in parts],
+               **models}
     if host:
         _run_remote(host, python, request, Path(cutout), out_dir)
     else:

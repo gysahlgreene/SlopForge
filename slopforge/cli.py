@@ -15,7 +15,7 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
-from .parts import parse_part_spec, validate_parts
+from .parts import parse_part_box, parse_part_spec, set_part_boxes, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -93,6 +93,9 @@ def parser():
     approve.add_argument("--force", action="store_true")
     approve.add_argument("--resume", action="store_true", help="Resume an incomplete prop execution")
     approve.add_argument("--quality-tier", help="Override the selected candidate's tier for 3D processing")
+    approve.add_argument("--part-box", action="append", default=[], dest="part_boxes",
+                         help="Where a declared part lies on the approved concept: 'name=x0,y0,x1,y1' as fractions of "
+                              "its width and height from the top left (repeatable; docs/WEAPONS.md)")
     reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
     reject.add_argument("name")
     reject.add_argument("candidate", type=int)
@@ -905,6 +908,10 @@ def _run(args):
             if not getattr(args, "_guided", False):
                 print(json.dumps(result, indent=2))
         elif recipe["pipeline"] == "model":
+            boxes = [parse_part_box(spec) for spec in getattr(args, "part_boxes", [])]
+            if boxes:  # saved first: approval reloads the manifest from disk
+                record["parts"] = set_part_boxes(record.get("parts") or [], boxes)
+                save_manifest(manifest_path, manifest)
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),

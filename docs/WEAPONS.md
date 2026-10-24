@@ -47,13 +47,29 @@ Declare each part that a later step will split from the mesh, as `--part`:
 - **Description:** the text after the second colon names the part as the concept draws it. Without one, the part's
   name stands in.
 
+**Locate each part with a box at approval**, once the concept is chosen, as fractions of the concept's width and
+height from the top left:
+
+```sh
+slopforge approve pistol 2 --part-box "slide=0.17,0.23,0.93,0.39" --part-box "trigger=0.43,0.47,0.49,0.59" \
+  --part-box "grip=0.10,0.41,0.35,0.89"
+```
+
 **How approval masks the parts:**
 - After the concept is cut out, approval masks each part on it.
-- [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) (MIT) detects the part from its
-  description, and [SAM 2.1](https://huggingface.co/facebook/sam2.1-hiera-large) (Apache-2.0) cuts its mask inside the
-  concept's outline.
-- Open-vocabulary detection is used, not phrase grounding: grounding "glass globe" on a lantern also boxed the whole
-  lantern.
+- [SAM 2.1](https://huggingface.co/facebook/sam2.1-hiera-large) (Apache-2.0) cuts each part's mask inside the
+  concept's outline, from its box.
+- A part without a box is found from its description by
+  [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) (MIT) open-vocabulary detection.
+- `masks.json` records which method found each part (`box_source`).
+- **Detection is unreliable on weapons** (2026-10-24, three weapon concepts):
+  - Florence-2 swapped a pistol's slide and grip panel, and boxed the whole sword for its grip, crossguard and blade.
+  - Grounding DINO boxed the whole weapon for every part, and OWLv2 found some parts but not the slide or the trigger.
+  - Single points missed thin parts.
+  - Boxes gave the slide (distinct from the frame in the same black finish), the trigger, the grips, a crossbow trigger
+    and a sword pommel cleanly.
+  - One diagonal bow limb's box took in the crossbow's barrel too.
+  - So give a box for every weapon part. Detection worked on a lantern's globe, wire guard and ring.
 - The masks, `masks.json` and a review overlay (`parts_overlay.png`) are outputs of the conditioning stage, under
   `candidates/<type>/<name>/parts_<execution>/`. The declared parts are part of that stage's identity, so changing one
   masks again.

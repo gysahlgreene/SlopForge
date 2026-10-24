@@ -821,8 +821,12 @@ Part masks (2026-10-24, M3 step W4, epic #107).
   - The models run in a separate environment (`scripts/install-part-masks.sh`), on the GPU host over SSH or locally.
   - The masks, a report and an overlay are conditioning-stage outputs, and the parts are part of that stage's identity.
   - A part not found stops before mesh inference (`part_mask_preflight`).
-- **Live:** on the H100, a lantern concept's glass globe, wire guard and carrying ring were masked precisely.
-  Phrase grounding boxed the whole lantern, so open-vocabulary detection is used instead.
+- **Live:**
+  - On the H100, a lantern concept's glass globe, wire guard and carrying ring were masked precisely by detection.
+  - On weapon concepts, detection was unreliable. Florence-2 swapped a pistol's slide and grip and boxed whole swords;
+    Grounding DINO and OWLv2 were no better.
+  - Boxes given at approval (`approve --part-box`) masked the slide, the trigger, the grips and a pommel cleanly, so
+    boxes are the method for weapons and detection is the fallback.
 - **Tests:**
   - part parsing;
   - the pre-check;
