@@ -1,8 +1,16 @@
 # Weapons
 
 Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)). They are
-**Experimental**: the `weapon` asset type exists, but no weapon has yet gone through the protocol. Moving parts,
-the grip pivot, a check for thin parts and the bowstring are planned steps, listed in the epic.
+**Experimental**: no weapon has yet gone through the protocol.
+
+**In place:**
+- the `weapon` type;
+- part masks;
+- orientation and the grip pivot;
+- the thin-part measure;
+- coloured non-metals.
+
+**Still planned** (listed in the epic): splitting moving parts from the mesh, the bowstring, and Unity motion.
 
 ## The `weapon` type
 
@@ -14,8 +22,15 @@ the grip pivot, a check for thin parts and the bowstring are planned steps, list
   - blades, guards, limbs and barrels drawn with their real thickness;
   - a bowstring drawn as one taut line;
   - no loose straps or floating parts.
-- **A centred pivot when sized.** `--target-size` sets the pivot from the asset type. Props and structures stand on
-  their base; weapons keep a centred origin until the grip pivot lands.
+- **Held at the grip, tip forward.** A weapon must declare its grip (`--part "grip=grip: ..."`). The final Blender
+  pass then orients it and sets its pivot:
+  - it finds the view that best fits the concept, searching the front half of the view sphere in 5° steps;
+  - it turns the concept's right, where the tip or muzzle points, to Blender −Y, which is forward once in Unity, and
+    the concept's up to +Z;
+  - it puts the origin at the centre of the vertices under the grip mask, widened by 1.5% of the concept to absorb
+    the view's coarseness;
+  - `--target-size=-,<length>,-` then sizes it along its length;
+  - inspection records the fitted view (`concept_view`: fit, theta, phi).
 
 It uses the prop limits the owner accepted, none yet calibrated on weapons:
 - five parts at most;

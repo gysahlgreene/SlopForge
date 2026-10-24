@@ -419,7 +419,8 @@ if __name__ == "__main__":
 
 
 class DeclaredMaterialTests(unittest.TestCase):
-    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None):
+    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None, asset_extra=None,
+                   lineage_extra=None):
         source = root / "source"
         source.mkdir()
         (source / "relay.glb").write_bytes(b"mesh")
@@ -430,15 +431,17 @@ class DeclaredMaterialTests(unittest.TestCase):
         config = {"asset_pipeline": {"candidate_root": "candidates", "manifest": "manifest.json",
                                      "model_budgets": {"prop_faces": 1000}}}
         asset = {"name": "lantern", "description": "Stone lantern", "materials": materials, "executions": [],
-                 "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"}}
+                 "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"},
+                 **(asset_extra or {})}
         execution = start_execution(asset, {"brief": "lantern"})
         manifest = {"schema_version": 4, "assets": {"prop:lantern": asset}}
         save_manifest(root / "manifest.json", manifest)
         lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
                    "key": "prop:lantern", "execution_id": execution["id"], "upstream": [],
-                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout}
+                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout, **(lineage_extra or {})}
 
         def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
+            self.process_options = options
             fbx.write_bytes(b"fbx"); blend.write_bytes(b"blend"); options["preview_dir"].mkdir()
             for view in ("front", "side", "rear", "three_quarter"):
                 Image.new("RGB", (64, 64), "gray").save(options["preview_dir"] / f"lantern_{view}.png")
@@ -454,6 +457,24 @@ class DeclaredMaterialTests(unittest.TestCase):
                                               {"face_budget": "prop_faces", **(limits or {})},
                                               asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
                                               lineage=lineage)
+
+    def test_a_grip_held_type_is_oriented_from_its_concept_and_pivoted_at_its_grip_mask(self):
+        # Weapons: Blender turns the tip forward from the concept's view and sets the origin at the grip mask.
+        grip = {"name": "handle", "kind": "grip", "text": "the grip"}
+        for pivot, expected in (("grip", True), ("bottom_center", False)):
+            with self.subTest(pivot=pivot), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
+                self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
+                                asset_extra={"pivot": pivot, "parts": [grip]},
+                                lineage_extra={"part_masks": root / "parts_1"})
+                options = self.process_options
+                self.assertEqual(options["pivot"], pivot)
+                if expected:
+                    self.assertEqual((options["concept"], options["grip_mask"]),
+                                     (root / "cutout.png", root / "parts_1/handle.png"))
+                else:
+                    self.assertEqual((options["concept"], options["grip_mask"]), (None, None))
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the

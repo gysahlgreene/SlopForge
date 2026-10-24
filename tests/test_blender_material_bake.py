@@ -646,3 +646,70 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
                     self.assertIn("Removed enclosed inner-shell vertices: 1106", result.stdout)
                     faces = int(result.stdout.split("Input faces: ")[1].split()[0])
                     self.assertEqual(faces, 48 * 24 * 2 - 2 * 48 + 12)  # outer sphere triangulated + cube
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderWeaponOrientationTests(unittest.TestCase):
+    def test_a_weapon_turns_its_tip_forward_and_is_held_at_its_grip(self):
+        # A sword drawn tip right; its mesh is turned 30 degrees, as a reconstruction can be. Final pass: tip along
+        # -Y (Unity +Z), 1.1 m long, origin at the centre of what the grip mask covers.
+        parts = {"blade": ((0.5, 0, 0), (1.0, 0.04, 0.08)), "guard": ((-0.015, 0, 0), (0.03, 0.06, 0.3)),
+                 "grip": ((-0.14, 0, 0), (0.22, 0.05, 0.05))}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend = root / "sword.glb", root / "sword.blend"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text(f"""import bpy, math, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for location, scale in {list(parts.values())!r}:
+    bpy.ops.mesh.primitive_cube_add(size=1, location=location)
+    bpy.context.object.scale = scale
+bpy.ops.object.select_all(action='SELECT')
+bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
+bpy.ops.object.join()
+bpy.ops.object.transform_apply(scale=True)
+bpy.context.object.rotation_euler = (0, 0, math.radians(-30))
+bpy.ops.object.transform_apply(rotation=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            # The concept, drawn front-on: image right is +X, up is +Z; 377.6 px per unit, x from -0.25 at 20 px.
+            concept, grip = Image.new("RGBA", (512, 128), (0, 0, 0, 0)), Image.new("L", (512, 128), 0)
+            px = lambda x, z: (round(20 + (x + 0.25) * 377.6), round(64 - z * 377.6))
+            for name, ((cx, _, cz), (sx, _, sz)) in parts.items():
+                box = (*px(cx - sx / 2, cz + sz / 2), *px(cx + sx / 2, cz - sz / 2))
+                concept.paste((120, 120, 130, 255), box)
+                if name == "grip":
+                    grip.paste(255, box)
+            concept.save(root / "concept.png")
+            grip.save(root / "grip.png")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "sword.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(maps[0]),
+                            "--target-size", "-,1.1,-", "--pivot", "grip", "--concept", str(root / "concept.png"),
+                            "--grip-mask", str(root / "grip.png")], check=True, capture_output=True, text=True)
+            probe, result = root / "probe.py", root / "probe.json"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+group = obj.vertex_groups["slopforge_grip"].index
+held = [v.co for v in obj.data.vertices if any(g.group == group for g in v.groups)]
+ys = [v.co.y for v in obj.data.vertices]
+json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(held) for i in range(3)],
+           "min_y": min(ys), "max_y": max(ys), "view": list(obj["slopforge_concept_view"])}, open(sys.argv[-1], 'w'))
+""")
+            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
+                           check=True, capture_output=True, text=True)
+            measured = json.loads(result.read_text())
+        self.assertAlmostEqual(measured["dims"][1], 1.1, places=3)  # its length runs along y
+        self.assertLess(measured["dims"][0], 0.2)
+        # The grip's centre is 1.14 of the sword's 1.25 units behind the tip: at 1.1 m the tip is 1.003 m forward
+        # (-Y) of the origin and the pommel end 0.097 m behind it.
+        self.assertAlmostEqual(measured["min_y"], -1.003, delta=0.03)
+        self.assertAlmostEqual(measured["max_y"], 0.097, delta=0.03)
+        fit, theta, _phi = measured["view"]
+        self.assertGreater(fit, 0.7)  # boxes against a hand-drawn concept; generated weapons fit closer
+        self.assertLessEqual(abs(abs(theta) - 30), 5)  # the fit searches in 5-degree steps

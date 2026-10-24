@@ -15,7 +15,7 @@ def blender_environment():
 def process_model(project_root, config, glb, fbx, blend, textures, face_budget, *,
                   surface_source=None, preview_dir=None, material_scale=3.0,
                   stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False, target_size=None, pivot=None,
-                  arm_thickness=None):
+                  arm_thickness=None, concept=None, grip_mask=None):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/prepare_model.py"
     command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python", str(script), "--",
@@ -34,6 +34,10 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
         command.extend(("--pivot", pivot))
     if arm_thickness:
         command.extend(("--arm-thickness", f"{arm_thickness:g}"))
+    if concept:  # weapons: oriented from the concept, held at the grip mask
+        command.extend(("--concept", str(concept)))
+        if grip_mask:
+            command.extend(("--grip-mask", str(grip_mask)))
     if stage_mesh:
         if reuse_stage_mesh:
             command[command.index("--") + 1] = str(stage_mesh)

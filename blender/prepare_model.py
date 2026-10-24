@@ -368,6 +368,40 @@ if not reuse_stage_mesh:
 
 
 # -------------------------------------------------
+# ORIENT FROM THE CONCEPT (weapons)
+# -------------------------------------------------
+
+if "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only:
+    # A weapon is drawn tip or muzzle right, top up. Turn the concept's right to -Y (forward in Unity once exported)
+    # and its up to +Z, from the view that best fits the concept, and mark the faces under the grip mask.
+    import numpy as np
+    from concept_view import fit_view, image_mask, surface_samples, to_concept_pixels, view_axes
+    concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
+    world, samples = surface_samples(obj)
+    fit, theta, phi = fit_view(samples, concept)
+    _, right, up = view_axes(math.radians(theta), math.radians(phi))
+    if "--grip-mask" in sys.argv:
+        grip = image_mask(sys.argv[sys.argv.index("--grip-mask") + 1], channel=0)
+        # Widened by 1.5% of the concept so vertices on the grip's edge count: the fitted view is 5 degrees coarse.
+        for _ in range(max(1, round(0.015 * max(grip.shape)))):
+            grip = grip | np.roll(grip, 1, 0) | np.roll(grip, -1, 0) | np.roll(grip, 1, 1) | np.roll(grip, -1, 1)
+        pixels = to_concept_pixels(np.stack([world @ np.array(right), world @ np.array(up)], 1), concept)
+        inside = ((pixels[:, 0] >= 0) & (pixels[:, 0] < grip.shape[1]) & (pixels[:, 1] >= 0) &
+                  (pixels[:, 1] < grip.shape[0]))
+        held = np.zeros(len(world), bool)
+        held[inside] = grip[pixels[inside, 1], pixels[inside, 0]]
+        group = obj.vertex_groups.new(name="slopforge_grip")
+        group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
+        print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
+    source = Matrix((right, up, right.cross(up))).transposed()
+    target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
+    obj.data.transform((target @ source.inverted()).to_4x4())
+    obj.data.update()
+    obj["slopforge_concept_view"] = [round(fit, 4), theta, phi]
+    print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
+
+
+# -------------------------------------------------
 # CENTER + NORMALIZE SCALE
 # -------------------------------------------------
 
@@ -725,9 +759,18 @@ bpy.ops.object.origin_set(
 if "--pivot" in sys.argv:
     # Kit modules: walls stand on their origin (bottom_center); a floor's walkable top sits at it (top_center).
     pivot = sys.argv[sys.argv.index("--pivot") + 1]
-    if pivot not in ("center", "bottom_center", "top_center"):
-        raise SystemExit(f"--pivot must be center, bottom_center or top_center, got {pivot!r}")
-    if pivot != "center":
+    if pivot not in ("center", "bottom_center", "top_center", "grip"):
+        raise SystemExit(f"--pivot must be center, bottom_center, top_center or grip, got {pivot!r}")
+    if pivot == "grip":
+        # A weapon is held at its origin: the centre of the vertices under the concept's grip mask.
+        group = obj.vertex_groups.get("slopforge_grip")
+        held = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices
+                if group and any(item.group == group.index for item in vertex.groups)]
+        if not held:
+            raise SystemExit("--pivot grip needs --concept and a --grip-mask that covers part of the mesh")
+        bpy.context.scene.cursor.location = sum(held, Vector()) / len(held)
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+    elif pivot != "center":
         heights = [(obj.matrix_world @ Vector(corner)).z for corner in obj.bound_box]
         bpy.context.scene.cursor.location = Vector((obj.location.x, obj.location.y,
                                                     min(heights) if pivot == "bottom_center" else max(heights)))

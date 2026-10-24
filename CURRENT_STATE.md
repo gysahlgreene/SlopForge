@@ -834,3 +834,19 @@ Part masks (2026-10-24, M3 step W4, epic #107).
   - masks recorded as stage outputs, and a missing part stopping before mesh inference.
   - `make verify-provenance` passes.
 - **Not verified:** masks on weapon concepts (the concept trial is queued behind another project's H100 jobs).
+
+Weapon orientation and grip pivot (2026-10-24, M3 step W5, epic #107).
+- **Change:**
+  - A type with `pivot: grip` (weapons) must declare a grip part.
+  - Its final Blender pass fits the concept's view (the concept-view search, now importable from
+    `blender/concept_view.py`) and turns the concept's right, where the tip points, to −Y and its up to +Z.
+  - It puts the origin at the centre of the vertices under the grip mask, widened by 1.5% of the concept for the
+    5° view steps.
+  - Inspection records the fitted view.
+- **Tests:**
+  - An opt-in Blender test: a sword mesh turned 30° and sized 1.1 m comes out tip at −1.003 m and pommel end at
+    +0.097 m from its origin, as its geometry requires.
+  - Approval passes the concept and grip mask only to grip-held types.
+  - `make verify` passes.
+- **Not verified:** a generated weapon. In Unity, Blender −Y should become +Z under the current FBX axes; that is
+  checked in step W9.

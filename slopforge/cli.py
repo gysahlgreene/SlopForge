@@ -968,12 +968,19 @@ def _run(args):
         if parts:
             record["parts"] = parts
         manifest["assets"][key] = record
+    # Unity keeps the FBX origin as the pivot: a type can declare one (weapons are held at their grip), and a sized
+    # asset otherwise stands on the ground.
+    pivot = recipe.get("pivot", "bottom_center" if target_size else None)
+    if pivot is not None and pivot not in {*recipes.PIVOTS, "grip"}:
+        raise ValueError(f"Asset type {asset_type} declares pivot {pivot!r}; use grip or one of "
+                         f"{', '.join(sorted(recipes.PIVOTS))}")
+    if pivot == "grip" and not any(part["kind"] == "grip" for part in parts):
+        raise ValueError(f"{asset_type} assets are held at their grip: declare it with "
+                         "--part 'grip=grip: <how the concept draws it>'")
     if target_size:
-        # Sized in metres, it stands on the ground unless its type declares a pivot: Unity keeps the FBX origin.
-        pivot = recipe.get("pivot", "bottom_center")
-        if pivot not in recipes.PIVOTS:
-            raise ValueError(f"Asset type {asset_type} declares pivot {pivot!r}; use one of {', '.join(sorted(recipes.PIVOTS))}")
-        record.update({"target_size": target_size, "pivot": pivot})
+        record["target_size"] = target_size
+    if pivot:
+        record["pivot"] = pivot
     save_manifest(manifest_path, manifest)
 
     try:

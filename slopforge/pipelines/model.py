@@ -1214,10 +1214,15 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     _lineage_start(lineage, "material_assembly_export", number, (),
                    {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
                    parents=assembly_inputs)
+    grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
+    masks = (lineage or {}).get("part_masks")
+    held = asset.get("pivot") == "grip"
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
-                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"))
+                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
+                  concept=(lineage or {}).get("concept_cutout") if held else None,
+                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -2531,7 +2536,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                        "execution_id": execution["id"], "attempt": attempt_number,
                        "upstream": upstream, "material_inputs": material_inputs,
                            "assembly_inputs": assembly_inputs, "reuse_execution": prior,
-                       "concept_cutout": paths["cutout"]}
+                       "concept_cutout": paths["cutout"], "part_masks": paths.get("part_masks")}
             previous_materials = ([item for item in asset.get("material_candidates", {}).get("items", [])
                                    if item.get("execution_id") == prior["id"] and
                                    item.get("mesh_attempt") == attempt_number] if prior else [])
