@@ -23,6 +23,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Materials and textures](MATERIALS.md): declared material regions, PBR maps, normal bake, emission and checks
 - [Candidate review board](REVIEW-BOARD.md) and [quality tiers](QUALITY-TIERS.md)
 - [Recipes](RECIPES.md) and [environment kits](ENVIRONMENT-KITS.md)
+- [Weapon part masks](media/weapon-parts-2026-10/README.md): text detection against boxes on weapon concepts
 - [Weapons](WEAPONS.md): the `weapon` type, its side-profile concepts and shape rule (M3, Experimental)
 - [Natural environments](NATURAL-ENVIRONMENTS.md): rocks, tiling ground and bark, foliage cut-outs, trees and shrubs, and `scene-render`
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
