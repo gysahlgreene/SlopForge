@@ -755,12 +755,16 @@ class SlopForgeTests(unittest.TestCase):
         self.assertEqual((weapon["aspect"], weapon["face_budget"]), ("wide", "weapon_faces"))
         self.assertIn("bowstring", weapon["reconstruction_rule"])
         (self.root / "ai/asset_types/weapon.yaml").write_text((templates / "weapon.yaml").read_text())
+        with redirect_stderr(StringIO()) as error:  # a weapon is held at its grip, so it must declare one
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "weapon", "sword", "A longsword"]), 1)
+        self.assertIn("--part 'grip=grip", error.getvalue())
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
                 redirect_stdout(StringIO()):
             self.assertEqual(cli_main(["--project", str(self.root), "generate", "weapon", "sword", "A longsword",
-                                       "--target-size=-,1.1,-"]), 0)
+                                       "--target-size=-,1.1,-", "--part", "grip=grip: the leather grip"]), 0)
         record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["weapon:sword"]
-        self.assertEqual(record["pivot"], "center")  # the type's pivot, not the ground
+        self.assertEqual(record["pivot"], "grip")  # the type's pivot, not the ground
+        self.assertEqual(record["parts"], [{"name": "grip", "kind": "grip", "text": "the leather grip"}])
 
     def test_doctor_uses_project_root_environment(self):
         with patch.dict(os.environ, {"SLOPFORGE_PROJECT_ROOT": str(self.root)}), \

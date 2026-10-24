@@ -2,15 +2,21 @@ name: weapon
 pipeline: model
 output_folder: Weapons
 face_budget: weapon_faces
+# The profile's weapon graph: TRELLIS.2 with Blender's reduction, also on h100_final.
+model_workflow: weapon_model
 # Weapons are drawn side-on on a wide canvas; --aspect overrides it per asset.
 aspect: wide
-# Sized weapons keep a centred origin until the grip pivot lands (M3, issue #107).
-pivot: center
+# Held at the grip: the origin sits at the centre of the --part grip mask, the tip or muzzle points along -Y
+# (Unity +Z) and the top along +Z, oriented from the view that best fits the concept.
+pivot: grip
 # The prop limits the owner accepted (2026-10-21 to 2026-10-24), not yet calibrated on weapons.
 max_components: 5
 max_concept_hue_difference: 4
 min_concept_chroma_ratio: 0.6
 max_concept_darkened_share: 0.4
+# Small coloured regions (grips, stocks) are shifted towards the concept's colours from its side: the whole-object
+# checks passed a pistol's rosewood grips decoded orange-brown on every seed (docs/MATERIALS.md).
+concept_colour_transfer: true
 min_concept_fit: 0.8
 # Replaces the props' "no thin parts" rule, which a blade or a bowstring cannot follow.
 reconstruction_rule: >-

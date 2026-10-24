@@ -25,12 +25,16 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              make_metallic_gloss, unity_cli)
+                              make_metallic_gloss, match_concept_colours, match_metal_lightness, unity_cli,
+                              zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
+from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
-                          concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
+                          apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
+                          apply_module_stretch, apply_thin_features, apply_weapon_orientation,
+                          concept_colour_fidelity, concept_thin_recall,
+                          is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
 
@@ -1176,6 +1180,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
+    coloured_nonmetals = [match for match, _glow in _emitter_targets(declared, "nonmetal").values() if match]
+    nonmetal_fraction = (zero_metallic(paths["basecolor"], paths["metallic"], coloured_nonmetals)
+                         if declares_metal and coloured_nonmetals else None)
     kit = kit_texture(root, context["manifest"], asset) if asset.get("kit_material") else None
     kit_settings = {}
     if kit:
@@ -1186,6 +1193,26 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         kit_settings["kit_roughness"] = kit_roughness
     glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
+    metal_gain = colour_transfer = None
+    cutout = (lineage or {}).get("concept_cutout")
+    # A held weapon's views search the full turn: TRELLIS.2 can rebuild it facing the other way (concept_view.py).
+    turn = {"full_turn": True} if asset.get("pivot") == "grip" else {}
+    transfer = bool(asset_type.get("concept_colour_transfer"))
+    if (declares_metal or transfer) and cutout and Path(cutout).is_file():
+        # The base colour and metallic maps seen from the concept's side: metal drawn lighter than decoded is
+        # brightened (match_metal_lightness), and a type that opts in has its non-metal colours shifted towards the
+        # concept's (match_concept_colours).
+        views = {name: _concept_view(root, config, cutout, mesh_path, paths, name, min_iou=0.8, uv=False, **turn,
+                                     **({"basecolor": str(paths["metallic"])} if name == "material_metallic" else {}))
+                 for name in ("material_base", "material_metallic")}
+        if all(view.get("status") == "rendered" for view in views.values()):
+            arrays = [np.asarray(Image.open(path).convert("RGBA"), dtype=float) for path in
+                      (cutout, paths["directory"] / "material_base_base.png",
+                       paths["directory"] / "material_metallic_base.png")]
+            if declares_metal:
+                metal_gain = round(match_metal_lightness(paths["basecolor"], paths["metallic"], *arrays), 3)
+            if transfer:
+                colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays)
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1209,10 +1236,15 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     _lineage_start(lineage, "material_assembly_export", number, (),
                    {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
                    parents=assembly_inputs)
+    grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
+    masks = (lineage or {}).get("part_masks")
+    held = asset.get("pivot") == "grip"
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
-                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"))
+                  pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
+                  concept=(lineage or {}).get("concept_cutout") if held else None,
+                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1236,6 +1268,14 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_emitter(validation, emissive_fraction)
     if glass_fraction is not None:
         validation = apply_declared_glass(validation, glass_fraction)
+    if nonmetal_fraction is not None:
+        validation = apply_declared_nonmetal(validation, nonmetal_fraction)
+    if metal_gain is not None:
+        validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
+    if colour_transfer is not None:
+        validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
+    if held:
+        validation = apply_weapon_orientation(validation)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -1249,13 +1289,16 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():
         # The atlas also holds hidden insides and bases, so compare what the concept shows (2026-10-21 jug: atlas
         # saturation 0.42 of the concept's, 0.83 from the concept's side). 0.8 fits the concept's side; jugs fit 0.86.
-        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False)
+        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False, **turn)
         rendered = paths["directory"] / "concept_colour_base.png" if view.get("status") == "rendered" else None
         if any(limit is not None for limit in colour_limits):
             validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered,
                                                                                   view), *colour_limits)
         if min_fit is not None:
             validation = apply_concept_fit(validation, view, min_fit)
+        if rendered is not None:  # recorded for every model; enforced where the type declares a minimum
+            validation = apply_thin_features(validation, concept_thin_recall(cutout, rendered),
+                                             asset_type.get("min_concept_thin_recall"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in
@@ -1270,7 +1313,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "normal_source": mesh_info.get("normal_source", "unknown"),
             "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             **({"emission_projection": projection} if projection else {}),
-            "metallic_source": "declared_nonmetal" if generator_metallic is not None else "generator",
+            "metallic_source": ("declared_nonmetal" if generator_metallic is not None else
+                                "generator_with_declared_nonmetals" if nonmetal_fraction is not None else "generator"),
             **({"glass_source": "declared_glass_mask"} if glass_fraction is not None else {}),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),
@@ -2190,6 +2234,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
         if view_slots:
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
+        if asset.get("parts"):
+            conditioning_settings["parts"] = part_settings(config, asset["parts"])
         conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
                                          [selected_artifact], conditioning_settings)
         if conditioning_refs is None:
@@ -2225,6 +2271,21 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"views_{execution['id']}",
                     view_slots, conditioning_settings["views"], execution["id"], selected_artifact)
                 conditioning_refs += view_refs
+            if asset.get("parts"):
+                print("3D stage: masking the declared parts on the concept...", flush=True)
+                parts_dir = (root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] /
+                             f"parts_{execution['id']}")
+                make_part_masks(config, paths["cutout"], asset["parts"], parts_dir)
+                cutout_ref = next(item for item in conditioning_refs if item["type"] == "image.cutout")
+                conditioning_refs += [
+                    _artifact_ref(root, parts_dir / f"{part['name']}.png", f"part-mask-{part['name']}:{execution['id']}",
+                                  "image.part_mask", "conditioning_preparation", 1, [cutout_ref])
+                    for part in asset["parts"] if (parts_dir / f"{part['name']}.png").is_file()]
+                conditioning_refs += [
+                    _artifact_ref(root, parts_dir / "masks.json", f"part-masks:{execution['id']}", "data.part_masks",
+                                  "conditioning_preparation", 1, [cutout_ref]),
+                    _artifact_ref(root, parts_dir / "parts_overlay.png", f"part-overlay:{execution['id']}",
+                                  "image.part_overlay", "conditioning_preparation", 1, [cutout_ref])]
             _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1,
                                                       stage_id=stage["id"])
             if view_slots:
@@ -2243,6 +2304,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         workflow = pipeline["workflows"].get("model")
         if workflow:  # declared emitters only drive the mesh-aware material stage
             check_emitters_in_concept(asset.get("materials"), paths["cutout"])
+        if asset.get("parts"):  # a part missing from the concept would be missing from every mesh
+            masks_ref = next(item for item in conditioning_refs if item["type"] == "data.part_masks")
+            paths["part_masks"] = (root / masks_ref["path"]).parent
+            check_part_masks(json.loads((root / masks_ref["path"]).read_text()), asset["parts"])
         if asset.get("kit_material"):
             if not workflow:
                 raise StageFailure("configuration", "A kit material is applied by the mesh-aware material stage",
@@ -2499,7 +2564,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                        "execution_id": execution["id"], "attempt": attempt_number,
                        "upstream": upstream, "material_inputs": material_inputs,
                            "assembly_inputs": assembly_inputs, "reuse_execution": prior,
-                       "concept_cutout": paths["cutout"]}
+                       "concept_cutout": paths["cutout"], "part_masks": paths.get("part_masks")}
             previous_materials = ([item for item in asset.get("material_candidates", {}).get("items", [])
                                    if item.get("execution_id") == prior["id"] and
                                    item.get("mesh_attempt") == attempt_number] if prior else [])

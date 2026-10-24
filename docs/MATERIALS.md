@@ -34,8 +34,14 @@ result against that declaration before anyone reviews it.
 3. **Geometry and maps.** The TRELLIS.2 workflow generates the shape and a voxel texture
    field. On the H100 profile the raw shape (often tens of millions of faces in open,
    non-manifold double shells) is remeshed on the GPU with ComfyUI's UDF `RemeshMesh` at
-   resolution 384 and decimated to the face budget with `DecimateMesh`. Blender then only
-   unwraps UVs, and ComfyUI bakes base color, roughness and metallic maps onto those UVs.
+   resolution 384 and saved in full detail (`save_detail`). Blender removes enclosed inner shells
+   from that shape, collapse-decimates it to the face budget and unwraps UVs, and ComfyUI bakes
+   base color, roughness and metallic maps onto those UVs. Blender reduces the full detail because
+   the graph's own `DecimateMesh` (midpoint placement) made a pistol's flat steel wavy and rounded its
+   edges, while Blender kept them; a crate's brackets and a lantern's lattice and roof ribs also came
+   out sharper, and a lantern's inner shell no longer spends half its budget (2026-10-24,
+   [evidence](media/mesh-reduction-2026-10/README.md)). A graph without `save_detail`, or one
+   whose own reduction is crease-preserving QEM (the character graph), still hands Blender its `save_raw`.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
@@ -145,6 +151,31 @@ result against that declaration before anyone reviews it.
    with the zero map. The crate kept its generator map (mean 0.04), with metallic texels on
    the grey iron brackets.
 
+   **Metal lightness.** When the brief declares metal, the material stage also renders the base
+   colour and metallic maps from the concept's fitted view. Where metal is lit in the concept,
+   every metal texel (metallic over 0.5) is scaled in linear RGB, keeping its hue, so its
+   luminance matches the concept's. The scale is the median over metal cells and is never below
+   1. Iron drawn dark stays dark, and fewer than six lit metal cells leave the map as decoded.
+   The gain is recorded as `metal_lightness_gain`. TRELLIS.2 decoded a pistol's blued steel
+   near-black (0.13 sRGB, about 2% reflectance, less than any metal) where its concept showed
+   dark grey; the slide rendered as a black mirror, and three seeds failed the dark-texture
+   check. With the step the slide reads as dark steel (gain 3.76, darkened share 0.013); a fixed
+   floor of 0.48 instead read as chrome ([evidence](media/weapon-pipeline-2026-10/README.md)).
+
+   **Concept colours (types that opt in, `concept_colour_transfer`).** Non-metal texels are
+   grouped into three colours. Each colour's cells seen from the concept's side, where it covers
+   most of the cell and the concept is chromatic, give the median CIELAB a*b* offset to the
+   concept and a lightness ratio.
+   - The colour is shifted by that offset, capped at 25, and its lightness raised half way to the
+     concept, never lowered, since a lit concept is brighter than albedo.
+   - A colour with fewer than four cells borrows the nearest measured colour's shift, if it is
+     within 20.
+   - The shifts are recorded as `concept_colour_transfer`.
+   - Why: TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed (hue angle 43
+     against 37), and the whole-object colour checks, ruled by its black steel, passed them. On one
+     pistol the shift brought the grips to hue angle 35.5 and chroma 28 (concept 37.2 and 30).
+   - Weapons opt in; props do not yet.
+
 9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
@@ -196,8 +227,11 @@ and none are declared yet.
     concepts lit or partly lit either way).
 - **Glossy non-metals:** TRELLIS.2 decodes polished stone and glazes as partly or fully
   metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
-  declares metal keeps the generator's values everywhere, including any false metal on
-  its glossy non-metal regions.
+  declares metal keeps the generator's values everywhere, so give its non-metal regions their
+  concept colour, as in `grip=nonmetal#5a3a22: dark leather`. The metallic map is then zeroed
+  where the base colour matches it, with the same colour rule as emitters. A coloured
+  non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
+  An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
   on metal parts. Treat Mac metallic output as unreliable until it is checked on a metal asset.
 - **Hidden faces:** single-image conditioning guesses faces the concept does not show and can copy
@@ -241,6 +275,14 @@ and none are declared yet.
   (`max_concept_darkened_share`), the candidate fails as `colour_darkened` and the next seed is tried; near-grey
   concepts are checked too. Comparing by position is what separates black patches from dark oak beams on plaster,
   which are dark in the concept as well. Calibration, cause and limits: [dark-texture check](media/dark-texture-check-2026-10/README.md).
+- **Thin parts:** the concept-fit check fills each row of the outline between its outer edges, so it cannot see a
+  missing bowstring, guard or handle. `concept_thin_recall` takes the concept's thin parts, meaning what a
+  morphological opening (radius 3 cells on a 256-cell grid) removes from its unfilled mask, and measures the share of
+  them the mesh covers from the concept's side. It is recorded for every model with a fitted view. A type that sets
+  `min_concept_thin_recall` fails a candidate below it as `thin_feature_missing`, and the next seed is tried.
+  - **Not calibrated yet:** of 147 kept props and modules, only six had thin parts covering at least 1% of the
+    object. Those were lanterns, stumps and a canister, and all kept 0.76–1.0 of them.
+  - **So no type declares a limit:** weapons will supply the failing cases.
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as

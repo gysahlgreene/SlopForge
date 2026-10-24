@@ -1811,6 +1811,25 @@ avoid: [environment]
             self.root, self.asset, {"candidate_execution_ids": [execution["id"]]}, child,
             {"asset_pipeline": {"defaults": {"image_candidates": 1}}})["reusable"])
 
+    def test_weapons_use_the_trellis_graph_on_every_h100_profile(self):
+        # On a pistol, longsword and crossbow, TRELLIS.2 with Blender's reduction matched the concepts' forms more
+        # cleanly than Pixal3D, which h100_final uses for props (2026-10-24).
+        import os
+        from slopforge.config import load_project
+        from slopforge.initializer import init_project
+        from slopforge.pipelines.model import model_route
+        from slopforge.taxonomy import load_taxonomy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "Assets").mkdir()
+            init_project(root)
+            weapon = load_taxonomy(root)["weapon"]
+            for profile in ("h100", "h100_final", "h100_multiview"):
+                with self.subTest(profile=profile), patch.dict(os.environ, {"SLOPFORGE_COMPUTE_PROFILE": profile}):
+                    routed = model_route(load_project(root), weapon)
+                    self.assertEqual(routed["asset_pipeline"]["workflows"]["model"],
+                                     "trellis2_image_to_model_h100_api.json")
+
     def test_character_model_route_swaps_only_with_a_configured_workflow(self):
         from slopforge.pipelines.model import model_route
 

@@ -422,6 +422,13 @@ def main():
         print(f"Input image does not exist: {src}", file=sys.stderr)
         sys.exit(1)
 
+    if args.workflow and validate_image(src, expected_format=None, require_alpha=True)["status"] == "failed":
+        # The model graphs crop to the concept's alpha and remove no background: an opaque concept is rebuilt with
+        # its backdrop, as a card or box around the object (2026-10-24 weapon graph A/B, docs/WORKFLOWS.md).
+        print(f"Model workflows need the concept cut-out with transparency (slopforge.surface.make_cutout); "
+              f"{src.name} has no alpha channel", file=sys.stderr)
+        sys.exit(1)
+
     name = safe_name(args.name)
 
     if not name:
@@ -499,14 +506,23 @@ def main():
             client.download_output(raw, raw_path)
             if detail:
                 client.download_output(detail, detail_path)
-            raw_refs = _journal_finish(journal, stage, [(raw_path, "mesh.raw")])
+            raw_refs = _journal_finish(journal, stage, [(raw_path, "mesh.raw")] +
+                                       ([(detail_path, "mesh.detail")] if detail else []))
         prepared = dest.with_name(f"{name}_{seed}_prepared.glb")
         print("Mesh stage: Blender reduction and UV preparation...", flush=True)
         script = Path(__file__).resolve().parents[1] / "blender" / "prepare_model.py"
+        # Blender reduces the full-detail shape where the graph's own reduction is midpoint DecimateMesh, which made a
+        # pistol's flat steel wavy and rounded its edges; Blender's collapse decimation of the same shape kept them
+        # and removes inner shells before the budget is spent (2026-10-24, docs/QUALITY-TIERS.md). The character
+        # graph's crease-preserving QEM reduction is kept: its manifold repair and rigging were tuned on it.
+        midpoint = any(node.get("class_type") == "DecimateMesh" and node["inputs"].get("placement_mode") == "midpoint"
+                       for node in workflow.values())
+        source_kind, source_path = ("mesh.detail", detail_path) if detail and midpoint else ("mesh.raw", raw_path)
         with _journal_stage(journal, "mesh_preparation", journal_attempt,
-                            {"face_budget": args.face_budget, "voxel_resolution": args.voxel_resolution},
-                            inputs=raw_refs):
-            subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(raw_path),
+                            {"face_budget": args.face_budget, "voxel_resolution": args.voxel_resolution,
+                             "source": source_kind},
+                            inputs=None if raw_refs is None else [ref for ref in raw_refs if ref["type"] == source_kind]):
+            subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(source_path),
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
                             "--voxel-resolution", str(args.voxel_resolution), "--mesh-only",
                             # The graph already ran a UDF remesh; Blender's voxel remesh would erase thin parts.
@@ -581,6 +597,8 @@ def main():
         output_records = [{"path": dest.name, "sha256": file_sha256(dest), "kind": "mesh"}]
         if "raw_path" in locals() and raw_path.is_file():
             output_records.append({"path": raw_path.name, "sha256": file_sha256(raw_path), "kind": "mesh.raw"})
+        if locals().get("detail_path") and detail_path.is_file():
+            output_records.append({"path": detail_path.name, "sha256": file_sha256(detail_path), "kind": "mesh.detail"})
         if "prepared" in locals() and prepared.is_file():
             output_records.append({"path": prepared.name, "sha256": file_sha256(prepared), "kind": "mesh.prepared"})
         for key, relative in textures.items():
@@ -597,7 +615,8 @@ def main():
                        if node.get("class_type") == "RemeshMesh"), None)
         unwrap = next((node["inputs"] for node in workflow.values()
                        if node.get("class_type") == "UnwrapMesh"), None)
-        mesh_preparation = {"face_budget": args.face_budget, "budget_unit": "triangles"}
+        mesh_preparation = {"face_budget": args.face_budget, "budget_unit": "triangles",
+                            **({"source": source_kind} if "source_kind" in locals() else {})}
         if remesh is not None:
             mesh_preparation.update({"method": "native_udf_remesh" if remesh.get("sign_mode") == "udf"
                                      else "native_signed_remesh", "resolution": remesh.get("resolution")})

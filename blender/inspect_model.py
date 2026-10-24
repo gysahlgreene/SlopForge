@@ -348,6 +348,10 @@ def inspect(source, face_budget, real_scale=False):
     measured["arm_taper"] = arm_taper(points, corner[0], minimum, maximum) if corner else None
     stretches = [float(obj["slopforge_axis_stretch"]) for obj in objects if "slopforge_axis_stretch" in obj]
     measured["axis_stretch"] = max(stretches) if stretches else None
+    views = [list(obj["slopforge_concept_view"]) for obj in objects if "slopforge_concept_view" in obj]
+    if views:  # [fit, theta, phi] of the view a weapon was oriented from
+        measured["concept_view"] = {"fit": views[0][0], "theta": views[0][1], "phi": views[0][2],
+                                    **({"tip_alignment": views[0][3]} if len(views[0]) > 3 else {})}
     if faces > face_budget:
         errors.append(f"face count {faces} exceeds budget {face_budget}")
     if not uv_layers:

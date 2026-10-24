@@ -793,3 +793,166 @@ Dark-texture check (2026-10-24; [evidence](docs/media/dark-texture-check-2026-10
   - five darkened examples; the cliff is closest to the limit (0.45);
   - timber walls with thickened near-black beams score 0.28–0.36 and are accepted;
   - existing projects must add the key to their own asset types.
+
+Thin-part recall (2026-10-24, M3 step W2, epic #107).
+- **Measure:** `concept_thin_recall` is recorded for every model with a fitted concept view: the share of the concept's
+  thin parts (strings, guards, rings, handles) that the mesh keeps from the concept's side. It fails a candidate as
+  `thin_feature_missing` only where a type declares `min_concept_thin_recall`.
+- **Not calibrated:** of 147 kept views only six had thin parts over 1% of the object, and all kept 0.76–1.0 of them.
+  No failures exist to set a limit from, so none is declared; the weapon runs will provide them.
+- **Tests:** a bow's 2-pixel string that is dropped fails only when a minimum is declared, and is recorded either way.
+Coloured non-metals next to metal (2026-10-24, M3 step W6, epic #107).
+- **Cause:** a brief that declares metal keeps the generator's metallic map everywhere, and TRELLIS.2 decodes glossy
+  non-metals as partly metallic. A weapon's leather grip or walnut stock would shine like its steel.
+- **Change:**
+  - `--material` accepts `nonmetal#rrggbb`.
+  - When metal is also declared, the metallic map is zeroed where the base colour matches that colour, using the
+    emitter colour rule.
+  - No matching region fails as `nonmetal_missing`, a retryable code.
+- **Tests:** a steel blade keeps its metal while the leather grip goes to zero; a grip colour missing from the map
+  retries.
+- **Not verified live:** no weapon has been generated yet.
+
+Part masks (2026-10-24, M3 step W4, epic #107).
+- **Change:**
+  - `--part "name=grip|hinge|slide[:axis:min..max][: description]"` declares a weapon's parts.
+  - Approval masks each one on the concept cut-out, with Florence-2 (MIT) open-vocabulary detection and a SAM 2.1
+    (Apache-2.0) box prompt.
+  - The models run in a separate environment (`scripts/install-part-masks.sh`), on the GPU host over SSH or locally.
+  - The masks, a report and an overlay are conditioning-stage outputs, and the parts are part of that stage's identity.
+  - A part not found stops before mesh inference (`part_mask_preflight`).
+- **Live:**
+  - On the H100, a lantern concept's glass globe, wire guard and carrying ring were masked precisely by detection.
+  - On weapon concepts, detection was unreliable. Florence-2 swapped a pistol's slide and grip and boxed whole swords;
+    Grounding DINO and OWLv2 were no better.
+  - Boxes given at approval (`approve --part-box`) masked the slide, the trigger, the grips and a pommel cleanly, so
+    boxes are the method for weapons and detection is the fallback.
+- **Tests:**
+  - part parsing;
+  - the pre-check;
+  - remote cleanup only of the directory it made, even after a login banner;
+  - masks recorded as stage outputs, and a missing part stopping before mesh inference.
+  - `make verify-provenance` passes.
+- **Not verified:** masks on weapon concepts (the concept trial is queued behind another project's H100 jobs).
+
+Weapon orientation and grip pivot (2026-10-24, M3 step W5, epic #107).
+- **Change:**
+  - A type with `pivot: grip` (weapons) must declare a grip part.
+  - Its final Blender pass fits the concept's view (the concept-view search, now importable from
+    `blender/concept_view.py`) and turns the concept's right, where the tip points, to −Y and its up to +Z.
+  - It puts the origin at the centre of the vertices under the grip mask, widened by 1.5% of the concept for the
+    5° view steps.
+  - Inspection records the fitted view.
+- **Tests:**
+  - An opt-in Blender test: a sword mesh turned 30° and sized 1.1 m comes out tip at −1.003 m and pommel end at
+    +0.097 m from its origin, as its geometry requires.
+  - Approval passes the concept and grip mask only to grip-held types.
+  - `make verify` passes.
+- **Not verified:** a generated weapon. In Unity, Blender −Y should become +Z under the current FBX axes; that is
+  checked in step W9.
+
+Weapon mesh graph and orientation (2026-10-24, M3 step W3, epic #107).
+- **Live comparison** on the H100, at seed 424242, of three concepts (longsword, pistol, three-quarter crossbow) and
+  three graphs ([evidence](docs/media/weapon-graph-2026-10/README.md)):
+  - the props' TRELLIS.2 graph already kept every thin part, including the bowstring;
+  - a weapon graph with a 768 sharp-feature remesh added a blade hole, folded slide triangles and a split stock;
+  - Pixal3D (`h100_final`) came closest to every concept.
+- **Decision:** weapons use each profile's model graph, as props do. No weapon graph ships.
+- **Orientation, root cause:** W5 turned the fitted view's right and up to the weapon's forward and top.
+  - A flat blade's outline barely changes with tilt, so the fit tilted 30° and rolled the live longsword about its
+    length.
+  - Pixal3D keeps a three-quarter concept's pose, while TRELLIS.2 lays the weapon lengthwise and its best view turns
+    45°.
+- **Orientation, fix:** the weapon is levelled from its own shape.
+  - Its top is the thinnest axis when that is nearer vertical (a weapon lying flat), and +Z otherwise.
+  - Its length is the longest axis across the top.
+  - The fitted view only picks the tip's end.
+- **Cut-out guard:** the first comparison fed white-backed concepts, and every mesh rebuilt its backdrop.
+  `processing/comfy_generate_3d.py` now refuses a model workflow input without alpha before inference. The opt-in live
+  integration test was also sending an opaque concept; it now cuts it out first.
+- **Tests:**
+  - Opt-in Blender: the sword fixture with its blade drawn shallower than built (failed on the old code, rolled 0.224
+    thick); a crossbow posed tilted as Pixal3D keeps it, which comes out flat (failed on the old code, 0.54 tall).
+  - An opaque concept stops before ComfyUI is contacted (failed on the old code).
+- **Live orientation:** all nine meshes came out tip forward and top up at their target length, held at a
+  box-prompted SAM grip mask (a trigger mask on the crossbow). The Pixal3D crossbow came out flat (0.10 thick against
+  TRELLIS.2's 0.11).
+- **Not verified:**
+  - one seed per weapon and graph;
+  - the material pass and Unity;
+  - the level of a flat-lying weapon to better than about 2°;
+  - thin-part recall on three-quarter concepts, which reads 0.51–0.61 although the crossbow string is kept.
+
+Mesh reduction from the full-detail shape (2026-10-24, [evidence](docs/media/mesh-reduction-2026-10/README.md)).
+- **Problem:** the owner judged weapon quality far below props.
+- **Cause:** not the generator. The `h100` TRELLIS.2 graph's full-detail shape (`save_detail`) is crisp; the graph's
+  midpoint `DecimateMesh` reduction to the face budget, which Blender received, made flat steel wavy, rounded edges
+  and erased a pistol's slide serrations. Same shape, three reductions: midpoint wavy, QEM creased, Blender collapse
+  flat and sharp.
+- **Fix:** where a graph reduces with midpoint `DecimateMesh`, the worker hands Blender `save_detail`.
+  - Blender removes inner shells, then collapse-decimates to the budget.
+  - `save_detail` is journaled as a `mesh.detail` artifact and is the preparation stage's only input and `source`.
+  - The character graph's crease-preserving QEM output is kept.
+- **Same-shape evidence:**
+  - one pistol and four prop shapes (crate, jug, two lanterns), all still one piece;
+  - crate brackets and lantern lattice and ribs sharper, the jug about the same;
+  - a lantern's inner shell no longer halves its visible budget (14,404 shipped faces, 28,499 now).
+- **Live at this commit:**
+  - the props protocol's lantern and crate concepts re-approved on `h100`, each passing on its first mesh attempt;
+  - the pistol's three new seeds kept flat planes and serrations but failed `colour_darkened` (0.407–0.462 against
+    0.4), on near-black generated steel.
+- **Tests:**
+  - the worker hands Blender `save_detail` for a midpoint graph and keeps `save_raw` for a QEM graph (the first fails
+    on the old worker);
+  - `make verify` and `make verify-provenance`.
+- **Not verified:**
+  - a props or kits protocol rerun (their Provisional evidence predates this change);
+  - `h100_multiview`, which has the same structure;
+  - whether near-black generated metal should fail the dark-texture check.
+
+Weapons through the whole pipeline (2026-10-24, [evidence](docs/media/weapon-pipeline-2026-10/README.md)).
+- **Runs:** a pistol, a longsword and a three-quarter crossbow, each approved on `h100` (TRELLIS.2) and re-approved in
+  a project clone on a Pixal3D graph with Blender's prepare step, rendered as the props are.
+- **Fixes found:**
+  - **Metal lightness:** metal decoded darker than the concept shows it is brightened to the concept, never darkened
+    (`metal_lightness_gain`). A pistol's near-black steel had failed the dark-texture check on every seed; with it,
+    the darkened share was 0.013.
+  - **Orientation:**
+    - the length is the axis across the top that passes nearest the grip (a crossbow's bow spread almost as far as
+      its stock);
+    - the kit walls' long-side turn no longer applies to oriented weapons;
+    - a view that looks along the weapon fails as the retryable `weapon_orientation` instead of crashing Blender.
+  - **Full-turn views:** a weapon's views search the full turn. TRELLIS.2 rebuilt three of four longswords turned
+    180°, which failed concept fit at 0.66–0.71; fitted from behind, the next seed scored 0.945.
+- **Decision:** weapons use TRELLIS.2 with Blender's reduction on every H100 profile (`weapon_model`). It matched the
+  concepts' forms more cleanly than Pixal3D on all three. The Pixal3D prepare-step graph does not ship.
+- **Rejected:** Direct3D-S2 (MIT), trialled on the H100, made a blotchier pistol than TRELLIS.2's full detail.
+- **Tests:**
+  - metal brightened to a lighter concept and left alone for a darker one or too little lit metal;
+  - the length chosen by the grip (a crossbow with a bow wider than its stock);
+  - a sword turned 180° oriented tip forward;
+  - `weapon_orientation` retryable;
+  - weapons routed to TRELLIS.2 on every H100 profile;
+  - each new Blender case fails on the code before it;
+  - `make verify`.
+- **Not verified:**
+  - one approved seed per weapon and graph, and the runs span three commits;
+  - Unity and moving parts;
+  - pistol grip checkering and colour, and soft small mechanisms, remain short of the concept.
+
+Concept colour transfer for weapons (2026-10-24, [evidence](docs/media/weapon-pipeline-2026-10/README.md#concept-colours)).
+- **Cause:** TRELLIS.2 decoded a pistol's rosewood grips orange-brown and darker on every seed (hue angle 43 against
+  37). The whole-object colour checks, ruled by its black steel, passed them.
+- **Change:** a type that sets `concept_colour_transfer` (the weapon type does) has its non-metal texels grouped into
+  three colours.
+  - Each colour's concept-side cells give the median CIELAB a*b* offset to the concept and a lightness ratio. A cell
+    counts for its most common colour when it is mostly non-metal.
+  - The offset is applied capped at 25, and lightness is raised half way, never lowered.
+  - The shifts are recorded as `concept_colour_transfer`. Props do not opt in yet.
+- **Live:** the pistol re-approved at `ab01409` passed on its first mesh, with grips shifted +9 a* (hue difference
+  0.09). Applied to a longsword and crossbow it barely moved them (+2.6 and +0.3 a*).
+- **Tests:** a drifted grip shifted to the concept's hue with metal untouched, and nothing changed without the key;
+  `make verify`.
+- **Not verified:**
+  - props;
+  - the first live run shifted nothing (fixed since: grain tones were measured one by one).

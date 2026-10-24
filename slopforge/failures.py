@@ -20,11 +20,14 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "colour_hue_shift",
     "colour_desaturated",
     "colour_darkened",
+    "thin_feature_missing",
     "glass_missing",
+    "nonmetal_missing",
     "uv_area_budget",
     "concept_fit",
     "module_footprint",
     "module_taper",
+    "weapon_orientation",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -380,11 +383,14 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "colour_hue_shift": ("concept_hue_difference", "max_concept_hue_difference"),
         "colour_desaturated": ("concept_chroma_ratio", "min_concept_chroma_ratio"),
         "colour_darkened": ("concept_darkened_share", "max_concept_darkened_share"),
+        "thin_feature_missing": ("concept_thin_recall", "min_concept_thin_recall"),
         "glass_missing": ("glass_fraction", "min_glass_fraction"),
+        "nonmetal_missing": ("nonmetal_fraction", "min_nonmetal_fraction"),
         "uv_area_budget": ("uv_area_sum", "min_uv_area"),
         "concept_fit": ("concept_fit", "min_concept_fit"),
         "module_footprint": ("open_quadrant", "max_open_quadrant"),
         "module_taper": ("corner_taper", "max_arm_taper"),
+        "weapon_orientation": ("weapon_tip_alignment", "min_weapon_tip_alignment"),
     }
 
     for code in codes:

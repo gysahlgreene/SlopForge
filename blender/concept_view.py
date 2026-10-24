@@ -3,7 +3,8 @@
 Usage: blender --background --python concept_view.py -- request.json
 
 request.json: {"model": textured.glb, "basecolor": texture.png, "concept": cutout.png (RGBA),
-               "prefix": output path prefix, "report": report.json, "size": optional render size (2048)}
+               "prefix": output path prefix, "report": report.json, "size": optional render size (2048),
+               "full_turn": optional, also search views from behind (weapons)}
 
 TRELLIS.2 rebuilds a prop facing front, not posed as its three-quarter concept shows it, so the view is found by
 comparing the concept silhouette with orthographic silhouettes of surface samples over the front half of the view
@@ -46,6 +47,58 @@ def view_axes(theta, phi):
     return towards, right, towards.cross(right)
 
 
+def image_mask(path, channel=3):
+    """A Blender-loaded image's mask (rows from the bottom): alpha for a cut-out, red for an L mask."""
+    image = bpy.data.images.load(str(path))
+    width, height = image.size
+    pixels = np.empty(width * height * 4, np.float32)
+    image.pixels.foreach_get(pixels)
+    bpy.data.images.remove(image)
+    return pixels.reshape(height, width, 4)[:, :, channel] > 0.5
+
+
+def surface_samples(obj):
+    """World-space vertices plus four random points per triangle, so thin faces still cover the silhouette."""
+    world = np.array([obj.matrix_world @ vertex.co for vertex in obj.data.vertices])
+    triangles = np.array([polygon.vertices[:3] for polygon in obj.data.polygons if len(polygon.vertices) == 3])
+    if not len(triangles):
+        raise ValueError("Mesh has no triangles")
+    weights = np.random.default_rng(0).dirichlet((1, 1, 1), size=(len(triangles), 4))
+    return world, np.concatenate([np.einsum("tsk,tkd->tsd", weights, world[triangles]).reshape(-1, 3), world])
+
+
+def fit_view(samples, concept, full_turn=False):
+    """(silhouette IoU, theta, phi in degrees) of the view whose mesh silhouette best fits the concept mask.
+
+    full_turn also searches the back half, front-facing views first so they win ties: TRELLIS.2 rebuilt three of four
+    side-profile swords turned to face the other way, which only a view from behind fits (2026-10-24, weapons).
+    """
+    rows, columns = np.nonzero(concept)
+    if not len(rows):
+        raise ValueError("Concept cutout has no opaque pixels")
+    target = silhouette(np.stack([columns, rows], 1).astype(float))
+    best = (-1.0, 0, 0)
+    for phi in range(0, 46, 5):
+        for theta in (sorted(range(-180, 180, 5), key=abs) if full_turn else range(-90, 91, 5)):
+            _, right, up = view_axes(math.radians(theta), math.radians(phi))
+            fitted = silhouette(np.stack([samples @ np.array(right), samples @ np.array(up)], 1))
+            iou = float((fitted & target).sum() / max((fitted | target).sum(), 1))
+            if iou > best[0]:
+                best = (iou, theta, phi)
+    return best
+
+
+def to_concept_pixels(points, concept):
+    """Map 2D view coordinates of mesh points onto concept pixels (column, row from the bottom), matching bounds
+    with the aspect kept, as silhouette() does for both."""
+    rows, columns = np.nonzero(concept)
+    concept_low = np.array([columns.min(), rows.min()], float)
+    concept_span = np.array([columns.max(), rows.max()], float) - concept_low
+    low, span = points.min(0), points.max(0) - points.min(0)
+    scale = concept_span.max() / max(span.max(), 1e-9)
+    return np.round(concept_low + (concept_span - span * scale) / 2 + (points - low) * scale).astype(int)
+
+
 def emission_material(name, image=None):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
@@ -72,31 +125,8 @@ def run(request):
     if len(meshes) != 1:
         raise ValueError(f"Expected one mesh in {request['model']}, found {len(meshes)}")
     obj = meshes[0]
-    world = np.array([obj.matrix_world @ vertex.co for vertex in obj.data.vertices])
-    triangles = np.array([polygon.vertices[:3] for polygon in obj.data.polygons if len(polygon.vertices) == 3])
-    if not len(triangles):
-        raise ValueError("Mesh has no triangles")
-    weights = np.random.default_rng(0).dirichlet((1, 1, 1), size=(len(triangles), 4))
-    samples = np.concatenate([np.einsum("tsk,tkd->tsd", weights, world[triangles]).reshape(-1, 3), world])
-
-    concept = bpy.data.images.load(request["concept"])
-    width, height = concept.size
-    pixels = np.empty(width * height * 4, np.float32)
-    concept.pixels.foreach_get(pixels)
-    rows, columns = np.nonzero(pixels.reshape(height, width, 4)[:, :, 3] > 0.5)  # Blender rows start at the bottom
-    if not len(rows):
-        raise ValueError("Concept cutout has no opaque pixels")
-    target = silhouette(np.stack([columns, rows], 1).astype(float))
-
-    best = (-1.0, 0, 0)
-    for phi in range(0, 46, 5):
-        for theta in range(-90, 91, 5):
-            _, right, up = view_axes(math.radians(theta), math.radians(phi))
-            fitted = silhouette(np.stack([samples @ np.array(right), samples @ np.array(up)], 1))
-            iou = float((fitted & target).sum() / max((fitted | target).sum(), 1))
-            if iou > best[0]:
-                best = (iou, theta, phi)
-    iou, theta, phi = best
+    world, samples = surface_samples(obj)
+    iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
     report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}
     # Colour comparison only needs the concept's side of the model, not texel registration.
     min_iou = float(request.get("min_iou", MIN_SILHOUETTE_IOU))
@@ -157,4 +187,5 @@ def main():
         raise SystemExit(result["error"])
 
 
-main()
+if __name__ == "__main__":  # prepare_model.py imports the fitting helpers
+    main()

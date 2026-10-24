@@ -4,12 +4,15 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import numpy as np
 from PIL import Image
 from processing.comfy_generate_3d import copy_generated_maps, copy_conditioning_image
 from processing import comfy_generate_3d
 from slopforge.pipelines.model import _generate_material_candidate, _native_material_candidate, retexture
 from slopforge.manifest import begin_stage, save_manifest, start_execution, start_stage
 from slopforge.unity_material import make_metallic_gloss
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class MeshPBRTests(unittest.TestCase):
@@ -75,11 +78,107 @@ class MeshPBRTests(unittest.TestCase):
         self.assertEqual(identities[0][1]["prepared_mesh.model_file"], "b" * 64)
         self.assertNotEqual(identities[0][0]["effective_sha256"], identities[1][0]["effective_sha256"])
 
+    def test_a_model_workflow_refuses_an_opaque_concept_before_inference(self):
+        # The model graphs crop to the concept's alpha and remove no background: an opaque concept came back as the
+        # weapon on a card or inside a box of its backdrop (2026-10-24 weapon graph A/B).
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = root / "concept.png"
+            Image.new("RGB", (8, 8), (255, 255, 255)).save(image)
+            with patch.object(comfy_generate_3d, "ComfyUIClient") as client, \
+                    patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image), "--name", "relay",
+                                               "--dest", str(root / "relay.glb"), "--workflow",
+                                               str(ROOT / "workflows/trellis2_image_to_model_h100_api.json")]), \
+                    self.assertRaises(SystemExit) as stopped:
+                comfy_generate_3d.main()
+        self.assertEqual(stopped.exception.code, 1)
+        client.assert_not_called()
+
+    def run_worker_with_detail(self, root, placement):
+        """Run the worker on a shape call that saves raw and full-detail meshes, with the graph's DecimateMesh in the
+        given placement mode; returns Blender's commands, the journaled stages and generation.json."""
+        image = root / "concept.png"
+        Image.new("RGBA", (8, 8), (0, 0, 0, 0)).save(image)
+        workflow_path = root / "trellis.json"
+        workflow_path.write_text(json.dumps({
+            "prepared_mesh": {"class_type": "Load3DAdvanced", "inputs": {"model_file": "none"}},
+            "shape_decimate": {"class_type": "DecimateMesh", "inputs": {"placement_mode": placement}},
+            "save_raw": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "raw"}},
+            "save_detail": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "detail"}},
+            "save": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "final"}},
+            "maps": {"class_type": "BakeTextureFromVoxel", "inputs": {"texture_size": 64}},
+            "save_basecolor": {"class_type": "SaveImage", "inputs": {"filename_prefix": "base"}},
+        }))
+        manifest_path = root / "manifest.json"
+
+        class Client:
+            calls = 0
+            def health(self, retry_window=0): return {"system": {}, "devices": []}
+            def upload_input(self, _path, folder): return {"name": f"upload{folder}.png", "subfolder": folder}
+            def queue_workflow(self, _workflow):
+                self.calls += 1
+                return f"prompt-{self.calls}"
+            def wait_for_completion(self, prompt, timeout=3600):
+                if prompt == "prompt-1":
+                    return {"outputs": {"save_raw": {"glb": {"filename": "raw.glb"}},
+                                        "save_detail": {"glb": {"filename": "detail.glb"}}}}
+                return {"outputs": {"save": {"glb": {"filename": "final.glb"}},
+                                    "save_basecolor": {"images": [{"filename": "basecolor.png"}]}}}
+            def download_output(self, item, path): Path(path).write_bytes(item["filename"].encode())
+
+        calls = []
+        def blender(command, **_kwargs):
+            calls.append(command)
+            Path(command[8]).write_bytes(b"prepared")
+            Path(command[command.index("--normal-output") + 1]).write_bytes(b"normal")
+        concept = {"id": "concept:1", "type": "image.concept", "path": "concept.png",
+                   "sha256": "a" * 64, "stage": "concept_generation", "attempt": 1, "derived_from": []}
+        asset = {"id": "relay", "name": "relay", "type": "prop", "description": "relay"}
+        execution = start_execution(asset, {"brief": "relay"})
+        stage = start_stage(execution, "mesh_workflow_execution", 1, [concept], {}, {})
+        begin_stage(stage)
+        save_manifest(manifest_path, {"schema_version": 4, "assets": {"prop:relay": asset}})
+        context = {"project_root": str(root), "manifest_path": str(manifest_path),
+                   "asset_selector": "prop:relay", "execution_id": execution["id"],
+                   "attempt": 1, "stage_id": stage["id"], "upstream_artifacts": [concept]}
+        with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=Client()), \
+                patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
+                patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image), "--name", "relay",
+                    "--dest", str(root / "mesh.glb"), "--workflow", str(workflow_path), "--blender", "blender",
+                    "--seed", "17", "--metadata", str(root / "generation.json"),
+                    "--journal-context", json.dumps(context)]):
+            comfy_generate_3d.main()
+        stages = json.loads(manifest_path.read_text())["assets"]["prop:relay"]["executions"][-1]["stages"]
+        return calls, stages, json.loads((root / "generation.json").read_text())
+
+    def test_blender_reduces_the_full_detail_shape_instead_of_midpoint_decimation(self):
+        # The graph's midpoint decimation made a pistol's flat steel wavy; Blender's collapse decimation of the
+        # full-detail shape kept it flat (2026-10-24). The prepared mesh must come from save_detail, journaled.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls, stages, generation = self.run_worker_with_detail(Path(temporary), "midpoint")
+        detail = next(item for stage in stages for item in stage["outputs"] if item["type"] == "mesh.detail")
+        self.assertEqual(Path(calls[0][7]).name, "mesh_detail.glb")  # Blender's input mesh
+        preparation = next(stage for stage in stages if stage["name"] == "mesh_preparation")
+        self.assertEqual([item["id"] for item in preparation["inputs"]], [detail["id"]])
+        self.assertEqual(preparation["settings"]["source"], "mesh.detail")
+        self.assertEqual(generation["mesh_preparation"]["source"], "mesh.detail")
+        self.assertIn("mesh.detail", {item["kind"] for item in generation["outputs"]})
+
+    def test_a_qem_decimating_graph_keeps_its_own_reduction(self):
+        # The character graph's crease-preserving QEM reduction was tuned with its rigging; it is not replaced.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls, stages, generation = self.run_worker_with_detail(Path(temporary), "qem")
+        raw = next(item for stage in stages for item in stage["outputs"] if item["type"] == "mesh.raw")
+        self.assertEqual(Path(calls[0][7]).name, "mesh_untextured.glb")
+        preparation = next(stage for stage in stages if stage["name"] == "mesh_preparation")
+        self.assertEqual([item["id"] for item in preparation["inputs"]], [raw["id"]])
+        self.assertEqual(generation["mesh_preparation"]["source"], "mesh.raw")
+
     def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             image = root / "concept.png"
-            image.write_bytes(b"concept")
+            Image.new("RGBA", (8, 8), (0, 0, 0, 0)).save(image)
             workflow_path = root / "trellis.json"
             workflow_path.write_text(json.dumps({
                 "prepared_mesh": {"class_type": "Load3DAdvanced", "inputs": {"model_file": "none", "viewport_state": {},
@@ -419,26 +518,31 @@ if __name__ == "__main__":
 
 
 class DeclaredMaterialTests(unittest.TestCase):
-    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None):
+    def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None, asset_extra=None,
+                   lineage_extra=None, metallic_map=None):
         source = root / "source"
         source.mkdir()
         (source / "relay.glb").write_bytes(b"mesh")
         basecolor.save(source / "basecolor.png")
         for key, value in (("normal", (128, 128, 255)), ("roughness", (200,) * 3), ("metallic", (metallic_value,) * 3)):
             Image.new("RGB", basecolor.size, value).save(source / f"{key}.png")
+        if metallic_map is not None:
+            metallic_map.save(source / "metallic.png")
         textures = {key: f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
         config = {"asset_pipeline": {"candidate_root": "candidates", "manifest": "manifest.json",
                                      "model_budgets": {"prop_faces": 1000}}}
         asset = {"name": "lantern", "description": "Stone lantern", "materials": materials, "executions": [],
-                 "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"}}
+                 "source": {"glb": "source/relay.glb", "processed_mesh": "source/processed.blend"},
+                 **(asset_extra or {})}
         execution = start_execution(asset, {"brief": "lantern"})
         manifest = {"schema_version": 4, "assets": {"prop:lantern": asset}}
         save_manifest(root / "manifest.json", manifest)
         lineage = {"root": root, "pipeline": config["asset_pipeline"], "manifest": manifest,
                    "key": "prop:lantern", "execution_id": execution["id"], "upstream": [],
-                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout}
+                   "material_inputs": [], "assembly_inputs": [], "concept_cutout": cutout, **(lineage_extra or {})}
 
         def process(_root, _config, _mesh, fbx, blend, maps, budget, **options):
+            self.process_options = options
             fbx.write_bytes(b"fbx"); blend.write_bytes(b"blend"); options["preview_dir"].mkdir()
             for view in ("front", "side", "rear", "three_quarter"):
                 Image.new("RGB", (64, 64), "gray").save(options["preview_dir"] / f"lantern_{view}.png")
@@ -454,6 +558,31 @@ class DeclaredMaterialTests(unittest.TestCase):
                                               {"face_budget": "prop_faces", **(limits or {})},
                                               asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
                                               lineage=lineage)
+
+    def test_a_grip_held_type_is_oriented_from_its_concept_and_pivoted_at_its_grip_mask(self):
+        # Weapons: Blender turns the tip forward from the concept's view and sets the origin at the grip mask.
+        # Its concept views search the full turn: TRELLIS.2 rebuilt side-profile swords facing the other way.
+        grip = {"name": "handle", "kind": "grip", "text": "the grip"}
+        for pivot, expected in (("grip", True), ("bottom_center", False)):
+            with self.subTest(pivot=pivot), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
+                views = []
+                def view(_root, _config, _cutout, _mesh, paths, name, **options):
+                    views.append(options)
+                    return {"status": "skipped", "silhouette_iou": 0.95}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
+                                    asset_extra={"pivot": pivot, "parts": [grip]}, limits={"min_concept_fit": 0.8},
+                                    lineage_extra={"part_masks": root / "parts_1"})
+                options = self.process_options
+                self.assertEqual(options["pivot"], pivot)
+                self.assertEqual([view.get("full_turn", False) for view in views], [expected])
+                if expected:
+                    self.assertEqual((options["concept"], options["grip_mask"]),
+                                     (root / "cutout.png", root / "parts_1/handle.png"))
+                else:
+                    self.assertEqual((options["concept"], options["grip_mask"]), (None, None))
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the
@@ -515,6 +644,37 @@ class DeclaredMaterialTests(unittest.TestCase):
                     self.assertTrue(candidate_quality_rejection(validation))  # the next seed is tried
                 else:
                     self.assertLess(validation["measured"]["concept_darkened_share"], 0.1)
+
+    def test_a_mesh_that_drops_the_concepts_thin_parts_retries_when_a_minimum_is_declared(self):
+        # A bow's string is a few pixels wide: the row-filled concept fit cannot see it go missing.
+        from slopforge.failures import candidate_quality_rejection
+        bow = [{"region": "bow", "class": "nonmetal", "description": "yew"}]
+
+        def picture(string):
+            image = Image.new("RGBA", (256, 128), (0, 0, 0, 0))
+            image.paste((120, 80, 40, 255), (20, 20, 60, 108))  # the bow's thick riser
+            if string:
+                image.paste((230, 230, 220, 255), (200, 20, 202, 108))  # a 2-pixel string
+            return image
+        for limit, string, status in ((None, False, "candidate"), (0.6, True, "candidate"), (0.6, False, "failed")):
+            with self.subTest(limit=limit, string=string), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                picture(True).save(root / "concept_cutout.png")
+
+                def view(_root, _config, _cutout, _mesh, paths, name, **_options):
+                    picture(string).save(paths["directory"] / f"{name}_base.png")
+                    return {"status": "rendered", "silhouette_iou": 0.95}
+                limits = {"max_concept_hue_difference": 4, **({"min_concept_thin_recall": limit} if limit else {})}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, bow, 0, Image.new("RGB", (64, 64), (120, 80, 40)),
+                                                cutout=root / "concept_cutout.png", limits=limits)
+                measured = candidate["validation"]["measured"]
+                self.assertEqual(candidate["status"], status)
+                self.assertGreater(measured["concept_thin_share"], 0.01)
+                self.assertEqual(measured["concept_thin_recall"], 1.0 if string else 0.0)  # recorded either way
+                if status == "failed":
+                    self.assertEqual(candidate["validation"]["failure_codes"], ["thin_feature_missing"])
+                    self.assertTrue(candidate_quality_rejection(candidate["validation"]))
 
     def test_without_a_concept_view_only_hue_is_checked_on_the_whole_map(self):
         # Hidden insides and bases lower the whole map's saturation (2026-10-21 jug: 0.42 of the concept's,
@@ -715,7 +875,119 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertEqual(emission.getpixel((130, 130)), (230, 160, 40))
                 self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
         with self.assertRaisesRegex(ValueError, "--material must be"):
-            parse_material_spec("housing=nonmetal#ffffff")
+            parse_material_spec("housing=metal#ffffff")  # metal has no colour rule
+        self.assertEqual(parse_material_spec("grip=nonmetal#5a3a22: leather")["color"], "#5a3a22")
+
+    def test_a_coloured_nonmetal_beside_declared_metal_loses_its_false_metal(self):
+        # A sword declares a steel blade, so the generator's metallic map is kept; its leather grip must not shine.
+        from slopforge.failures import candidate_quality_rejection
+        from slopforge.style import parse_material_spec
+        sword = [parse_material_spec("blade=metal: steel"), parse_material_spec("grip=nonmetal#5a3a22: leather")]
+        for grip_in_map, status in ((True, "candidate"), (False, "failed")):
+            with self.subTest(grip_in_map=grip_in_map), tempfile.TemporaryDirectory() as temporary:
+                base = Image.new("RGB", (256, 256), (170, 175, 180))  # steel
+                if grip_in_map:
+                    base.paste((90, 58, 34), (0, 0, 80, 256))  # the grip's leather colour
+                candidate = self._candidate(Path(temporary), sword, 200, base)
+                validation = candidate["validation"]
+                self.assertEqual(candidate["status"], status)
+                self.assertEqual(candidate["metallic_source"], "generator_with_declared_nonmetals")
+                with Image.open(Path(temporary) / candidate["outputs"]["metallic"]) as metallic:
+                    grey = metallic.convert("L")
+                    self.assertEqual(grey.getpixel((200, 128)), 200)  # the steel keeps its metal
+                    if grip_in_map:
+                        self.assertEqual(grey.getpixel((40, 128)), 0)  # the leather is a dielectric
+                if grip_in_map:
+                    self.assertGreater(validation["measured"]["nonmetal_fraction"], 0.2)
+                else:
+                    self.assertEqual(validation["failure_codes"], ["nonmetal_missing"])
+                    self.assertTrue(candidate_quality_rejection(validation))
+
+    def test_metal_darker_than_its_concept_is_brightened_to_it(self):
+        # A pistol's blued steel was decoded near-black (0.13 sRGB) where its concept showed dark grey (0.36), and
+        # every seed failed the dark-texture check (2026-10-24). Metal is brightened to the concept; wood is untouched.
+        from slopforge.style import parse_material_spec
+        pistol = [parse_material_spec("slide=metal: blued steel"), parse_material_spec("grips=nonmetal: walnut")]
+
+        def view(_root, _config, _cutout, _mesh, paths, name, **options):
+            with Image.open(options.get("basecolor", paths["basecolor"])) as texture:  # the map, seen whole
+                texture.convert("RGBA").resize((64, 64)).save(paths["directory"] / f"{name}_base.png")
+            return {"status": "rendered", "silhouette_iou": 0.95}
+
+        for concept_grey, expect_gain in ((91, True), (20, False)):
+            with self.subTest(concept_grey=concept_grey), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                Image.new("RGBA", (64, 64), (concept_grey,) * 3 + (255,)).save(root / "concept_cutout.png")
+                base = Image.new("RGB", (64, 64), (33, 34, 34))  # near-black steel
+                base.paste((110, 60, 40), (0, 0, 8, 64))  # a walnut strip, not metal
+                metallic = Image.new("L", (64, 64), 255)
+                metallic.paste(0, (0, 0, 8, 64))
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, pistol, 0, base, cutout=root / "concept_cutout.png",
+                                                limits={"max_concept_darkened_share": 0.4}, metallic_map=metallic)
+                gain = candidate["validation"]["measured"]["metal_lightness_gain"]
+                with Image.open(root / candidate["outputs"]["basecolor"]) as result:
+                    steel, wood = result.convert("RGB").getpixel((40, 32)), result.convert("RGB").getpixel((2, 32))
+                self.assertEqual(wood, (110, 60, 40))
+                if expect_gain:
+                    self.assertGreater(gain, 4)
+                    self.assertAlmostEqual(steel[1], 91, delta=4)  # the concept's grey
+                    self.assertEqual(candidate["status"], "candidate")  # no longer darkened
+                else:  # iron drawn darker than decoded keeps its colour
+                    self.assertEqual(gain, 1.0)
+                    self.assertEqual(steel, (33, 34, 34))
+
+    def test_a_small_region_drifting_from_the_concept_colour_is_shifted_back(self):
+        # TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed while the whole-object checks, ruled
+        # by the black steel, passed (2026-10-24). A type that opts in has each non-metal colour shifted to the concept.
+        from slopforge.style import parse_material_spec
+        from slopforge.validation import _lab
+        pistol = [parse_material_spec("slide=metal: steel"), parse_material_spec("grips=nonmetal: rosewood")]
+
+        def view(_root, _config, _cutout, _mesh, paths, name, **options):
+            with Image.open(options.get("basecolor", paths["basecolor"])) as texture:
+                texture.convert("RGBA").resize((64, 64)).save(paths["directory"] / f"{name}_base.png")
+            return {"status": "rendered", "silhouette_iou": 0.95}
+
+        for opted_in in (True, False):
+            with self.subTest(opted_in=opted_in), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                concept = Image.new("RGBA", (64, 64), (60, 60, 64, 255))
+                concept.paste((150, 52, 32, 255), (0, 0, 24, 64))  # rosewood
+                concept.save(root / "concept_cutout.png")
+                base = Image.new("RGB", (64, 64), (60, 60, 64))
+                base.paste((96, 58, 30), (0, 0, 24, 64))  # decoded orange-brown
+                metallic = Image.new("L", (64, 64), 255)
+                metallic.paste(0, (0, 0, 24, 64))
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, pistol, 0, base, cutout=root / "concept_cutout.png",
+                                                limits={"concept_colour_transfer": True} if opted_in else {},
+                                                metallic_map=metallic)
+                with Image.open(root / candidate["outputs"]["basecolor"]) as result:
+                    grip, steel = result.convert("RGB").getpixel((10, 32)), result.convert("RGB").getpixel((50, 32))
+                self.assertEqual(steel, (60, 60, 64))  # metal is not shifted
+                measured = candidate["validation"]["measured"]
+                if opted_in:
+                    hue = lambda rgb: np.degrees(np.arctan2(*_lab(np.array([rgb], float))[0, [2, 1]]))
+                    self.assertAlmostEqual(hue(grip), hue((150, 52, 32)), delta=3)  # the concept's hue
+                    self.assertGreater(_lab(np.array([grip], float))[0, 0], _lab(np.array([[96, 58, 30]], float))[0, 0])
+                    self.assertTrue(any("shift_ab" in entry for entry in measured["concept_colour_transfer"].values()))
+                else:
+                    self.assertEqual(grip, (96, 58, 30))
+                    self.assertNotIn("concept_colour_transfer", measured)
+
+    def test_too_little_lit_metal_is_left_as_decoded(self):
+        from slopforge.unity_material import match_metal_lightness
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (16, 16), (33, 34, 34)).save(root / "base.png")
+            Image.new("L", (16, 16), 255).save(root / "metal.png")
+            cutout = np.full((64, 64, 4), 255.0); cutout[..., :3] = 91
+            view = np.full((64, 64, 4), 255.0); view[..., :3] = 33
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255; metal[:4, :4, :3] = 255  # one corner of metal
+            self.assertEqual(match_metal_lightness(root / "base.png", root / "metal.png", cutout, view, metal), 1.0)
+            with Image.open(root / "base.png") as image:
+                self.assertEqual(image.getpixel((8, 8)), (33, 34, 34))
 
     def test_reconstruction_rules_are_appended_to_agent_prompts_with_materials(self):
         from slopforge.style import parse_material_spec, reconstruction_rules

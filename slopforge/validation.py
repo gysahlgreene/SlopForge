@@ -262,6 +262,77 @@ def apply_declared_glass(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
     return validation
 
 
+THIN_GRID = 256  # cells along the object's longest side
+THIN_RADIUS = 3  # parts narrower than about 7 cells (under 3% of the longest side) count as thin
+THIN_MIN_SPECK = 15  # cells; smaller thin specks are outline corners, not parts
+THIN_MIN_SHARE = 0.01  # thin parts covering less of the object than this are not checked
+
+
+def _object_mask(path):
+    """An image's object mask cropped to its bounds, longest side THIN_GRID, aspect kept."""
+    with Image.open(path) as image:
+        mask = np.asarray(image.convert("RGBA"))[..., 3] > 200
+    ys, xs = np.nonzero(mask)
+    mask = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    scale = THIN_GRID / max(mask.shape)
+    size = (max(1, round(mask.shape[1] * scale)), max(1, round(mask.shape[0] * scale)))
+    fitted = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize(size, Image.BOX)) > 127
+    out = np.zeros((THIN_GRID, THIN_GRID), bool)
+    out[:fitted.shape[0], :fitted.shape[1]] = fitted
+    return out
+
+
+def concept_thin_recall(cutout_path, view_path):
+    """How much of the concept's thin parts (strings, guards, rings, handles) the reconstruction kept, seen from the
+    concept's side; recall is None when thin parts cover under THIN_MIN_SHARE of the object.
+
+    The concept-fit check fills each outline row between its outer edges, so a missing bowstring cannot lower it.
+    Here the concept's thin parts are what a morphological opening removes from its unfilled mask, and recall is the
+    share of them the slightly widened mesh mask covers. On 147 kept props and modules only six had thin parts over
+    1% of the object (lanterns, stumps, a canister), and all kept 0.76-1.0 of them (2026-10-24).
+    """
+    from scipy import ndimage
+    concept, mesh = _object_mask(cutout_path), _object_mask(view_path)
+    y, x = np.ogrid[-THIN_RADIUS:THIN_RADIUS + 1, -THIN_RADIUS:THIN_RADIUS + 1]
+    thin = concept & ~ndimage.binary_opening(concept, structure=x * x + y * y <= THIN_RADIUS ** 2)
+    labels, count = ndimage.label(thin)
+    sizes = ndimage.sum(thin, labels, range(1, count + 1))
+    thin = np.isin(labels, [index + 1 for index, size in enumerate(sizes) if size >= THIN_MIN_SPECK])
+    share = float(thin.sum() / max(concept.sum(), 1))
+    covered = ndimage.binary_dilation(mesh, iterations=2)
+    recall = round(float((thin & covered).sum() / thin.sum()), 3) if share >= THIN_MIN_SHARE else None
+    return {"concept_thin_share": round(share, 4), "concept_thin_recall": recall}
+
+
+def apply_thin_features(validation, thin, minimum=None):
+    """Record thin-part recall; below a declared minimum the candidate fails as thin_feature_missing (retryable)."""
+    validation.setdefault("measured", {}).update(thin)
+    recall = thin.get("concept_thin_recall")
+    if minimum is None or recall is None:
+        return validation
+    validation.setdefault("limits", {})["min_concept_thin_recall"] = minimum
+    if recall < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the mesh kept {recall} of the concept's thin parts (limit {minimum}), so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "thin_feature_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
+def apply_declared_nonmetal(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
+    """Fail a candidate whose base colour has no region for a declared coloured non-metal (retryable quality code)."""
+    measured = round(fraction, 4)
+    validation.setdefault("measured", {})["nonmetal_fraction"] = measured
+    validation.setdefault("limits", {})["min_nonmetal_fraction"] = minimum
+    if measured < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            "brief declares a coloured non-metal but no region of that colour was found in the base colour, so another "
+            "seed is tried; if every seed misses it, check the declared colour against the concept"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "nonmetal_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_concept_fit(validation, view, minimum):
     """Fail a candidate whose mesh no longer matches the concept's outline (retryable quality code).
 
@@ -280,6 +351,31 @@ def apply_concept_fit(validation, view, minimum):
         validation["failure_codes"] = [*validation.get("failure_codes", []), "concept_fit"]
         validation["status"] = "failed"
     return validation
+
+# A weapon's length must run at least this far along the concept's right for its tip's end to be told: a reconstruction
+# of two crossed swords lay across the fitted view at 0.0, and a three-quarter crossbow ran at 0.45 (2026-10-24).
+MIN_WEAPON_TIP_ALIGNMENT = 0.25
+
+
+def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
+    """Fail a held weapon whose length runs across the concept's fitted view (retryable quality code).
+
+    Blender's final pass records how far the weapon's length runs along the concept's right (blender/prepare_model.py,
+    Orient from the concept). Near 0 the view looks along the length, so which end is the tip is a guess.
+    """
+    alignment = (validation.get("measured", {}).get("concept_view") or {}).get("tip_alignment")
+    if alignment is None:
+        return validation
+    validation["measured"]["weapon_tip_alignment"] = alignment
+    validation.setdefault("limits", {})["min_weapon_tip_alignment"] = minimum
+    if alignment < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the weapon's length runs across the concept's view (tip alignment {alignment}, limit {minimum}), so its "
+            "tip cannot be told from its pommel or stock; another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "weapon_orientation"]
+        validation["status"] = "failed"
+    return validation
+
 
 # A module declared as an L corner must leave one quarter of its footprint nearly empty. Real stone corners measured
 # 0.00 there (others 0.69-0.92); one that reconstructed as a solid block measured 0.86 in every quarter (2026-10-22).
@@ -352,15 +448,22 @@ def _lab(rgb):
     return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], -1)
 
 
-def _lightness_cells(rgba, n):
-    """CIELAB L* of an RGBA object image cropped to its bounds and averaged onto n x n cells, and which cells it
-    covers."""
+def _lab_cells(rgba, n):
+    """CIELAB of an RGBA object image cropped to its bounds and averaged onto n x n cells, which cells it covers, and
+    the crop box."""
     mask = rgba[..., 3] > 200
     ys, xs = np.nonzero(mask)
     box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     colour = Image.fromarray(rgba[..., :3].astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
     cover = Image.fromarray((mask * 255).astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
-    return _lab(np.asarray(colour, dtype=float).reshape(-1, 3))[:, 0].reshape(n, n), np.asarray(cover) > 128
+    return _lab(np.asarray(colour, dtype=float).reshape(-1, 3)).reshape(n, n, 3), np.asarray(cover) > 128, box
+
+
+def _lightness_cells(rgba, n):
+    """CIELAB L* of an RGBA object image cropped to its bounds and averaged onto n x n cells, and which cells it
+    covers."""
+    lab, cover, _ = _lab_cells(rgba, n)
+    return lab[..., 0], cover
 
 
 def concept_darkened_share(cutout, view):

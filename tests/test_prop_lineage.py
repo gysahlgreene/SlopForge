@@ -567,6 +567,39 @@ avoid: [environment]
         self.assertEqual((execution["failure"]["category"], execution["failure"]["operation"]),
                          ("configuration", "emitter_preflight"))
 
+    def test_declared_parts_are_masked_as_conditioning_outputs_and_a_missing_part_stops_early(self):
+        from slopforge.failures import StageFailure
+        from slopforge.parts import parse_part_spec
+        self._concept_candidates()
+        self.record["parts"] = [parse_part_spec("grip=grip: the grip"), parse_part_spec("trigger=hinge:x:-20..0")]
+        found = {"grip"}
+
+        def masks(_config, cutout, parts, out_dir):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            report = {"parts": {}}
+            for part in parts:
+                if part["name"] in found:
+                    Image.new("L", (32, 32), 255).save(out_dir / f"{part['name']}.png")
+                report["parts"][part["name"]] = {"share": 0.3 if part["name"] in found else 0.0}
+            (out_dir / "masks.json").write_text(json.dumps(report))
+            Image.new("RGB", (32, 32)).save(out_dir / "parts_overlay.png")
+            return report
+        calls = []
+        with patch("slopforge.pipelines.model.make_part_masks", side_effect=masks), \
+                self.assertRaisesRegex(StageFailure, "trigger"):
+            self._approve(lambda *_args, **_kwargs: calls.append(1))
+        self.assertEqual(calls, [])  # no mesh inference for a concept that lacks a declared part
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        execution = asset["executions"][-1]
+        self.assertEqual((execution["failure"]["category"], execution["failure"]["operation"]),
+                         ("configuration", "part_mask_preflight"))
+        stage = next(item for item in execution["stages"] if item["name"] == "conditioning_preparation")
+        self.assertEqual(stage["settings"]["parts"]["parts"], self.record["parts"])  # a changed part re-masks
+        types = sorted(item["type"] for item in stage["outputs"])
+        self.assertEqual(types.count("image.part_mask"), 1)
+        self.assertIn("data.part_masks", types)
+        self.assertIn("image.part_overlay", types)
+
     def test_emitter_preflight_reads_only_the_object_not_the_removed_background(self):
         from slopforge.failures import StageFailure
         from slopforge.pipelines.model import check_emitters_in_concept
