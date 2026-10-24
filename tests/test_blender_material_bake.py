@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -6,7 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageStat
+import numpy as np
+from PIL import Image, ImageDraw, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -646,3 +648,123 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format="GLB")
                     self.assertIn("Removed enclosed inner-shell vertices: 1106", result.stdout)
                     faces = int(result.stdout.split("Input faces: ")[1].split()[0])
                     self.assertEqual(faces, 48 * 24 * 2 - 2 * 48 + 12)  # outer sphere triangulated + cube
+
+
+def _rotated(points, turns):
+    """Points turned about world axes in order, as Blender applies each rotation_euler step."""
+    for axis, degrees in turns:
+        c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+        i, j = {"X": (1, 2), "Y": (2, 0), "Z": (0, 1)}[axis]
+        points = points.copy()
+        points[:, i], points[:, j] = c * points[:, i] - s * points[:, j], s * points[:, i] + c * points[:, j]
+    return points
+
+
+def _boxes_seen_from_front(boxes, turns, size, scale, centre):
+    """An RGBA image and an L mask per box of axis-aligned boxes {name: (centre, size)} posed by turns, drawn as seen
+    from the front: image right is +X, up is +Z."""
+    images = {name: Image.new("L", size, 0) for name in boxes}
+    for name, (middle, extent) in boxes.items():
+        draw = ImageDraw.Draw(images[name])
+        for k in range(3):
+            i, j = [axis for axis in range(3) if axis != k]
+            for side in (-1, 1):
+                quad = np.zeros((4, 3))
+                quad[:, k] = side
+                quad[:, i], quad[:, j] = (-1, 1, 1, -1), (-1, -1, 1, 1)
+                points = _rotated(np.array(middle) + quad * np.array(extent) / 2, turns)
+                draw.polygon([(centre[0] + x * scale, centre[1] - z * scale) for x, _, z in points], fill=255)
+    concept = Image.new("RGBA", size, (0, 0, 0, 0))
+    for mask in images.values():
+        concept.paste((120, 120, 130, 255), mask=mask)
+    return concept, images
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderWeaponOrientationTests(unittest.TestCase):
+    def orient(self, parts, turns, concept, grip):
+        """Box parts joined into one mesh and turned, then the final pass with --target-size=-,1.1,- and --pivot grip;
+        returns its dimensions, extremes, grip centre and recorded concept view."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend = root / "weapon.glb", root / "weapon.blend"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text(f"""import bpy, math, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for location, scale in {list(parts.values())!r}:
+    bpy.ops.mesh.primitive_cube_add(size=1, location=location)
+    bpy.context.object.scale = scale
+bpy.ops.object.select_all(action='SELECT')
+bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
+bpy.ops.object.join()
+bpy.ops.object.transform_apply(scale=True)
+for axis, degrees in {turns!r}:
+    bpy.context.object.rotation_euler = [math.radians(degrees) if name == axis else 0 for name in 'XYZ']
+    bpy.ops.object.transform_apply(rotation=True)
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            concept.save(root / "concept.png")
+            grip.save(root / "grip.png")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
+                            str(blend), *map(str, maps), "--face-budget", "1000", "--surface-source", str(maps[0]),
+                            "--target-size", "-,1.1,-", "--pivot", "grip", "--concept", str(root / "concept.png"),
+                            "--grip-mask", str(root / "grip.png")], check=True, capture_output=True, text=True)
+            probe, result = root / "probe.py", root / "probe.json"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+group = obj.vertex_groups["slopforge_grip"].index
+held = [v.co for v in obj.data.vertices if any(g.group == group for g in v.groups)]
+ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices]
+json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(held) for i in range(3)],
+           "min_y": min(ys), "max_y": max(ys), "min_z": min(zs), "max_z": max(zs),
+           "view": list(obj["slopforge_concept_view"])}, open(sys.argv[-1], 'w'))
+""")
+            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
+                           check=True, capture_output=True, text=True)
+            return json.loads(result.read_text())
+
+    def test_a_weapon_turns_its_tip_forward_and_is_held_at_its_grip(self):
+        # A sword drawn tip right; its mesh is turned 30 degrees, as a reconstruction can be. Final pass: tip along
+        # -Y (Unity +Z), 1.1 m long, origin at the centre of what the grip mask covers. Its blade is drawn shallower
+        # than built, as on the live longsword of 2026-10-24 (4.8% of the length drawn, 5.4% built), where tilting
+        # the flat mesh fitted the outline better (0.92 at phi 30 against 0.83 at 0) and rolled it.
+        parts = {"blade": ((0.5, 0, 0), (1.0, 0.01, 0.08)), "guard": ((-0.015, 0, 0), (0.03, 0.06, 0.3)),
+                 "grip": ((-0.14, 0, 0), (0.22, 0.05, 0.05))}
+        drawn = {**parts, "blade": ((0.5, 0, 0), (1.0, 0.01, 0.07))}
+        concept, masks = _boxes_seen_from_front(drawn, [], (512, 128), 377.6, (114.4, 64))
+        measured = self.orient(parts, [("Z", -30)], concept, masks["grip"])
+        self.assertAlmostEqual(measured["dims"][1], 1.1, places=3)  # its length runs along y
+        # Turned exactly, not in the fit's 5-degree steps, and not rolled about its length: x is the guard's 0.06
+        # thickness and z its 0.3 height, at 1.1/1.25 scale.
+        self.assertAlmostEqual(measured["dims"][0], 0.053, delta=0.003)
+        self.assertAlmostEqual(measured["dims"][2], 0.264, delta=0.005)
+        # The grip's centre is 1.14 of the sword's 1.25 units behind the tip: at 1.1 m the tip is 1.003 m forward
+        # (-Y) of the origin and the pommel end 0.097 m behind it.
+        self.assertAlmostEqual(measured["min_y"], -1.003, delta=0.03)
+        self.assertAlmostEqual(measured["max_y"], 0.097, delta=0.03)
+        fit, theta, _phi = measured["view"]
+        self.assertGreater(fit, 0.7)  # boxes against a hand-drawn concept; generated weapons fit closer
+        self.assertLessEqual(abs(abs(theta) - 30), 5)  # the fit searches in 5-degree steps
+
+    def test_a_weapon_kept_in_its_concept_pose_is_levelled(self):
+        # A crossbow drawn from above at three-quarters. Pixal3D keeps the concept's pose (2026-10-24), so the mesh
+        # is turned 25 degrees and tilted 35 towards the camera, as drawn. Final pass: stock along -Y tip first, bow
+        # across x, lying flat with its grip below the stock.
+        parts = {"stock": ((0, 0, 0), (1.0, 0.06, 0.08)), "bow": ((0.42, 0, 0), (0.04, 0.8, 0.03)),
+                 "grip": ((-0.25, 0, -0.08), (0.08, 0.05, 0.08))}
+        pose = [("Z", 25), ("X", 35)]
+        concept, masks = _boxes_seen_from_front(parts, pose, (512, 384), 350, (256, 192))
+        measured = self.orient(parts, pose, concept, masks["grip"])
+        self.assertAlmostEqual(measured["dims"][1], 1.1, places=3)
+        self.assertAlmostEqual(measured["dims"][0], 0.88, delta=0.01)  # the bow's 0.8 at 1.1 scale
+        # Stock top to grip bottom, 0.16 at 1.1 scale; left tilted it measured 0.54. The grip below the stock
+        # leans the fitted plane about a degree here, and up to 2 degrees on live crossbows (docs/WEAPONS.md).
+        self.assertAlmostEqual(measured["dims"][2], 0.176, delta=0.03)
+        self.assertLess(measured["min_y"], -0.7)  # the tip, 0.75 ahead of the grip at 1.1 scale, is forward
+        self.assertGreater(measured["max_z"], -measured["min_z"])  # the stock sits above the grip

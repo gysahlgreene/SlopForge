@@ -34,7 +34,7 @@ class GlassDeclarationTests(unittest.TestCase):
         rules = reconstruction_rules({"pipeline": "model"}, [bottle])
         self.assertIn("nothing visible through it", rules)
         with self.assertRaisesRegex(ValueError, "glass"):
-            parse_material_spec("bottle=nonmetal#3c965a")
+            parse_material_spec("bottle=metal#3c965a")  # only metal takes no colour
 
 
 class ApplyGlassTests(unittest.TestCase):

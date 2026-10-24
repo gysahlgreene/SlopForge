@@ -196,8 +196,11 @@ and none are declared yet.
     concepts lit or partly lit either way).
 - **Glossy non-metals:** TRELLIS.2 decodes polished stone and glazes as partly or fully
   metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
-  declares metal keeps the generator's values everywhere, including any false metal on
-  its glossy non-metal regions.
+  declares metal keeps the generator's values everywhere, so give its non-metal regions their
+  concept colour, as in `grip=nonmetal#5a3a22: dark leather`. The metallic map is then zeroed
+  where the base colour matches it, with the same colour rule as emitters. A coloured
+  non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
+  An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
   on metal parts. Treat Mac metallic output as unreliable until it is checked on a metal asset.
 - **Hidden faces:** single-image conditioning guesses faces the concept does not show and can copy
@@ -241,6 +244,14 @@ and none are declared yet.
   (`max_concept_darkened_share`), the candidate fails as `colour_darkened` and the next seed is tried; near-grey
   concepts are checked too. Comparing by position is what separates black patches from dark oak beams on plaster,
   which are dark in the concept as well. Calibration, cause and limits: [dark-texture check](media/dark-texture-check-2026-10/README.md).
+- **Thin parts:** the concept-fit check fills each row of the outline between its outer edges, so it cannot see a
+  missing bowstring, guard or handle. `concept_thin_recall` takes the concept's thin parts, meaning what a
+  morphological opening (radius 3 cells on a 256-cell grid) removes from its unfilled mask, and measures the share of
+  them the mesh covers from the concept's side. It is recorded for every model with a fitted view. A type that sets
+  `min_concept_thin_recall` fails a candidate below it as `thin_feature_missing`, and the next seed is tried.
+  - **Not calibrated yet:** of 147 kept props and modules, only six had thin parts covering at least 1% of the
+    object. Those were lanterns, stumps and a canister, and all kept 0.76–1.0 of them.
+  - **So no type declares a limit:** weapons will supply the failing cases.
 - **Detached components:** on six 2026-10-20 H100 props, every component besides the main body
   (3–25 per prop, 7–39% of the triangles) was hidden inside it. Removing them changed no pixel in eight
   views, from the sides, above and below. Mesh preparation now removes enclosed components for props as well as
