@@ -319,6 +319,20 @@ def apply_thin_features(validation, thin, minimum=None):
     return validation
 
 
+def apply_declared_nonmetal(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
+    """Fail a candidate whose base colour has no region for a declared coloured non-metal (retryable quality code)."""
+    measured = round(fraction, 4)
+    validation.setdefault("measured", {})["nonmetal_fraction"] = measured
+    validation.setdefault("limits", {})["min_nonmetal_fraction"] = minimum
+    if measured < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            "brief declares a coloured non-metal but no region of that colour was found in the base colour, so another "
+            "seed is tried; if every seed misses it, check the declared colour against the concept"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "nonmetal_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_concept_fit(validation, view, minimum):
     """Fail a candidate whose mesh no longer matches the concept's outline (retryable quality code).
 

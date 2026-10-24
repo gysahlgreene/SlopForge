@@ -58,20 +58,21 @@ MATERIAL_CLASSES = {
 
 
 def parse_material_spec(spec):
-    """Parse 'region=class[: description]'; class is nonmetal, metal, emissive[#rrggbb] or glass[#rrggbb].
+    """Parse 'region=class[: description]'; class is nonmetal[#rrggbb], metal, emissive[#rrggbb] or glass[#rrggbb].
 
     The optional colour is the region's base colour in the concept; the material stage matches it in the
-    generated base colour map (emitters glow in it, glass turns see-through there). Without one, the region is
-    found as the map's pale near-neutral area.
+    generated base colour map (emitters glow in it, glass turns see-through there, and a coloured non-metal next to
+    declared metal has its metallic zeroed there). Without one, an emitter or glass is found as the map's pale
+    near-neutral area.
     """
     region, separator, rest = spec.partition("=")
     material_class, _, detail = rest.partition(":")
     material_class, _, color = material_class.strip().lower().partition("#")
     region, detail = region.strip(), detail.strip()
-    valid_color = not color or (material_class in ("emissive", "glass") and len(color) == 6
+    valid_color = not color or (material_class in ("emissive", "glass", "nonmetal") and len(color) == 6
                                 and all(c in "0123456789abcdef" for c in color))
     if not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color:
-        raise ValueError("--material must be 'region=nonmetal|metal|emissive[#rrggbb]|glass[#rrggbb][: description]', "
+        raise ValueError("--material must be 'region=nonmetal[#rrggbb]|metal|emissive[#rrggbb]|glass[#rrggbb][: description]', "
                          f"got {spec!r}")
     item = {"region": region, "class": material_class, "description": detail}
     if color:

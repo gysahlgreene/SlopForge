@@ -746,7 +746,33 @@ class DeclaredMaterialTests(unittest.TestCase):
                 self.assertEqual(emission.getpixel((130, 130)), (230, 160, 40))
                 self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
         with self.assertRaisesRegex(ValueError, "--material must be"):
-            parse_material_spec("housing=nonmetal#ffffff")
+            parse_material_spec("housing=metal#ffffff")  # metal has no colour rule
+        self.assertEqual(parse_material_spec("grip=nonmetal#5a3a22: leather")["color"], "#5a3a22")
+
+    def test_a_coloured_nonmetal_beside_declared_metal_loses_its_false_metal(self):
+        # A sword declares a steel blade, so the generator's metallic map is kept; its leather grip must not shine.
+        from slopforge.failures import candidate_quality_rejection
+        from slopforge.style import parse_material_spec
+        sword = [parse_material_spec("blade=metal: steel"), parse_material_spec("grip=nonmetal#5a3a22: leather")]
+        for grip_in_map, status in ((True, "candidate"), (False, "failed")):
+            with self.subTest(grip_in_map=grip_in_map), tempfile.TemporaryDirectory() as temporary:
+                base = Image.new("RGB", (256, 256), (170, 175, 180))  # steel
+                if grip_in_map:
+                    base.paste((90, 58, 34), (0, 0, 80, 256))  # the grip's leather colour
+                candidate = self._candidate(Path(temporary), sword, 200, base)
+                validation = candidate["validation"]
+                self.assertEqual(candidate["status"], status)
+                self.assertEqual(candidate["metallic_source"], "generator_with_declared_nonmetals")
+                with Image.open(Path(temporary) / candidate["outputs"]["metallic"]) as metallic:
+                    grey = metallic.convert("L")
+                    self.assertEqual(grey.getpixel((200, 128)), 200)  # the steel keeps its metal
+                    if grip_in_map:
+                        self.assertEqual(grey.getpixel((40, 128)), 0)  # the leather is a dielectric
+                if grip_in_map:
+                    self.assertGreater(validation["measured"]["nonmetal_fraction"], 0.2)
+                else:
+                    self.assertEqual(validation["failure_codes"], ["nonmetal_missing"])
+                    self.assertTrue(candidate_quality_rejection(validation))
 
     def test_reconstruction_rules_are_appended_to_agent_prompts_with_materials(self):
         from slopforge.style import parse_material_spec, reconstruction_rules

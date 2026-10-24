@@ -196,8 +196,11 @@ and none are declared yet.
     concepts lit or partly lit either way).
 - **Glossy non-metals:** TRELLIS.2 decodes polished stone and glazes as partly or fully
   metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
-  declares metal keeps the generator's values everywhere, including any false metal on
-  its glossy non-metal regions.
+  declares metal keeps the generator's values everywhere, so give its non-metal regions their
+  concept colour, as in `grip=nonmetal#5a3a22: dark leather`. The metallic map is then zeroed
+  where the base colour matches it, with the same colour rule as emitters. A coloured
+  non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
+  An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
   on metal parts. Treat Mac metallic output as unreliable until it is checked on a metal asset.
 - **Hidden faces:** single-image conditioning guesses faces the concept does not show and can copy
