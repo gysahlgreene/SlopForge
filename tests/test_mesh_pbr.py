@@ -937,6 +937,45 @@ class DeclaredMaterialTests(unittest.TestCase):
                     self.assertEqual(gain, 1.0)
                     self.assertEqual(steel, (33, 34, 34))
 
+    def test_a_small_region_drifting_from_the_concept_colour_is_shifted_back(self):
+        # TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed while the whole-object checks, ruled
+        # by the black steel, passed (2026-10-24). A type that opts in has each non-metal colour shifted to the concept.
+        from slopforge.style import parse_material_spec
+        from slopforge.validation import _lab
+        pistol = [parse_material_spec("slide=metal: steel"), parse_material_spec("grips=nonmetal: rosewood")]
+
+        def view(_root, _config, _cutout, _mesh, paths, name, **options):
+            with Image.open(options.get("basecolor", paths["basecolor"])) as texture:
+                texture.convert("RGBA").resize((64, 64)).save(paths["directory"] / f"{name}_base.png")
+            return {"status": "rendered", "silhouette_iou": 0.95}
+
+        for opted_in in (True, False):
+            with self.subTest(opted_in=opted_in), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                concept = Image.new("RGBA", (64, 64), (60, 60, 64, 255))
+                concept.paste((150, 52, 32, 255), (0, 0, 24, 64))  # rosewood
+                concept.save(root / "concept_cutout.png")
+                base = Image.new("RGB", (64, 64), (60, 60, 64))
+                base.paste((96, 58, 30), (0, 0, 24, 64))  # decoded orange-brown
+                metallic = Image.new("L", (64, 64), 255)
+                metallic.paste(0, (0, 0, 24, 64))
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, pistol, 0, base, cutout=root / "concept_cutout.png",
+                                                limits={"concept_colour_transfer": True} if opted_in else {},
+                                                metallic_map=metallic)
+                with Image.open(root / candidate["outputs"]["basecolor"]) as result:
+                    grip, steel = result.convert("RGB").getpixel((10, 32)), result.convert("RGB").getpixel((50, 32))
+                self.assertEqual(steel, (60, 60, 64))  # metal is not shifted
+                measured = candidate["validation"]["measured"]
+                if opted_in:
+                    hue = lambda rgb: np.degrees(np.arctan2(*_lab(np.array([rgb], float))[0, [2, 1]]))
+                    self.assertAlmostEqual(hue(grip), hue((150, 52, 32)), delta=3)  # the concept's hue
+                    self.assertGreater(_lab(np.array([grip], float))[0, 0], _lab(np.array([[96, 58, 30]], float))[0, 0])
+                    self.assertTrue(any("shift_ab" in entry for entry in measured["concept_colour_transfer"].values()))
+                else:
+                    self.assertEqual(grip, (96, 58, 30))
+                    self.assertNotIn("concept_colour_transfer", measured)
+
     def test_too_little_lit_metal_is_left_as_decoded(self):
         from slopforge.unity_material import match_metal_lightness
         with tempfile.TemporaryDirectory() as temporary:

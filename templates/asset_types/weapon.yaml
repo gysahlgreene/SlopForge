@@ -14,6 +14,9 @@ max_components: 5
 max_concept_hue_difference: 4
 min_concept_chroma_ratio: 0.6
 max_concept_darkened_share: 0.4
+# Small coloured regions (grips, stocks) are shifted towards the concept's colours from its side: the whole-object
+# checks passed a pistol's rosewood grips decoded orange-brown on every seed (docs/MATERIALS.md).
+concept_colour_transfer: true
 min_concept_fit: 0.8
 # Replaces the props' "no thin parts" rule, which a blade or a bowstring cannot follow.
 reconstruction_rule: >-

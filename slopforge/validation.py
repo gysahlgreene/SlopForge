@@ -448,15 +448,22 @@ def _lab(rgb):
     return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], -1)
 
 
-def _lightness_cells(rgba, n):
-    """CIELAB L* of an RGBA object image cropped to its bounds and averaged onto n x n cells, and which cells it
-    covers."""
+def _lab_cells(rgba, n):
+    """CIELAB of an RGBA object image cropped to its bounds and averaged onto n x n cells, which cells it covers, and
+    the crop box."""
     mask = rgba[..., 3] > 200
     ys, xs = np.nonzero(mask)
     box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
     colour = Image.fromarray(rgba[..., :3].astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
     cover = Image.fromarray((mask * 255).astype(np.uint8)).crop(box).resize((n, n), Image.BOX)
-    return _lab(np.asarray(colour, dtype=float).reshape(-1, 3))[:, 0].reshape(n, n), np.asarray(cover) > 128
+    return _lab(np.asarray(colour, dtype=float).reshape(-1, 3)).reshape(n, n, 3), np.asarray(cover) > 128, box
+
+
+def _lightness_cells(rgba, n):
+    """CIELAB L* of an RGBA object image cropped to its bounds and averaged onto n x n cells, and which cells it
+    covers."""
+    lab, cover, _ = _lab_cells(rgba, n)
+    return lab[..., 0], cover
 
 
 def concept_darkened_share(cutout, view):

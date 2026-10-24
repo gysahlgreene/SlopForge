@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
 from .provenance import file_sha256
-from .validation import DARKENED_LIT, _lightness_cells
+from .validation import DARKENED_LIT, MIN_CONCEPT_CHROMA, _lab, _lab_cells, _lightness_cells
 
 
 def unity_cli(project_root):
@@ -178,6 +178,83 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
     pixels[..., :3] = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
     Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
     return gain
+
+
+COLOUR_CLUSTERS = 3  # non-metal colours told apart in a map: a pistol's grips came out as three wood tones
+MIN_CLUSTER_CELLS = 4  # concept-side cells a colour needs before its shift is measured
+MAX_CHROMA_SHIFT = 25.0  # CIELAB a*b* units; a larger drift is not a tint
+BORROW_DISTANCE = 20.0  # a colour too small to measure takes a measured colour's shift only if this close in CIELAB
+LIGHTNESS_SHARE = 0.5  # a lit concept is brighter than albedo, so lightness moves half way to it, and never down
+
+
+def _srgb_from_lab(lab):
+    """sRGB 0-255 of an (..., 3) CIELAB (D65) array, clipped to the gamut."""
+    fy = (lab[..., 0] + 16) / 116
+    f = np.stack([fy + lab[..., 1] / 500, fy, fy - lab[..., 2] / 200], -1)
+    xyz = np.where(f > 6 / 29, f ** 3, 3 * (6 / 29) ** 2 * (f - 4 / 29)) * np.array([0.95047, 1.0, 1.08883])
+    linear = np.clip(xyz @ np.array([[3.2406, -1.5372, -0.4986], [-0.9689, 1.8758, 0.0415],
+                                     [0.0557, -0.2040, 1.0570]]).T, 0, 1)
+    return np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055) * 255
+
+
+def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, metal_view):
+    """Shift each non-metal colour of the base colour map towards the concept's; returns a report per colour.
+
+    TRELLIS.2 decoded a pistol's rosewood grips more orange and darker than drawn on every seed (CIELAB hue angle 43
+    against 37, 2026-10-24), and the whole-object colour checks, dominated by the black steel, passed them. Non-metal
+    texels are grouped into COLOUR_CLUSTERS colours. Each colour's cells seen from the concept's side (cutout,
+    base_view and metal_view are RGBA arrays, as for match_metal_lightness), where it covers most of the cell and the
+    concept is chromatic, give the median CIELAB a*b* offset to the concept and lightness ratio. A colour with too
+    few cells borrows the nearest measured colour's shift within BORROW_DISTANCE.
+    """
+    with Image.open(basecolor_path) as image:
+        mode, pixels = image.mode, np.asarray(image.convert("RGBA"), dtype=np.float32)
+    with Image.open(metallic_path) as image:
+        metallic = np.asarray(image.convert("L").resize((pixels.shape[1], pixels.shape[0])), dtype=np.float32) / 255
+    nonmetal = (metallic < 0.5) & (pixels[..., :3].max(-1) > 5)
+    if nonmetal.sum() < 100:
+        return {}
+    lab = _lab(pixels[..., :3][nonmetal]).astype(np.float32)
+    rng = np.random.default_rng(0)
+    centres = lab[rng.choice(len(lab), COLOUR_CLUSTERS, replace=False)] if len(lab) >= COLOUR_CLUSTERS else lab
+    sample = lab[rng.choice(len(lab), min(60000, len(lab)), replace=False)]
+    for _ in range(20):  # k-means on a sample of the texels
+        labels = np.argmin(((sample[:, None] - centres[None]) ** 2).sum(-1), 1)
+        centres = np.array([sample[labels == k].mean(0) if (labels == k).any() else centres[k]
+                            for k in range(len(centres))])
+    nearest = lambda colours: np.argmin(((colours[..., None, :] - centres) ** 2).sum(-1), -1)
+    concept, concept_cover, _ = _lab_cells(cutout, METAL_LIGHTNESS_GRID)
+    texture, texture_cover, (x0, y0, x1, y1) = _lab_cells(base_view, METAL_LIGHTNESS_GRID)
+    seen = (base_view[..., 3] > 200) & (metal_view[..., 0] < 128)
+    view_labels = nearest(_lab(base_view[..., :3].reshape(-1, 3)).reshape(*base_view.shape[:2], 3))
+    report, shifts = {}, {}
+    for k in range(len(centres)):
+        covered = ((view_labels == k) & seen)[y0:y1, x0:x1].astype(np.uint8) * 255
+        share = np.asarray(Image.fromarray(covered).resize((METAL_LIGHTNESS_GRID,) * 2, Image.BOX), dtype=float) / 255
+        cells = (concept_cover & texture_cover & (share > 0.6)
+                 & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA))
+        report[k] = {"colour": [round(float(value), 1) for value in centres[k]], "cells": int(cells.sum())}
+        if cells.sum() >= MIN_CLUSTER_CELLS:
+            shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
+            shift *= min(1.0, MAX_CHROMA_SHIFT / max(float(np.hypot(*shift)), 1e-6))
+            ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, 2))
+            shifts[k] = (shift, ratio)
+    labels = nearest(lab)
+    for k in report:
+        source = k if k in shifts else min(
+            (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE),
+            key=lambda j: np.linalg.norm(centres[j] - centres[k]), default=None)
+        if source is None:
+            continue
+        shift, ratio = shifts[source]
+        lab[labels == k, 1:] += shift
+        lab[labels == k, 0] = np.clip(lab[labels == k, 0] * (1 + LIGHTNESS_SHARE * (ratio - 1)), 0, 100)
+        report[k].update({"shift_ab": [round(float(value), 1) for value in shift],
+                          "lightness": round(1 + LIGHTNESS_SHARE * (ratio - 1), 3), "from": source})
+    if any("shift_ab" in entry for entry in report.values()):
+        pixels[..., :3][nonmetal] = _srgb_from_lab(lab)
+        Image.fromarray(pixels.round().clip(0, 255).astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
+    return report
 
 
 def glass_material_path(material):
