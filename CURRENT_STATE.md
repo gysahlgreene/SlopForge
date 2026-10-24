@@ -793,3 +793,11 @@ Dark-texture check (2026-10-24; [evidence](docs/media/dark-texture-check-2026-10
   - five darkened examples; the cliff is closest to the limit (0.45);
   - timber walls with thickened near-black beams score 0.28–0.36 and are accepted;
   - existing projects must add the key to their own asset types.
+
+Thin-part recall (2026-10-24, M3 step W2, epic #107).
+- **Measure:** `concept_thin_recall` is recorded for every model with a fitted concept view: the share of the concept's
+  thin parts (strings, guards, rings, handles) that the mesh keeps from the concept's side. It fails a candidate as
+  `thin_feature_missing` only where a type declares `min_concept_thin_recall`.
+- **Not calibrated:** of 147 kept views only six had thin parts over 1% of the object, and all kept 0.76–1.0 of them.
+  No failures exist to set a limit from, so none is declared; the weapon runs will provide them.
+- **Tests:** a bow's 2-pixel string that is dropped fails only when a minimum is declared, and is recorded either way.

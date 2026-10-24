@@ -30,7 +30,7 @@ from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
-                          concept_colour_fidelity, is_placeholder_normal, measure_material_maps, validate_image,
+                          apply_thin_features, concept_colour_fidelity, concept_thin_recall, is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
 
@@ -1256,6 +1256,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                                                                                   view), *colour_limits)
         if min_fit is not None:
             validation = apply_concept_fit(validation, view, min_fit)
+        if rendered is not None:  # recorded for every model; enforced where the type declares a minimum
+            validation = apply_thin_features(validation, concept_thin_recall(cutout, rendered),
+                                             asset_type.get("min_concept_thin_recall"))
     paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
     failure = _validation_failure(validation, stage="material_assembly_export", attempt=number)
     assembly_outputs = [(paths[key], _MATERIAL_ARTIFACT_TYPES[key]) for key in

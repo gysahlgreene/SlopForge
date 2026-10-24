@@ -262,6 +262,63 @@ def apply_declared_glass(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
     return validation
 
 
+THIN_GRID = 256  # cells along the object's longest side
+THIN_RADIUS = 3  # parts narrower than about 7 cells (under 3% of the longest side) count as thin
+THIN_MIN_SPECK = 15  # cells; smaller thin specks are outline corners, not parts
+THIN_MIN_SHARE = 0.01  # thin parts covering less of the object than this are not checked
+
+
+def _object_mask(path):
+    """An image's object mask cropped to its bounds, longest side THIN_GRID, aspect kept."""
+    with Image.open(path) as image:
+        mask = np.asarray(image.convert("RGBA"))[..., 3] > 200
+    ys, xs = np.nonzero(mask)
+    mask = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    scale = THIN_GRID / max(mask.shape)
+    size = (max(1, round(mask.shape[1] * scale)), max(1, round(mask.shape[0] * scale)))
+    fitted = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize(size, Image.BOX)) > 127
+    out = np.zeros((THIN_GRID, THIN_GRID), bool)
+    out[:fitted.shape[0], :fitted.shape[1]] = fitted
+    return out
+
+
+def concept_thin_recall(cutout_path, view_path):
+    """How much of the concept's thin parts (strings, guards, rings, handles) the reconstruction kept, seen from the
+    concept's side; recall is None when thin parts cover under THIN_MIN_SHARE of the object.
+
+    The concept-fit check fills each outline row between its outer edges, so a missing bowstring cannot lower it.
+    Here the concept's thin parts are what a morphological opening removes from its unfilled mask, and recall is the
+    share of them the slightly widened mesh mask covers. On 147 kept props and modules only six had thin parts over
+    1% of the object (lanterns, stumps, a canister), and all kept 0.76-1.0 of them (2026-10-24).
+    """
+    from scipy import ndimage
+    concept, mesh = _object_mask(cutout_path), _object_mask(view_path)
+    y, x = np.ogrid[-THIN_RADIUS:THIN_RADIUS + 1, -THIN_RADIUS:THIN_RADIUS + 1]
+    thin = concept & ~ndimage.binary_opening(concept, structure=x * x + y * y <= THIN_RADIUS ** 2)
+    labels, count = ndimage.label(thin)
+    sizes = ndimage.sum(thin, labels, range(1, count + 1))
+    thin = np.isin(labels, [index + 1 for index, size in enumerate(sizes) if size >= THIN_MIN_SPECK])
+    share = float(thin.sum() / max(concept.sum(), 1))
+    covered = ndimage.binary_dilation(mesh, iterations=2)
+    recall = round(float((thin & covered).sum() / thin.sum()), 3) if share >= THIN_MIN_SHARE else None
+    return {"concept_thin_share": round(share, 4), "concept_thin_recall": recall}
+
+
+def apply_thin_features(validation, thin, minimum=None):
+    """Record thin-part recall; below a declared minimum the candidate fails as thin_feature_missing (retryable)."""
+    validation.setdefault("measured", {}).update(thin)
+    recall = thin.get("concept_thin_recall")
+    if minimum is None or recall is None:
+        return validation
+    validation.setdefault("limits", {})["min_concept_thin_recall"] = minimum
+    if recall < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the mesh kept {recall} of the concept's thin parts (limit {minimum}), so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "thin_feature_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_concept_fit(validation, view, minimum):
     """Fail a candidate whose mesh no longer matches the concept's outline (retryable quality code).
 
