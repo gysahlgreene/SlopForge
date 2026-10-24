@@ -63,7 +63,11 @@ def test_live_h100_trellis_bf16_and_local_blender_pipeline():
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        concept = ROOT / "img/power-relay-concept.png"
+        # Cut out first, as the pipeline does: the model graph rebuilds an opaque concept's backdrop.
+        concept = root / "relay-cutout.png"
+        subprocess.run([sys.executable, str(ROOT / "processing/prepare_3d_input.py"), "--input",
+                        str(ROOT / "img/power-relay-concept.png"), "--cutout", str(concept),
+                        "--output", str(root / "relay-flat.png")], check=True, cwd=ROOT)
         output = root / "relay.glb"
         command = [sys.executable, str(ROOT / "processing/comfy_generate_3d.py"), "--image", str(concept),
                    "--name", "integration_relay", "--dest", str(output), "--workflow",

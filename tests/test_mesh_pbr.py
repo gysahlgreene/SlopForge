@@ -11,6 +11,8 @@ from slopforge.pipelines.model import _generate_material_candidate, _native_mate
 from slopforge.manifest import begin_stage, save_manifest, start_execution, start_stage
 from slopforge.unity_material import make_metallic_gloss
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class MeshPBRTests(unittest.TestCase):
     def test_retexture_passes_processed_mesh_to_blender_only_with_reuse_proof(self):
@@ -75,11 +77,27 @@ class MeshPBRTests(unittest.TestCase):
         self.assertEqual(identities[0][1]["prepared_mesh.model_file"], "b" * 64)
         self.assertNotEqual(identities[0][0]["effective_sha256"], identities[1][0]["effective_sha256"])
 
+    def test_a_model_workflow_refuses_an_opaque_concept_before_inference(self):
+        # The model graphs crop to the concept's alpha and remove no background: an opaque concept came back as the
+        # weapon on a card or inside a box of its backdrop (2026-10-24 weapon graph A/B).
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = root / "concept.png"
+            Image.new("RGB", (8, 8), (255, 255, 255)).save(image)
+            with patch.object(comfy_generate_3d, "ComfyUIClient") as client, \
+                    patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image), "--name", "relay",
+                                               "--dest", str(root / "relay.glb"), "--workflow",
+                                               str(ROOT / "workflows/trellis2_image_to_model_h100_api.json")]), \
+                    self.assertRaises(SystemExit) as stopped:
+                comfy_generate_3d.main()
+        self.assertEqual(stopped.exception.code, 1)
+        client.assert_not_called()
+
     def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             image = root / "concept.png"
-            image.write_bytes(b"concept")
+            Image.new("RGBA", (8, 8), (0, 0, 0, 0)).save(image)
             workflow_path = root / "trellis.json"
             workflow_path.write_text(json.dumps({
                 "prepared_mesh": {"class_type": "Load3DAdvanced", "inputs": {"model_file": "none", "viewport_state": {},
