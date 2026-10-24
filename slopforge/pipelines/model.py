@@ -31,7 +31,8 @@ from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
-                          apply_module_stretch, apply_thin_features, concept_colour_fidelity, concept_thin_recall,
+                          apply_module_stretch, apply_thin_features, apply_weapon_orientation,
+                          concept_colour_fidelity, concept_thin_recall,
                           is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -1261,6 +1262,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_nonmetal(validation, nonmetal_fraction)
     if metal_gain is not None:
         validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
+    if held:
+        validation = apply_weapon_orientation(validation)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),

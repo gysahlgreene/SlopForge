@@ -997,3 +997,16 @@ class PropComponentBudgetTests(unittest.TestCase):
         report = _quality_report(component_count=1)
         report["measured"]["arm_taper"] = [1.002, 1.007]
         self.assertEqual(apply_module_footprint(report, [0.31, 0.55, 0.37, 0.0], "corner").get("failure_codes", []), [])
+
+    def test_a_weapon_whose_length_runs_across_the_concept_view_is_retried(self):
+        # Two crossed swords reconstructed at alignment 0.0 and stopped approval as a Blender crash (2026-10-24); it
+        # is a quality rejection, so the next seed is tried. A three-quarter crossbow at 0.45 is oriented.
+        from slopforge.validation import apply_weapon_orientation
+        for alignment, codes in ((0.0, ["weapon_orientation"]), (0.45, [])):
+            report = _quality_report(component_count=1)
+            report["measured"]["concept_view"] = {"fit": 0.73, "theta": -90, "phi": 0, "tip_alignment": alignment}
+            result = apply_weapon_orientation(report)
+            self.assertEqual(result.get("failure_codes", []), codes)
+            self.assertEqual(result["measured"]["weapon_tip_alignment"], alignment)
+            self.assertEqual(candidate_quality_rejection(result), bool(codes))
+        self.assertEqual(apply_weapon_orientation({"measured": {}}), {"measured": {}})  # not a held weapon
