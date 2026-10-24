@@ -25,7 +25,7 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              make_metallic_gloss, unity_cli, zero_metallic)
+                              make_metallic_gloss, match_metal_lightness, unity_cli, zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
@@ -1191,6 +1191,17 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         kit_settings["kit_roughness"] = kit_roughness
     glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
+    metal_gain = None
+    cutout = (lineage or {}).get("concept_cutout")
+    if declares_metal and cutout and Path(cutout).is_file():
+        # Metal drawn lighter than the generator decoded it is brightened to the concept (match_metal_lightness).
+        views = {name: _concept_view(root, config, cutout, mesh_path, paths, name, min_iou=0.8, uv=False,
+                                     **({"basecolor": str(paths["metallic"])} if name == "metal_metallic" else {}))
+                 for name in ("metal_base", "metal_metallic")}
+        if all(view.get("status") == "rendered" for view in views.values()):
+            arrays = [np.asarray(Image.open(path).convert("RGBA"), dtype=float) for path in
+                      (cutout, paths["directory"] / "metal_base_base.png", paths["directory"] / "metal_metallic_base.png")]
+            metal_gain = round(match_metal_lightness(paths["basecolor"], paths["metallic"], *arrays), 3)
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1248,6 +1259,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_glass(validation, glass_fraction)
     if nonmetal_fraction is not None:
         validation = apply_declared_nonmetal(validation, nonmetal_fraction)
+    if metal_gain is not None:
+        validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
