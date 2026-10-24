@@ -516,6 +516,37 @@ class DeclaredMaterialTests(unittest.TestCase):
                 else:
                     self.assertLess(validation["measured"]["concept_darkened_share"], 0.1)
 
+    def test_a_mesh_that_drops_the_concepts_thin_parts_retries_when_a_minimum_is_declared(self):
+        # A bow's string is a few pixels wide: the row-filled concept fit cannot see it go missing.
+        from slopforge.failures import candidate_quality_rejection
+        bow = [{"region": "bow", "class": "nonmetal", "description": "yew"}]
+
+        def picture(string):
+            image = Image.new("RGBA", (256, 128), (0, 0, 0, 0))
+            image.paste((120, 80, 40, 255), (20, 20, 60, 108))  # the bow's thick riser
+            if string:
+                image.paste((230, 230, 220, 255), (200, 20, 202, 108))  # a 2-pixel string
+            return image
+        for limit, string, status in ((None, False, "candidate"), (0.6, True, "candidate"), (0.6, False, "failed")):
+            with self.subTest(limit=limit, string=string), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                picture(True).save(root / "concept_cutout.png")
+
+                def view(_root, _config, _cutout, _mesh, paths, name, **_options):
+                    picture(string).save(paths["directory"] / f"{name}_base.png")
+                    return {"status": "rendered", "silhouette_iou": 0.95}
+                limits = {"max_concept_hue_difference": 4, **({"min_concept_thin_recall": limit} if limit else {})}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, bow, 0, Image.new("RGB", (64, 64), (120, 80, 40)),
+                                                cutout=root / "concept_cutout.png", limits=limits)
+                measured = candidate["validation"]["measured"]
+                self.assertEqual(candidate["status"], status)
+                self.assertGreater(measured["concept_thin_share"], 0.01)
+                self.assertEqual(measured["concept_thin_recall"], 1.0 if string else 0.0)  # recorded either way
+                if status == "failed":
+                    self.assertEqual(candidate["validation"]["failure_codes"], ["thin_feature_missing"])
+                    self.assertTrue(candidate_quality_rejection(candidate["validation"]))
+
     def test_without_a_concept_view_only_hue_is_checked_on_the_whole_map(self):
         # Hidden insides and bases lower the whole map's saturation (2026-10-21 jug: 0.42 of the concept's,
         # 0.83 from the concept's side), so a washed-out atlas alone must not fail the candidate.
