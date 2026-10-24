@@ -151,6 +151,17 @@ result against that declaration before anyone reviews it.
    with the zero map. The crate kept its generator map (mean 0.04), with metallic texels on
    the grey iron brackets.
 
+   **Metal lightness.** When the brief declares metal, the material stage also renders the base
+   colour and metallic maps from the concept's fitted view. Where metal is lit in the concept,
+   every metal texel (metallic over 0.5) is scaled in linear RGB, keeping its hue, so its
+   luminance matches the concept's. The scale is the median over metal cells and is never below
+   1. Iron drawn dark stays dark, and fewer than six lit metal cells leave the map as decoded.
+   The gain is recorded as `metal_lightness_gain`. TRELLIS.2 decoded a pistol's blued steel
+   near-black (0.13 sRGB, about 2% reflectance, less than any metal) where its concept showed
+   dark grey; the slide rendered as a black mirror, and three seeds failed the dark-texture
+   check. With the step the slide reads as dark steel (gain 3.76, darkened share 0.013); a fixed
+   floor of 0.48 instead read as chrome ([evidence](media/weapon-pipeline-2026-10/README.md)).
+
 9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
    above so they are not rendered edge-on. For a lit turntable of any material candidate,
