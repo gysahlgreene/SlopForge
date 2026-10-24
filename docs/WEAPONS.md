@@ -3,14 +3,18 @@
 Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)). They are
 **Experimental**: no weapon has yet gone through the protocol.
 
+A pistol, a longsword and a crossbow have been through the full pipeline, one run each; the owner accepted their look
+for now (2026-10-24, [evidence](media/weapon-pipeline-2026-10/README.md)).
+
 **In place:**
-- the `weapon` type;
+- the `weapon` type, on TRELLIS.2 with Blender's full-detail reduction on every H100 profile;
 - part masks;
 - orientation and the grip pivot;
 - the thin-part measure;
-- coloured non-metals.
+- coloured non-metals, metal brightened to the concept, and concept colours for small parts.
 
-**Still planned** (listed in the epic): splitting moving parts from the mesh, the bowstring, and Unity motion.
+**Still planned** (listed in the epic): splitting moving parts from the mesh, Unity motion, and the W-v1 protocol. The
+bowstring feature is deferred: every crossbow so far kept its string.
 
 ## The `weapon` type
 
