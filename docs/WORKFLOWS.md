@@ -17,6 +17,12 @@ SlopForge stores API-format ComfyUI graphs in `workflows/`; a project override i
 | `image_views_qwen_edit_api.json` | Front, side and back views of an approved concept for multi-view conditioning (`workflows.views`) | Qwen-Image-Edit-2511 fp8mixed, Qwen2.5-VL-7B fp8, Qwen VAE, fal multiple-angles LoRA | Experimental. Live H100 inference on two props (2026-10-20); see [multi-view conditioning](#multi-view-conditioning-props). |
 | `pixal3d_multiview_image_to_model_h100_api.json` | Four-view image-to-3D mesh-aware PBR (`h100_multiview` props) | Pixal3D multi-view BF16, DINOv3+NAF, TRELLIS.2 shape and texture VAEs | Experimental. Same structure as the H100 TRELLIS.2 prop graph (GPU UDF remesh 384, Blender UVs and normal bake); live H100 inference on two props (2026-10-20). |
 
+**Model graphs need the cut-out.** Every model graph crops to its input's transparency and removes no background,
+so pass the concept cut-out (`slopforge.surface.make_cutout`), as the pipeline does. Given an opaque concept, the
+graphs rebuilt the backdrop as a card or box around the object (2026-10-24,
+[weapon graph comparison](media/weapon-graph-2026-10/README.md)), so `processing/comfy_generate_3d.py` refuses an
+image without an alpha channel before inference.
+
 The Z-Image graph uses ComfyUI core nodes. TRELLIS graphs use ComfyUI's TRELLIS.2 node set (`Trellis2*`, `VaeDecode*`, `BakeTextureFromVoxel`, `ApplyTextureToMesh`, `SaveGLB`, and related nodes). Pixal3D adds `Pixal3DConditioning` and uses ComfyUI's mesh remeshing and UV unwrap nodes. On 2026-10-04 the four TRELLIS API graph files passed `ComfyUIClient.validate_workflow()` against the live H100 `/object_info` response; Pixal3D ran successfully on the H100 on 2026-10-08.
 
 The model and node versions installed in a ComfyUI service can differ from these workflows. Check upstream model and custom-node requirements before running a graph.

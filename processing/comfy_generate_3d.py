@@ -422,6 +422,13 @@ def main():
         print(f"Input image does not exist: {src}", file=sys.stderr)
         sys.exit(1)
 
+    if args.workflow and validate_image(src, expected_format=None, require_alpha=True)["status"] == "failed":
+        # The model graphs crop to the concept's alpha and remove no background: an opaque concept is rebuilt with
+        # its backdrop, as a card or box around the object (2026-10-24 weapon graph A/B, docs/WORKFLOWS.md).
+        print(f"Model workflows need the concept cut-out with transparency (slopforge.surface.make_cutout); "
+              f"{src.name} has no alpha channel", file=sys.stderr)
+        sys.exit(1)
+
     name = safe_name(args.name)
 
     if not name:

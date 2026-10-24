@@ -372,8 +372,8 @@ if not reuse_stage_mesh:
 # -------------------------------------------------
 
 if "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only:
-    # A weapon is drawn tip or muzzle right, top up. Turn the concept's right to -Y (forward in Unity once exported)
-    # and its up to +Z, from the view that best fits the concept, and mark the faces under the grip mask.
+    # A weapon is drawn tip or muzzle right. Turn its tip to -Y (forward in Unity once exported) and its top to +Z,
+    # and mark the faces under the grip mask, seen from the view that best fits the concept.
     import numpy as np
     from concept_view import fit_view, image_mask, surface_samples, to_concept_pixels, view_axes
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
@@ -393,7 +393,24 @@ if "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only:
         group = obj.vertex_groups.new(name="slopforge_grip")
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
-    source = Matrix((right, up, right.cross(up))).transposed()
+    # Levelled from the weapon's own shape, not the fitted view (2026-10-24, docs/WEAPONS.md, Orientation): TRELLIS
+    # rebuilds a weapon upright and lengthwise whatever the concept's camera, Pixal3D keeps the concept's pose (a
+    # crossbow drawn from above came back tilted 21 degrees), and tilting by the fitted view rolled a flat longsword
+    # 30 degrees about its length, since its outline barely changes with tilt. A weapon whose thinnest axis is nearer
+    # vertical than horizontal lies flat in its concept, like that crossbow, and the axis is its top; a side-on
+    # weapon's top is +Z. Its length is its longest axis across the top (the full 3D one leans 19-25 degrees towards
+    # a pistol's grip), pointed at the end the concept draws on the right.
+    centred = samples - samples.mean(0)
+    thinnest = np.linalg.eigh(centred.T @ centred)[1][:, 0]
+    top = thinnest * np.sign(thinnest[2]) if abs(thinnest[2]) > math.sqrt(0.5) else np.array([0.0, 0.0, 1.0])
+    across = centred - np.outer(centred @ top, top)
+    length = np.linalg.eigh(across.T @ across)[1][:, -1]
+    towards_tip = float(length @ np.array(right))
+    if abs(towards_tip) < 0.5:
+        raise SystemExit(f"The concept's fitted view (theta {theta}, phi {phi}) looks along the weapon's length, so "
+                         "its tip is ambiguous; approve a concept that shows the weapon's length, tip or muzzle right")
+    forward, top = Vector(length * np.sign(towards_tip)), Vector(top)
+    source = Matrix((forward, top, forward.cross(top))).transposed()
     target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
     obj.data.transform((target @ source.inverted()).to_4x4())
     obj.data.update()
