@@ -15,6 +15,7 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
+from .parts import parse_part_box, parse_part_spec, set_part_boxes, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -43,6 +44,9 @@ def parser():
     generate.add_argument("--image-prompt", help="Agent-authored prompt; model assets also get reconstruction and material rules appended")
     generate.add_argument("--material", action="append", default=[], dest="materials",
                           help="Declare a material region: 'region=nonmetal[#rrggbb]|metal|emissive[#rrggbb]|glass[#rrggbb][: description]' (repeatable)")
+    generate.add_argument("--part", action="append", default=[], dest="parts",
+                          help="Declare a part to split from the mesh: 'name=grip[: description]' or "
+                               "'name=hinge|slide:x|y|z:min..max[: description]' (repeatable; docs/WEAPONS.md)")
     generate.add_argument("--aspect", choices=tuple(model.CONCEPT_ASPECTS),
                           help="Concept canvas for a 3D asset: portrait for objects taller than wide, landscape for "
                                "wider, wide for long objects such as weapons (an asset type can set its own default)")
@@ -89,6 +93,9 @@ def parser():
     approve.add_argument("--force", action="store_true")
     approve.add_argument("--resume", action="store_true", help="Resume an incomplete prop execution")
     approve.add_argument("--quality-tier", help="Override the selected candidate's tier for 3D processing")
+    approve.add_argument("--part-box", action="append", default=[], dest="part_boxes",
+                         help="Where a declared part lies on the approved concept: 'name=x0,y0,x1,y1' as fractions of "
+                              "its width and height from the top left (repeatable; docs/WEAPONS.md)")
     reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
     reject.add_argument("name")
     reject.add_argument("candidate", type=int)
@@ -901,6 +908,10 @@ def _run(args):
             if not getattr(args, "_guided", False):
                 print(json.dumps(result, indent=2))
         elif recipe["pipeline"] == "model":
+            boxes = [parse_part_box(spec) for spec in getattr(args, "part_boxes", [])]
+            if boxes:  # saved first: approval reloads the manifest from disk
+                record["parts"] = set_part_boxes(record.get("parts") or [], boxes)
+                save_manifest(manifest_path, manifest)
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),
@@ -916,6 +927,9 @@ def _run(args):
     materials = [parse_material_spec(spec) for spec in getattr(args, "materials", [])]
     if materials and recipe["pipeline"] != "model":
         raise ValueError(f"--material applies to 3D asset types; {asset_type} is an image asset type")
+    parts = validate_parts([parse_part_spec(spec) for spec in getattr(args, "parts", [])])
+    if parts and recipe["pipeline"] != "model":
+        raise ValueError(f"--part applies to 3D asset types; {asset_type} is an image asset type")
     if getattr(args, "aspect", None) and recipe["pipeline"] != "model":
         raise ValueError(f"--aspect applies to 3D asset types; {asset_type} is an image asset type")
     if getattr(args, "shape_guide", None) and recipe["pipeline"] != "model":
@@ -944,11 +958,15 @@ def _run(args):
                        "style_version": style["version"], "status": "generating"})
         if materials:
             record["materials"] = materials
+        if parts:
+            record["parts"] = parts
     else:
         record = new_record(asset_type, args.name, args.description, style, pipeline["conditioning"])
         record["status"] = "generating"
         if materials:
             record["materials"] = materials
+        if parts:
+            record["parts"] = parts
         manifest["assets"][key] = record
     if target_size:
         # Sized in metres, it stands on the ground unless its type declares a pivot: Unity keeps the FBX origin.

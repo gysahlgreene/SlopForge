@@ -28,6 +28,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               make_metallic_gloss, unity_cli, zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
+from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_thin_features, concept_colour_fidelity, concept_thin_recall,
@@ -2200,6 +2201,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
         if view_slots:
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
+        if asset.get("parts"):
+            conditioning_settings["parts"] = part_settings(config, asset["parts"])
         conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
                                          [selected_artifact], conditioning_settings)
         if conditioning_refs is None:
@@ -2235,6 +2238,21 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] / f"views_{execution['id']}",
                     view_slots, conditioning_settings["views"], execution["id"], selected_artifact)
                 conditioning_refs += view_refs
+            if asset.get("parts"):
+                print("3D stage: masking the declared parts on the concept...", flush=True)
+                parts_dir = (root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] /
+                             f"parts_{execution['id']}")
+                make_part_masks(config, paths["cutout"], asset["parts"], parts_dir)
+                cutout_ref = next(item for item in conditioning_refs if item["type"] == "image.cutout")
+                conditioning_refs += [
+                    _artifact_ref(root, parts_dir / f"{part['name']}.png", f"part-mask-{part['name']}:{execution['id']}",
+                                  "image.part_mask", "conditioning_preparation", 1, [cutout_ref])
+                    for part in asset["parts"] if (parts_dir / f"{part['name']}.png").is_file()]
+                conditioning_refs += [
+                    _artifact_ref(root, parts_dir / "masks.json", f"part-masks:{execution['id']}", "data.part_masks",
+                                  "conditioning_preparation", 1, [cutout_ref]),
+                    _artifact_ref(root, parts_dir / "parts_overlay.png", f"part-overlay:{execution['id']}",
+                                  "image.part_overlay", "conditioning_preparation", 1, [cutout_ref])]
             _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1,
                                                       stage_id=stage["id"])
             if view_slots:
@@ -2253,6 +2271,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         workflow = pipeline["workflows"].get("model")
         if workflow:  # declared emitters only drive the mesh-aware material stage
             check_emitters_in_concept(asset.get("materials"), paths["cutout"])
+        if asset.get("parts"):  # a part missing from the concept would be missing from every mesh
+            masks_ref = next(item for item in conditioning_refs if item["type"] == "data.part_masks")
+            paths["part_masks"] = (root / masks_ref["path"]).parent
+            check_part_masks(json.loads((root / masks_ref["path"]).read_text()), asset["parts"])
         if asset.get("kit_material"):
             if not workflow:
                 raise StageFailure("configuration", "A kit material is applied by the mesh-aware material stage",

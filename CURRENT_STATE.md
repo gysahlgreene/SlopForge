@@ -812,3 +812,25 @@ Coloured non-metals next to metal (2026-10-24, M3 step W6, epic #107).
 - **Tests:** a steel blade keeps its metal while the leather grip goes to zero; a grip colour missing from the map
   retries.
 - **Not verified live:** no weapon has been generated yet.
+
+Part masks (2026-10-24, M3 step W4, epic #107).
+- **Change:**
+  - `--part "name=grip|hinge|slide[:axis:min..max][: description]"` declares a weapon's parts.
+  - Approval masks each one on the concept cut-out, with Florence-2 (MIT) open-vocabulary detection and a SAM 2.1
+    (Apache-2.0) box prompt.
+  - The models run in a separate environment (`scripts/install-part-masks.sh`), on the GPU host over SSH or locally.
+  - The masks, a report and an overlay are conditioning-stage outputs, and the parts are part of that stage's identity.
+  - A part not found stops before mesh inference (`part_mask_preflight`).
+- **Live:**
+  - On the H100, a lantern concept's glass globe, wire guard and carrying ring were masked precisely by detection.
+  - On weapon concepts, detection was unreliable. Florence-2 swapped a pistol's slide and grip and boxed whole swords;
+    Grounding DINO and OWLv2 were no better.
+  - Boxes given at approval (`approve --part-box`) masked the slide, the trigger, the grips and a pommel cleanly, so
+    boxes are the method for weapons and detection is the fallback.
+- **Tests:**
+  - part parsing;
+  - the pre-check;
+  - remote cleanup only of the directory it made, even after a login banner;
+  - masks recorded as stage outputs, and a missing part stopping before mesh inference.
+  - `make verify-provenance` passes.
+- **Not verified:** masks on weapon concepts (the concept trial is queued behind another project's H100 jobs).
