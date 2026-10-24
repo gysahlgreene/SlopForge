@@ -934,6 +934,7 @@ class PropComponentBudgetTests(unittest.TestCase):
             prop = load_taxonomy(root)["prop"]
         # Owner-declared 2026-10-21, calibrated on the protocol jugs and crates.
         self.assertEqual((prop["max_concept_hue_difference"], prop["min_concept_chroma_ratio"]), (4, 0.6))
+        self.assertEqual(prop["max_concept_darkened_share"], 0.4)  # calibrated 2026-10-24 on 147 labelled views
 
     def test_mesh_that_no_longer_fits_the_concept_retries_the_next_seed(self):
         # 2026-10-22: shattered glass bottles fitted the concept outline at 0.71-0.75 and passed every other check;
