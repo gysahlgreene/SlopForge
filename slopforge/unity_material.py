@@ -123,6 +123,24 @@ def apply_glass(basecolor_path, roughness_path, metallic_path, matches):
     return sum(mask.histogram()[128:]) / (base.width * base.height)
 
 
+def zero_metallic(basecolor_path, metallic_path, matches):
+    """Zero the metallic map where the base colour matches a declared non-metal's colour; returns the share found.
+
+    A brief that declares metal keeps the generator's metallic map, and TRELLIS.2 decodes glossy non-metals as partly
+    metallic (docs/MATERIALS.md, Glossy non-metals): a weapon's leather grip or walnut stock would shine like steel.
+    """
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGB")
+    mask = Image.new("L", base.size, 0)
+    for match in matches:
+        mask = ImageChops.lighter(mask, emitter_colour_mask(base, match))
+    with Image.open(metallic_path) as image:
+        mode, channel = image.mode, image.convert("L")
+    channel.paste(0, mask=mask)
+    channel.convert(mode).save(metallic_path)
+    return sum(mask.histogram()[128:]) / (base.width * base.height)
+
+
 def glass_material_path(material):
     """The Unity material for a prop's declared glass faces, next to its main material."""
     material = Path(material)

@@ -25,12 +25,13 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              make_metallic_gloss, unity_cli)
+                              make_metallic_gloss, unity_cli, zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_concept_fit, apply_declared_glass, apply_module_footprint, apply_module_stretch,
-                          apply_thin_features, concept_colour_fidelity, concept_thin_recall, is_placeholder_normal, measure_material_maps, validate_image,
+                          apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
+                          apply_module_stretch, apply_thin_features, concept_colour_fidelity, concept_thin_recall,
+                          is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
 
@@ -1176,6 +1177,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
+    coloured_nonmetals = [match for match, _glow in _emitter_targets(declared, "nonmetal").values() if match]
+    nonmetal_fraction = (zero_metallic(paths["basecolor"], paths["metallic"], coloured_nonmetals)
+                         if declares_metal and coloured_nonmetals else None)
     kit = kit_texture(root, context["manifest"], asset) if asset.get("kit_material") else None
     kit_settings = {}
     if kit:
@@ -1236,6 +1240,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_emitter(validation, emissive_fraction)
     if glass_fraction is not None:
         validation = apply_declared_glass(validation, glass_fraction)
+    if nonmetal_fraction is not None:
+        validation = apply_declared_nonmetal(validation, nonmetal_fraction)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -1273,7 +1279,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             "normal_source": mesh_info.get("normal_source", "unknown"),
             "emission_source": "declared_emissive_mask" if emissive_fraction is not None else "none",
             **({"emission_projection": projection} if projection else {}),
-            "metallic_source": "declared_nonmetal" if generator_metallic is not None else "generator",
+            "metallic_source": ("declared_nonmetal" if generator_metallic is not None else
+                                "generator_with_declared_nonmetals" if nonmetal_fraction is not None else "generator"),
             **({"glass_source": "declared_glass_mask"} if glass_fraction is not None else {}),
             "path": paths["surface"].relative_to(root).as_posix(), "validation": validation,
             "generator": generator_provenance(mesh_info.get("workflow"), mesh_info),

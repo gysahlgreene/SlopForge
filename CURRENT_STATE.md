@@ -801,3 +801,14 @@ Thin-part recall (2026-10-24, M3 step W2, epic #107).
 - **Not calibrated:** of 147 kept views only six had thin parts over 1% of the object, and all kept 0.76–1.0 of them.
   No failures exist to set a limit from, so none is declared; the weapon runs will provide them.
 - **Tests:** a bow's 2-pixel string that is dropped fails only when a minimum is declared, and is recorded either way.
+Coloured non-metals next to metal (2026-10-24, M3 step W6, epic #107).
+- **Cause:** a brief that declares metal keeps the generator's metallic map everywhere, and TRELLIS.2 decodes glossy
+  non-metals as partly metallic. A weapon's leather grip or walnut stock would shine like its steel.
+- **Change:**
+  - `--material` accepts `nonmetal#rrggbb`.
+  - When metal is also declared, the metallic map is zeroed where the base colour matches that colour, using the
+    emitter colour rule.
+  - No matching region fails as `nonmetal_missing`, a retryable code.
+- **Tests:** a steel blade keeps its metal while the leather grip goes to zero; a grip colour missing from the map
+  retries.
+- **Not verified live:** no weapon has been generated yet.
