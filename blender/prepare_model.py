@@ -4,11 +4,23 @@ import sys
 from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mesh_cleanup import remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally
+from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
+                          separate_part)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
 TARGET_FACES = 30000
+
+
+def part_specs():
+    """(name, kind, mask) for each --part NAME KIND MASK: a weapon's hinge or slide to split along its concept mask."""
+    specs = []
+    for index, value in enumerate(sys.argv):
+        if value == "--part":
+            if len(sys.argv) < index + 4 or sys.argv[index + 2] not in ("hinge", "slide"):
+                raise SystemExit("--part needs NAME KIND MASK, with KIND hinge or slide")
+            specs.append((sys.argv[index + 1], sys.argv[index + 2], Path(sys.argv[index + 3])))
+    return specs
 
 
 def get_args():
@@ -381,20 +393,32 @@ if oriented:
     world, samples = surface_samples(obj)
     fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
     _, right, up = view_axes(math.radians(theta), math.radians(phi))
+    pixels = to_concept_pixels(np.stack([world @ np.array(right), world @ np.array(up)], 1), concept)
+
+    def under(mask):
+        """Which vertices the fitted view projects onto the mask's pixels."""
+        inside = ((pixels[:, 0] >= 0) & (pixels[:, 0] < mask.shape[1]) & (pixels[:, 1] >= 0) &
+                  (pixels[:, 1] < mask.shape[0]))
+        result = np.zeros(len(world), bool)
+        result[inside] = mask[pixels[inside, 1], pixels[inside, 0]]
+        return result
+
     held = None
     if "--grip-mask" in sys.argv:
         grip = image_mask(sys.argv[sys.argv.index("--grip-mask") + 1], channel=0)
         # Widened by 1.5% of the concept so vertices on the grip's edge count: the fitted view is 5 degrees coarse.
         for _ in range(max(1, round(0.015 * max(grip.shape)))):
             grip = grip | np.roll(grip, 1, 0) | np.roll(grip, -1, 0) | np.roll(grip, 1, 1) | np.roll(grip, -1, 1)
-        pixels = to_concept_pixels(np.stack([world @ np.array(right), world @ np.array(up)], 1), concept)
-        inside = ((pixels[:, 0] >= 0) & (pixels[:, 0] < grip.shape[1]) & (pixels[:, 1] >= 0) &
-                  (pixels[:, 1] < grip.shape[0]))
-        held = np.zeros(len(world), bool)
-        held[inside] = grip[pixels[inside, 1], pixels[inside, 0]]
+        held = under(grip)
         group = obj.vertex_groups.new(name="slopforge_grip")
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
+    for name, kind, mask_path in part_specs():
+        # Not widened: a moving part's cut follows its mask; its faces are smoothed when it is separated.
+        moving = under(image_mask(mask_path, channel=0))
+        group = obj.vertex_groups.new(name=f"slopforge_part_{name}")
+        group.add([int(index) for index in np.flatnonzero(moving)], 1.0, "REPLACE")
+        print(f"Part {name} ({kind}): {int(moving.sum())} of {len(world)} vertices under its mask")
     # Levelled from the weapon's own shape, not the fitted view (2026-10-24, docs/WEAPONS.md, Orientation): TRELLIS
     # rebuilds a weapon upright and lengthwise whatever the concept's camera, Pixal3D keeps the concept's pose (a
     # crossbow drawn from above came back tilted 21 degrees), and tilting by the fitted view rolled a flat longsword
@@ -803,6 +827,20 @@ if "--pivot" in sys.argv:
                                                     min(heights) if pivot == "bottom_center" else max(heights)))
         bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
 
+# -------------------------------------------------
+# MOVING PARTS (weapons)
+# -------------------------------------------------
+
+if not mesh_only:
+    for name, kind, _mask in part_specs():
+        part = separate_part(obj, name, kind, basecolor=next(
+            (image for image in bpy.data.images if basecolor_path and Path(bpy.path.abspath(image.filepath)).resolve()
+             == basecolor_path), None))
+        if part is None:
+            print(f"Part {name} ({kind}): too few faces under its mask; not separated")
+        else:
+            print(f"Part {name} ({kind}): {len(part.data.polygons)} faces, pivot {[round(v, 4) for v in part.location]}")
+
 if preview_dir:
     render_previews(obj, preview_dir, output_fbx.stem)
 
@@ -824,6 +862,8 @@ print(f"BLEND: {output_blend}")
 
 bpy.ops.object.select_all(action="DESELECT")
 obj.select_set(True)
+for child in obj.children:  # a weapon's moving parts
+    child.select_set(True)
 
 bpy.context.view_layer.objects.active = obj
 
@@ -838,6 +878,7 @@ bpy.ops.export_scene.fbx(
     add_leaf_bones=False,
     path_mode="COPY",
     embed_textures=True,
+    use_custom_props=True,  # a moving part's kind (slopforge_part) reaches the engine and FBX inspection
 )
 
 print(f"FBX: {output_fbx}")

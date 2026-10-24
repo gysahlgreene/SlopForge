@@ -200,3 +200,161 @@ def remove_enclosed_components(mesh, merge_distance, sample=200, inside_share=0.
     bm.free()
     mesh.update()
     return len(doomed)
+
+
+def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
+    """Split a weapon's moving part from its mesh along the vertex group slopforge_part_<name>; returns the part.
+
+    The group holds the vertices under the part's concept mask (prepare_model.py). A face belongs to the part when
+    most of its corners do, then takes the majority of itself and its neighbours for `smoothing` rounds: on a live
+    pistol slide, misregistration left spikes along the cut that four rounds removed (2026-10-24). Vertices are
+    welded by position first, because a textured GLB splits them along UV seams and every seam would read as a cut.
+    Both sides of the cut are closed with flat caps that take one texel of the surface beside them, so a cap shows a
+    plain colour instead of a smear: the texel of basecolor (a Blender image, or None) nearest the median colour
+    along the cut, since a single boundary texel can be a pale outlier (a live pistol's caps came out white). The part becomes a child of obj: a slide pivots at its bounding box centre, a
+    hinge at the centre of its cut. Returns None when too few faces fall under the mask.
+    """
+    import bpy
+    from mathutils import Matrix, Vector
+    group = obj.vertex_groups.get(f"slopforge_part_{name}")
+    if group is None:
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    # Every layer exists before any face is collected: adding a layer afterwards renews the element references, and
+    # a face set built earlier then matches nothing.
+    deform = bm.verts.layers.deform.verify()
+    for layers, layer_name in ((bm.verts.layers.int, "slopforge_cut"), (bm.faces.layers.int, "slopforge_part")):
+        if layers.get(layer_name) is not None:  # never carried over: removed before the meshes are written
+            layers.remove(layers.get(layer_name))
+    cut_layer = bm.verts.layers.int.new("slopforge_cut")
+    label = bm.faces.layers.int.new("slopforge_part")
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=max(obj.dimensions) * 1e-6)
+    inside = {vertex: vertex[deform].get(group.index, 0.0) > 0.5 for vertex in bm.verts}
+    part = {face for face in bm.faces if sum(inside[vertex] for vertex in face.verts) * 2 > len(face.verts)}
+    for _ in range(smoothing):
+        labels = {}
+        for face in bm.faces:
+            near = {other for edge in face.edges for other in edge.link_faces} | {face}
+            labels[face] = sum(other in part for other in near) * 2 > len(near)
+        part = {face for face, belongs in labels.items() if belongs}
+    # Islands: a strip of either side enclosed by the other, left where a ragged mask crossed the surface (a live
+    # pistol body came out in 12-19 pieces). Any piece of a side that is not its largest, and touches the cut, joins
+    # the side around it; pre-existing separate pieces touch no cut and stay.
+    for _ in range(3):
+        moved = False
+        for side in (True, False):
+            faces = [face for face in bm.faces if (face in part) == side]
+            pieces = _face_pieces(faces)
+            for piece in pieces[1:]:
+                if any((other in part) != side for face in piece for edge in face.edges for other in edge.link_faces):
+                    part = (part - piece) if side else (part | piece)
+                    moved = True
+        if not moved:
+            break
+    if len(part) < min_faces or len(part) == len(bm.faces):
+        bm.free()
+        return None
+    seam = [edge for edge in bm.edges
+            if any(face in part for face in edge.link_faces) and not all(face in part for face in edge.link_faces)]
+    for edge in seam:
+        for vertex in edge.verts:
+            vertex[cut_layer] = 1
+    cut = [vertex.co.copy() for vertex in {vertex for edge in seam for vertex in edge.verts}]
+    for face in bm.faces:
+        face[label] = int(face in part)
+    bmesh.ops.split_edges(bm, edges=seam)
+    piece = bm.copy()
+    for target, keep in ((piece, 1), (bm, 0)):
+        layer = target.faces.layers.int["slopforge_part"]
+        bmesh.ops.delete(target, geom=[face for face in target.faces if face[layer] != keep], context="FACES")
+        _cap_cut(target, basecolor)
+        target.verts.layers.int.remove(target.verts.layers.int["slopforge_cut"])
+        target.faces.layers.int.remove(target.faces.layers.int["slopforge_part"])
+    bm.to_mesh(obj.data)
+    obj.data.update()
+    bm.free()
+    mesh = bpy.data.meshes.new(name)
+    piece.to_mesh(mesh)
+    piece.free()
+    for material in obj.data.materials:
+        mesh.materials.append(material)
+    child = bpy.data.objects.new(name, mesh)
+    for collection in obj.users_collection:
+        collection.objects.link(child)
+    child.parent = obj
+    child.matrix_parent_inverse = Matrix.Identity(4)
+    if kind == "hinge":
+        pivot = sum(cut, Vector()) / len(cut) if cut else Vector()
+    else:
+        low = Vector([min(vertex.co[axis] for vertex in mesh.vertices) for axis in range(3)])
+        high = Vector([max(vertex.co[axis] for vertex in mesh.vertices) for axis in range(3)])
+        pivot = (low + high) / 2
+    mesh.transform(Matrix.Translation(-pivot))
+    mesh.update()
+    child.location = pivot
+    child["slopforge_part"] = kind
+    return child
+
+
+def _face_pieces(faces):
+    """Connected pieces of a set of faces (joined over shared edges), largest first."""
+    remaining, pieces = set(faces), []
+    while remaining:
+        stack, piece = [remaining.pop()], set()
+        while stack:
+            face = stack.pop()
+            piece.add(face)
+            for edge in face.edges:
+                for other in edge.link_faces:
+                    if other in remaining:
+                        remaining.remove(other)
+                        stack.append(other)
+        pieces.append(piece)
+    return sorted(pieces, key=len, reverse=True)
+
+
+def _cap_cut(bm, basecolor=None):
+    """Close the openings a cut left (boundary edges between cut vertices) with flat triangulated caps."""
+    cut = bm.verts.layers.int["slopforge_cut"]
+    edges = [edge for edge in bm.edges if edge.is_boundary and all(vertex[cut] for vertex in edge.verts)]
+    if not edges:
+        return []
+    before = set(bm.faces)
+    bmesh.ops.holes_fill(bm, edges=edges, sides=0)
+    caps = [face for face in bm.faces if face not in before]
+    caps = bmesh.ops.triangulate(bm, faces=caps)["faces"]
+    uv = bm.loops.layers.uv.active
+    if uv is not None and caps:
+        cap_set = set(caps)
+        for cap in _face_pieces(caps):  # each opening takes its own texel
+            loops = [loop for face in cap for vertex in face.verts for loop in vertex.link_loops
+                     if loop.face not in cap_set]
+            source = _typical_texel(loops, uv, basecolor)
+            for face in cap:
+                for loop in face.loops:
+                    loop[uv].uv = source
+    for face in caps:
+        face.smooth = False
+    return caps
+
+
+_PIXELS = {}
+
+
+def _typical_texel(loops, uv, basecolor):
+    """The UV among the loops whose base colour is nearest their median colour; the first loop without an image."""
+    if basecolor is None or not loops:
+        return loops[0][uv].uv.copy()
+    import numpy as np
+    width, height = basecolor.size
+    if basecolor.name not in _PIXELS:  # read once: a 4096 map is 200 MB of floats
+        pixels = np.empty(width * height * basecolor.channels, np.float32)
+        basecolor.pixels.foreach_get(pixels)
+        _PIXELS[basecolor.name] = pixels.reshape(height, width, basecolor.channels)[..., :3]
+    coordinates = np.array([[loop[uv].uv.x, loop[uv].uv.y] for loop in loops]) % 1.0
+    columns = np.clip((coordinates[:, 0] * width).astype(int), 0, width - 1)
+    rows = np.clip((coordinates[:, 1] * height).astype(int), 0, height - 1)
+    colours = _PIXELS[basecolor.name][rows, columns]
+    nearest = int(np.argmin(np.abs(colours - np.median(colours, 0)).sum(1)))
+    return loops[nearest][uv].uv.copy()

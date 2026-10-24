@@ -377,6 +377,25 @@ def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
     return validation
 
 
+def apply_moving_parts(validation, declared):
+    """Fail a weapon whose declared moving part did not come out as its own piece (retryable quality code).
+
+    Blender's final pass splits each hinge or slide from the mesh along its concept mask (mesh_cleanup.py,
+    separate_part); a part with too few faces under its mask is left in the body, and another seed may model it.
+    """
+    found = {part["name"] for part in validation.get("measured", {}).get("parts") or []}
+    missing = [name for name in declared if name not in found]
+    validation.setdefault("measured", {})["moving_parts_missing"] = len(missing)
+    validation.setdefault("limits", {})["max_moving_parts_missing"] = 0
+    if missing:
+        validation["errors"] = [*validation.get("errors", []),
+            f"moving part(s) {', '.join(missing)} did not come out as their own piece: too few faces fell under "
+            "their concept masks, so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 # A module declared as an L corner must leave one quarter of its footprint nearly empty. Real stone corners measured
 # 0.00 there (others 0.69-0.92); one that reconstructed as a solid block measured 0.86 in every quarter (2026-10-22).
 MAX_OPEN_QUADRANT = 0.15

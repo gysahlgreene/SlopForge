@@ -682,9 +682,11 @@ def _boxes_seen_from_front(boxes, turns, size, scale, centre):
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderWeaponOrientationTests(unittest.TestCase):
-    def orient(self, parts, turns, concept, grip):
-        """Box parts joined into one mesh and turned, then the final pass with --target-size=-,1.1,- and --pivot grip;
-        returns its dimensions, extremes, grip centre and recorded concept view."""
+    def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=()):
+        """Box parts joined into one mesh (subdivided by cuts) and turned, then the final pass with --target-size and
+        --pivot grip; masks are written beside the concept for extra arguments that name them. Returns the body's
+        dimensions, extremes, grip centre and recorded concept view, and every mesh object's parent, origin, world
+        bounds, face count and open edges."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             glb, blend = root / "weapon.glb", root / "weapon.blend"
@@ -701,6 +703,11 @@ bpy.ops.object.select_all(action='SELECT')
 bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
 bpy.ops.object.join()
 bpy.ops.object.transform_apply(scale=True)
+if {cuts}:
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts={cuts})
+    bpy.ops.object.mode_set(mode='OBJECT')
 for axis, degrees in {turns!r}:
     bpy.context.object.rotation_euler = [math.radians(degrees) if name == axis else 0 for name in 'XYZ']
     bpy.ops.object.transform_apply(rotation=True)
@@ -710,24 +717,47 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                            check=True, capture_output=True, text=True)
             concept.save(root / "concept.png")
             grip.save(root / "grip.png")
-            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
-                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
-                            str(blend), *map(str, maps), "--face-budget", "1000", "--surface-source", str(maps[0]),
-                            "--target-size", "-,1.1,-", "--pivot", "grip", "--concept", str(root / "concept.png"),
-                            "--grip-mask", str(root / "grip.png")], check=True, capture_output=True, text=True)
+            for name, mask in (masks or {}).items():
+                mask.save(root / f"{name}.png")
+            prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                       str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
+                                       str(blend), *map(str, maps), "--face-budget", str(budget), "--surface-source",
+                                       str(maps[0]), "--target-size", target, "--pivot", "grip", "--concept",
+                                       str(root / "concept.png"), "--grip-mask", str(root / "grip.png"),
+                                       *[str(root / value) if value.endswith(".png") else value for value in extra]],
+                                      capture_output=True, text=True)
+            self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
             probe, result = root / "probe.py", root / "probe.json"
             probe.write_text("""import bpy, json, sys
-obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+meshes = [o for o in bpy.data.objects if o.type == 'MESH']
+obj = next(o for o in meshes if o.parent is None)
 group = obj.vertex_groups["slopforge_grip"].index
 held = [v.co for v in obj.data.vertices if any(g.group == group for g in v.groups)]
 ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices]
+def record(o):
+    points = [o.matrix_world @ v.co for v in o.data.vertices]
+    open_edges = sum(1 for e in o.data.edges if sum(e.key in p.edge_keys for p in o.data.polygons) == 1)
+    return {"parent": o.parent.name if o.parent else None, "origin": list(o.matrix_world.translation),
+            "min": [min(p[i] for p in points) for i in range(3)] if points else None,
+            "max": [max(p[i] for p in points) for i in range(3)] if points else None,
+            "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part")}
 json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(held) for i in range(3)],
            "min_y": min(ys), "max_y": max(ys), "min_z": min(zs), "max_z": max(zs),
-           "view": list(obj["slopforge_concept_view"])}, open(sys.argv[-1], 'w'))
+           "view": list(obj["slopforge_concept_view"]), "body": obj.name,
+           "objects": {o.name: record(o) for o in meshes}}, open(sys.argv[-1], 'w'))
 """)
-            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
-                           check=True, capture_output=True, text=True)
-            return json.loads(result.read_text())
+            probed = subprocess.run([BLENDER, "--background", str(blend), "--python-exit-code", "1", "--python",
+                                     str(probe), "--", str(result)], capture_output=True, text=True)
+            self.assertEqual(probed.returncode, 0, (probed.stdout + probed.stderr)[-3000:])
+            inspections = {}
+            for label, model in (("inspection", blend), ("fbx_inspection", root / "weapon.fbx")):
+                inspected = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                            str(ROOT / "blender/inspect_model.py"), "--", str(model),
+                                            str(root / f"{label}.json"), str(budget), "--real-scale"],
+                                           capture_output=True, text=True)
+                self.assertEqual(inspected.returncode, 0, (inspected.stdout + inspected.stderr)[-3000:])
+                inspections[label] = json.loads((root / f"{label}.json").read_text())["measured"]
+            return {**json.loads(result.read_text()), **inspections}
 
     def test_a_weapon_turns_its_tip_forward_and_is_held_at_its_grip(self):
         # A sword drawn tip right; its mesh is turned 30 degrees, as a reconstruction can be. Final pass: tip along
@@ -765,6 +795,48 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         fit, theta, _phi, alignment = measured["view"]
         self.assertGreater(fit, 0.7)  # boxes against a drawn concept, as above
         self.assertGreaterEqual(abs(theta), 175)
+
+    def test_moving_parts_are_split_from_the_body_with_pivots_by_kind(self):
+        # W8: a slide and a hinged part are cut from one connected body along masks drawn on its concept, closed, and
+        # parented to the body: a slide pivots at its box centre, a hinge on its cut. The body is a finely divided
+        # slab so the cuts run through it, on its 0.025 grid (z from -0.2 to 0.2).
+        body = {"body": ((0, 0, 0), (1.0, 0.1, 0.4))}
+        regions = {"slide": ((0, 0, 0.1375), (1.0, 0.1, 0.125)), "lever": ((0, 0, -0.15), (1.0, 0.1, 0.1)),
+                   "grip": ((-0.375, 0, -0.0125), (0.15, 0.1, 0.125))}
+        concept, masks = _boxes_seen_from_front({**body, **regions}, [], (512, 256), 400, (256, 128))
+        # A one-vertex-wide gap across the slide mask: a strip of body faces inside the slide, as the ragged masks of
+        # a live pistol left slivers along the cut (2026-10-24: 12-19 body pieces). Islands join the side around them.
+        ImageDraw.Draw(masks["slide"]).rectangle((100, 75, 412, 81), fill=0)  # the vertex row at z 0.125
+        measured = self.orient(body, [], concept, masks["grip"], cuts=15, budget=20000, target="-,1.0,-",
+                               masks={"slide": masks["slide"], "lever": masks["lever"]},
+                               extra=("--part", "slide", "slide", "slide.png", "--part", "lever", "hinge", "lever.png"))
+        objects, body_name = measured["objects"], measured["body"]
+        self.assertEqual(sorted(objects), sorted([body_name, "slide", "lever"]))
+        slide, lever, rest = objects["slide"], objects["lever"], objects[body_name]
+        self.assertEqual((slide["parent"], lever["parent"]), (body_name, body_name))
+        self.assertEqual((slide["kind"], lever["kind"]), ("slide", "hinge"))
+        for name, record in objects.items():
+            self.assertEqual(record["open_edges"], 0, name)  # every piece is closed over its cut
+        # Bottom-centred at 0: the lever is z 0-0.1, the slide 0.275-0.4, and the body keeps what lies between.
+        self.assertAlmostEqual(lever["min"][2], 0.0, delta=0.01)
+        self.assertAlmostEqual(lever["max"][2], 0.1, delta=0.03)
+        self.assertAlmostEqual(slide["min"][2], 0.275, delta=0.03)
+        self.assertAlmostEqual(rest["min"][2], lever["max"][2], delta=0.001)
+        self.assertAlmostEqual(rest["max"][2], slide["min"][2], delta=0.001)
+        centre = [(low + high) / 2 for low, high in zip(slide["min"], slide["max"])]
+        for axis in range(3):
+            self.assertAlmostEqual(slide["origin"][axis], centre[axis], delta=1e-4)  # a slide pivots at its centre
+        self.assertAlmostEqual(lever["origin"][2], lever["max"][2], delta=1e-4)  # a hinge pivots on its cut
+        inspection = measured["inspection"]
+        self.assertEqual(sorted((part["name"], part["kind"], part["parent"]) for part in inspection["parts"]),
+                         [("lever", "hinge", body_name), ("slide", "slide", body_name)])
+        self.assertEqual(inspection["component_count"], 1)  # the parts are not stray pieces of the body
+        exported = measured["fbx_inspection"]  # the FBX keeps the hierarchy, the pivots and each part's kind
+        self.assertEqual(sorted((part["name"], part["kind"]) for part in exported["parts"]),
+                         [("lever", "hinge"), ("slide", "slide")])
+        for part in exported["parts"]:
+            for axis in range(3):
+                self.assertAlmostEqual(part["pivot"][axis], objects[part["name"]]["origin"][axis], delta=1e-3)
 
     def test_a_weapon_kept_in_its_concept_pose_is_levelled(self):
         # A crossbow drawn from above at three-quarters. Pixal3D keeps the concept's pose (2026-10-24), so the mesh

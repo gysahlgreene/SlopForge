@@ -32,7 +32,7 @@ from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
-                          apply_module_stretch, apply_thin_features, apply_weapon_orientation,
+                          apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
                           is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
@@ -1239,12 +1239,14 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
+    moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in asset.get("parts") or []
+              if part["kind"] in ("hinge", "slide")] if held and masks else []
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if held else None,
-                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None)
+                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1276,6 +1278,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
     if held:
         validation = apply_weapon_orientation(validation)
+    if moving:
+        validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
