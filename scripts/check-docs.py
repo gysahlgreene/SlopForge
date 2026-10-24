@@ -34,6 +34,9 @@ for path in sorted(paths):
             continue
         if not (path.parent / target).exists():
             errors.append(f'{path.relative_to(root)}: missing link {target}')
+        elif (path.parent / target).is_file() and (path.parent / target).stat().st_size == 0:
+            # 2026-10-24: an empty kit_modules.jpg shipped as a broken image; existing was not enough.
+            errors.append(f'{path.relative_to(root)}: empty file {target}')
 if errors:
     raise SystemExit('\n'.join(errors))
 print('Documentation links and machine-metadata checks passed.')

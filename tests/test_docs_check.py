@@ -9,7 +9,7 @@ CHECKER = Path(__file__).resolve().parents[1] / "scripts/check-docs.py"
 
 
 class DocsCheckTests(unittest.TestCase):
-    def check_fixture(self, public_text):
+    def check_fixture(self, public_text, empty_files=()):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
@@ -19,12 +19,19 @@ class DocsCheckTests(unittest.TestCase):
             (root / "docs/superpowers").mkdir(parents=True)
             (root / "docs/superpowers/private.md").write_text("Local path: /Users/example/private/file\n")
             (root / "docs/README.md").write_text(public_text)
+            for name in empty_files:
+                (root / "docs" / name).write_bytes(b"")
             return subprocess.run([sys.executable, str(root / "scripts/check-docs.py")],
                                   cwd=root, capture_output=True, text=True)
 
     def test_ignored_working_notes_do_not_fail_public_docs_check(self):
         result = self.check_fixture("# Public documentation\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_linked_empty_image_fails(self):
+        result = self.check_fixture("![Modules](kit_modules.jpg)\n", empty_files=("kit_modules.jpg",))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("empty file kit_modules.jpg", result.stderr)
 
     def test_new_public_guides_are_checked_before_staging(self):
         result = self.check_fixture("[Missing guide](missing.md)\n")
