@@ -93,6 +93,86 @@ class MeshPBRTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 1)
         client.assert_not_called()
 
+    def run_worker_with_detail(self, root, placement):
+        """Run the worker on a shape call that saves raw and full-detail meshes, with the graph's DecimateMesh in the
+        given placement mode; returns Blender's commands, the journaled stages and generation.json."""
+        image = root / "concept.png"
+        Image.new("RGBA", (8, 8), (0, 0, 0, 0)).save(image)
+        workflow_path = root / "trellis.json"
+        workflow_path.write_text(json.dumps({
+            "prepared_mesh": {"class_type": "Load3DAdvanced", "inputs": {"model_file": "none"}},
+            "shape_decimate": {"class_type": "DecimateMesh", "inputs": {"placement_mode": placement}},
+            "save_raw": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "raw"}},
+            "save_detail": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "detail"}},
+            "save": {"class_type": "SaveGLB", "inputs": {"filename_prefix": "final"}},
+            "maps": {"class_type": "BakeTextureFromVoxel", "inputs": {"texture_size": 64}},
+            "save_basecolor": {"class_type": "SaveImage", "inputs": {"filename_prefix": "base"}},
+        }))
+        manifest_path = root / "manifest.json"
+
+        class Client:
+            calls = 0
+            def health(self, retry_window=0): return {"system": {}, "devices": []}
+            def upload_input(self, _path, folder): return {"name": f"upload{folder}.png", "subfolder": folder}
+            def queue_workflow(self, _workflow):
+                self.calls += 1
+                return f"prompt-{self.calls}"
+            def wait_for_completion(self, prompt, timeout=3600):
+                if prompt == "prompt-1":
+                    return {"outputs": {"save_raw": {"glb": {"filename": "raw.glb"}},
+                                        "save_detail": {"glb": {"filename": "detail.glb"}}}}
+                return {"outputs": {"save": {"glb": {"filename": "final.glb"}},
+                                    "save_basecolor": {"images": [{"filename": "basecolor.png"}]}}}
+            def download_output(self, item, path): Path(path).write_bytes(item["filename"].encode())
+
+        calls = []
+        def blender(command, **_kwargs):
+            calls.append(command)
+            Path(command[8]).write_bytes(b"prepared")
+            Path(command[command.index("--normal-output") + 1]).write_bytes(b"normal")
+        concept = {"id": "concept:1", "type": "image.concept", "path": "concept.png",
+                   "sha256": "a" * 64, "stage": "concept_generation", "attempt": 1, "derived_from": []}
+        asset = {"id": "relay", "name": "relay", "type": "prop", "description": "relay"}
+        execution = start_execution(asset, {"brief": "relay"})
+        stage = start_stage(execution, "mesh_workflow_execution", 1, [concept], {}, {})
+        begin_stage(stage)
+        save_manifest(manifest_path, {"schema_version": 4, "assets": {"prop:relay": asset}})
+        context = {"project_root": str(root), "manifest_path": str(manifest_path),
+                   "asset_selector": "prop:relay", "execution_id": execution["id"],
+                   "attempt": 1, "stage_id": stage["id"], "upstream_artifacts": [concept]}
+        with patch.object(comfy_generate_3d, "ComfyUIClient", return_value=Client()), \
+                patch.object(comfy_generate_3d.subprocess, "run", side_effect=blender), \
+                patch.object(sys, "argv", ["comfy_generate_3d.py", "--image", str(image), "--name", "relay",
+                    "--dest", str(root / "mesh.glb"), "--workflow", str(workflow_path), "--blender", "blender",
+                    "--seed", "17", "--metadata", str(root / "generation.json"),
+                    "--journal-context", json.dumps(context)]):
+            comfy_generate_3d.main()
+        stages = json.loads(manifest_path.read_text())["assets"]["prop:relay"]["executions"][-1]["stages"]
+        return calls, stages, json.loads((root / "generation.json").read_text())
+
+    def test_blender_reduces_the_full_detail_shape_instead_of_midpoint_decimation(self):
+        # The graph's midpoint decimation made a pistol's flat steel wavy; Blender's collapse decimation of the
+        # full-detail shape kept it flat (2026-10-24). The prepared mesh must come from save_detail, journaled.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls, stages, generation = self.run_worker_with_detail(Path(temporary), "midpoint")
+        detail = next(item for stage in stages for item in stage["outputs"] if item["type"] == "mesh.detail")
+        self.assertEqual(Path(calls[0][7]).name, "mesh_detail.glb")  # Blender's input mesh
+        preparation = next(stage for stage in stages if stage["name"] == "mesh_preparation")
+        self.assertEqual([item["id"] for item in preparation["inputs"]], [detail["id"]])
+        self.assertEqual(preparation["settings"]["source"], "mesh.detail")
+        self.assertEqual(generation["mesh_preparation"]["source"], "mesh.detail")
+        self.assertIn("mesh.detail", {item["kind"] for item in generation["outputs"]})
+
+    def test_a_qem_decimating_graph_keeps_its_own_reduction(self):
+        # The character graph's crease-preserving QEM reduction was tuned with its rigging; it is not replaced.
+        with tempfile.TemporaryDirectory() as temporary:
+            calls, stages, generation = self.run_worker_with_detail(Path(temporary), "qem")
+        raw = next(item for stage in stages for item in stage["outputs"] if item["type"] == "mesh.raw")
+        self.assertEqual(Path(calls[0][7]).name, "mesh_untextured.glb")
+        preparation = next(stage for stage in stages if stage["name"] == "mesh_preparation")
+        self.assertEqual([item["id"] for item in preparation["inputs"]], [raw["id"]])
+        self.assertEqual(generation["mesh_preparation"]["source"], "mesh.raw")
+
     def test_3d_sidecar_records_separate_shape_texture_calls_and_unknown_weights(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
