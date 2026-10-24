@@ -46,12 +46,18 @@ asset_pipeline:
         character_image: image_character_pose_api.json
         guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
+        # Weapons keep TRELLIS.2 with Blender's reduction on every profile: on a pistol, longsword and crossbow it
+        # matched the concepts' forms more cleanly than Pixal3D (docs/WEAPONS.md, 2026-10-24).
+        weapon_model: trellis2_image_to_model_h100_api.json
     h100_final:
       workflows:
         model: pixal3d_image_to_model_h100_api.json
         character_image: image_character_pose_api.json
         guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
+        # Weapons keep TRELLIS.2 with Blender's reduction on every profile: on a pistol, longsword and crossbow it
+        # matched the concepts' forms more cleanly than Pixal3D (docs/WEAPONS.md, 2026-10-24).
+        weapon_model: trellis2_image_to_model_h100_api.json
     # h100_multiview: props condition Pixal3D on generated front, side and back views of the
     # approved concept instead of guessing unseen sides from it (see docs/WORKFLOWS.md).
     h100_multiview:
@@ -61,6 +67,9 @@ asset_pipeline:
         character_image: image_character_pose_api.json
         guided_image: image_character_pose_api.json
         character_model: trellis2_image_to_model_h100_character_api.json
+        # Weapons keep TRELLIS.2 with Blender's reduction on every profile: on a pistol, longsword and crossbow it
+        # matched the concepts' forms more cleanly than Pixal3D (docs/WEAPONS.md, 2026-10-24).
+        weapon_model: trellis2_image_to_model_h100_api.json
 
   # Quality is independent of compute_profile and COMFYUI_URL.
   quality_tier: final

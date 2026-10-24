@@ -371,15 +371,17 @@ if not reuse_stage_mesh:
 # ORIENT FROM THE CONCEPT (weapons)
 # -------------------------------------------------
 
-if "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only:
+oriented = "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only
+if oriented:
     # A weapon is drawn tip or muzzle right. Turn its tip to -Y (forward in Unity once exported) and its top to +Z,
     # and mark the faces under the grip mask, seen from the view that best fits the concept.
     import numpy as np
     from concept_view import fit_view, image_mask, surface_samples, to_concept_pixels, view_axes
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
     world, samples = surface_samples(obj)
-    fit, theta, phi = fit_view(samples, concept)
+    fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
     _, right, up = view_axes(math.radians(theta), math.radians(phi))
+    held = None
     if "--grip-mask" in sys.argv:
         grip = image_mask(sys.argv[sys.argv.index("--grip-mask") + 1], channel=0)
         # Widened by 1.5% of the concept so vertices on the grip's edge count: the fitted view is 5 degrees coarse.
@@ -399,22 +401,28 @@ if "--concept" in sys.argv and not reuse_stage_mesh and not mesh_only:
     # 30 degrees about its length, since its outline barely changes with tilt. A weapon whose thinnest axis is nearer
     # vertical than horizontal lies flat in its concept, like that crossbow, and the axis is its top; a side-on
     # weapon's top is +Z. Its length is its longest axis across the top (the full 3D one leans 19-25 degrees towards
-    # a pistol's grip), pointed at the end the concept draws on the right.
+    # a pistol's grip), pointed at the end the concept draws on the right. Of the two axes across the top, the length
+    # is the one whose line through the centre passes nearest the grip: a crossbow's bow can spread almost as far as
+    # its stock (2026-10-24: variances 0.051 and 0.063).
     centred = samples - samples.mean(0)
     thinnest = np.linalg.eigh(centred.T @ centred)[1][:, 0]
     top = thinnest * np.sign(thinnest[2]) if abs(thinnest[2]) > math.sqrt(0.5) else np.array([0.0, 0.0, 1.0])
     across = centred - np.outer(centred @ top, top)
-    length = np.linalg.eigh(across.T @ across)[1][:, -1]
+    axes = np.linalg.eigh(across.T @ across)[1][:, ::-1][:, :2].T  # longest first
+    length = axes[0]
+    if held is not None and held.any():
+        offset = world[held].mean(0) - samples.mean(0)
+        offset -= (offset @ top) * top
+        length = min(axes, key=lambda axis: np.linalg.norm(offset - (offset @ axis) * axis))
+    # How far the length runs along the concept's right; near 0 the view looks along it and the tip's end is a guess,
+    # which validation rejects (weapon_orientation) so another seed is tried.
     towards_tip = float(length @ np.array(right))
-    if abs(towards_tip) < 0.5:
-        raise SystemExit(f"The concept's fitted view (theta {theta}, phi {phi}) looks along the weapon's length, so "
-                         "its tip is ambiguous; approve a concept that shows the weapon's length, tip or muzzle right")
-    forward, top = Vector(length * np.sign(towards_tip)), Vector(top)
+    forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
     source = Matrix((forward, top, forward.cross(top))).transposed()
     target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
     obj.data.transform((target @ source.inverted()).to_4x4())
     obj.data.update()
-    obj["slopforge_concept_view"] = [round(fit, 4), theta, phi]
+    obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
     print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
 
 
@@ -442,7 +450,9 @@ if not reuse_stage_mesh and not mesh_only:
         # A declared horizontal size marks the long side when the other is free (a wall is 3,-,3).
         x_long = None if target[0] is None and target[1] is None else (
             target[1] is None or (target[0] is not None and target[0] >= target[1]))
-        if x_long is not None and x_long != (size.x >= size.y):
+        # Not for a weapon already oriented from its concept: a crossbow whose bow spread wider than its stock was long
+        # was turned 90 degrees, putting the bow along its length (2026-10-24).
+        if not oriented and x_long is not None and x_long != (size.x >= size.y):
             obj.data.transform(Matrix.Rotation(math.pi / 2, 4, "Z"))
             size = Vector((size.y, size.x, size.z))
         factors = [None if value is None else value / max(size[axis], 1e-6) for axis, value in enumerate(target)]

@@ -3,7 +3,8 @@
 Usage: blender --background --python concept_view.py -- request.json
 
 request.json: {"model": textured.glb, "basecolor": texture.png, "concept": cutout.png (RGBA),
-               "prefix": output path prefix, "report": report.json, "size": optional render size (2048)}
+               "prefix": output path prefix, "report": report.json, "size": optional render size (2048),
+               "full_turn": optional, also search views from behind (weapons)}
 
 TRELLIS.2 rebuilds a prop facing front, not posed as its three-quarter concept shows it, so the view is found by
 comparing the concept silhouette with orthographic silhouettes of surface samples over the front half of the view
@@ -66,15 +67,19 @@ def surface_samples(obj):
     return world, np.concatenate([np.einsum("tsk,tkd->tsd", weights, world[triangles]).reshape(-1, 3), world])
 
 
-def fit_view(samples, concept):
-    """(silhouette IoU, theta, phi in degrees) of the view whose mesh silhouette best fits the concept mask."""
+def fit_view(samples, concept, full_turn=False):
+    """(silhouette IoU, theta, phi in degrees) of the view whose mesh silhouette best fits the concept mask.
+
+    full_turn also searches the back half, front-facing views first so they win ties: TRELLIS.2 rebuilt three of four
+    side-profile swords turned to face the other way, which only a view from behind fits (2026-10-24, weapons).
+    """
     rows, columns = np.nonzero(concept)
     if not len(rows):
         raise ValueError("Concept cutout has no opaque pixels")
     target = silhouette(np.stack([columns, rows], 1).astype(float))
     best = (-1.0, 0, 0)
     for phi in range(0, 46, 5):
-        for theta in range(-90, 91, 5):
+        for theta in (sorted(range(-180, 180, 5), key=abs) if full_turn else range(-90, 91, 5)):
             _, right, up = view_axes(math.radians(theta), math.radians(phi))
             fitted = silhouette(np.stack([samples @ np.array(right), samples @ np.array(up)], 1))
             iou = float((fitted & target).sum() / max((fitted | target).sum(), 1))
@@ -121,7 +126,7 @@ def run(request):
         raise ValueError(f"Expected one mesh in {request['model']}, found {len(meshes)}")
     obj = meshes[0]
     world, samples = surface_samples(obj)
-    iou, theta, phi = fit_view(samples, image_mask(request["concept"]))
+    iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
     report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}
     # Colour comparison only needs the concept's side of the model, not texel registration.
     min_iou = float(request.get("min_iou", MIN_SILHOUETTE_IOU))

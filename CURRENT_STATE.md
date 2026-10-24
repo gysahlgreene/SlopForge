@@ -909,3 +909,33 @@ Mesh reduction from the full-detail shape (2026-10-24, [evidence](docs/media/mes
   - a props or kits protocol rerun (their Provisional evidence predates this change);
   - `h100_multiview`, which has the same structure;
   - whether near-black generated metal should fail the dark-texture check.
+
+Weapons through the whole pipeline (2026-10-24, [evidence](docs/media/weapon-pipeline-2026-10/README.md)).
+- **Runs:** a pistol, a longsword and a three-quarter crossbow, each approved on `h100` (TRELLIS.2) and re-approved in
+  a project clone on a Pixal3D graph with Blender's prepare step, rendered as the props are.
+- **Fixes found:**
+  - **Metal lightness:** metal decoded darker than the concept shows it is brightened to the concept, never darkened
+    (`metal_lightness_gain`). A pistol's near-black steel had failed the dark-texture check on every seed; with it,
+    the darkened share was 0.013.
+  - **Orientation:**
+    - the length is the axis across the top that passes nearest the grip (a crossbow's bow spread almost as far as
+      its stock);
+    - the kit walls' long-side turn no longer applies to oriented weapons;
+    - a view that looks along the weapon fails as the retryable `weapon_orientation` instead of crashing Blender.
+  - **Full-turn views:** a weapon's views search the full turn. TRELLIS.2 rebuilt three of four longswords turned
+    180°, which failed concept fit at 0.66–0.71; fitted from behind, the next seed scored 0.945.
+- **Decision:** weapons use TRELLIS.2 with Blender's reduction on every H100 profile (`weapon_model`). It matched the
+  concepts' forms more cleanly than Pixal3D on all three. The Pixal3D prepare-step graph does not ship.
+- **Rejected:** Direct3D-S2 (MIT), trialled on the H100, made a blotchier pistol than TRELLIS.2's full detail.
+- **Tests:**
+  - metal brightened to a lighter concept and left alone for a darker one or too little lit metal;
+  - the length chosen by the grip (a crossbow with a bow wider than its stock);
+  - a sword turned 180° oriented tip forward;
+  - `weapon_orientation` retryable;
+  - weapons routed to TRELLIS.2 on every H100 profile;
+  - each new Blender case fails on the code before it;
+  - `make verify`.
+- **Not verified:**
+  - one approved seed per weapon and graph, and the runs span three commits;
+  - Unity and moving parts;
+  - pistol grip checkering and colour, and soft small mechanisms, remain short of the concept.

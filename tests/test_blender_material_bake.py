@@ -748,21 +748,36 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         # (-Y) of the origin and the pommel end 0.097 m behind it.
         self.assertAlmostEqual(measured["min_y"], -1.003, delta=0.03)
         self.assertAlmostEqual(measured["max_y"], 0.097, delta=0.03)
-        fit, theta, _phi = measured["view"]
+        fit, theta, _phi, alignment = measured["view"]
         self.assertGreater(fit, 0.7)  # boxes against a hand-drawn concept; generated weapons fit closer
         self.assertLessEqual(abs(abs(theta) - 30), 5)  # the fit searches in 5-degree steps
+        self.assertGreater(alignment, 0.8)
+
+    def test_a_weapon_rebuilt_facing_the_other_way_still_points_its_tip_forward(self):
+        # TRELLIS.2 rebuilt three of four side-profile swords turned 180 degrees, so the concept's view is only
+        # matched from behind (2026-10-24). The fit searches the full turn and the tip still ends forward.
+        parts = {"blade": ((0.5, 0, 0), (1.0, 0.01, 0.08)), "guard": ((-0.015, 0, 0), (0.03, 0.06, 0.3)),
+                 "grip": ((-0.14, 0, 0), (0.22, 0.05, 0.05))}
+        concept, masks = _boxes_seen_from_front(parts, [], (512, 128), 377.6, (114.4, 64))
+        measured = self.orient(parts, [("Z", 180)], concept, masks["grip"])
+        self.assertAlmostEqual(measured["min_y"], -1.003, delta=0.03)  # the tip, forward
+        self.assertAlmostEqual(measured["max_y"], 0.097, delta=0.03)
+        fit, theta, _phi, alignment = measured["view"]
+        self.assertGreater(fit, 0.7)  # boxes against a drawn concept, as above
+        self.assertGreaterEqual(abs(theta), 175)
 
     def test_a_weapon_kept_in_its_concept_pose_is_levelled(self):
         # A crossbow drawn from above at three-quarters. Pixal3D keeps the concept's pose (2026-10-24), so the mesh
-        # is turned 25 degrees and tilted 35 towards the camera, as drawn. Final pass: stock along -Y tip first, bow
-        # across x, lying flat with its grip below the stock.
-        parts = {"stock": ((0, 0, 0), (1.0, 0.06, 0.08)), "bow": ((0.42, 0, 0), (0.04, 0.8, 0.03)),
+        # is turned 25 degrees and tilted 35 towards the camera, as drawn. Its bow spreads wider than its stock is
+        # long, so only the grip tells which axis is the length. Final pass: stock along -Y tip first, bow across x,
+        # lying flat with its grip below the stock.
+        parts = {"stock": ((0, 0, 0), (1.0, 0.06, 0.08)), "bow": ((0.42, 0, 0), (0.04, 1.1, 0.03)),
                  "grip": ((-0.25, 0, -0.08), (0.08, 0.05, 0.08))}
         pose = [("Z", 25), ("X", 35)]
         concept, masks = _boxes_seen_from_front(parts, pose, (512, 384), 350, (256, 192))
         measured = self.orient(parts, pose, concept, masks["grip"])
         self.assertAlmostEqual(measured["dims"][1], 1.1, places=3)
-        self.assertAlmostEqual(measured["dims"][0], 0.88, delta=0.01)  # the bow's 0.8 at 1.1 scale
+        self.assertAlmostEqual(measured["dims"][0], 1.21, delta=0.01)  # the bow's 1.1 at 1.1 scale
         # Stock top to grip bottom, 0.16 at 1.1 scale; left tilted it measured 0.54. The grip below the stock
         # leans the fitted plane about a degree here, and up to 2 degrees on live crossbows (docs/WEAPONS.md).
         self.assertAlmostEqual(measured["dims"][2], 0.176, delta=0.03)

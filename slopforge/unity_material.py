@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 from .failures import StageFailure
 from .provenance import file_sha256
+from .validation import DARKENED_LIT, _lightness_cells
 
 
 def unity_cli(project_root):
@@ -139,6 +140,44 @@ def zero_metallic(basecolor_path, metallic_path, matches):
     channel.paste(0, mask=mask)
     channel.convert(mode).save(metallic_path)
     return sum(mask.histogram()[128:]) / (base.width * base.height)
+
+
+METAL_LIGHTNESS_GRID = 16  # cells across the object, as one of the dark-texture check's grids
+MIN_LIT_METAL_CELLS = 6  # fewer lit metal cells than this is too little metal to judge from the concept's side
+MAX_METAL_GAIN = 8.0
+
+
+def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, metal_view):
+    """Brighten metal whose base colour is darker than the concept shows it; returns the gain applied (1.0: none).
+
+    TRELLIS.2 decoded a pistol's blued steel near-black (0.13 sRGB, about 2% reflectance, less than any metal)
+    where the concept showed dark grey, so the slide rendered as a black mirror and three seeds failed the dark-texture
+    check (2026-10-24). cutout, base_view and metal_view are RGBA arrays of the concept and of the base colour and
+    metallic maps rendered from the concept's fitted view. Each metal cell lit in the concept gives the ratio of the
+    concept's luminance to the base colour's; every metal texel is scaled by their median in linear RGB, keeping its
+    hue. Metal is never darkened, and iron drawn dark stays dark.
+    """
+    concept, concept_cover = _lightness_cells(cutout, METAL_LIGHTNESS_GRID)
+    texture, texture_cover = _lightness_cells(base_view, METAL_LIGHTNESS_GRID)
+    metal, _ = _lightness_cells(metal_view, METAL_LIGHTNESS_GRID)
+    lit = concept_cover & texture_cover & (metal > 53.4) & (concept > DARKENED_LIT)  # L* 53.4 is metallic 0.5
+    if lit.sum() < MIN_LIT_METAL_CELLS:
+        return 1.0
+    luminance = lambda lightness: ((lightness + 16) / 116) ** 3
+    gain = float(np.clip(np.median(luminance(concept[lit]) / np.maximum(luminance(texture[lit]), 1e-4)),
+                         1.0, MAX_METAL_GAIN))
+    if gain == 1.0:
+        return gain
+    with Image.open(basecolor_path) as image:
+        mode, pixels = image.mode, np.asarray(image.convert("RGBA"), dtype=float) / 255
+    with Image.open(metallic_path) as image:
+        metallic = np.asarray(image.convert("L").resize((pixels.shape[1], pixels.shape[0])), dtype=float) / 255
+    rgb = pixels[..., :3]
+    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    linear[metallic > 0.5] = np.clip(linear[metallic > 0.5] * gain, 0, 1)
+    pixels[..., :3] = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
+    Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
+    return gain
 
 
 def glass_material_path(material):

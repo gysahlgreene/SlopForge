@@ -14,7 +14,7 @@ Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/Sl
 
 ## The `weapon` type
 
-[`templates/asset_types/weapon.yaml`](../templates/asset_types/weapon.yaml) differs from a prop in three ways, and shares its mesh graph:
+[`templates/asset_types/weapon.yaml`](../templates/asset_types/weapon.yaml) differs from a prop in four ways:
 - **A side-profile concept on a wide canvas** (1536 × 640). The tip or muzzle points right and the grip sits on the
   left, so a long blade or barrel fills the frame. `--aspect` overrides it for one asset.
 - **Its own shape rule.** Props are told "no thin hollow tubes, open rings, wires, or paper-thin parts", because
@@ -24,13 +24,19 @@ Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/Sl
   - no loose straps or floating parts.
 - **Held at the grip, tip forward.** A weapon must declare its grip (`--part "grip=grip: ..."`). The final Blender
   pass then orients it and sets its pivot:
-  - It finds the view that best fits the concept, searching the front half of the view sphere in 5° steps.
+  - It finds the view that best fits the concept in 5° steps. A weapon's search covers the full turn, front-facing
+    views first: TRELLIS.2 rebuilt three of four side-profile longswords turned 180°, which only a view from behind
+    fits. Its colour checks render from the same view.
   - **Its top:**
     - A weapon whose thinnest axis is nearer vertical than horizontal lies flat in its concept, like a crossbow drawn
       from above. That axis is its top.
     - A side-on weapon's top is +Z.
-  - **Its length** is its longest axis across the top. It is pointed at the end the concept draws on the right, the
-    tip or muzzle, and turned to Blender −Y, which is forward once in Unity.
+  - **Its length** is whichever of the two axes across the top passes nearest the grip: a crossbow's bow can spread
+    almost as far as its stock is long. It is pointed at the end the concept draws on the right, the tip or muzzle,
+    and turned to Blender −Y, which is forward once in Unity.
+  - **An unreadable view is retried.** Inspection records how far the length runs along the concept's right
+    (`tip_alignment`). Below 0.25 the view looks along the weapon and the tip's end is a guess, so the candidate fails
+    as the retryable `weapon_orientation`. A reconstruction of two crossed swords measured 0.0.
   - **Why the fitted view only picks the tip's end:**
     - TRELLIS.2 rebuilds a weapon side-on and lengthwise whatever the concept's camera, while Pixal3D keeps the
       concept's pose.
@@ -38,11 +44,14 @@ Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/Sl
     - A pistol's grip leans its full 3D principal axis 19–25° off the barrel.
   - It puts the origin at the centre of the vertices under the grip mask, seen from the fitted view, widened by 1.5% of
     the concept to absorb the view's coarseness.
-  - `--target-size=-,<length>,-` then sizes it along its length.
-  - Inspection records the fitted view (`concept_view`: fit, theta, phi).
-- **The props' mesh graph.** A graph made for weapons, with a finer sharp-feature remesh, added defects without
-  keeping more. Pixal3D on `h100_final` came closest to every concept
-  ([graph comparison](media/weapon-graph-2026-10/README.md)).
+  - `--target-size=-,<length>,-` then sizes it along its length, without the kit walls' turn of the longer side onto
+    the declared axis.
+  - Inspection records the fitted view (`concept_view`: fit, theta, phi, tip_alignment).
+- **TRELLIS.2 on every H100 profile** (`model_workflow: weapon_model`). It reduces the full-detail shape in Blender,
+  as props do. A pistol, longsword and crossbow through the whole pipeline matched their concepts' forms more cleanly
+  than a Pixal3D graph with the same Blender reduction, which only had the pistol's grips closer
+  ([full-pipeline comparison](media/weapon-pipeline-2026-10/README.md)). A graph made for weapons, with a finer
+  sharp-feature remesh, had added defects ([first comparison](media/weapon-graph-2026-10/README.md)).
 
 Long weapons suit the default `wide` canvas; pass `--aspect landscape` for weapons around 1.5:1, such as pistols and crossbows, and draw a crossbow from above at three-quarters so its bow and string show ([concept trial](media/weapon-concepts-2026-10/README.md)).
 
@@ -128,5 +137,11 @@ Splitting parts from the mesh along these masks is the next step (epic #107).
 - **Orientation precision.** A grip or stock below a flat-lying weapon leans the plane fitted through it:
   - about 1° on the test fixture;
   - up to 2° on live crossbows, where the true level is unknown.
+- **Small detail and finish** (pistol, 2026-10-24):
+  - small mechanisms such as a hammer, safety and slide stop stay soft;
+  - grip checkering is lost;
+  - a small coloured region such as wooden grips can drift in colour, because the colour checks measure the whole
+    object;
+  - generated steel is glossy where a concept shows it satin.
 - **Single mesh.** Every weapon is still one mesh. Moving parts are planned: each part split from the one generated
   mesh along a mask drawn on the concept.

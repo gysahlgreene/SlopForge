@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import numpy as np
 from PIL import Image
 from processing.comfy_generate_3d import copy_generated_maps, copy_conditioning_image
 from processing import comfy_generate_3d
@@ -518,13 +519,15 @@ if __name__ == "__main__":
 
 class DeclaredMaterialTests(unittest.TestCase):
     def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None, asset_extra=None,
-                   lineage_extra=None):
+                   lineage_extra=None, metallic_map=None):
         source = root / "source"
         source.mkdir()
         (source / "relay.glb").write_bytes(b"mesh")
         basecolor.save(source / "basecolor.png")
         for key, value in (("normal", (128, 128, 255)), ("roughness", (200,) * 3), ("metallic", (metallic_value,) * 3)):
             Image.new("RGB", basecolor.size, value).save(source / f"{key}.png")
+        if metallic_map is not None:
+            metallic_map.save(source / "metallic.png")
         textures = {key: f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
         config = {"asset_pipeline": {"candidate_root": "candidates", "manifest": "manifest.json",
                                      "model_budgets": {"prop_faces": 1000}}}
@@ -558,16 +561,23 @@ class DeclaredMaterialTests(unittest.TestCase):
 
     def test_a_grip_held_type_is_oriented_from_its_concept_and_pivoted_at_its_grip_mask(self):
         # Weapons: Blender turns the tip forward from the concept's view and sets the origin at the grip mask.
+        # Its concept views search the full turn: TRELLIS.2 rebuilt side-profile swords facing the other way.
         grip = {"name": "handle", "kind": "grip", "text": "the grip"}
         for pivot, expected in (("grip", True), ("bottom_center", False)):
             with self.subTest(pivot=pivot), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
-                self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
-                                asset_extra={"pivot": pivot, "parts": [grip]},
-                                lineage_extra={"part_masks": root / "parts_1"})
+                views = []
+                def view(_root, _config, _cutout, _mesh, paths, name, **options):
+                    views.append(options)
+                    return {"status": "skipped", "silhouette_iou": 0.95}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
+                                    asset_extra={"pivot": pivot, "parts": [grip]}, limits={"min_concept_fit": 0.8},
+                                    lineage_extra={"part_masks": root / "parts_1"})
                 options = self.process_options
                 self.assertEqual(options["pivot"], pivot)
+                self.assertEqual([view.get("full_turn", False) for view in views], [expected])
                 if expected:
                     self.assertEqual((options["concept"], options["grip_mask"]),
                                      (root / "cutout.png", root / "parts_1/handle.png"))
@@ -892,6 +902,53 @@ class DeclaredMaterialTests(unittest.TestCase):
                 else:
                     self.assertEqual(validation["failure_codes"], ["nonmetal_missing"])
                     self.assertTrue(candidate_quality_rejection(validation))
+
+    def test_metal_darker_than_its_concept_is_brightened_to_it(self):
+        # A pistol's blued steel was decoded near-black (0.13 sRGB) where its concept showed dark grey (0.36), and
+        # every seed failed the dark-texture check (2026-10-24). Metal is brightened to the concept; wood is untouched.
+        from slopforge.style import parse_material_spec
+        pistol = [parse_material_spec("slide=metal: blued steel"), parse_material_spec("grips=nonmetal: walnut")]
+
+        def view(_root, _config, _cutout, _mesh, paths, name, **options):
+            with Image.open(options.get("basecolor", paths["basecolor"])) as texture:  # the map, seen whole
+                texture.convert("RGBA").resize((64, 64)).save(paths["directory"] / f"{name}_base.png")
+            return {"status": "rendered", "silhouette_iou": 0.95}
+
+        for concept_grey, expect_gain in ((91, True), (20, False)):
+            with self.subTest(concept_grey=concept_grey), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                Image.new("RGBA", (64, 64), (concept_grey,) * 3 + (255,)).save(root / "concept_cutout.png")
+                base = Image.new("RGB", (64, 64), (33, 34, 34))  # near-black steel
+                base.paste((110, 60, 40), (0, 0, 8, 64))  # a walnut strip, not metal
+                metallic = Image.new("L", (64, 64), 255)
+                metallic.paste(0, (0, 0, 8, 64))
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    candidate = self._candidate(root, pistol, 0, base, cutout=root / "concept_cutout.png",
+                                                limits={"max_concept_darkened_share": 0.4}, metallic_map=metallic)
+                gain = candidate["validation"]["measured"]["metal_lightness_gain"]
+                with Image.open(root / candidate["outputs"]["basecolor"]) as result:
+                    steel, wood = result.convert("RGB").getpixel((40, 32)), result.convert("RGB").getpixel((2, 32))
+                self.assertEqual(wood, (110, 60, 40))
+                if expect_gain:
+                    self.assertGreater(gain, 4)
+                    self.assertAlmostEqual(steel[1], 91, delta=4)  # the concept's grey
+                    self.assertEqual(candidate["status"], "candidate")  # no longer darkened
+                else:  # iron drawn darker than decoded keeps its colour
+                    self.assertEqual(gain, 1.0)
+                    self.assertEqual(steel, (33, 34, 34))
+
+    def test_too_little_lit_metal_is_left_as_decoded(self):
+        from slopforge.unity_material import match_metal_lightness
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (16, 16), (33, 34, 34)).save(root / "base.png")
+            Image.new("L", (16, 16), 255).save(root / "metal.png")
+            cutout = np.full((64, 64, 4), 255.0); cutout[..., :3] = 91
+            view = np.full((64, 64, 4), 255.0); view[..., :3] = 33
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255; metal[:4, :4, :3] = 255  # one corner of metal
+            self.assertEqual(match_metal_lightness(root / "base.png", root / "metal.png", cutout, view, metal), 1.0)
+            with Image.open(root / "base.png") as image:
+                self.assertEqual(image.getpixel((8, 8)), (33, 34, 34))
 
     def test_reconstruction_rules_are_appended_to_agent_prompts_with_materials(self):
         from slopforge.style import parse_material_spec, reconstruction_rules

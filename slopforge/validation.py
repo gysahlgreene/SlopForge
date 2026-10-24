@@ -352,6 +352,31 @@ def apply_concept_fit(validation, view, minimum):
         validation["status"] = "failed"
     return validation
 
+# A weapon's length must run at least this far along the concept's right for its tip's end to be told: a reconstruction
+# of two crossed swords lay across the fitted view at 0.0, and a three-quarter crossbow ran at 0.45 (2026-10-24).
+MIN_WEAPON_TIP_ALIGNMENT = 0.25
+
+
+def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
+    """Fail a held weapon whose length runs across the concept's fitted view (retryable quality code).
+
+    Blender's final pass records how far the weapon's length runs along the concept's right (blender/prepare_model.py,
+    Orient from the concept). Near 0 the view looks along the length, so which end is the tip is a guess.
+    """
+    alignment = (validation.get("measured", {}).get("concept_view") or {}).get("tip_alignment")
+    if alignment is None:
+        return validation
+    validation["measured"]["weapon_tip_alignment"] = alignment
+    validation.setdefault("limits", {})["min_weapon_tip_alignment"] = minimum
+    if alignment < minimum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the weapon's length runs across the concept's view (tip alignment {alignment}, limit {minimum}), so its "
+            "tip cannot be told from its pommel or stock; another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "weapon_orientation"]
+        validation["status"] = "failed"
+    return validation
+
+
 # A module declared as an L corner must leave one quarter of its footprint nearly empty. Real stone corners measured
 # 0.00 there (others 0.69-0.92); one that reconstructed as a solid block measured 0.86 in every quarter (2026-10-22).
 MAX_OPEN_QUADRANT = 0.15

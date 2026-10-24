@@ -25,13 +25,14 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              make_metallic_gloss, unity_cli, zero_metallic)
+                              make_metallic_gloss, match_metal_lightness, unity_cli, zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
-                          apply_module_stretch, apply_thin_features, concept_colour_fidelity, concept_thin_recall,
+                          apply_module_stretch, apply_thin_features, apply_weapon_orientation,
+                          concept_colour_fidelity, concept_thin_recall,
                           is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
 
@@ -1191,6 +1192,19 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         kit_settings["kit_roughness"] = kit_roughness
     glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
+    metal_gain = None
+    cutout = (lineage or {}).get("concept_cutout")
+    # A held weapon's views search the full turn: TRELLIS.2 can rebuild it facing the other way (concept_view.py).
+    turn = {"full_turn": True} if asset.get("pivot") == "grip" else {}
+    if declares_metal and cutout and Path(cutout).is_file():
+        # Metal drawn lighter than the generator decoded it is brightened to the concept (match_metal_lightness).
+        views = {name: _concept_view(root, config, cutout, mesh_path, paths, name, min_iou=0.8, uv=False, **turn,
+                                     **({"basecolor": str(paths["metallic"])} if name == "metal_metallic" else {}))
+                 for name in ("metal_base", "metal_metallic")}
+        if all(view.get("status") == "rendered" for view in views.values()):
+            arrays = [np.asarray(Image.open(path).convert("RGBA"), dtype=float) for path in
+                      (cutout, paths["directory"] / "metal_base_base.png", paths["directory"] / "metal_metallic_base.png")]
+            metal_gain = round(match_metal_lightness(paths["basecolor"], paths["metallic"], *arrays), 3)
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1248,6 +1262,10 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_declared_glass(validation, glass_fraction)
     if nonmetal_fraction is not None:
         validation = apply_declared_nonmetal(validation, nonmetal_fraction)
+    if metal_gain is not None:
+        validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
+    if held:
+        validation = apply_weapon_orientation(validation)
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -1261,7 +1279,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():
         # The atlas also holds hidden insides and bases, so compare what the concept shows (2026-10-21 jug: atlas
         # saturation 0.42 of the concept's, 0.83 from the concept's side). 0.8 fits the concept's side; jugs fit 0.86.
-        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False)
+        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False, **turn)
         rendered = paths["directory"] / "concept_colour_base.png" if view.get("status") == "rendered" else None
         if any(limit is not None for limit in colour_limits):
             validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered,
