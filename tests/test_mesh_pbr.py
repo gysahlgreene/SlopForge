@@ -561,16 +561,23 @@ class DeclaredMaterialTests(unittest.TestCase):
 
     def test_a_grip_held_type_is_oriented_from_its_concept_and_pivoted_at_its_grip_mask(self):
         # Weapons: Blender turns the tip forward from the concept's view and sets the origin at the grip mask.
+        # Its concept views search the full turn: TRELLIS.2 rebuilt side-profile swords facing the other way.
         grip = {"name": "handle", "kind": "grip", "text": "the grip"}
         for pivot, expected in (("grip", True), ("bottom_center", False)):
             with self.subTest(pivot=pivot), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
-                self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
-                                asset_extra={"pivot": pivot, "parts": [grip]},
-                                lineage_extra={"part_masks": root / "parts_1"})
+                views = []
+                def view(_root, _config, _cutout, _mesh, paths, name, **options):
+                    views.append(options)
+                    return {"status": "skipped", "silhouette_iou": 0.95}
+                with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                    self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
+                                    asset_extra={"pivot": pivot, "parts": [grip]}, limits={"min_concept_fit": 0.8},
+                                    lineage_extra={"part_masks": root / "parts_1"})
                 options = self.process_options
                 self.assertEqual(options["pivot"], pivot)
+                self.assertEqual([view.get("full_turn", False) for view in views], [expected])
                 if expected:
                     self.assertEqual((options["concept"], options["grip_mask"]),
                                      (root / "cutout.png", root / "parts_1/handle.png"))

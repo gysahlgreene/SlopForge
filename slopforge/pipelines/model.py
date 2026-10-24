@@ -1194,9 +1194,11 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
     metal_gain = None
     cutout = (lineage or {}).get("concept_cutout")
+    # A held weapon's views search the full turn: TRELLIS.2 can rebuild it facing the other way (concept_view.py).
+    turn = {"full_turn": True} if asset.get("pivot") == "grip" else {}
     if declares_metal and cutout and Path(cutout).is_file():
         # Metal drawn lighter than the generator decoded it is brightened to the concept (match_metal_lightness).
-        views = {name: _concept_view(root, config, cutout, mesh_path, paths, name, min_iou=0.8, uv=False,
+        views = {name: _concept_view(root, config, cutout, mesh_path, paths, name, min_iou=0.8, uv=False, **turn,
                                      **({"basecolor": str(paths["metallic"])} if name == "metal_metallic" else {}))
                  for name in ("metal_base", "metal_metallic")}
         if all(view.get("status") == "rendered" for view in views.values()):
@@ -1277,7 +1279,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():
         # The atlas also holds hidden insides and bases, so compare what the concept shows (2026-10-21 jug: atlas
         # saturation 0.42 of the concept's, 0.83 from the concept's side). 0.8 fits the concept's side; jugs fit 0.86.
-        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False)
+        view = _concept_view(root, config, cutout, mesh_path, paths, "concept_colour", min_iou=0.8, uv=False, **turn)
         rendered = paths["directory"] / "concept_colour_base.png" if view.get("status") == "rendered" else None
         if any(limit is not None for limit in colour_limits):
             validation = apply_concept_colour(validation, concept_colour_fidelity(cutout, paths["basecolor"], rendered,

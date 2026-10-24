@@ -379,7 +379,7 @@ if oriented:
     from concept_view import fit_view, image_mask, surface_samples, to_concept_pixels, view_axes
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
     world, samples = surface_samples(obj)
-    fit, theta, phi = fit_view(samples, concept)
+    fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
     _, right, up = view_axes(math.radians(theta), math.radians(phi))
     held = None
     if "--grip-mask" in sys.argv:
