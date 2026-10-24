@@ -786,7 +786,9 @@ Dark-texture check (2026-10-24; [evidence](docs/media/dark-texture-check-2026-10
   timber from black stone; comparing by position does.
 - **Tests:** a blackened grey concept fails and retries; dark beams that are dark in the concept pass; the limit is
   declared; `make verify`.
-- **Not verified:** the live retry on the H100 (pending, queued behind another project's jobs).
+- **Live:** the cliff's original concept on the H100 at `1139b94`. Three seeds were rejected as darkened
+  (0.50–0.59); the fourth was accepted (0.013) and matches the concept by eye. A first attempt stopped on GPU memory
+  held by another project's jobs on the shared H100.
 - **Limits:**
   - five darkened examples; the cliff is closest to the limit (0.45);
   - timber walls with thickened near-black beams score 0.28–0.36 and are accepted;

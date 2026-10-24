@@ -86,4 +86,22 @@ dark in the concept too.
 
 ## Live check
 
-Pending: the cliff's original concept 3, re-approved on the H100 with the check on.
+The moorland cliff's original concept 3 was re-approved on the H100 `final` tier, at commit `1139b94`, with the check
+on. This was the concept whose first mesh published black on 2026-10-23.
+
+![The concept, then four seeds' base colours from its side: three rejected as darkened, the fourth accepted](live_cliff_seeds.jpg)
+
+| Seed | Darkened share | Result |
+| --- | --- | --- |
+| 1 | 0.522 | rejected: `colour_darkened`, also `component_budget` |
+| 2 | 0.499 | rejected: `colour_darkened`, also `component_budget` |
+| 3 | 0.594 | rejected: `colour_darkened` |
+| 4 | 0.013 | accepted (concept fit 0.95) |
+
+Seed 1 ran first, and then the run stopped. Another project's image jobs held 77.8 of the H100's 79.2 GiB, so the
+next bake ran out of memory. The out-of-memory recovery freed the cache and retried once, but that project kept
+reloading its models. The rest ran once the H100 was idle.
+
+This concept textures black on most seeds: four of five seeds tried here and on 2026-10-23. The check turns
+that from a published black cliff into retries. A concept closer to the brief, like the live run's concept 5,
+avoids the retries.
