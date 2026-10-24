@@ -956,3 +956,22 @@ Concept colour transfer for weapons (2026-10-24, [evidence](docs/media/weapon-pi
 - **Not verified:**
   - props;
   - the first live run shifted nothing (fixed since: grain tones were measured one by one).
+
+Weapon moving parts (2026-10-24, M3 step W8, [evidence](docs/media/weapon-moving-parts-2026-10/README.md)).
+- **Change:** the final Blender pass splits each declared hinge or slide from the one generated mesh along its concept
+  mask (`separate_part`): vertices welded, faces labelled by majority and smoothed, cut islands rejoined, both sides
+  capped with a plain texel, the part parented to the body with a pivot by kind (slide: box centre; hinge: cut
+  centre). The FBX carries the hierarchy and the kind; inspection records `parts`. A part too small to separate
+  fails as the retryable `part_missing`.
+- **Design change:** the split runs after texturing, not before as planned, because the single-view Pixal3D graph has
+  no prepare step. The generator therefore paints no cut faces; caps take a texel from the surface beside them.
+- **Live:** one pistol concept, three runs. The first cut left the body in 12–19 slivers (fixed by rejoining islands);
+  the caps came out white (fixed by the median texel). The last run passed with a 14,834-face slide and a 120-face
+  trigger, after one retry on a seed whose trigger was too small. Its FBX imports with both parts as children at the
+  recorded pivots, and the project's Unity preview imported it.
+- **Tests:** a slab with a slide and a hinge cut along masks, with a strip gap in the slide mask: both parts come out
+  closed, parented, pivoted by kind, in the FBX with their kinds, and the body stays one piece; the material stage
+  passes hinge and slide masks for held weapons only, and a part that does not come out fails `part_missing`;
+  `make verify`.
+- **Not verified:** motion in Unity (no prefab, clip or playback check: W9); any weapon other than this pistol; a part
+  hidden behind another in the concept's view cannot be cut.
