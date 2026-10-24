@@ -414,8 +414,13 @@ if oriented:
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
     for name, kind, mask_path in part_specs():
-        # Not widened: a moving part's cut follows its mask; its faces are smoothed when it is separated.
-        moving = under(image_mask(mask_path, channel=0))
+        mask = image_mask(mask_path, channel=0)
+        if kind == "hinge":
+            # Widened by 1% of the concept: SAM masked a pistol trigger's blade alone, and the cut left its root in
+            # the frame (2026-10-24). A slide's mask is not widened; its cut is snapped to a plane when separated.
+            for _ in range(max(1, round(0.01 * max(mask.shape)))):
+                mask = mask | np.roll(mask, 1, 0) | np.roll(mask, -1, 0) | np.roll(mask, 1, 1) | np.roll(mask, -1, 1)
+        moving = under(mask)
         group = obj.vertex_groups.new(name=f"slopforge_part_{name}")
         group.add([int(index) for index in np.flatnonzero(moving)], 1.0, "REPLACE")
         print(f"Part {name} ({kind}): {int(moving.sum())} of {len(world)} vertices under its mask")
@@ -687,6 +692,10 @@ if bsdf is None:
 if surface_source_path:
     if not surface_source_path.is_file():
         raise SystemExit(f"Surface material image missing: {surface_source_path}")
+    if basecolor_path and surface_source_path.resolve() == basecolor_path.resolve():
+        # The swatch is tiled and baked into the base colour path; given the base colour map itself, it overwrote a
+        # candidate's map with its own tiling (2026-10-24). Native textures pass no --surface-source.
+        raise SystemExit("--surface-source must not be the base colour map it is baked into")
     bsdf = bake_basecolor(obj, material, surface_source_path, basecolor_path, material_scale,
                          {"normal": normal_path, "roughness": roughness_path,
                           "metallic": metallic_path, "emission": emission_path})
