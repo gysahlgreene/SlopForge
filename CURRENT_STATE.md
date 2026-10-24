@@ -979,8 +979,15 @@ Weapon moving parts (2026-10-24, M3 step W8, [evidence](docs/media/weapon-moving
   mask widened by 1% (trigger 288 faces, from 120). A strip of the slide's underside at the muzzle still stays with
   the frame. Cutting offline, the final pass was given a candidate's base colour as `--surface-source` and baked
   over it; restored from the published copies, and the pass now refuses that.
+- **Third pass (overall look):** multi-view conditioning draws a side profile for every view of a pistol and fails
+  its own gate (not usable); a bolder concept gives flatter sides and a cleaner cut. Its run exposed a budget bug:
+  the cut adds faces after the reduction (30,333 from 28,432 on a 30,000 budget), so a mesh with moving parts is
+  now reduced to 90% of its budget at both reduction sites (`_reduction_budget`; unit test and first-pass test).
+  The rerun passed on its first seed with every cap closed. Still the generator's: the lumpy hammer, the small
+  trigger, the mirror finish.
 - **Not verified:** any weapon other than this pistol; a part hidden behind another in the concept's view cannot be
-  cut; the second pass ran offline on M3's mesh and maps, not through `approve`.
+  cut; the second pass ran offline on M3's mesh and maps, not through `approve`; the 10% margin is measured on one
+  pistol.
 
 Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-moving-parts-2026-10/README.md#in-unity)).
 - **Change:** `approve-texture` on a weapon with hinge or slide parts builds `<name>.prefab` (an identity root at the

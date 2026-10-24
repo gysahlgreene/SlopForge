@@ -1099,7 +1099,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
                 shutil.copy2(tiles[key], paths[key])
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
-                      face_budget, surface_source=paths["surface"],
+                      _reduction_budget(face_budget, asset), surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
@@ -1413,6 +1413,15 @@ def _face_budget(pipeline, asset_type, asset, default=30000):
     faces (2026-10-22 kit: a 3 x 3 m floor used 59,988)."""
     budget = asset.get("face_budget") or pipeline.get("model_budgets", {}).get(asset_type.get("face_budget"), default)
     return int(budget) if budget is not None else None
+
+
+def _reduction_budget(face_budget, asset):
+    """The face count to reduce a mesh to. The final pass cuts a weapon's moving parts from the reduced mesh, and
+    the cut adds faces (the bisect's splits, the caps, a barrel): 1,901 on a 30,000-face pistol (2026-10-24 run B2),
+    so the reduction leaves room for them."""
+    # shortcut: a fixed 10% margin, measured on one pistol; make it a per-type setting if another weapon overruns
+    cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
+    return int(face_budget * 0.9) if cut_later else face_budget
 
 
 def _fit_texture_size(maps, size):
@@ -2446,7 +2455,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 if mesh_outputs is None:
                     config["_journal_context"] = journal_context
                     if workflow:
-                        budget = _face_budget(pipeline, asset_type, asset)
+                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,

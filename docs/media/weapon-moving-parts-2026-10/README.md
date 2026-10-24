@@ -69,6 +69,29 @@ mesh and maps) addressed the first and third:
 
 ![The M4 cut at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
 
+**Third pass: the overall look.** Two levers were tried for the owner's fourth fault, through `approve` on the H100:
+- **Multi-view conditioning** (run M5, the `h100_multiview` Pixal3D graph): the view generator drew a side profile
+  for every requested view, so its mirrored-silhouette gate rejected all three attempts (overlap 0.21–0.68 against
+  0.9). Not usable for a side-profile weapon as it stands.
+
+  ![The four generated views, all side profiles](multiview_views.jpg)
+
+- **A bolder concept** (runs B1–B4: the same brief asking for a large hammer, deep serrations and coarse checkering):
+  flatter sides and a cleaner slide. Its first cut (B1) took the frame's dust cover with the slide, since the slide
+  box reached below the slide line; a tighter box (B2) gave the cleanest cut yet (8 open edges against B1's 355),
+  but the candidate failed the face budget: reduced to 28,432 faces, 30,333 after the cut. The cut adds faces
+  (the bisect's splits, the caps, the barrel), after the reduction. **Fix:** a mesh with moving parts is reduced to
+  90% of its budget (`_reduction_budget`), at both reduction sites: the worker-side pass for TRELLIS.2 (B3 showed
+  the first Blender pass alone was not it) and the first Blender pass for native meshes. B4 then passed on its
+  first seed: 25,648 faces reduced, every cap closed, body in one piece, slide 8,431 faces, trigger 122.
+
+  ![The current pistol and the bold one, at rest and moved](current_vs_bold.jpg)
+
+  ![The bold pistol's slide travelling back and its trigger pulling](bold_pistol_motion.gif)
+
+  Still the generator's: the lumpy slide rear and hammer, the small trigger (122 faces), and a mirror finish on
+  steel the concept draws matte (the open metal-finish decision).
+
 ## In Unity
 
 Publishing the M3 pistol (`approve-texture`) built its prefab, an animator with one state per part, and one clip per
