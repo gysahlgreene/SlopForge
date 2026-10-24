@@ -146,11 +146,9 @@ keeps the last flythrough in `.previous`.
   piece whose facing matters: the long side then turns onto x, and the layout's turn holds.
 - **TRELLIS sometimes textures a mesh mostly black,** even on the side the concept shows. The live cliff's view
   from the concept's side had 0.48 of the concept's median lightness; the other 17 live models had 0.71–1.20. The
-  black is in TRELLIS's own texture, not the bake. The colour checks compare only hue and saturation, so it
-  published. Three lightness measures over 125 published models did not separate it from accepted timber modules,
-  whose dark beams on light plaster shift those measures, so there is no check yet. Next check: label those 125
-  concept-side views by eye and calibrate against the labels. Until then, review each 3D child's preview for black
-  patches before publishing it.
+  black is in TRELLIS's own texture, not the bake. The colour checks compared only hue and saturation, so it
+  published. Since 2026-10-24 the `colour_darkened` check rejects it and tries the next seed
+  ([calibration](media/dark-texture-check-2026-10/README.md)).
 
 **Measured:** a stills-only render of the full scene over the prototype's assets took 82 s, with 145 objects,
 2.0 million grass blades, 6,600 cover cards and a 34 s lighting bake.

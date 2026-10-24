@@ -744,7 +744,7 @@ Natural environments and scenes (2026-10-23; [guide](docs/NATURAL-ENVIRONMENTS.m
   regeneration; the report records the source and hash.
 - **Found:** TRELLIS sometimes textures a mesh mostly black on the concept's side. The cliff and S2's M2-v3 pillar
   are cases. Three lightness measures over 125 published models did not separate the failures from accepted
-  timber modules, so there is no check yet. Next: label those views by eye and calibrate.
+  timber modules; the 2026-10-24 `colour_darkened` check below does.
 - **Tests:** `tests/test_scene.py` (frame field of view; recipe-file scene source and its validation).
 - **Not verified:** Play mode, frame rate and memory; a second live run; the owner's review of the live footage.
 
@@ -773,3 +773,21 @@ natural environments, scenes) and of every public doc. The 2026-10-20 review's 2
 - **Not verified:** a full flythrough after the texture fix (the stills path is the same code); a failed foliage
   re-approval against a live ComfyUI.
 - **Left as is:** the kit and prop four-view renders look alike but differ by design (sizes, a top view, lighting).
+
+Dark-texture check (2026-10-24; [evidence](docs/media/dark-texture-check-2026-10/README.md)).
+- **Cause:** TRELLIS.2 sometimes predicts a mostly black texture on the side the concept shows. On the moorland cliff,
+  faces baked dark sit as close to TRELLIS's surface as light ones, so it is the predicted colour, not the bake.
+- **Change:** `concept_darkened_share` compares the concept with the concept-side view of the base colour on 8 to
+  24-cell grids of the object's bounds: cells lit in the concept (L* over 30) but under 0.6 of its lightness in the
+  map. Over 0.4 (`max_concept_darkened_share`, `prop` and `architecture`) the candidate fails as `colour_darkened`
+  and the next seed is tried; near-grey concepts are checked too.
+- **Calibration:** 147 unique concept-side views from every evidence run, labelled by eye first. The 5 darkened
+  measured 0.45–0.86, and every fine one 0.37 or less. Five lightness-statistic measures did not separate dark-beamed
+  timber from black stone; comparing by position does.
+- **Tests:** a blackened grey concept fails and retries; dark beams that are dark in the concept pass; the limit is
+  declared; `make verify`.
+- **Not verified:** the live retry on the H100 (pending, queued behind another project's jobs).
+- **Limits:**
+  - five darkened examples; the cliff is closest to the limit (0.45);
+  - timber walls with thickened near-black beams score 0.28–0.36 and are accepted;
+  - existing projects must add the key to their own asset types.
