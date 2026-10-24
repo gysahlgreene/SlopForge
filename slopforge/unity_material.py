@@ -227,12 +227,17 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
     texture, texture_cover, (x0, y0, x1, y1) = _lab_cells(base_view, METAL_LIGHTNESS_GRID)
     seen = (base_view[..., 3] > 200) & (metal_view[..., 0] < 128)
     view_labels = nearest(_lab(base_view[..., :3].reshape(-1, 3)).reshape(*base_view.shape[:2], 3))
+    cell_share = lambda mask: np.asarray(Image.fromarray(mask[y0:y1, x0:x1].astype(np.uint8) * 255).resize(
+        (METAL_LIGHTNESS_GRID,) * 2, Image.BOX), dtype=float) / 255
+    shares = np.stack([cell_share((view_labels == k) & seen) for k in range(len(centres))])
+    # A cell counts for its most common colour when it is mostly non-metal: one wood's grain tones each rarely cover
+    # most of a cell alone (2026-10-24 pistol: 3, 0 and 2 cells by single-colour majority).
+    measurable = (concept_cover & texture_cover & (shares.sum(0) > 0.6)
+                  & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA))
+    plurality = shares.argmax(0)
     report, shifts = {}, {}
     for k in range(len(centres)):
-        covered = ((view_labels == k) & seen)[y0:y1, x0:x1].astype(np.uint8) * 255
-        share = np.asarray(Image.fromarray(covered).resize((METAL_LIGHTNESS_GRID,) * 2, Image.BOX), dtype=float) / 255
-        cells = (concept_cover & texture_cover & (share > 0.6)
-                 & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA))
+        cells = measurable & (plurality == k)
         report[k] = {"colour": [round(float(value), 1) for value in centres[k]], "cells": int(cells.sum())}
         if cells.sum() >= MIN_CLUSTER_CELLS:
             shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
