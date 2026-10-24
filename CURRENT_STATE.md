@@ -850,3 +850,35 @@ Weapon orientation and grip pivot (2026-10-24, M3 step W5, epic #107).
   - `make verify` passes.
 - **Not verified:** a generated weapon. In Unity, Blender −Y should become +Z under the current FBX axes; that is
   checked in step W9.
+
+Weapon mesh graph and orientation (2026-10-24, M3 step W3, epic #107).
+- **Live comparison** on the H100, at seed 424242, of three concepts (longsword, pistol, three-quarter crossbow) and
+  three graphs ([evidence](docs/media/weapon-graph-2026-10/README.md)):
+  - the props' TRELLIS.2 graph already kept every thin part, including the bowstring;
+  - a weapon graph with a 768 sharp-feature remesh added a blade hole, folded slide triangles and a split stock;
+  - Pixal3D (`h100_final`) came closest to every concept.
+- **Decision:** weapons use each profile's model graph, as props do. No weapon graph ships.
+- **Orientation, root cause:** W5 turned the fitted view's right and up to the weapon's forward and top.
+  - A flat blade's outline barely changes with tilt, so the fit tilted 30° and rolled the live longsword about its
+    length.
+  - Pixal3D keeps a three-quarter concept's pose, while TRELLIS.2 lays the weapon lengthwise and its best view turns
+    45°.
+- **Orientation, fix:** the weapon is levelled from its own shape.
+  - Its top is the thinnest axis when that is nearer vertical (a weapon lying flat), and +Z otherwise.
+  - Its length is the longest axis across the top.
+  - The fitted view only picks the tip's end.
+- **Cut-out guard:** the first comparison fed white-backed concepts, and every mesh rebuilt its backdrop.
+  `processing/comfy_generate_3d.py` now refuses a model workflow input without alpha before inference. The opt-in live
+  integration test was also sending an opaque concept; it now cuts it out first.
+- **Tests:**
+  - Opt-in Blender: the sword fixture with its blade drawn shallower than built (failed on the old code, rolled 0.224
+    thick); a crossbow posed tilted as Pixal3D keeps it, which comes out flat (failed on the old code, 0.54 tall).
+  - An opaque concept stops before ComfyUI is contacted (failed on the old code).
+- **Live orientation:** all nine meshes came out tip forward and top up at their target length, held at a
+  box-prompted SAM grip mask (a trigger mask on the crossbow). The Pixal3D crossbow came out flat (0.10 thick against
+  TRELLIS.2's 0.11).
+- **Not verified:**
+  - one seed per weapon and graph;
+  - the material pass and Unity;
+  - the level of a flat-lying weapon to better than about 2°;
+  - thin-part recall on three-quarter concepts, which reads 0.51–0.61 although the crossbow string is kept.

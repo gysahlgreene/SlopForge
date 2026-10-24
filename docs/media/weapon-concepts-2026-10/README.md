@@ -31,4 +31,4 @@ Landscape draws the pistol larger.
 - The weapon type keeps `wide` as its default, for long weapons such as swords, spears and rifles.
 - Shorter weapons, around 1.5:1 like pistols and crossbows, should pass `--aspect landscape`.
 
-**Not checked:** reconstruction of these concepts. The meshes are compared in the graph A/B (step W3).
+**Reconstruction:** one concept of each weapon was rebuilt by three mesh graphs in step W3 ([graph comparison](../weapon-graph-2026-10/README.md)).
