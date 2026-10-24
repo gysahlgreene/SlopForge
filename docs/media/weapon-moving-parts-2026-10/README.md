@@ -49,8 +49,24 @@ the single-view Pixal3D graph has no prepare step between shape and texture:
 
 ![The M3 pistol at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
 
-The M3 FBX imports with the slide and trigger as children of the body at the recorded pivots, and the project's
-Unity preview imported it.
+## In Unity
+
+Publishing the M3 pistol (`approve-texture`) built its prefab, an animator with one state per part, and one clip per
+part, then sampled each clip at rest and at its limit:
+
+| Part | Declared | Measured | Pivot drift |
+| --- | --- | --- | --- |
+| slide | −0.03 m along z | −0.0300 m | 0 |
+| trigger | −20° about x | −20.00° | 0 |
+
+The weapon points along +Z from the root, and the root (the grip) lies inside its bounds.
+
+![Unity: the pistol at rest, with the slide back, and with the trigger pulled](unity_motion.jpg)
+
+The travel check caught a real fault on its first run: Unity imports the FBX root scaled by 100 under its 0.01 file
+scale, so a slide clip written in the part's local space moved it 3 m. The travel now goes through the parent's
+scale. An opt-in test (`tests/test_unity_weapon.py`) builds a slab with a slide and a hinged lever in Blender,
+exports it as the final pass does, and checks the same numbers in Unity.
 
 **Limits:**
 - **Masks project straight through** the concept's view, so a part must be separate in that view. The frame under
@@ -60,5 +76,4 @@ Unity preview imported it.
 - **A small part can fail to separate.** The trigger is 0.6% of the concept, and one seed in two left too few faces
   under its mask. The pipeline retries the next seed (`part_missing`).
 - **One concept, one weapon.** Three runs of the same pistol concept; no other weapon with moving parts yet.
-- **Not checked:** motion in Unity. The parts reach it as child objects with pivots, but there is no prefab, no clip
-  and no playback check yet (step W9).
+- **Editor sampling only.** The clips are sampled in the editor for the checks and the strip; Play mode is not run.

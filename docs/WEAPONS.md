@@ -12,9 +12,10 @@ for now (2026-10-24, [evidence](media/weapon-pipeline-2026-10/README.md)).
 - orientation and the grip pivot;
 - the thin-part measure;
 - coloured non-metals, metal brightened to the concept, and concept colours for small parts;
-- moving parts split from the mesh, with pivots and a hierarchy in the FBX.
+- moving parts split from the mesh, with pivots and a hierarchy in the FBX, and a Unity prefab with a checked
+  motion clip per part.
 
-**Still planned** (listed in the epic): Unity motion clips and their checks, and the W-v1 protocol. The
+**Still planned** (listed in the epic): the W-v1 protocol, and the owner's decisions it needs. The
 bowstring feature is deferred: every crossbow so far kept its string.
 
 ## The `weapon` type
@@ -147,6 +148,22 @@ On a lantern concept, the models masked the glass globe, the crossed wire guard 
 A pistol's slide and trigger were split this way on three live runs
 ([evidence](media/weapon-moving-parts-2026-10/README.md)).
 
+**In Unity** (`slopforge/unity_weapon.py`, at `approve-texture` for a weapon with hinge or slide parts):
+- A prefab `<name>.prefab` next to the published FBX: an identity root at the grip over the imported model, with an
+  Animator whose controller (`Animations/<name>.controller`) has one state per part.
+- One clip per part (`Animations/<name>_<part>.anim`): rest at 0 s, the declared limit at 0.5 s, rest at 1 s. A
+  slide moves along its declared axis in the weapon's frame; a hinge turns about it at the part's own pivot.
+- **Checks**, by sampling each clip at rest and at its limit:
+  - a hinge's pivot drifts no more than 1 mm, and it turns within 0.5° of its limit;
+  - a slide travels within 1 mm of its limit along its axis, with no sideways movement;
+  - the weapon points along +Z from the root, and the root lies inside its bounds.
+  - A failed check fails the publication (`weapon_motion`), which rolls back.
+- A strip `Previews/<name>_motion.png` shows the weapon at rest and at each part's limit, and the checks are recorded
+  as `weapon_motion` in the validation.
+
+The travel check caught a real fault on its first run: the imported FBX root is scaled 100 under Unity's 0.01 file
+scale, so a slide moved 3 m until its travel was taken through the parent's scale.
+
 ## Known limits
 
 - **Thin parts.** Image-to-3D may still thicken, break or drop thin parts.
@@ -168,4 +185,4 @@ A pistol's slide and trigger were split this way on three live runs
   - the caps closing a cut are flat, so a hollow slide shows a flat slab where it comes off;
   - a small part can leave too few faces under its mask on some seeds (one in two for a trigger of 0.6% of the
     concept), which costs a retry;
-  - the parts reach Unity as child objects with pivots, but there is no prefab, clip or playback check yet.
+  - the clips are editor-sampled for the checks; Play mode is not run.

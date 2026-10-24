@@ -973,5 +973,18 @@ Weapon moving parts (2026-10-24, M3 step W8, [evidence](docs/media/weapon-moving
   closed, parented, pivoted by kind, in the FBX with their kinds, and the body stays one piece; the material stage
   passes hinge and slide masks for held weapons only, and a part that does not come out fails `part_missing`;
   `make verify`.
-- **Not verified:** motion in Unity (no prefab, clip or playback check: W9); any weapon other than this pistol; a part
-  hidden behind another in the concept's view cannot be cut.
+- **Not verified:** any weapon other than this pistol; a part hidden behind another in the concept's view cannot be
+  cut.
+
+Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-moving-parts-2026-10/README.md#in-unity)).
+- **Change:** `approve-texture` on a weapon with hinge or slide parts builds `<name>.prefab` (an identity root at the
+  grip over the imported model, with an Animator) and one clip per part (rest, limit, rest), then samples each clip
+  and checks it: hinge pivot drift under 1 mm and angle within 0.5°; slide travel within 1 mm along its axis; tip
+  along +Z; root inside the bounds. A failed check fails the publication (`weapon_motion`). The checks and a strip
+  are recorded.
+- **Live:** the M3 pistol published with its slide at −0.0300 m and trigger at −20.00°, no drift.
+- **Found by the check:** the imported FBX root is scaled 100 under Unity's 0.01 file scale, so a slide clip written
+  in local units moved 3 m; travel now goes through the parent's scale.
+- **Tests:** an opt-in Unity test (a slab with a slide and a hinged lever from Blender, checked in Unity); the request
+  built from the declared parts; publication records the checks and fails on an error; `make verify`.
+- **Not verified:** Play mode; any weapon other than this pistol.
