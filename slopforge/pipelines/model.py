@@ -28,6 +28,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               make_metallic_gloss, match_concept_colours, match_metal_lightness, unity_cli,
                               zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
+from ..unity_weapon import build_weapon_prefab
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
@@ -1884,6 +1885,21 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
+            if moving:
+                # A weapon with moving parts also gets a prefab, a clip per part and a motion check (unity_weapon).
+                motion = build_weapon_prefab(root, asset["name"], paths["fbx"], moving,
+                                             prefab=paths["directory"] / f"{asset['name']}.prefab",
+                                             clip_folder=paths["directory"] / "Animations",
+                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png")
+                if motion["errors"]:
+                    raise StageFailure("processing_validation",
+                                       "weapon motion checks failed: " + "; ".join(motion["errors"]),
+                                       operation="weapon_motion",
+                                       remedy="check the part's declared axis and range against the published model")
+                validation["measured"]["weapon_motion"] = {key: motion[key] for key in
+                                                           ("prefab", "controller", "motions", "tip_forward",
+                                                            "root_inside")}
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])
