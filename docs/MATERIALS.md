@@ -34,8 +34,14 @@ result against that declaration before anyone reviews it.
 3. **Geometry and maps.** The TRELLIS.2 workflow generates the shape and a voxel texture
    field. On the H100 profile the raw shape (often tens of millions of faces in open,
    non-manifold double shells) is remeshed on the GPU with ComfyUI's UDF `RemeshMesh` at
-   resolution 384 and decimated to the face budget with `DecimateMesh`. Blender then only
-   unwraps UVs, and ComfyUI bakes base color, roughness and metallic maps onto those UVs.
+   resolution 384 and saved in full detail (`save_detail`). Blender removes enclosed inner shells
+   from that shape, collapse-decimates it to the face budget and unwraps UVs, and ComfyUI bakes
+   base color, roughness and metallic maps onto those UVs. Blender reduces the full detail because
+   the graph's own `DecimateMesh` (midpoint placement) made a pistol's flat steel wavy and rounded its
+   edges, while Blender kept them; a crate's brackets and a lantern's lattice and roof ribs also came
+   out sharper, and a lantern's inner shell no longer spends half its budget (2026-10-24,
+   [evidence](media/mesh-reduction-2026-10/README.md)). A graph without `save_detail`, or one
+   whose own reduction is crease-preserving QEM (the character graph), still hands Blender its `save_raw`.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape

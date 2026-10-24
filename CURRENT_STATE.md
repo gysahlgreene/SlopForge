@@ -882,3 +882,30 @@ Weapon mesh graph and orientation (2026-10-24, M3 step W3, epic #107).
   - the material pass and Unity;
   - the level of a flat-lying weapon to better than about 2°;
   - thin-part recall on three-quarter concepts, which reads 0.51–0.61 although the crossbow string is kept.
+
+Mesh reduction from the full-detail shape (2026-10-24, [evidence](docs/media/mesh-reduction-2026-10/README.md)).
+- **Problem:** the owner judged weapon quality far below props.
+- **Cause:** not the generator. The `h100` TRELLIS.2 graph's full-detail shape (`save_detail`) is crisp; the graph's
+  midpoint `DecimateMesh` reduction to the face budget, which Blender received, made flat steel wavy, rounded edges
+  and erased a pistol's slide serrations. Same shape, three reductions: midpoint wavy, QEM creased, Blender collapse
+  flat and sharp.
+- **Fix:** where a graph reduces with midpoint `DecimateMesh`, the worker hands Blender `save_detail`.
+  - Blender removes inner shells, then collapse-decimates to the budget.
+  - `save_detail` is journaled as a `mesh.detail` artifact and is the preparation stage's only input and `source`.
+  - The character graph's crease-preserving QEM output is kept.
+- **Same-shape evidence:**
+  - one pistol and four prop shapes (crate, jug, two lanterns), all still one piece;
+  - crate brackets and lantern lattice and ribs sharper, the jug about the same;
+  - a lantern's inner shell no longer halves its visible budget (14,404 shipped faces, 28,499 now).
+- **Live at this commit:**
+  - the props protocol's lantern and crate concepts re-approved on `h100`, each passing on its first mesh attempt;
+  - the pistol's three new seeds kept flat planes and serrations but failed `colour_darkened` (0.407–0.462 against
+    0.4), on near-black generated steel.
+- **Tests:**
+  - the worker hands Blender `save_detail` for a midpoint graph and keeps `save_raw` for a QEM graph (the first fails
+    on the old worker);
+  - `make verify` and `make verify-provenance`.
+- **Not verified:**
+  - a props or kits protocol rerun (their Provisional evidence predates this change);
+  - `h100_multiview`, which has the same structure;
+  - whether near-black generated metal should fail the dark-texture check.
