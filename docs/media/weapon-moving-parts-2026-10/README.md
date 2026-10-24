@@ -22,12 +22,17 @@ At approval each part was given a box on the concept. SAM 2.1 masked the slide (
 the single-view Pixal3D graph has no prepare step between shape and texture:
 1. Vertices are welded by position: the textured GLB splits them along UV seams, and every seam would read as a cut.
 2. A face belongs to the part when most of its corners project onto the mask from the concept's fitted view. Each face
-   then takes the majority of itself and its neighbours, four times, which removes spikes along the cut.
-3. Any island of either side that touches the cut joins the side around it.
-4. The seam edges are split, each side's opening is closed with flat caps, and each cap takes one texel of the
+   then takes the majority of itself and its neighbours, four times, which removes spikes along the cut. A hinge's
+   mask is first widened by 1% of the concept, since SAM masked a trigger's blade alone.
+3. Any strip of either side that lies along the cut joins the side around it.
+4. Where the seam is flat (within 5% of its extent), the surface is bisected on the fitted plane and the faces near
+   the seam take the side of the plane they lie on, so the cut is one straight line. A small curved seam, like a
+   trigger's, keeps its masked outline.
+5. The seam edges are split, each side's opening is closed with flat caps, and each cap takes one texel of the
    surface beside it: the texel nearest the median colour along the cut.
-5. The part becomes a child of the body. A slide pivots at its bounding box centre; a hinge at the centre of its cut.
-6. The FBX exports the body and its children, with each part's kind as a custom property. Inspection records
+6. Under a slide, a barrel cylinder is added as a static child of the body, so the slide drawn back shows a barrel.
+7. The part becomes a child of the body. A slide pivots at its bounding box centre; a hinge at the centre of its cut.
+8. The FBX exports the body and its children, with each part's kind as a custom property. Inspection records
    `parts` (name, kind, faces, parent, pivot) and leaves them out of the component count.
 
 **Two faults found on the way:**
@@ -37,7 +42,22 @@ the single-view Pixal3D graph has no prepare step between shape and texture:
   ![The body after the first cut, with slivers along the slide line](slivers.jpg)
 
 - **Pale caps.** A cap took one boundary texel, which on this pistol was a pale outlier, so the cuts showed as white
-  triangles. Step 4's median choice fixed it.
+  triangles. Step 5's median choice fixed it.
+
+**The owner's review** of the first result ("not good enough yet") named three faults: flat slabs appearing at full
+travel, a lumpy slide rear and hammer, and a trigger that barely read. The second pass (M4, cut offline from M3's
+mesh and maps) addressed the first and third:
+- **Straight cut and a barrel** (steps 4 and 6). The frame's top is now one flat line, and a barrel shows when the
+  slide goes back instead of the frame's cut face. The magazine, an interior plate joined to the body only through
+  inner surfaces, had followed the slide out of the grip; only strips along the cut flip sides now, and it stays
+  inside the body as its own piece.
+- **A whole trigger** (step 2's widening): 288 faces against 120, and a visible pull.
+- **Not fixed:** a thin strip of the slide's underside at the muzzle stays with the frame, so a small slab shows
+  under the barrel at full travel; labelling in-plane faces by their direction opened the cut and was reverted. The
+  slide's rear and hammer are the generator's small-detail limit.
+- **A fault of my own along the way:** cutting offline, I passed the candidate's base colour map as the final pass's
+  `--surface-source`, which bakes that swatch over the base colour path, and overwrote M3's maps. They were restored
+  from the published copies, and the pass now refuses a surface source that is the map it bakes into.
 
 **Live runs** (commit of each in `private/weapons-pipeline-2026-10-24/M*/commit.txt`):
 
@@ -47,7 +67,7 @@ the single-view Pixal3D graph has no prepare step between shape and texture:
 | M2 (islands fixed) | 2 | seed 1's trigger was too small to separate (`part_missing`, retried); seed 2 passed, body in one piece |
 | M3 (caps fixed) | 2 | the same: one retry on a missing trigger, then passed; slide 14,834 faces, trigger 120 |
 
-![The M3 pistol at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
+![The M4 cut at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
 
 ## In Unity
 
@@ -71,8 +91,8 @@ exports it as the final pass does, and checks the same numbers in Unity.
 **Limits:**
 - **Masks project straight through** the concept's view, so a part must be separate in that view. The frame under
   the slide is only kept because it shows below the slide line; a part hidden behind another cannot be cut.
-- **Caps are flat.** Where the slide comes off, the frame's top is a flat slab and the slide is hollow, since the
-  generator made one closed surface. At rest nothing shows; at full travel the frame's cap shows at the muzzle.
+- **Caps are flat and the parts hollow,** since the generator made one closed surface. The barrel hides most of the
+  frame's cap at full travel; a strip of the slide's underside still shows under it at the muzzle.
 - **A small part can fail to separate.** The trigger is 0.6% of the concept, and one seed in two left too few faces
   under its mask. The pipeline retries the next seed (`part_missing`).
 - **One concept, one weapon.** Three runs of the same pistol concept; no other weapon with moving parts yet.

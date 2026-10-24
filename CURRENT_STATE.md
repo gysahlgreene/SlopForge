@@ -973,8 +973,14 @@ Weapon moving parts (2026-10-24, M3 step W8, [evidence](docs/media/weapon-moving
   closed, parented, pivoted by kind, in the FBX with their kinds, and the body stays one piece; the material stage
   passes hinge and slide masks for held weapons only, and a part that does not come out fails `part_missing`;
   `make verify`.
+- **Owner review (2026-10-24):** "not good enough yet": flat slabs at full travel, a lumpy slide rear and hammer, a
+  trigger that barely read. Second pass: a flat seam is bisected on its fitted plane; only strips along the cut flip
+  sides (the magazine plate had followed the slide out); a barrel cylinder under a slide, a static child; a hinge's
+  mask widened by 1% (trigger 288 faces, from 120). A strip of the slide's underside at the muzzle still stays with
+  the frame. Cutting offline, the final pass was given a candidate's base colour as `--surface-source` and baked
+  over it; restored from the published copies, and the pass now refuses that.
 - **Not verified:** any weapon other than this pistol; a part hidden behind another in the concept's view cannot be
-  cut.
+  cut; the second pass ran offline on M3's mesh and maps, not through `approve`.
 
 Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-moving-parts-2026-10/README.md#in-unity)).
 - **Change:** `approve-texture` on a weapon with hinge or slide parts builds `<name>.prefab` (an identity root at the
