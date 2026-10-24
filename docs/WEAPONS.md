@@ -32,6 +32,8 @@ Weapons are roadmap milestone M3 ([epic #107](https://github.com/gysahlgreene/Sl
   - `--target-size=-,<length>,-` then sizes it along its length;
   - inspection records the fitted view (`concept_view`: fit, theta, phi).
 
+Long weapons suit the default `wide` canvas; pass `--aspect landscape` for weapons around 1.5:1, such as pistols and crossbows, and draw a crossbow from above at three-quarters so its bow and string show ([concept trial](media/weapon-concepts-2026-10/README.md)).
+
 It uses the prop limits the owner accepted, none yet calibrated on weapons:
 - five parts at most;
 - concept fit at least 0.8;
