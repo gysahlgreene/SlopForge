@@ -7,16 +7,16 @@ these masks, so their colour and placement match the body by construction (docs/
 """
 import json
 import re
-import shlex
 import subprocess
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from .failures import StageFailure
 from .paths import tool_root
+from .remote_tool import run_remote_tool
 
 PART_KINDS = ("grip", "hinge", "slide")
 PART_AXES = ("x", "y", "z")
@@ -104,38 +104,6 @@ def _tools(config):
     return host, tools.get("parts_python"), {**DEFAULT_MODELS, **(tools.get("parts_models") or {})}
 
 
-def _run_remote(host, python, request, cutout, out_dir):
-    ssh = ["ssh", "-o", "BatchMode=yes", host]
-    made = subprocess.run(ssh + ["mktemp", "-d", "/tmp/slopforge-parts-XXXXXX"], capture_output=True, text=True,
-                          check=False)
-    # Shell start-up files may print first; cleanup runs `rm -rf` on this path, so accept only mktemp's line.
-    work = (made.stdout.strip().splitlines() or [""])[-1].strip()
-    if made.returncode != 0 or not re.fullmatch(r"/tmp/slopforge-parts-[A-Za-z0-9]+", work):
-        raise RuntimeError(f"Could not create a part-mask work directory on {host}")
-    work = PurePosixPath(work)
-    try:
-        with tempfile.TemporaryDirectory() as temporary:
-            request_path = Path(temporary) / "request.json"
-            request_path.write_text(json.dumps({**request, "image": str(work / "concept.png"),
-                                                "out_dir": str(work / "masks")}))
-            for local, remote in ((cutout, work / "concept.png"), (request_path, work / "request.json")):
-                if subprocess.run(["scp", "-q", "-o", "BatchMode=yes", str(local), f"{host}:{remote}"],
-                                  check=False).returncode != 0:
-                    raise RuntimeError(f"Could not upload {local.name} to {host}")
-        completed = subprocess.run(ssh + [shlex.join([python, "-", str(work / "request.json")])],
-                                   input=(tool_root() / "processing/part_masks.py").read_text(),
-                                   capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            raise RuntimeError(f"Part masks on {host} failed: "
-                               + (completed.stderr.strip().splitlines() or ["no output"])[-1])
-        out_dir.mkdir(parents=True, exist_ok=True)
-        if subprocess.run(["scp", "-q", "-r", "-o", "BatchMode=yes", f"{host}:{work / 'masks'}/.", str(out_dir)],
-                          check=False).returncode != 0:
-            raise RuntimeError(f"Could not download the part masks from {host}")
-    finally:
-        subprocess.run(ssh + ["rm", "-rf", "--", str(work)], check=False)
-
-
 def make_part_masks(config, cutout, parts, out_dir):
     """Mask every declared part on the concept cutout; returns masks.json's report and writes an overlay image."""
     host, python, models = _tools(config)
@@ -147,7 +115,8 @@ def make_part_masks(config, cutout, parts, out_dir):
     request = {"parts": [{key: part[key] for key in ("name", "text", "box") if key in part} for part in parts],
                **models}
     if host:
-        _run_remote(host, python, request, Path(cutout), out_dir)
+        run_remote_tool(host, python, tool_root() / "processing/part_masks.py", {**request, "image": "concept.png"},
+                        {"concept.png": Path(cutout)}, {".": out_dir})
     else:
         out_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as temporary:
