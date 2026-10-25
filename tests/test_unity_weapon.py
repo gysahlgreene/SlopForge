@@ -174,6 +174,43 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
         self.assertEqual(sorted(report["passed"]), ['PartPulses("lever")', 'PartPulses("slide")', "RestsOnTheGround"])
         self.assertFalse((self.root / "Assets/SlopForgeTests").exists())  # the scaffolding leaves the project
 
+    def test_a_part_moved_into_a_pocket_of_the_body_is_not_inside_it(self):
+        """A slab with a block under its front end, and a slide that moves from behind the body into the pocket
+        between them, touching neither: from the pocket a ray up crosses the slab twice and a ray forward the block
+        twice. Unity's RaycastAll reports one hit per collider, so counting its hits read both rays as odd and the
+        clear slide as inside (a hybrid pistol's slide read 0.103 against Blender's 0.000, 2026-10-25)."""
+        script = f"""import bpy
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.mesh.uv_texture_add(); o.data.materials.append(bpy.data.materials.new(name))
+    return o
+body = box('body', (0, -0.5, 0.1), (0.05, 1.0, 0.2))  # Unity z 0..1, y 0..0.2
+block = box('block', (0, -0.9, -0.1), (0.05, 0.2, 0.2))  # under the slab's front: Unity z 0.8..1, y -0.2..0
+bpy.ops.object.select_all(action='DESELECT'); block.select_set(True); body.select_set(True)
+bpy.context.view_layer.objects.active = body; bpy.ops.object.join()
+bpy.context.scene.cursor.location = (0, 0, 0); bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+slide = box('slide', (0, 0.4, -0.1), (0.02, 0.2, 0.1))  # behind the body: Unity z -0.5..-0.3, y -0.15..-0.05
+slide.parent = body; slide['slopforge_part'] = 'slide'
+bpy.context.scene.cursor.location = (0, 0.4, -0.1); bpy.ops.object.select_all(action='DESELECT')
+slide.select_set(True); bpy.context.view_layer.objects.active = slide; bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.fbx(filepath={str(self.folder / 'pocket.fbx')!r}, use_selection=True, object_types={{'MESH'}},
+    axis_forward='-Z', axis_up='Y', apply_unit_scale=True, bake_space_transform=False, add_leaf_bones=False,
+    use_custom_props=True)
+"""
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                       check=True, capture_output=True)
+        # forward 0.7: the slide ends at Unity z 0.2..0.4, under the slab and behind the block
+        parts = [{"name": "slide", "kind": "slide", "axis": "z", "min": 0.0, "max": 0.7}]
+        report = build_weapon_prefab(self.root, "pocket", self.folder / "pocket.fbx", parts,
+                                     prefab=self.folder / "pocket.prefab", clip_folder=self.folder / "Animations",
+                                     render=self.folder / "pocket.png", held=False, mass=1.0, layer=None)
+        self.assertLessEqual(report["motions"][0]["penetration"], 0.02, report["errors"])
+        self.assertFalse([error for error in report["errors"] if "penetrat" in error], report["errors"])
+
     def test_a_hinge_that_swings_into_the_body_fails_the_penetration_check(self):
         fbx = self._export()
         # a flap at the slab's front end, folded back over the slab: in Unity's sense a negative turn about x takes

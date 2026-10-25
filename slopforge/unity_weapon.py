@@ -307,12 +307,10 @@ public static class CLASS_NAME
             {
                 var point = filter.transform.TransformPoint(vertex);
                 // Generated meshes have holes, so one ray's parity lies (a clear chest lid read 0.08 along x,
-                // 2026-10-25): a point is inside when rays along two of three axes cross the body an odd number
-                // of times, as the Blender sweep (mesh_cleanup.sweep_penetration) counts it.
-                var odd = 0;
-                foreach (var direction in new[] { Vector3.right, Vector3.up, Vector3.forward })
-                    odd += Physics.RaycastAll(point, direction, 1000f).Count(h => temporary.Contains(h.collider as MeshCollider)) % 2;
-                if (odd >= 2) inside++;
+                // 2026-10-25): a point is inside when rays along two of three axes cross one body mesh an odd
+                // number of times, as the Blender sweep (mesh_cleanup.sweep_penetration) counts it.
+                if (temporary.Any(c => new[] { Vector3.right, Vector3.up, Vector3.forward }
+                        .Count(direction => Crossings(c, point, direction) % 2 == 1) >= 2)) inside++;
             }
             shares.Add((float)inside / vertices.Length);
         }
@@ -321,6 +319,21 @@ public static class CLASS_NAME
         Physics.queriesHitBackfaces = hadBackfaces;
         foreach (var c in temporary) UnityEngine.Object.DestroyImmediate(c);
         return Mathf.Max(0f, shares.Max() - shares[0]);
+    }
+
+    // The times a ray crosses one collider. RaycastAll reports one hit per collider, so counting its hits read a
+    // ray through a closed body as one crossing (a hybrid pistol's clear slide read 0.103 inside, 2026-10-25): the
+    // ray is marched on from just past the nearest hit.
+    static int Crossings(Collider collider, Vector3 point, Vector3 direction)
+    {
+        var count = 0;
+        for (; count < 64; count++)
+        {
+            var hits = Physics.RaycastAll(point, direction, 1000f).Where(h => h.collider == collider).ToArray();
+            if (hits.Length == 0) break;
+            point = hits.OrderBy(h => h.distance).First().point + direction * 1e-5f;
+        }
+        return count;
     }
 
     static Socket AddSocket(Transform parent, string name, Vector3 position)
