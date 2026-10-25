@@ -17,43 +17,30 @@ def fixture():
 
 
 class PartIdTests(unittest.TestCase):
-    def test_declared_parts_then_body_then_rear_parts_get_ids(self):
+    def test_declared_parts_then_the_body_get_ids(self):
         alpha, masks, parts = fixture()
         ids, table = part_ids(alpha, masks, parts)
-        self.assertEqual([entry["name"] for entry in table], ["slide", "trigger", "body", "slide_rear"])
-        self.assertEqual([entry["kind"] for entry in table], ["slide", "hinge", "body", "static"])
-        self.assertEqual([entry["id"] for entry in table], [1, 2, 3, 4])
+        self.assertEqual(table, [{"name": "slide", "kind": "slide", "id": 1}, {"name": "trigger", "kind": "hinge", "id": 2},
+                                 {"name": "body", "kind": "body", "id": 3}])
         self.assertTrue((ids[0:20, 10:100] == 1).all())
         self.assertTrue((ids[25:35, 40:50] == 2).all())
-        self.assertTrue((ids[0:20, 0:10] == 4).all())  # the hammer blob: body pixels above the slide line
+        self.assertTrue((ids[0:20, 0:10] == 3).all())  # the hammer behind the slide stays body
         self.assertTrue((ids[20:60, 0:40] == 3).all())
         self.assertEqual(int((ids == 0).sum()), 0)
 
-    def test_body_under_a_slide_that_dips_at_the_muzzle_stays_body(self):
-        # 2026-10-25 live pistol: the slide's lowest row was at the muzzle, so "above the slide's bottom line" took
-        # the frame under the whole slide and OmniPart grew a second shell over it. Only body pixels with no slide
-        # below them in their column (the hammer behind it, a sight on top of it) are the rear part.
-        alpha = np.ones((60, 100), bool)
-        slide = np.zeros_like(alpha); slide[0:20, 10:90] = True; slide[20:30, 80:90] = True  # dips at the muzzle
+    def test_what_sits_on_a_slide_moves_with_it(self):
+        # 2026-10-25 live pistol: the sights on top of the slide were body, so a rule keyed on "body above the
+        # slide line" spanned the whole slide and OmniPart grew a second shell over it. A body speck resting on
+        # the slide (body all the way down to the slide's top in its column) is the slide's; the hammer behind the
+        # slide and the frame under it are not.
+        alpha = np.zeros((60, 100), bool); alpha[10:60, :] = True; alpha[5:10, 20:25] = True; alpha[5:10, 85:90] = True
+        alpha[0:10, 0:8] = True  # a hammer behind the slide, above its line
+        slide = np.zeros_like(alpha); slide[10:30, 10:95] = True
         ids, table = part_ids(alpha, {"slide": slide}, [{"name": "slide", "kind": "slide"}])
-        rear = table[-1]["id"]
-        self.assertTrue((ids[0:30, 0:10] == rear).all())  # the hammer: columns without slide, above its line
-        self.assertTrue((ids[20:30, 10:80] == 2).all())  # the frame under the slide stays body
-        self.assertTrue((ids[0:20, 90:100] == rear).all())  # ahead of the slide, above its line
-        self.assertTrue((ids[30:60, :] == 2).all())
-
-    def test_body_pixels_above_each_slide_become_rear_parts(self):
-        alpha = np.ones((60, 100), bool)
-        upper = np.zeros_like(alpha); upper[0:10, 20:100] = True
-        lower = np.zeros_like(alpha); lower[30:40, 20:100] = True
-        parts = [{"name": "bolt", "kind": "slide"}, {"name": "release", "kind": "slide"}]
-        ids, table = part_ids(alpha, {"bolt": upper, "release": lower}, parts)
-        self.assertEqual([entry["name"] for entry in table], ["bolt", "release", "body", "bolt_rear", "release_rear"])
-        self.assertTrue((ids[0:10, 20:100] == 1).all())
-        self.assertTrue((ids[30:40, 20:100] == 2).all())  # the lower slide keeps its own pixels
-        self.assertTrue((ids[0:10, 0:20] == 4).all())
-        self.assertTrue((ids[10:40, 0:20] == 5).all())
-        self.assertTrue((ids[40:60, :] == 3).all())
+        self.assertTrue((ids[5:10, 20:25] == 1).all())  # rear sight: on the slide
+        self.assertTrue((ids[5:10, 85:90] == 1).all())  # front sight: on the slide
+        self.assertTrue((ids[0:10, 0:8] == 2).all())  # the hammer is not on the slide
+        self.assertTrue((ids[30:60, :] == 2).all())  # the frame under it is body
 
     def test_an_object_outside_every_mask_is_just_a_body(self):
         alpha = np.ones((8, 8), bool)
@@ -123,13 +110,13 @@ class PartBoxTests(unittest.TestCase):
         coords = block_coords(2, 62, 10, 46)
         frame = object_frame(alpha, coords)
         boxes = part_boxes(ids, table, frame)
-        self.assertEqual(boxes.shape, (4, 2, 3))
+        self.assertEqual(boxes.shape, (3, 2, 3))
         ordered = [entry["name"] for entry in sorted(table, key=lambda e: -np.where(ids == e["id"])[0].max())]
-        self.assertEqual(ordered, ["body", "trigger", "slide", "slide_rear"])
+        self.assertEqual(ordered, ["body", "trigger", "slide"])
         for box in boxes:
             self.assertAlmostEqual(float(box[0][1]), float(frame.lo[1]), places=6)
             self.assertAlmostEqual(float(box[1][1]), float(frame.hi[1]), places=6)
-        self.assertEqual([box[0][0] <= box[1][0] and box[0][2] <= box[1][2] for box in boxes], [True] * 4)
+        self.assertEqual([box[0][0] <= box[1][0] and box[0][2] <= box[1][2] for box in boxes], [True] * 3)
 
 
 class CoverageTests(unittest.TestCase):
@@ -166,26 +153,26 @@ class MainTests(unittest.TestCase):
 
             def omnipart(_request, out_dir, boxes_for, _mask_path):
                 _frame, boxes = boxes_for(coords)
-                self.assertEqual(boxes.shape, (3, 2, 3))
+                self.assertEqual(boxes.shape, (2, 2, 3))
                 # OmniPart's merged GLB: geometry_0 is its box visualisation, then one node per box in order
                 # ... under a "world" root node without a mesh, as merge_parts writes it
-                names = ["geometry_0", "geometry_1", "geometry_2", "geometry_3"]
-                doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [4]}],
+                names = ["geometry_0", "geometry_1", "geometry_2"]
+                doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [3]}],
                        "nodes": [*({"name": name, "mesh": index} for index, name in enumerate(names)),
-                                 {"name": "world", "children": [0, 1, 2, 3]}],
+                                 {"name": "world", "children": [0, 1, 2]}],
                        "meshes": [{"name": name, "primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}
                                   for name in names],
                        "accessors": [{"count": 3, "type": "VEC3", "componentType": 5126},
                                      {"count": 36, "type": "SCALAR", "componentType": 5125}]}
                 (Path(out_dir) / "mesh_textured.glb").write_bytes(pack_glb(doc, b""))
                 top = coords[coords[:, 3] >= 34]
-                return coords, [coords, top, coords[:0]], {"provider": "omnipart", "version": "abc", "device": "H100"}, {"omnipart/OmniPart": "rev"}
+                return coords, [coords, top], {"provider": "omnipart", "version": "abc", "device": "H100"}, {"omnipart/OmniPart": "rev"}
             with patch.object(part_model, "_omnipart", side_effect=omnipart):
                 part_model.main(str(root / "request.json"))
             doc = glb_json(root / "out/parts.glb")
             names = [node["name"] for node in doc["nodes"]]
-            self.assertEqual(names, ["body", "slide", "slide_rear", "world"])  # bottom-up order, box vis dropped
-            self.assertEqual(doc["nodes"][3]["children"], [0, 1, 2])
+            self.assertEqual(names, ["body", "slide", "world"])  # bottom-up order, box vis dropped
+            self.assertEqual(doc["nodes"][2]["children"], [0, 1])
             report = json.loads((root / "out/parts.json").read_text())
             self.assertEqual(report["seed"], 7)
             self.assertEqual(report["parts"]["slide"]["kind"], "slide")
@@ -194,7 +181,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(report["parts"]["slide"]["voxels"], int((coords[:, 3] >= 34).sum()))
             self.assertEqual(len(report["parts"]["slide"]["box"]), 2)
             self.assertEqual(report["parts"]["slide"]["faces"], 12)
-            self.assertEqual(glb_json(root / "out/parts.glb")["scenes"][0]["nodes"], [3])
+            self.assertEqual(glb_json(root / "out/parts.glb")["scenes"][0]["nodes"], [2])
             self.assertEqual(report["backend"]["provider"], "omnipart")
             self.assertTrue((root / "out/mask.exr").is_file() or (root / "out/mask.png").is_file())
 

@@ -182,9 +182,11 @@ with `SPCONV_ALGO=native ATTN_BACKEND=xformers`, as the part masks do. A missing
 
 **How a run goes** (`processing/part_model.py` on the host, then `blender/prepare_parts.py`, then the usual final
 pass):
-1. Every object pixel of the concept cutout gets a part id: the declared parts in order, then the body. Body pixels
-   above a slide's bottom line (a pistol's hammer, beavertail and rear sight) become a static `<slide>_rear` part,
-   so the body's 3D box stops at the slide line and the slide's box is not contested.
+1. Every object pixel of the concept cutout gets a part id: the declared parts in order, then the body. A body
+   speck resting on a slide (body all the way down to the slide's top in its column: a pistol's sights) is the
+   slide's, since it moves with it. The body's box therefore spans the whole weapon and overlaps every part's box;
+   OmniPart resolves the overlap from the masks. (A rule that moved the body above a slide's line into a separate
+   part was tried first: the sights stretched that part over the whole slide and OmniPart grew a second shell.)
 2. OmniPart's sparse structure gives the object's occupied voxels (64³). Each part's 2D mask extent is mapped onto
    that extent (image columns along grid x, mirrored when the voxels' footprint matches the mirrored silhouette
    better; rows down grid z; the full thickness) and becomes its 3D box. OmniPart's own layout model (NVIDIA
@@ -232,8 +234,7 @@ stage's settings; changing either invalidates the stage like a workflow change.
 - **Moving parts** (pistol, 2026-10-24 and 2026-10-25):
   - masks project straight through the concept's view, so a part must be separate in that view;
   - generated as parts (OmniPart): one seed in four lost a part in the spike (a retry); a tiny part's texture comes
-    out pale; large smooth surfaces are TRELLIS v1 quality; the `_rear` rule was needed on a pistol and is untested
-    on other weapons;
+    out pale; large smooth surfaces are TRELLIS v1 quality;
   - cut from one mesh (the route without `part_model`): the parts are hollow and the caps flat; a strip of the
     slide's underside at the muzzle stays with the frame;
   - the clips are editor-sampled for the checks; Play mode is not run.

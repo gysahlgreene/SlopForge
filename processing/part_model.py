@@ -28,8 +28,8 @@ GRID = 64  # OmniPart's sparse structure resolution; boxes are in its [-0.5, 0.5
 
 def part_ids(alpha, masks, parts):
     """Label every object pixel with a part id: declared parts first (earlier wins where masks overlap), then the
-    body, then, for each slide, the body pixels above its bottom line as a static `<slide>_rear` part (a pistol's
-    hammer and beavertail), so the body's box stops at the slide line and the slide's box is not contested."""
+    body. A body speck resting on a slide (body all the way down to the slide's top in its column: a pistol's
+    sights) is the slide's, since it moves with it; the hammer behind the slide and the frame under it stay body."""
     ids = np.zeros(alpha.shape, np.int32)
     table = []
     for index, part in enumerate(parts, 1):
@@ -40,18 +40,10 @@ def part_ids(alpha, masks, parts):
     table.append({"name": "body", "kind": "body", "id": body})
     for part in [entry for entry in table if entry["kind"] == "slide"]:
         slide = ids == part["id"]
-        rows = np.flatnonzero(slide.any(axis=1))
-        if not len(rows):
-            continue
-        above = np.zeros(alpha.shape, bool)
-        above[: rows.max() + 1] = True
-        # ... but not the frame under the slide: a body pixel with slide pixels above it in its column stays body
-        # (2026-10-25 live pistol: the slide dipped at the muzzle and the whole frame top became a second shell)
-        under = np.cumsum(slide, axis=0) > 0
-        rear = (ids == body) & above & ~under
-        if rear.any():
-            ids[rear] = len(table) + 1
-            table.append({"name": f"{part['name']}_rear", "kind": "static", "id": len(table) + 1})
+        resting = np.zeros(alpha.shape, bool)
+        for row in range(alpha.shape[0] - 2, -1, -1):  # scanning upwards: a body pixel rests on the slide when the pixel under it does
+            resting[row] = (ids[row] == body) & (slide[row + 1] | resting[row + 1])
+        ids[resting] = part["id"]
     return ids, table
 
 

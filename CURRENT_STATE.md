@@ -1018,5 +1018,5 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
   a touching trigger and a floating hinge (opt-in Blender); the route, settings identity and the coverage gate
   (unit); `make verify` (844 passed).
 - **Not verified:** no live run through `approve` yet (the spike ran the tool by hand on one pistol, 4 seeds, 3
-  good); any weapon other than a pistol; the 0.6 limit and the `_rear` rule on other weapons; OmniPart's VRAM peak
+  good); any weapon other than a pistol; the 0.6 limit on other weapons; OmniPart's VRAM peak
   beside ComfyUI.
