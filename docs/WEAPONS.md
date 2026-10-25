@@ -197,7 +197,7 @@ pass):
 3. OmniPart's MIT part synthesis fills the boxes and returns one textured mesh per part. The tool renames each
    node after its part and records, per declared hinge or slide, a diagnostic `structure_coverage` (the share of
    its mask's grid cells that hold a sparse-structure voxel; a thin lever barely registers there, so it is not the
-   gate). OmniPart reads the mask on its 37×37 feature grid and pairs part k with mask id k there, so a part too
+   gate). OmniPart crops the object square and reads the mask on its 37×37 feature grid, pairing part k with mask id k, so a part too
    thin to be the majority of any cell (a rifle's trigger) would vanish and every later part would take another
    part's image features; such a part is given the one cell it fills most before the mask is written.
 4. `prepare_parts.py` welds and reduces each part to its share of the face budget by surface area (floor 2%), with

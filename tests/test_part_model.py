@@ -156,7 +156,43 @@ class BoxOrderTests(unittest.TestCase):
             check_box_order(ids, table, swapped)
 
 
+def omnipart_coarse(ids):
+    """OmniPart's own reading of a mask (inference_utils.load_img_mask + smart_downsample_mask), ported as the oracle:
+    a square crop 1.2x the object's larger side, zero-padded, then the most common non-zero id per 37x37 cell."""
+    ys, xs = np.nonzero(ids > 0)
+    bbox = [xs.min(), ys.min(), xs.max(), ys.max()]
+    center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+    hsize = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 2 * 1.2
+    aug = [int(center[0] - hsize), int(center[1] - hsize), int(center[0] + hsize), int(center[1] + hsize)]
+    height, width = ids.shape
+    pad = (max(0, -aug[1]), max(0, aug[3] - height)), (max(0, -aug[0]), max(0, aug[2] - width))
+    mask = np.pad(ids, pad)
+    aug = [aug[0] + pad[1][0], aug[1] + pad[0][0], aug[2] + pad[1][0], aug[3] + pad[0][0]]
+    mask = mask[aug[1]:aug[3], aug[0]:aug[2]]
+    h, w = mask.shape
+    out = np.zeros((37, 37), int)
+    for i in range(37):
+        for j in range(37):
+            region = mask[int(i * (h / 37)):min(int((i + 1) * (h / 37)), h), int(j * (w / 37)):min(int((j + 1) * (w / 37)), w)]
+            values, counts = np.unique(region.flatten(), return_counts=True)
+            nonzero = values > 0
+            if nonzero.any():
+                out[i, j] = values[nonzero][counts[nonzero].argmax()]
+    return out
+
+
 class CoarseGridTests(unittest.TestCase):
+    def test_the_coarse_grid_is_omniparts_own_crop_of_the_object(self):
+        from processing.part_model import coarse_ids
+        ids = np.zeros((1024, 1024), np.int32)
+        ids[300:700, 100:900] = 3  # a wide object: OmniPart's square crop reaches past the image
+        ids[640:700, 100:260] = 1  # a grip at the bottom left
+        ids[300:330, 500:620] = 2  # a bolt along the top
+        self.assertTrue((coarse_ids(ids) == omnipart_coarse(ids)).all())
+        tall = np.zeros((1024, 1024), np.int32)
+        tall[50:1000, 400:560] = 2; tall[900:1000, 400:470] = 1
+        self.assertTrue((coarse_ids(tall) == omnipart_coarse(tall)).all())
+
     def test_a_thin_part_keeps_a_cell_at_omniparts_resolution(self):
         from processing.part_model import coarse_ids
         alpha = np.ones((896, 1152), bool)
@@ -164,7 +200,8 @@ class CoarseGridTests(unittest.TestCase):
         self.assertNotIn(1, coarse_ids(np.where(trigger, 1, 2)))  # the body outnumbers it in every 31x24 cell
         ids, table = part_ids(alpha, {"trigger": trigger}, [{"name": "trigger", "kind": "hinge"}])
         self.assertIn(1, coarse_ids(ids))  # so it is given the cell it fills most, or OmniPart drops it
-        self.assertLess(((ids == 1) & ~trigger).sum(), 32 * 25)  # one cell's object pixels, no more
+        self.assertIn(1, omnipart_coarse(ids))
+        self.assertLess(((ids == 1) & ~trigger).sum(), 38 * 38)  # one cell's object pixels, no more
         self.assertTrue((ids[trigger] == 1).all())
 
     def test_parts_whose_bottoms_share_a_coarse_row_order_by_id_like_omnipart(self):
