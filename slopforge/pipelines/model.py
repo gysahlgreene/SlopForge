@@ -1445,6 +1445,14 @@ def _face_budget(pipeline, asset_type, asset, default=30000):
     return int(budget) if budget is not None else None
 
 
+def _removes_hidden_faces(asset_type, asset):
+    """Whether the mesh stage deletes the faces no ray from outside reaches before it reduces (the type's
+    remove_hidden_faces): not behind declared glass, which is seen through, nor on a type that needs a closed body."""
+    if not asset_type.get("remove_hidden_faces") or asset_type.get("max_nonmanifold_edges") == 0:
+        return False
+    return not any(item.get("class") == "glass" for item in asset.get("materials") or [])
+
+
 def _reduction_budget(face_budget, asset, asset_type=None):
     """The face count to reduce a mesh to. The final pass cuts a weapon's moving parts from the reduced mesh, and
     the cut adds faces (the bisect's splits, the caps, a barrel): 1,901 on a 30,000-face pistol (2026-10-24 run B2),
@@ -2445,6 +2453,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            if _removes_hidden_faces(asset_type, asset):  # only when set: existing assets keep their settings
+                mesh_settings["remove_hidden_faces"] = True
             if part_backend(asset_type, asset):
                 # Only on the part route: a None here would change every existing asset's mesh settings (review
                 # 2026-10-25). A change of the part tools invalidates the stage.
@@ -2536,6 +2546,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
                                        require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
+                                       remove_hidden_faces=_removes_hidden_faces(asset_type, asset),
                                        project_concept=asset_type.get("concept_projection") == "front",
                                        **({"views": views} if views else {}))
                     else:

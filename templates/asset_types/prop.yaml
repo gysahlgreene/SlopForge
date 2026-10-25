@@ -57,3 +57,6 @@ max_folded_edge_share: 0.1
 # Generated parts' textures come out darker and duller than the concept: their colours are moved to the concept's
 # from its side (docs/MATERIALS.md).
 concept_colour_transfer: true
+# The mesh stage deletes the faces no ray from outside reaches before it reduces: TRELLIS.2's double skin and the
+# shells inside it took 76-91% of delivered weapons' and props' faces (2026-10-25). Not behind declared glass.
+remove_hidden_faces: true

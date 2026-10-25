@@ -1238,6 +1238,41 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderHiddenFacesTests(unittest.TestCase):
+    def test_faces_no_ray_from_outside_reaches_are_removed(self):
+        # TRELLIS.2 surfaces are a double skin with shells inside: of a delivered pistol's 26,000 faces 9% could be
+        # seen from outside, and the reduction spent the budget on the rest (2026-10-25). A box skinned twice (the
+        # inner skin facing in) with a block inside, beside a thin plate: the inner skin and the block go, the outer
+        # skin and both sides of the plate stay.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import remove_hidden_faces
+bpy.ops.wm.read_factory_settings(use_empty=True)
+import bmesh
+bm = bmesh.new()
+for size, centre, flip in ((1.0, (0, 0, 0), False), (0.9, (0, 0, 0), True), (0.2, (0, 0, 0), False)):
+    made = bmesh.ops.create_cube(bm, size=size)
+    bmesh.ops.translate(bm, verts=made["verts"], vec=centre)
+    if flip:
+        bmesh.ops.reverse_faces(bm, faces=list({{f for v in made["verts"] for f in v.link_faces}}))
+plate = bmesh.ops.create_grid(bm, x_segments=2, y_segments=2, size=0.3)
+bmesh.ops.translate(bm, verts=plate["verts"], vec=(1.2, 0, 0))
+mesh = bpy.data.meshes.new("double"); bm.to_mesh(mesh); bm.free()
+before = len(mesh.polygons)
+removed = remove_hidden_faces(mesh, 1.5)
+print("FACES", before, removed, len(mesh.polygons))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        before, removed, after = map(int, next(line for line in result.stdout.splitlines()
+                                               if line.startswith("FACES")).split()[1:])
+        self.assertEqual(before, 6 + 6 + 6 + 4)
+        self.assertEqual(removed, 12)  # the inner skin and the block
+        self.assertEqual(after, 6 + 4)  # the outer skin and the plate
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderViewFitTests(unittest.TestCase):
     def test_an_elevation_is_taken_only_when_it_fits_clearly_better(self):
         # A side-profile pistol's silhouette barely changes when seen from a little above: three seeds fitted best at

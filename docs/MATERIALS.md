@@ -44,6 +44,18 @@ result against that declaration before anyone reviews it.
    whose own reduction is crease-preserving QEM (the character graph), still hands Blender its `save_raw`.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
+   The remeshed shape is a double skin: an outer face and an inner one about half a percent of the
+   object inside it, with more shells inside, all connected, so the enclosed-shell removal keeps them.
+   Of the faces of delivered weapons and props only 9–24% could be seen from outside (2026-10-25: a
+   pistol 9% and 24%, a chest 20%), and the reduction and the texture went mostly to the rest. A type
+   with `remove_hidden_faces: true` (weapon and prop) has Blender delete the faces no ray from
+   outside reaches before it reduces (`mesh_cleanup.remove_hidden_faces`: 32 evenly spread rays per
+   face, a face beside a seen one and facing within 60° of it kept): on a pistol's 1.26
+   million-face detail mesh 28% were seen, in 40 s, and at the same 24,000-face budget its slide's
+   step, hammer and grip panels came out crisp where they had been lumpy, with backs of faces on
+   0.09% of what is seen (0.01% before). Not behind declared glass, which is seen through, nor on
+   types that need a closed body (characters).
+
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto
    the repaired, UV-mapped mesh (`normal_source: blender_mikktspace_bake`). Blender and Unity

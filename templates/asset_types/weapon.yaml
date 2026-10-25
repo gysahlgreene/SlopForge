@@ -62,3 +62,6 @@ texture_size: 4096
 unity_prefab: true
 mass: 1.0
 unity_layer: Weapons
+# The mesh stage deletes the faces no ray from outside reaches before it reduces: TRELLIS.2's double skin and the
+# shells inside it took 76-91% of delivered weapons' and props' faces (2026-10-25). Not behind declared glass.
+remove_hidden_faces: true

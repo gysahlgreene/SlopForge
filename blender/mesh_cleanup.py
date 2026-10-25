@@ -331,6 +331,47 @@ HINGE_AXES = {"x": ((1, 0, 0), 1), "y": ((0, 0, 1), -1), "z": ((0, 1, 0), 1)}
 SLIDE_AXES = {"x": (-1, 0, 0), "y": (0, 0, 1), "z": (0, -1, 0)}
 
 
+def remove_hidden_faces(mesh, size, directions=32):
+    """Delete the faces no ray from outside reaches; returns how many. Each face casts rays from its centre along
+    `directions` evenly spread directions (a Fibonacci sphere) and is seen when one leaves the object; a face beside a
+    seen one and facing within 60 degrees of it stays too, so a crevice's edge is not left ragged. TRELLIS.2 surfaces
+    are a double skin (an outer face and an inner one about half a percent of the object inside) with shells inside:
+    of a delivered pistol's 26,000 faces 9% could be seen, of a chest's 20%, and the reduction spent the budget and the
+    texture on the rest. On that pistol's 1.26 million-face detail mesh 28% were seen (40 s); reduced to the same
+    budget, the slide's step, the hammer and the grip panels came out crisp instead of lumpy (2026-10-25)."""
+    import math
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=size * 1e-6)
+    bm.faces.ensure_lookup_table()
+    bm.faces.index_update()
+    bm.normal_update()
+    tree = BVHTree.FromBMesh(bm)
+    golden = math.pi * (3 - math.sqrt(5))
+    rays = []
+    for index in range(directions):
+        z = 1 - 2 * (index + 0.5) / directions
+        radius = math.sqrt(1 - z * z)
+        rays.append(Vector((math.cos(golden * index) * radius, math.sin(golden * index) * radius, z)))
+    seen = [any(tree.ray_cast(face.calc_center_median() + ray * size * 1e-4, ray, size * 4)[0] is None for ray in rays)
+            for face in bm.faces]
+    keep = list(seen)
+    for face in bm.faces:
+        if seen[face.index]:
+            for edge in face.edges:
+                for other in edge.link_faces:
+                    if not seen[other.index] and face.normal.dot(other.normal) >= 0.5:
+                        keep[other.index] = True
+    hidden = [face for face in bm.faces if not keep[face.index]]
+    bmesh.ops.delete(bm, geom=hidden, context="FACES")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    return len(hidden)
+
+
 def winding_numbers(points, triangles, chunk=16):
     """The generalized winding number of each point (n, 3) about `triangles` (m, 3, 3): about 1 inside a closed
     surface and 0 outside it, and still near that where the surface has holes, where a ray's parity is not (a hybrid

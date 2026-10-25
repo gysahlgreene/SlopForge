@@ -6,8 +6,8 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          gltf_name, motion_matrix, separate_part, separate_tagged, sweep_penetration, tag_parts,
-                          visible_backfaces)
+                          gltf_name, motion_matrix, remove_hidden_faces, separate_part, separate_tagged,
+                          sweep_penetration, tag_parts, visible_backfaces)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -634,6 +634,10 @@ if mesh_only:
         modifier.use_smooth_shade = True
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.modifier_apply(modifier=modifier.name)
+    # After any repair, which an opening would set off: the double skin and the shells inside it take most of the
+    # faces and of the texture otherwise (mesh_cleanup.remove_hidden_faces)
+    if "--remove-hidden-faces" in sys.argv:
+        print(f"Removed hidden faces: {remove_hidden_faces(obj.data, float(max(maximum - minimum)))}")
 
 # Exports use triangles; counting remeshed quads underestimates the budget.
 if any(len(polygon.vertices) > 3 for polygon in obj.data.polygons):

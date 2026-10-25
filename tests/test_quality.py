@@ -155,6 +155,28 @@ asset_pipeline:
         self.assertIn('"shape_remesh" in workflow and not args.require_manifold', worker)
         self.assertIn('["--local-repair"] if args.require_manifold', worker)
 
+    def test_types_that_remove_hidden_faces_ask_the_mesh_stage_to_before_it_reduces(self):
+        # Of a delivered pistol's faces 9% could be seen from outside; removed before the reduction, the budget and
+        # the texture go to the surface a player sees (2026-10-25). Weapons and props opt in; glass is seen through, so
+        # a brief that declares it keeps the faces behind it; characters keep their closed body.
+        from slopforge.pipelines.model import _removes_hidden_faces
+        config = {"asset_pipeline": {"tools": {"hunyuan_checkpoint": "model.safetensors"},
+                    "workflows": {"model": "trellis2_image_to_model_h100_api.json"}}}
+        with patch("slopforge.backends.comfyui.subprocess.run") as run, \
+                patch("slopforge.backends.comfyui.blender_executable", return_value="blender"):
+            run.return_value = Mock(returncode=0)
+            generate_model(self.root, config, self.root / "concept.png", "pistol", self.root / "pistol.glb",
+                           self.root / "mesh.json", 9, remove_hidden_faces=True)
+        self.assertIn("--remove-hidden-faces", run.call_args.args[0])
+        worker = (Path(__file__).resolve().parents[1] / "processing/comfy_generate_3d.py").read_text()
+        self.assertIn('["--remove-hidden-faces"] if args.remove_hidden_faces', worker)
+        steel = [{"region": "frame", "class": "metal"}]
+        self.assertTrue(_removes_hidden_faces({"remove_hidden_faces": True}, {"materials": steel}))
+        self.assertFalse(_removes_hidden_faces({"remove_hidden_faces": True},
+                                               {"materials": [*steel, {"region": "panes", "class": "glass"}]}))
+        self.assertFalse(_removes_hidden_faces({"remove_hidden_faces": True, "max_nonmanifold_edges": 0}, {}))
+        self.assertFalse(_removes_hidden_faces({}, {}))
+
     def test_character_types_project_their_front_concept(self):
         from slopforge.paths import tool_root
 
