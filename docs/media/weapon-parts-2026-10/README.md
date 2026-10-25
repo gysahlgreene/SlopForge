@@ -34,6 +34,23 @@ three times. Three briefs went through `approve` on the `h100` profile with the 
 
 ![The pistol: untextured parts, textured at rest and with the slide back](pistol_review.jpg)
 
+## In Unity
+
+Both passing weapons were published with `approve-texture`, which built the prefab, one clip per part and the W9
+motion checks (unchanged from the cut route):
+
+| Weapon | Part | Declared | Measured | Pivot drift |
+| --- | --- | --- | --- | --- |
+| pistol | slide | −0.03 m along z | −0.0300 m | 0 |
+| pistol | trigger | −20° about x | −20.00° | 0 |
+| rifle | bolt | −0.08 m along z | −0.0800 m | 0 |
+| rifle | trigger | −20° about x | −20.00° | 0 |
+
+Both point along +Z from the root with the root inside the grip.
+
+![Unity: the pistol at rest, slide back, trigger pulled](pistol_unity_motion.jpg)
+![Unity: the rifle at rest, bolt back, trigger pulled](rifle_unity_motion.jpg)
+
 **Limits seen:**
 - The slide's coverage sat at the limit (0.61) on the passing seed, and one earlier seed gave a slide in 7 pieces:
   seed variance in how OmniPart resolves the overlap of the body's box with the slide's.

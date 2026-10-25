@@ -1024,4 +1024,5 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
   static parts as children, a black atlas from glTF's metallic default, NaN colour metrics making a retry final, a
   rear-part rule that duplicated the slide, the grid axis along y, a voxel coverage that missed thin levers).
 - **Not verified:** any seed-to-seed consistency beyond these runs; the pistol's slide coverage sat at the limit;
-  OmniPart's VRAM peak beside ComfyUI; Unity motion on these runs is recorded below when published.
+  OmniPart's VRAM peak beside ComfyUI. Both passing weapons published through Unity with every motion check
+  passing (pistol slide −0.0300 m, trigger −20.00°; rifle bolt −0.0800 m, trigger −20.00°; no pivot drift).
