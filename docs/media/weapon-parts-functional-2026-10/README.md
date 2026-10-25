@@ -23,7 +23,11 @@ page is the live evidence for the branch that followed (`feat/weapon-parts-quali
 - **Props with parts:** a prop with a declared hinge or slide is framed from its concept (front to the camera, top
   up) and goes through the same route; `@face[-face]` anchors a hinge on an edge of its own bounds.
 - **Guards found by these runs:** a part narrower than 3 cells of OmniPart's 64-cell structure stops before the
-  run; thin parts keep a cell of OmniPart's 37×37 mask grid; a penetration failure names the sign that clears.
+  run; thin parts keep a cell of OmniPart's 37×37 mask grid; the final pass sweeps each part through its range in
+  Blender and retries a seed whose part turns or slides into the body (`part_penetrates`); a Unity penetration
+  failure on a hinge names the sign that clears.
+- **The sign convention, written down:** ranges are in Unity's sense (a positive turn about x takes +y towards
+  +z): a hanging trigger pulls with `0..20`, a back-hinged lid opens with `-100..0`.
 
 ## Pistol: published and played
 
@@ -32,8 +36,11 @@ page is the live evidence for the branch that followed (`feat/weapon-parts-quali
 The P2 run (branch at PR1–5) passed its gates with the colour transfer and the metal-lightness match measured for
 the first time on this route (metal gain 2.9×, darkened share 0.053, slide 0.90 of its mask, trigger 0.99) and
 published through Unity: slide −0.0300 m, trigger 20.00°, penetration 0.002 and 0.001 over rest, no pivot drift.
-Its trigger had been declared `-20..0`, which in Unity's sense swings a hanging trigger forward; P3 is the same
-brief with `0..20` (a pull), run on the finished branch — its results are in the table below.
+Its trigger had been declared `-20..0`, which in Unity's sense swings a hanging trigger forward. P3 is the same
+brief with `0..20` (a pull): its seed passed the mesh and colour gates (slide 0.86 of its mask, trigger 0.96) but
+Unity rejected the publication, the slide reading 0.040 of its vertices inside the frame over rest when drawn back
+(tolerance 0.02). That is what led to the sweep in Blender's final pass, so such a seed is replaced before
+materials; P4 is P3 re-approved with fresh seeds through it.
 
 ## Rifle: rejected by the coverage gate, and why
 

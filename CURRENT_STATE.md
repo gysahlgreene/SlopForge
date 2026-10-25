@@ -1040,12 +1040,17 @@ Multi-part weapons and props: quality and in-game function (2026-10-25, M3, [gui
   body settles on a floor; the editor is launched directly, see [Unity](docs/UNITY.md)). Props with a declared part
   are framed from the concept; `@face[-face]` anchors a hinge on an edge of its bounds. Guards from the runs: a part
   under 3 cells of OmniPart's structure stops before the run; thin parts keep a cell of OmniPart's 37×37 mask grid
-  (its crop and downsample are ported as the test oracle); a penetration failure names the sign that clears.
+  (its crop and downsample are ported as the test oracle); the final pass sweeps each part through its declared
+  range in Blender and retries a seed whose part turns or slides into the body (`part_penetrates`, type key
+  `max_part_penetration` 0.02) before materials and Unity; a Unity penetration failure on a hinge names the sign
+  that clears. Ranges are in Unity's sense (a positive turn about x takes +y towards +z), written in the guide.
 - **Tests:** unit (request, maps, colour matching, coarse grid against OmniPart's own reading, preflight, Play-mode
   script and results, publication wiring), opt-in Blender (normal bake, chest fixture with a prop frame and anchor),
   opt-in Unity live (colliders, sockets, Animator, penetration with the mirrored hint, Play mode), `make verify`.
-- **Live (2026-10-25):** pistol P2 published and played (slide −0.0300 m, trigger 20.00°, penetration ≤ 0.002);
-  P3 is the same brief with the trigger's sign in Unity's sense (`0..20`). Rifle R2 rejected: the bolt handle
+- **Live (2026-10-25):** pistol P2 published and played (slide −0.0300 m, trigger −20.00°, penetration ≤ 0.002;
+  its trigger declared the wrong way, forward); P3, the same brief with the trigger pulling (`0..20`), passed the
+  mesh and colour gates but Unity rejected its slide (0.040 inside the frame drawn back), which led to the Blender
+  sweep; P4 is P3 re-approved through it. Rifle R2 rejected: the bolt handle
   (1.7 cells) and trigger (2.2 cells) are below OmniPart's grid, three seeds each; the preflight now stops such
   briefs. Chest: lid geometry passed on every seed (0.77–0.91 of its mask); C2 rejected in Unity (`@back-top` is a
   domed lid's apex), C3 rejected with the hint (`-100` clears), C4 with the right declaration failed the colour
