@@ -1923,10 +1923,10 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                     raise StageFailure("processing_validation",
                                        "weapon motion checks failed: " + "; ".join(motion["errors"]),
                                        operation="weapon_motion",
-                                       remedy="check the part's declared axis and range against the published model")
-                validation["measured"]["weapon_motion"] = {key: motion[key] for key in
-                                                           ("prefab", "controller", "motions", "tip_forward",
-                                                            "root_inside")}
+                                       remedy="check the part's declared axis, range and anchor against the published "
+                                              "model: a hinge turns about the edge it is anchored on (a lid: @back-bottom, its seam)")
+                validation["measured"]["weapon_motion"] = {key: value for key, value in motion.items()
+                                                           if key != "errors"}
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])

@@ -466,7 +466,9 @@ avoid: [environment]
         def prefab(root, name, fbx, parts, **options):
             calls.append((name, parts, options["held"], options["mass"], options["layer"]))
             return {"errors": [], "prefab": "Assets/relay.prefab", "controller": "Assets/relay.controller",
-                    "motions": [], "tip_forward": True, "root_inside": True}
+                    "motions": [], "tip_forward": True, "root_inside": True, "default_state": "Rest",
+                    "warnings": ["layer 'Props' is not defined"], "colliders": ["relay"], "rigidbody_mass": 25.0,
+                    "sockets": [{"name": "Socket_Grip", "position": [0.0, 0.0, 0.0]}], "parameters": []}
         imports = []
 
         def unity_material(root, fbx, material, maps, **options):
@@ -480,6 +482,10 @@ avoid: [environment]
         self.assertEqual(imports, [True])  # a static prop gets lightmap UVs; a held weapon does not
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         self.assertEqual(record["validation"]["measured"]["weapon_motion"]["prefab"], "Assets/relay.prefab")
+        motion = record["validation"]["measured"]["weapon_motion"]  # the whole report a game needs, as documented
+        self.assertEqual((motion["colliders"], motion["rigidbody_mass"], motion["default_state"]), (["relay"], 25.0, "Rest"))
+        self.assertEqual(motion["sockets"][0]["name"], "Socket_Grip")
+        self.assertEqual(motion["warnings"], ["layer 'Props' is not defined"])
 
     def test_same_bytes_at_different_candidate_and_final_paths_keep_same_hash(self):
         self._concept_candidates()

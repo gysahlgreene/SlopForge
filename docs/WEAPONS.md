@@ -227,10 +227,13 @@ stage's settings; changing either invalidates the stage like a workflow change.
 ## Props with parts
 
 The same declarations work on a prop: the `prop` type sets `part_model: omnipart`, so a chest that declares
-`--part "lid=hinge:x:0..110@back-top: the domed lid"` is generated as a body and a lid, framed from its concept
-(front towards the concept's camera, top up; no grip, no full-turn search, no tip check), the lid measured against
-its mask, separated with its pivot on its back-top edge, and published as a prefab whose `lid` trigger and
-`lid_open` bool open it. A chest is the first prop proven this way (2026-10-25 live run, see the evidence pages).
+`--part "lid=hinge:x:0..100@back-bottom: the domed lid"` is generated as a body and a lid, framed from its concept
+(front towards the concept's camera at −Y, top up; no grip, no full-turn search, no tip check), the lid measured
+against its mask, separated with its pivot on its back-bottom edge, and published as a prefab whose `lid` trigger
+and `lid_open` bool open it. The anchor names an edge of the part's own bounds, so a lid's hinge is `back-bottom`,
+the seam it rests on: `back-top` put a domed lid's pivot at its apex, and the rim swept through the body, which
+the interpenetration check rejected (2026-10-25 live run, 0.27 of the lid's vertices inside). A chest is the first
+prop proven this way (see the evidence pages).
 
 ## The prefab a game uses
 
