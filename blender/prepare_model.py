@@ -1,11 +1,12 @@
 import bpy
+import json
 import math
 import sys
 from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          separate_part)
+                          separate_part, separate_tagged, tag_parts)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -349,6 +350,14 @@ else:
 
 if not mesh_objects:
     raise SystemExit("No mesh objects found.")
+
+parts_table = None
+if "--parts-json" in sys.argv:
+    # A weapon generated as parts (OmniPart, prepare_parts.py): one node per part, tagged before the join below
+    # and separated again after orientation and scaling (MOVING PARTS).
+    parts_table = json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text())["parts"]
+    if not reuse_stage_mesh:
+        tag_parts(mesh_objects, parts_table)
 
 
 # -------------------------------------------------
@@ -840,7 +849,11 @@ if "--pivot" in sys.argv:
 # MOVING PARTS (weapons)
 # -------------------------------------------------
 
-if not mesh_only:
+if not mesh_only and parts_table is not None:
+    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions)):
+        print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
+              f"pivot {[round(v, 4) for v in child.location]}")
+elif not mesh_only:
     for name, kind, _mask in part_specs():
         part = separate_part(obj, name, kind, basecolor=next(
             (image for image in bpy.data.images if basecolor_path and Path(bpy.path.abspath(image.filepath)).resolve()
