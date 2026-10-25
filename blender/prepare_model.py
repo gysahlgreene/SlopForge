@@ -6,7 +6,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          gltf_name, separate_part, separate_tagged, tag_parts)
+                          gltf_name, separate_part, separate_tagged, sweep_penetration, tag_parts)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -894,9 +894,25 @@ if "--pivot" in sys.argv:
 if not mesh_only and parts_table is not None:
     anchors = {value.split("=")[0]: value.split("=")[1].split("-") for index, value in enumerate(sys.argv)
                if index and sys.argv[index - 1] == "--anchor"}
-    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors):
+    children = separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors)
+    for child in children:
         print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
               f"pivot {[round(v, 4) for v in child.location]}")
+    # --motion name=axis:low..high: each part swept through its declared range against the rest of the model; the
+    # gate (part_penetration) retries a seed whose part turns or slides into the body (docs/WEAPONS.md, Axes).
+    motions = {value.split("=")[0]: value.split("=")[1] for index, value in enumerate(sys.argv)
+               if index and sys.argv[index - 1] == "--motion"}
+    penetration = {}
+    for child in children:
+        if child.name in motions:
+            axis, span = motions[child.name].split(":")
+            low, high = (float(bound) for bound in span.split(".."))
+            others = [obj, *[other for other in children if other is not child]]
+            penetration[child.name] = sweep_penetration(child, others, axis, low, high)
+            print(f"Part {child.name} ({child['slopforge_part']}): {penetration[child.name]:.3f} of its vertices "
+                  f"inside the body over rest through {axis} {low:g}..{high:g}")
+    if penetration:
+        obj["slopforge_part_penetration"] = json.dumps(penetration)
 elif not mesh_only:
     for name, kind, _mask in part_specs():
         part = separate_part(obj, name, kind, basecolor=next(

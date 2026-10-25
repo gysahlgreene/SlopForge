@@ -1013,6 +1013,22 @@ class PropComponentBudgetTests(unittest.TestCase):
         absent = apply_part_coverage(_quality_report(component_count=1), {}, declared, 0.6)
         self.assertEqual(absent["failure_codes"], ["part_missing"])
 
+    def test_a_part_that_swings_into_its_body_is_retried_before_materials(self):
+        # The C3 chest's lid (0.169 of its vertices inside the body over rest) reached Unity before it failed; the
+        # final pass now sweeps each part through its declared range in Blender, so a seed is retried early.
+        from slopforge.validation import apply_part_penetration
+        declared = [{"name": "lid", "kind": "hinge"}, {"name": "drawer", "kind": "slide"}]
+        report = apply_part_penetration(_quality_report(component_count=1), {"lid": 0.169, "drawer": 0.004}, declared, 0.02)
+        self.assertEqual(report["failure_codes"], ["part_penetrates"])
+        self.assertIn("lid 0.17", report["errors"][-1])
+        self.assertEqual(report["measured"]["part_penetration"], {"lid": 0.169, "drawer": 0.004})
+        self.assertEqual((report["measured"]["moving_parts_penetrating"], report["limits"]["max_part_penetration"]), (1, 0.02))
+        self.assertTrue(candidate_quality_rejection(report))
+        passing = apply_part_penetration(_quality_report(component_count=1), {"lid": 0.01, "drawer": 0.0}, declared, 0.02)
+        self.assertEqual(passing.get("failure_codes", []), [])
+        unmeasured = apply_part_penetration(_quality_report(component_count=1), {}, declared, 0.02)
+        self.assertEqual(unmeasured.get("failure_codes", []), [])  # the cut route measures nothing: no verdict
+
     def test_a_base_colour_without_textured_pixels_records_no_metric_and_stays_retryable(self):
         # 2026-10-25 live pistol: an all-black atlas left no texels to measure, the chroma metrics became NaN, the
         # failure record could not carry its evidence, and a retryable part_missing was reported as final.

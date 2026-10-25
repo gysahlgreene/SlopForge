@@ -1046,13 +1046,20 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
         concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
         masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}}})
         measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
                                extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
-                                      "--parts-json", "parts.json"),
-                               fixture_script=self.CHEST_FIXTURE,
-                               files={"parts.json": json.dumps({"parts": {"body": {"kind": "body", "id": 2},
-                                                                         "lid": {"kind": "hinge", "id": 1}}})})
+                                      "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                               fixture_script=self.CHEST_FIXTURE, files={"parts.json": parts_json})
         objects = measured["objects"]
+        # swept through its declared range (Unity's sense: a negative turn about x lifts a back-hinged lid): the
+        # share of the lid's vertices inside the body over rest; the gate retries a seed that sweeps into the body
+        self.assertLessEqual(measured["inspection"]["part_penetration"]["lid"], 0.02)
+        sunk = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
+                           extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
+                                  "--parts-json", "parts.json", "--motion", "lid=x:0..100"),
+                           fixture_script=self.CHEST_FIXTURE, files={"parts.json": parts_json})
+        self.assertGreater(sunk["inspection"]["part_penetration"]["lid"], 0.1)  # a positive turn sinks it
         self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]}, {"lid": "hinge"})
         self.assertEqual(measured["inspection"]["component_count"], 1)
         self.assertGreaterEqual(measured["inspection"]["part_coverage"]["lid"], 0.5)

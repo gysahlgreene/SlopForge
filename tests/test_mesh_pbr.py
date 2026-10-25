@@ -663,13 +663,17 @@ class DeclaredMaterialTests(unittest.TestCase):
                                             lineage_extra={"part_masks": root / "parts_1"},
                                             mesh_extra={"part_model": "omnipart",
                                                         "parts": {"lid": {"kind": "hinge"}, "body": {"kind": "body"}}},
-                                            inspection_extra={"part_coverage": {"lid": 0.9},
+                                            inspection_extra={"part_coverage": {"lid": 0.9}, "part_penetration": {"lid": 0.005},
                                                               "parts": [{"name": "lid", "kind": "hinge"}]})
             options = self.process_options
             self.assertEqual(options["concept"], root / "cutout.png")
             self.assertIsNone(options["grip_mask"])
             self.assertEqual(options["parts"], [("lid", "hinge", root / "parts_1/lid.png")])
             self.assertEqual(options["anchors"], {"lid": ["back", "top"]})
+            # the final pass sweeps each part through its declared range (Blender) and the gate reads the result
+            self.assertEqual(options["motions"], {"lid": ("x", 0.0, 110.0)})
+            self.assertEqual(candidate["validation"]["measured"]["part_penetration"], {"lid": 0.005})
+            self.assertEqual(candidate["validation"]["limits"]["max_part_penetration"], 0.02)
             self.assertEqual(transfers, [1.0])  # the parts route moves lightness the whole way to the concept's
             self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
             self.assertEqual([item.get("full_turn", False) for item in views], [False] * len(views))

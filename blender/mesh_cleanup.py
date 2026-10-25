@@ -323,6 +323,63 @@ def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
     return _attach(obj, mesh, kind, pivot)
 
 
+# Declared ranges are in the published (Unity) frame, x right, y up, z forward (docs/WEAPONS.md, Axes); the export
+# maps Blender (x, y, z) to Unity (-x, z, -y). About x the turn's sense is the same in both (Unity's left-handed
+# convention and the mirror cancel: a positive turn sinks a back-hinged lid's front in both, 2026-10-25 chest);
+# y and z follow the same change of basis and are not yet checked live.
+HINGE_AXES = {"x": ((1, 0, 0), 1), "y": ((0, 0, 1), -1), "z": ((0, 1, 0), 1)}
+SLIDE_AXES = {"x": (-1, 0, 0), "y": (0, 0, 1), "z": (0, -1, 0)}
+
+
+def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
+    """The share of `part`'s vertices inside `others` at the worst of `samples` points of its declared range, over
+    the share at rest: a lid turned into its chest, a drawer through its housing. The part turns about its origin
+    (its pivot) or slides along its axis; a point is inside when rays along two of three axes cross a mesh an odd
+    number of times (generated meshes have holes, so one ray's parity lies). Unity repeats the check on the prefab."""
+    import math
+    import bpy
+    from mathutils import Matrix, Vector
+    from mathutils.bvhtree import BVHTree
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    trees = [BVHTree.FromObject(other, depsgraph) for other in others if other.type == "MESH"]
+    step = max(1, len(part.data.vertices) // limit)
+    rest = [part.matrix_world @ vertex.co for index, vertex in enumerate(part.data.vertices) if index % step == 0]
+    if not trees or not rest:
+        return 0.0
+
+    def inside(point):
+        for tree in trees:
+            odd = 0
+            for direction in (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))):
+                hits, origin = 0, point.copy()
+                for _ in range(64):
+                    location = tree.ray_cast(origin, direction)[0]
+                    if location is None:
+                        break
+                    hits += 1
+                    origin = location + direction * 1e-5
+                odd += hits % 2
+            if odd >= 2:
+                return True
+        return False
+
+    pivot = part.matrix_world.translation.copy()
+    rest_share = sum(inside(point) for point in rest) / len(rest)
+    far = low if abs(low) > abs(high) else high  # the range runs from rest to its far end
+    worst = 0.0
+    for sample in range(1, samples + 1):
+        amount = far * sample / samples
+        if part.get("slopforge_part") == "slide":
+            move = Matrix.Translation(Vector(SLIDE_AXES[axis]) * amount)
+        else:
+            direction, sign = HINGE_AXES[axis]
+            move = (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(sign * amount), 4, Vector(direction))
+                    @ Matrix.Translation(-pivot))
+        share = sum(inside(move @ point) for point in rest) / len(rest)
+        worst = max(worst, share - rest_share)
+    return round(worst, 4)
+
+
 def _attach(obj, mesh, kind, pivot):
     """A child object of obj for the mesh, with obj's materials, its origin at pivot and its kind recorded."""
     import bpy

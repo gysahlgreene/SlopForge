@@ -241,8 +241,9 @@ public static class CLASS_NAME
         motion.penetration = Penetration(root, part, clip, request);
         if (motion.penetration > request.penetration_tolerance)
         {
-            // The usual cause is the range's sign (docs/WEAPONS.md, Axes): say so when the mirrored range clears.
-            var mirrored = Penetration(root, part, Pulse(clip.name + "_mirrored", part,
+            // A hinge's usual cause is the range's sign (docs/WEAPONS.md, Axes): say so when the mirrored range clears.
+            // A slide's opposite direction leaves the body almost always, which says nothing about the right one.
+            var mirrored = declared.kind != "hinge" ? 1f : Penetration(root, part, Pulse(clip.name + "_mirrored", part,
                 AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request);
             errors.Add(label + " penetrates the body through its range (" +
                        motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices inside, over rest" +

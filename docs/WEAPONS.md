@@ -268,6 +268,14 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
   housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
   the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
 
+The final pass already sweeps each part through its declared range in Blender, before any material is generated:
+the share of the part's vertices inside the rest of the model at the worst point of its range, over its share at
+rest (a point counts as inside when rays along two of three axes cross a mesh an odd number of times, since
+generated meshes have holes). A part over the type's `max_part_penetration` (0.02) is the retryable
+`part_penetrates`, so a seed whose lid turns into its chest is replaced before materials and Unity (the C3 chest's
+lid read 0.047 in Blender and 0.169 in Unity; both reject it). Unity's single-ray check on the published prefab
+stays the final word, and the two can differ at the margin on an imperfect mesh.
+
 The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
 player. LODs are not generated (the mesh budget is the one LOD).

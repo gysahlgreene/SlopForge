@@ -1026,3 +1026,30 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
 - **Not verified:** any seed-to-seed consistency beyond these runs; the pistol's slide coverage sat at the limit;
   OmniPart's VRAM peak beside ComfyUI. Both passing weapons published through Unity with every motion check
   passing (pistol slide −0.0300 m, trigger −20.00°; rifle bolt −0.0800 m, trigger −20.00°; no pivot drift).
+
+Multi-part weapons and props: quality and in-game function (2026-10-25, M3, [guide](docs/WEAPONS.md#the-prefab-a-game-uses), [evidence](docs/media/weapon-parts-functional-2026-10/README.md)).
+- **Why:** the owner asked for multi-part weapons and props that look right close up and work in a game (sockets,
+  colliders and physics, animations verified in Play mode), a chest with a lid first.
+- **Change:** on the parts route the concept-side view joins the parts (so the metal-lightness match and the colour
+  transfer run at last), a tangent normal map is baked per part with sharp edges over 30°, textures and the atlas
+  at the type's `texture_size` (4096 for weapons; Unity imports at it), metallic by part text, colours move to the
+  concept's the whole way with metal keeping the concept's chroma, OmniPart's sampler settings come from the type.
+  Every weapon and every `unity_prefab: true` type publishes a prefab: convex colliders, Rigidbody, layer, sockets,
+  Animator (`Rest`, trigger and hold bool per part), the W9 checks, an interpenetration check through each range,
+  lightmap UVs on static assets, and a Play-mode run through Unity's test runner (each part pulses and returns, the
+  body settles on a floor; the editor is launched directly, see [Unity](docs/UNITY.md)). Props with a declared part
+  are framed from the concept; `@face[-face]` anchors a hinge on an edge of its bounds. Guards from the runs: a part
+  under 3 cells of OmniPart's structure stops before the run; thin parts keep a cell of OmniPart's 37×37 mask grid
+  (its crop and downsample are ported as the test oracle); a penetration failure names the sign that clears.
+- **Tests:** unit (request, maps, colour matching, coarse grid against OmniPart's own reading, preflight, Play-mode
+  script and results, publication wiring), opt-in Blender (normal bake, chest fixture with a prop frame and anchor),
+  opt-in Unity live (colliders, sockets, Animator, penetration with the mirrored hint, Play mode), `make verify`.
+- **Live (2026-10-25):** pistol P2 published and played (slide −0.0300 m, trigger 20.00°, penetration ≤ 0.002);
+  P3 is the same brief with the trigger's sign in Unity's sense (`0..20`). Rifle R2 rejected: the bolt handle
+  (1.7 cells) and trigger (2.2 cells) are below OmniPart's grid, three seeds each; the preflight now stops such
+  briefs. Chest: lid geometry passed on every seed (0.77–0.91 of its mask); C2 rejected in Unity (`@back-top` is a
+  domed lid's apex), C3 rejected with the hint (`-100` clears), C4 with the right declaration failed the colour
+  gates on three seeds (chroma ratio 0.07–0.55: OmniPart paints the chest's sides dark) and is being retried.
+- **Not verified / open:** the chest's colour consistency (2 of 9 seeds passed the colour gates); seed variance of
+  the pistol's trigger coverage and overflow; Play mode checks motion and settling only; no LODs; the crossbow.
+  Status Experimental: one brief per kind, no repeatability claim.
