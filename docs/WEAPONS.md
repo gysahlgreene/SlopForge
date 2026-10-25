@@ -258,31 +258,46 @@ need retraining on its latent space, so the two are combined after generation in
 
 1. TRELLIS.2 generates the surface as for any asset (the workflow route), and OmniPart generates the parts for the
    same concept and masks (`run_omnipart`; its textures are not used).
-2. `blender/hybrid_graph.py` repairs the surface locally into a closed manifold (a cut across one of its
-   non-manifold edges leaves an opening with loose ends that no fill can close), then records its face graph (faces
+2. `blender/hybrid_graph.py` removes the surface's fully enclosed inner shells and records its face graph (faces
    that share an edge, the edge's length and angle), OmniPart's parts, and per moving part a vote from its concept
-   mask: +1 where the concept's fitted view sees the face inside the mask, -1 outside, 0 unseen or within 2% of
-   the mask's edge (a mask edge carried through the view lands a few millimetres off the surface's crease; at full
-   weight it pulled the cut across a panel in teeth). A flat side-profile concept, one that looks along the
-   object's thinnest axis within ~11°, votes through the thickness.
+   mask: +1 where the concept's fitted view sees the face inside the mask, -1 outside, 0 unseen or within a band at
+   the mask's edge (2% of the object, at most a quarter of the part's narrow width: a mask edge carried through the
+   view lands a few millimetres off the surface's crease, and at full weight it pulled the cut across a panel in
+   teeth). A concept that looks along the object's thinnest axis within ~18° (a weapon's side profile) votes through
+   the thickness. The surface is not repaired into a manifold: on a chest with 1,627 non-manifold edges the local
+   repair refilled holes with untextured triangles across the lid.
 3. `slopforge/part_split.py` aligns OmniPart's parts on the surface (the best of the 24 quarter turns with bounds
    fitted, refined by ICP: TRELLIS.2 lays a pistol along Y, OmniPart along X), measures each face's distance to
    each part, and labels the faces with graph cuts on scipy's maximum flow: a face's vote is how much closer it is
-   to a part than to the others (1% of the object's size counts as one unit) plus 3 units for a mask vote; cutting
-   between two faces costs the edge's length times exp(-(angle/25°)²), so a boundary runs along the surface's own
-   creases (a slide's groove, a lid's seam). Moving parts are cut larger first, a trigger from what the slide leaves.
+   to a part than to the others (1% of the object's size is one unit, at most 20) plus 3 units for a mask vote;
+   cutting between two faces costs the edge's length times exp(-(angle/25°)²), so a boundary runs along the
+   surface's own creases (a slide's groove, a lid's seam). Moving parts are cut larger first, a trigger from what
+   the slide leaves. OmniPart's parts vary by seed, so its vote is scaled by its agreement with the mask (the share
+   of the mask-voted faces nearest its part): on one live seed its slide was a speck at the muzzle and outvoted a
+   mask that covered the slide. A mask whose votes cover under a quarter of its share of the concept missed its part
+   (a trigger a few per cent wide fell through the view's misregistration) and is dropped for that seed
+   (`hybrid.masks_dropped`).
 4. `blender/hybrid_apply.py` writes the surface back as one glTF node per part, and the final pass tags, separates
    and pivots the parts as for OmniPart's. With `close_openings` in the part table, every opening the separation
    leaves, on each part and on the body, is closed (`mesh_cleanup.close_openings`): a planar fill in the opening's
    best-fit plane; a chain whose loose ends are close is bridged first; an opening no fill can close (a rim that
    dips into a pistol's bore) gets a flat cap across its convex outline in the plane most of its rim lies in
-   (RANSAC), a little inside its piece and facing out. Fills and caps take one texel, their ring's median colour.
+   (RANSAC), a little inside its piece and facing out; an opening under a hinged part that covers at least half the
+   body's outline in that plane (a chest's top) becomes a **cavity**: a rim, inner walls and a floor a player sees
+   into when the lid opens. Fills, caps and cavities take one texel, their ring's median colour, and any that is not
+   inside the unsplit object is dropped (a cap whose outline overshot a concave opening stood up behind a lid).
 5. Gates: `hybrid_alignment_error` over `max_hybrid_alignment_error` (0.03 of the surface's size) is `part_missing`,
    as are a part's mask coverage and the motion sweep, so a seed whose generators disagree is replaced.
 
-Live (2026-10-25, the H1 pistol and P4's OmniPart parts): alignment 1.4% of the pistol's size, the split in 6 s,
-slide 0.98 of its mask with 0.01 outside it, trigger 0.83, every opening closed, the motion sweep 0.000. Not yet
-verified: the chest through this route, a run through the whole pipeline on the H100, Unity.
+The mask stage feeds both votes and OmniPart: SAM's three candidates are scored by how well they fill the declared
+box (above), and gaps narrower than ~6% of the object inside the chosen mask are closed, so an iron band across a
+chest's lid does not split the lid's mask (OmniPart had left the band and the lid's ends with the body).
+
+Live (2026-10-25): on the H1 pistol with P4's OmniPart parts, alignment 1.4% of the pistol's size, the split in 6 s,
+slide 0.98 of its mask with 0.01 outside it, every opening closed, the motion sweep 0.000; with the slide back it
+reads cleanly at inspect distance with single-sided faces. On three new pistol seeds the slides took 27%, 30% and 19%
+of the surface after the vote balancing (7%, 30%, 7% before); the coverage gate rejects the weak ones. A chest from
+the old lid mask opened to a wooden cavity; its lid's ends and band stayed on the body until the mask closing.
 
 ## Props with parts
 
