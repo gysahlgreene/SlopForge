@@ -331,6 +331,7 @@ def part(name, size, colour, cuts):
     m = bpy.data.materials.new(name); m.use_nodes = True
     tex = m.node_tree.nodes.new('ShaderNodeTexImage'); tex.image = image
     m.node_tree.links.new(tex.outputs['Color'], m.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
+    m.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 1.0  # glTF's default: a diffuse bake of a metal is black
     o.data.materials.append(m)
 part('body', (2, 1, 1), (1, 0, 0, 1), 6)
 part('slide', (2, 0.3, 0.3), (0, 0, 1, 1), 6)
@@ -909,7 +910,7 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
 bpy.ops.wm.read_factory_settings(use_empty=True)
 def box(name, centre, size):
     bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
-    o = bpy.context.object; o.name = name; o.scale = size
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size  # meshes named like the parts, as the tool writes them
     bpy.ops.object.transform_apply(location=True, scale=True)
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.subdivide(number_cuts=3); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
@@ -918,11 +919,13 @@ box('body', (0, 0, 0), (1.0, 0.2, 0.2))
 box('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))        # on top of the body, touching its top face
 box('trigger', (0.1, 0, -0.15), (0.05, 0.02, 0.1))  # hangs below the body, touching its underside
 box('floating', (-0.2, 0, -0.5), (0.05, 0.05, 0.05))  # a hinge that touches nothing
+box('grip', (0.4, 0, -0.1), (0.1, 0.22, 0.05))  # a static part: generated separately, keeps the body one piece
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
 """
     PARTS_TABLE = json.dumps({"parts": {"body": {"kind": "body", "id": 4}, "slide": {"kind": "slide", "id": 1},
-                                        "trigger": {"kind": "hinge", "id": 2}, "floating": {"kind": "hinge", "id": 3}}})
+                                        "trigger": {"kind": "hinge", "id": 2}, "floating": {"kind": "hinge", "id": 3},
+                                        "grip": {"kind": "grip", "id": 5}}})
 
     def test_parts_from_a_glb_become_children_with_pivots_by_kind(self):
         # A weapon generated as parts (OmniPart): the final pass tags each node's faces, joins, orients and scales
@@ -937,8 +940,8 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         objects = measured["objects"]
         body = objects[measured["body"]]
         self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]},
-                         {"slide": "slide", "trigger": "hinge", "floating": "hinge"})
-        self.assertEqual(measured["inspection"]["component_count"], 1)  # the body is one piece
+                         {"slide": "slide", "trigger": "hinge", "floating": "hinge", "grip": "grip"})  # exact names
+        self.assertEqual(measured["inspection"]["component_count"], 1)  # the body is one piece: every part is a child
         for name in ("slide", "floating"):  # box centres
             centre = [(objects[name]["min"][i] + objects[name]["max"][i]) / 2 for i in range(3)]
             for axis in range(3):
@@ -947,7 +950,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertAlmostEqual(trigger["origin"][2], body["min"][2], delta=0.005)  # at the body's underside
         self.assertAlmostEqual(trigger["origin"][1], (trigger["min"][1] + trigger["max"][1]) / 2, delta=0.02)
         self.assertEqual(sorted(part["name"] for part in measured["fbx_inspection"]["parts"]),
-                         ["floating", "slide", "trigger"])
+                         ["floating", "grip", "slide", "trigger"])
         self.assertEqual(sum(1 for item in objects.values() if item["open_edges"]), 0)  # nothing was cut open
 
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
@@ -974,7 +977,7 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
                                     capture_output=True, text=True)
             self.assertEqual(probed.returncode, 0, (probed.stdout + probed.stderr)[-3000:])
             tags = json.loads(next(line for line in probed.stdout.splitlines() if line.startswith("TAGS "))[5:])
-            self.assertEqual(tags, {"body.001": [4], "slide.001": [1], "trigger.001": [2], "floating.001": [3]})
+            self.assertEqual(tags, {"body.001": [4], "slide.001": [1], "trigger.001": [2], "floating.001": [3], "grip.001": [5]})
 
     def test_moving_parts_are_split_from_the_body_with_pivots_by_kind(self):
         # W8: a slide and a hinged part are cut from one connected body along masks drawn on its concept, closed, and

@@ -91,31 +91,36 @@ def bake_atlases(objects, texture_size, basecolor_output, metallic_output, metal
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 1
     scene.render.bake.margin = 4  # the islands are packed 4 texels apart: a wider margin bleeds one part's metallic into its neighbour's
-    for kind, output in (("DIFFUSE", basecolor_output), ("EMIT", metallic_output)):
+    # Both atlases are emission bakes: a diffuse bake of a glTF material is black where it is metallic (glTF's
+    # default metallicFactor is 1), so the part's base colour is wired straight into an emission shader instead.
+    for kind, output in (("colour", basecolor_output), ("metal", metallic_output)):
         target = bpy.data.images.new(f"atlas_{kind}", width=texture_size, height=texture_size, alpha=False)
-        if kind == "EMIT":
+        if kind == "metal":
             target.colorspace_settings.name = "Non-Color"
         for obj in objects:
             for material in obj.data.materials:
                 if material is None:
                     continue
                 material.use_nodes = True
-                nodes = material.node_tree.nodes
-                if kind == "EMIT":
-                    # the metallic atlas: this part's declared value as flat emission, baked through the same UVs
-                    for node in list(nodes):
-                        nodes.remove(node)
-                    out = nodes.new("ShaderNodeOutputMaterial")
-                    emission = nodes.new("ShaderNodeEmission")
+                nodes, links = material.node_tree.nodes, material.node_tree.links
+                if kind == "colour":
+                    principled = next((node for node in nodes if node.type == "BSDF_PRINCIPLED"), None)
+                    source = principled.inputs["Base Color"] if principled else None
+                else:
+                    source = None
+                emission = nodes.new("ShaderNodeEmission")
+                if source is not None and source.is_linked:
+                    links.new(source.links[0].from_socket, emission.inputs["Color"])
+                elif source is not None:
+                    emission.inputs["Color"].default_value = source.default_value
+                else:  # the metallic atlas: this part's declared value, flat
                     emission.inputs["Color"].default_value = (metal.get(obj.name, 1.0),) * 3 + (1.0,)
-                    material.node_tree.links.new(emission.outputs["Emission"], out.inputs["Surface"])
+                out = next((node for node in nodes if node.type == "OUTPUT_MATERIAL"), None) or nodes.new("ShaderNodeOutputMaterial")
+                links.new(emission.outputs["Emission"], out.inputs["Surface"])
                 node = nodes.new("ShaderNodeTexImage")
                 node.image = target
                 nodes.active = node
-        if kind == "DIFFUSE":
-            bpy.ops.object.bake(type="DIFFUSE", pass_filter={"COLOR"}, use_selected_to_active=False)
-        else:
-            bpy.ops.object.bake(type="EMIT", use_selected_to_active=False)
+        bpy.ops.object.bake(type="EMIT", use_selected_to_active=False)
         output.parent.mkdir(parents=True, exist_ok=True)
         target.filepath_raw, target.file_format = str(output), "PNG"
         target.save()

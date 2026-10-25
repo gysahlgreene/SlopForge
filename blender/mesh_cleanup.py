@@ -339,6 +339,7 @@ def _attach(obj, mesh, kind, pivot):
     child.location = pivot
     child["slopforge_part"] = kind
     return child
+    return child
 
 
 def _side(point, centre, normal):
@@ -517,7 +518,10 @@ def separate_tagged(obj, table, contact):
         return []
     # The GLB split its vertices along UV seams; welded, each part is closed again and its seam edges are not open.
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=max(obj.dimensions) * 1e-6)
-    moving = {entry["id"]: (name, entry["kind"]) for name, entry in table.items() if entry["kind"] in ("hinge", "slide")}
+    # Every part but the body becomes a child, static ones too (a grip, a slide's rear): the body stays one piece
+    # for the component budget, and the moving parts get their pivots.
+    parts = {entry["id"]: (name, entry["kind"]) for name, entry in table.items() if entry["kind"] != "body"}
+    moving = {part_id for part_id, (_name, kind) in parts.items() if kind in ("hinge", "slide")}
     # Distance to the rest of the weapon's surface, not its vertices: a trigger under a flat underside has no
     # body vertex near it.
     rest = bm.copy()
@@ -526,7 +530,7 @@ def separate_tagged(obj, table, contact):
     tree = BVHTree.FromBMesh(rest)
     rest.free()
     children = []
-    for part_id, (name, kind) in moving.items():
+    for part_id, (name, kind) in parts.items():
         faces = [face for face in bm.faces if face[layer] == part_id]
         if not faces:
             print(f"Part {name} ({kind}): no faces were generated for it")
@@ -542,11 +546,17 @@ def separate_tagged(obj, table, contact):
         piece = bm.copy()
         piece_layer = piece.faces.layers.int.get("slopforge_part")
         bmesh.ops.delete(piece, geom=[face for face in piece.faces if face[piece_layer] != part_id], context="FACES")
+        # The join left the imported part's mesh as an orphan under this name; the child takes the exact name
+        for block in (bpy.data.meshes, bpy.data.objects):
+            taken = block.get(name)
+            if taken is not None and taken.users == 0:
+                block.remove(taken)
         mesh = bpy.data.meshes.new(name)
         piece.to_mesh(mesh)
         piece.free()
-        _attach(obj, mesh, kind, pivot)
-        children.append(obj.children[-1])
+        child = _attach(obj, mesh, kind, pivot)
+        child.name = mesh.name = name
+        children.append(child)
         bmesh.ops.delete(bm, geom=faces, context="FACES")
     bm.to_mesh(obj.data)
     bm.free()
