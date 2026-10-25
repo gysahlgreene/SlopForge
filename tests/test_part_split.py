@@ -68,6 +68,19 @@ class LabelFacesTests(unittest.TestCase):
         labels = label_faces(distances, ["body", "hinge"], pairs, lengths, angles, areas, masks={"hinge": mask})
         self.assertEqual(list(labels), ["hinge"] * 5 + ["body"] * 5)  # the unseen faces follow the crease
 
+    def test_a_part_omnipart_misplaced_is_cut_where_the_mask_says(self):
+        # Seed 1 of the 2026-10-25 live pistol: the mask's votes covered the slide, OmniPart's slide was a speck at the
+        # muzzle, and its far-off distances outvoted the mask. OmniPart's vote counts as far as its part agrees with
+        # the mask where the mask votes.
+        n = 20
+        pairs, lengths, angles, areas = strip(n, crease_at=9)
+        distances = np.zeros((n, 2))  # body, slide
+        distances[:, 0] = 0.001  # OmniPart's body is near every face
+        distances[:, 1] = 0.2  # its slide is far from all of them
+        mask = np.array([1] * 10 + [-1] * 10)
+        labels = label_faces(distances, ["body", "slide"], pairs, lengths, angles, areas, masks={"slide": mask})
+        self.assertEqual(list(labels), ["slide"] * 10 + ["body"] * 10)
+
     def test_a_trigger_is_cut_from_what_the_slide_leaves(self):
         n = 30
         pairs, lengths, angles, areas = strip(n, crease_at=9)

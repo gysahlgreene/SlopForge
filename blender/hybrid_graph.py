@@ -94,8 +94,10 @@ def mask_votes(vertices, polygons, centres, concept_path, masks):
     # chest) does not: there only the faces it sees vote (2026-10-25, the pistol's far side came out jagged).
     centred = vertices - vertices.mean(0)
     thinnest = np.linalg.eigh(centred.T @ centred)[1][:, 0]
-    # Only a view within ~11 degrees of that axis: the pistol's 15-degree tilt moved its far side 3% (2026-10-25).
-    through = abs(float(np.dot(thinnest, np.array(towards)))) > 0.98
+    # A view within ~18 degrees of that axis: a 15-degree tilt moves a pistol's far side about 3%, near the 2%
+    # neutral band at the mask's edges, and the creases take the rest (2026-10-25: a seed whose view was tilted
+    # 15 degrees had too few seen faces for the mask to place the slide).
+    through = abs(float(np.dot(thinnest, np.array(towards)))) > 0.95
     # A mask's edge, carried through a fitted view, lands a few millimetres off the surface's crease; at full weight
     # it pulled the cut across a smooth panel in teeth (2026-10-25). Within a margin of the edge (2% of the concept's
     # object) a face does not vote, and the crease decides.
@@ -103,8 +105,11 @@ def mask_votes(vertices, polygons, centres, concept_path, masks):
     votes = {}
     for name, path in masks.items():
         mask = image_mask(path, channel=0)
+        rows_m, cols_m = np.nonzero(mask)
+        narrow = min(np.ptp(rows_m) + 1, np.ptp(cols_m) + 1) if len(rows_m) else 0
+        part_margin = max(1, min(margin, round(0.25 * narrow)))  # a trigger is not one band of uncertainty
         core, hull = mask.copy(), mask.copy()
-        for _ in range(margin):
+        for _ in range(part_margin):
             core &= np.roll(core, 1, 0) & np.roll(core, -1, 0) & np.roll(core, 1, 1) & np.roll(core, -1, 1)
             hull |= np.roll(hull, 1, 0) | np.roll(hull, -1, 0) | np.roll(hull, 1, 1) | np.roll(hull, -1, 1)
         inside = (pixels[:, 0] >= 0) & (pixels[:, 0] < mask.shape[1]) & (pixels[:, 1] >= 0) & (pixels[:, 1] < mask.shape[0])

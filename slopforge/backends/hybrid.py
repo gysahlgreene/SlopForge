@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from ..part_split import align, label_faces, part_distances
 from ..paths import blender_executable, tool_root
@@ -58,6 +59,20 @@ def split_surface(project_root, config, surface, parts_glb, concept, masks, part
                      for n, (v, t) in zip(names, placed)}
     moving.sort(key=lambda n: -areas_by_part[n])  # larger first: a trigger is cut from what a slide leaves
     votes = {n: data[f"mask_{n}"] for n in moving if f"mask_{n}" in data.files}
+    dropped = []
+    areas = np.asarray(data["areas"], float)
+    with Image.open(concept) as image:
+        alpha = np.asarray(image.convert("RGBA"))[..., 3] > 0
+    for name in list(votes):
+        with Image.open(masks[name]) as image:
+            share = float((np.asarray(image.convert("L").resize(alpha.shape[::-1])) > 127)[alpha].mean())
+        voting = votes[name] != 0
+        voted = float(areas[votes[name] > 0].sum() / max(areas[voting].sum(), 1e-12))
+        # a mask that lands on far less of the surface than its share of the concept missed its part: a trigger a
+        # few per cent of the object wide fell through the fitted view's misregistration and voted against itself
+        if share > 0 and voted < 0.25 * share:
+            dropped.append(name)
+            del votes[name]
     labels = label_faces(distances / span, names, data["pairs"], data["lengths"], data["angles"], data["areas"],
                          masks=votes, moving=moving)
     shares = {n: round(float(np.mean(labels == n)), 4) for n in ["body", *moving]}
@@ -68,7 +83,7 @@ def split_surface(project_root, config, surface, parts_glb, concept, masks, part
     _blender(config, root, "hybrid_apply.py", apply_request)
     pairs = data["pairs"]
     cut = labels[pairs[:, 0]] != labels[pairs[:, 1]]
-    report = {"alignment_error": round(error / span, 4), "shares": shares,
+    report = {"alignment_error": round(error / span, 4), "shares": shares, "masks_dropped": dropped,
               "cut_length": round(float(data["lengths"][cut].sum() / span), 3),
               "parts": {name: {"kind": next((p["kind"] for p in parts if p["name"] == name), "body"),
                                "id": index + 1} for index, name in enumerate(["body", *moving])},
@@ -94,7 +109,7 @@ def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed,
     info = json.loads(metadata.read_text())
     info["part_model"] = "hybrid"
     info["parts"] = report["parts"]
-    info["hybrid"] = {key: report[key] for key in ("alignment_error", "shares", "cut_length", "tools")}
+    info["hybrid"] = {key: report[key] for key in ("alignment_error", "shares", "cut_length", "masks_dropped", "tools")}
     info["part_generator"] = {"backend": omnipart.get("backend", {}), "model_weights": omnipart.get("model_weights", {}),
                               "seed": seed}
     for output in info.get("outputs") or []:  # the surface is rewritten as nodes: its recorded hash follows it

@@ -65,7 +65,15 @@ def label_faces(distances, names, pairs, lengths, angles, areas, masks=None, lam
         rivals = [n for n in names if n != part and (n not in moving or moving.index(n) > moving.index(part))]
         gap = (distances[:, names.index(part)] - distances[:, [names.index(r) for r in rivals]].min(1)) / tau
         if masks is not None and part in masks:
-            gap = gap - mask_weight * np.asarray(masks[part], float)
+            vote = np.asarray(masks[part], float)
+            # OmniPart's parts vary by seed: its vote counts as far as its part agrees with the mask where the mask
+            # votes for it (the share of those faces nearest its part; on a live pistol seed its slide was a speck at
+            # the muzzle, 6%, and its far-off distances outvoted a mask that covered the slide)
+            voted = vote > 0
+            if voted.any():
+                nearest = np.argmin(distances, axis=1) == names.index(part)
+                gap = gap * float(np.clip(nearest[voted].mean() / 0.5, 0.1, 1.0))
+            gap = gap - mask_weight * vote
         gap = np.clip(np.nan_to_num(gap), -20, 20)  # 20 units is decisive; a wider range only drowns the creases
         index = {node: k for k, node in enumerate(remaining)}
         keep = np.array([a in index and b in index for a, b in pairs], bool)

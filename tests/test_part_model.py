@@ -545,7 +545,7 @@ class HybridBackendTests(unittest.TestCase):
                 seen["split"] = (parts_glb.name, sorted(masks_))
                 surface_.with_name("pistol_whole.glb").write_bytes(b"whole")
                 surface_.write_bytes(b"nodes")
-                return {"alignment_error": 0.014, "shares": {"body": 0.7, "slide": 0.3}, "cut_length": 8.1,
+                return {"alignment_error": 0.014, "shares": {"body": 0.7, "slide": 0.3}, "cut_length": 8.1, "masks_dropped": [],
                         "parts": {"body": {"kind": "body", "id": 1}, "slide": {"kind": "slide", "id": 2}},
                         "tools": {"hybrid_graph.py": "abc"}}
             with patch.object(hybrid, "run_omnipart", side_effect=omnipart), \
