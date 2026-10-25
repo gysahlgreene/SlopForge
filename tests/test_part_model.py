@@ -279,6 +279,50 @@ class DerivedMapTests(unittest.TestCase):
         self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "matte black steel"},
                                       {"region": "grip", "class": "nonmetal", "description": "polished walnut"}]), "matte")
 
+    def test_part_metal_by_region_text(self):
+        # The rifle's declared non-metal "stock" named no part, so its walnut grip came out metal (2026-10-25);
+        # a region word in the part's own description counts too
+        from slopforge.unity_material import part_metal
+        materials = [{"region": "stock", "class": "nonmetal", "description": "oiled walnut"},
+                     {"region": "barrel, receiver and bolt", "class": "metal", "description": "blued steel"}]
+        parts = [{"name": "grip", "kind": "grip", "text": "the chequered pistol grip of the stock"},
+                 {"name": "bolt", "kind": "slide", "text": "the bolt handle and bolt on the receiver"},
+                 {"name": "trigger", "kind": "hinge", "text": "the curved trigger inside the guard"}]
+        self.assertEqual(part_metal(parts, materials), {"grip": 0, "bolt": 1, "trigger": 1})
+
+    def test_colour_matching_on_the_parts_route(self):
+        # OmniPart's textures are darker and duller than the concept all over (chest 2026-10-25: darkened 0.45-0.69,
+        # chroma ratio 0.25-0.29). On that route the lightness moves the whole way to the concept's (within the cap)
+        # and metal texels keep no more chroma than the concept's metal shows (the pink serrations).
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours, match_metal_lightness
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (184, 132, 78)  # lit oak
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (70, 58, 48)  # dark, dull
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255  # no metal
+            Image.new("RGB", (32, 32), (70, 58, 48)).save(root / "base.png")
+            Image.new("L", (32, 32), 0).save(root / "metal.png")
+            report = match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal, lightness_share=1.0)
+            lab = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float).reshape(-1, 3))
+            self.assertGreater(float(np.median(lab[:, 0])), 55.0)  # from L* 26 towards the oak's 59
+            self.assertGreater(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 20.0)  # chroma restored
+            self.assertTrue(any(entry.get("lightness", 1) > 1.4 for entry in report.values()))
+            # metal: a grey concept, a dark base with a purplish patch; brightened, and the patch loses its tint
+            cutout[..., :3] = (120, 120, 120)
+            view[..., :3] = (35, 35, 36)
+            metal[..., :3] = 255
+            base = Image.new("RGB", (32, 32), (35, 35, 36)); base.paste((80, 50, 80), (8, 8, 16, 16)); base.save(root / "base2.png")
+            Image.new("L", (32, 32), 255).save(root / "metal2.png")
+            gain = match_metal_lightness(root / "base2.png", root / "metal2.png", cutout, view, metal)
+            self.assertGreater(gain, 2.0)
+            lab = _lab(np.asarray(Image.open(root / "base2.png").convert("RGB"), dtype=float)[8:16, 8:16].reshape(-1, 3))
+            self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 6.0)
+
     def test_part_metal_by_region_name(self):
         from slopforge.unity_material import part_metal
         materials = [{"region": "slide and frame", "class": "metal", "description": "blued steel"},

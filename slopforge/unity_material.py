@@ -176,6 +176,17 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
     linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
     linear[metallic > 0.5] = np.clip(linear[metallic > 0.5] * gain, 0, 1)
     pixels[..., :3] = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
+    # Brightening reveals tints the decoder left in dark metal (a pistol's serrations came up pink, 2026-10-25):
+    # metal keeps no more chroma than the concept's lit metal shows
+    concept_lab, _cover, _box = _lab_cells(cutout, METAL_LIGHTNESS_GRID)
+    chroma_limit = float(np.median(np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2]))) + 2.0
+    metal_texels = metallic > 0.5
+    lab = _lab(pixels[..., :3][metal_texels] * 255)
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
+    over = chroma > chroma_limit
+    if over.any():
+        lab[over, 1:] *= (chroma_limit / chroma[over])[:, None]
+        pixels[..., :3][metal_texels] = _srgb_from_lab(lab) / 255
     Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
     return gain
 
@@ -185,6 +196,7 @@ MIN_CLUSTER_CELLS = 4  # concept-side cells a colour needs before its shift is m
 MAX_CHROMA_SHIFT = 25.0  # CIELAB a*b* units; a larger drift is not a tint
 BORROW_DISTANCE = 20.0  # a colour too small to measure takes a measured colour's shift only if this close in CIELAB
 LIGHTNESS_SHARE = 0.5  # a lit concept is brighter than albedo, so lightness moves half way to it, and never down
+MAX_LIGHTNESS_RATIO = 3.0  # a texture decoded darker than a third of the concept's lightness is not a tint
 
 
 def _srgb_from_lab(lab):
@@ -197,8 +209,10 @@ def _srgb_from_lab(lab):
     return np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055) * 255
 
 
-def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, metal_view):
+def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, metal_view, lightness_share=LIGHTNESS_SHARE):
     """Shift each non-metal colour of the base colour map towards the concept's; returns a report per colour.
+    lightness_share: how far lightness moves to the concept's (the parts route, whose textures are dark all over,
+    moves the whole way).
 
     TRELLIS.2 decoded a pistol's rosewood grips more orange and darker than drawn on every seed (CIELAB hue angle 43
     against 37, 2026-10-24), and the whole-object colour checks, dominated by the black steel, passed them. Non-metal
@@ -242,7 +256,7 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
         if cells.sum() >= MIN_CLUSTER_CELLS:
             shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
             shift *= min(1.0, MAX_CHROMA_SHIFT / max(float(np.hypot(*shift)), 1e-6))
-            ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, 2))
+            ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, MAX_LIGHTNESS_RATIO))
             shifts[k] = (shift, ratio)
     labels = nearest(lab)
     for k in report:
@@ -253,9 +267,9 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
             continue
         shift, ratio = shifts[source]
         lab[labels == k, 1:] += shift
-        lab[labels == k, 0] = np.clip(lab[labels == k, 0] * (1 + LIGHTNESS_SHARE * (ratio - 1)), 0, 100)
+        lab[labels == k, 0] = np.clip(lab[labels == k, 0] * (1 + lightness_share * (ratio - 1)), 0, 100)
         report[k].update({"shift_ab": [round(float(value), 1) for value in shift],
-                          "lightness": round(1 + LIGHTNESS_SHARE * (ratio - 1), 3), "from": source})
+                          "lightness": round(1 + lightness_share * (ratio - 1), 3), "from": source})
     if any("shift_ab" in entry for entry in report.values()):
         pixels[..., :3][nonmetal] = _srgb_from_lab(lab)
         Image.fromarray(pixels.round().clip(0, 255).astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
@@ -567,16 +581,20 @@ def finish_word(materials):
 
 
 def part_metal(parts, materials):
-    """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip"),
-    else 1 when the brief declares any metal, else 0."""
+    """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip", or
+    "stock" in "the pistol grip of the stock"), else 1 when the brief declares any metal, else 0."""
     import re
 
-    def names(item):
-        return [word for word in re.findall(r"[a-z]+", (item.get("region") or "").lower()) if len(word) >= 3]
-    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in names(item)]
+    def words(text):
+        return [word for word in re.findall(r"[a-z]+", (text or "").lower()) if len(word) >= 3]
+    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in words(item.get("region"))]
     default = 1 if any(item.get("class") == "metal" for item in materials or []) else 0
-    return {part["name"]: 0 if any(word.startswith(part["name"]) or part["name"].startswith(word)
-                                   for word in nonmetal) else default for part in parts}
+
+    def named(part):
+        own = {part["name"].lower(), *words(part.get("text"))}
+        return any(word.startswith(part["name"].lower()) or part["name"].lower().startswith(word) or word in own
+                   for word in nonmetal)
+    return {part["name"]: 0 if named(part) else default for part in parts}
 
 
 def derive_part_maps(atlas, metal, finish, out_dir, normal=None):

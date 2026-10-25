@@ -644,14 +644,21 @@ class DeclaredMaterialTests(unittest.TestCase):
             Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
             (root / "source/parts").mkdir(parents=True)
             (root / "source/parts/parts.json").write_text("{}")
-            views = []
+            views, transfers = [], []
 
             def view(_root, _config, _cutout, _mesh, paths, name, **options):
                 views.append(options)
-                return {"status": "skipped", "silhouette_iou": 0.95}
-            with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                Image.new("RGBA", (64, 64), (90, 90, 90, 255)).save(paths["directory"] / f"{name}_base.png")
+                return {"status": "rendered", "silhouette_iou": 0.95}
+
+            def transfer(_base, _metal, *_arrays, lightness_share=0.5):
+                transfers.append(lightness_share)
+                return {}
+            with patch("slopforge.pipelines.model._concept_view", side_effect=view), \
+                    patch("slopforge.pipelines.model.match_concept_colours", side_effect=transfer):
                 candidate = self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)),
-                                            cutout=root / "cutout.png", limits={"min_part_coverage": 0.55},
+                                            cutout=root / "cutout.png",
+                                            limits={"min_part_coverage": 0.55, "concept_colour_transfer": True},
                                             asset_extra={"pivot": "bottom_center", "parts": [lid]},
                                             lineage_extra={"part_masks": root / "parts_1"},
                                             mesh_extra={"part_model": "omnipart",
@@ -663,6 +670,7 @@ class DeclaredMaterialTests(unittest.TestCase):
             self.assertIsNone(options["grip_mask"])
             self.assertEqual(options["parts"], [("lid", "hinge", root / "parts_1/lid.png")])
             self.assertEqual(options["anchors"], {"lid": ["back", "top"]})
+            self.assertEqual(transfers, [1.0])  # the parts route moves lightness the whole way to the concept's
             self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
             self.assertEqual([item.get("full_turn", False) for item in views], [False] * len(views))
             self.assertNotIn("weapon_orientation", candidate["validation"].get("failure_codes", []))

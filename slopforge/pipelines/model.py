@@ -1215,7 +1215,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             if declares_metal:
                 metal_gain = round(match_metal_lightness(paths["basecolor"], paths["metallic"], *arrays), 3)
             if transfer:
-                colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays)
+                # the parts route's textures are dark all over, so lightness moves the whole way to the concept's
+                colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays,
+                                                        **({"lightness_share": 1.0} if mesh_info.get("part_model") else {}))
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None

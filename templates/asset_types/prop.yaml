@@ -35,3 +35,6 @@ unity_layer: Props
 # weapons are (docs/WEAPONS.md, Moving parts); a part covering less of its concept mask than this is retried.
 part_model: omnipart
 min_part_coverage: 0.55
+# Generated parts' textures come out darker and duller than the concept: their colours are moved to the concept's
+# from its side (docs/MATERIALS.md).
+concept_colour_transfer: true
