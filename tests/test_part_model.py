@@ -159,5 +159,125 @@ class MainTests(unittest.TestCase):
             self.assertTrue((root / "out/mask.exr").is_file() or (root / "out/mask.png").is_file())
 
 
+class DerivedMapTests(unittest.TestCase):
+    def test_derive_part_maps_writes_four_maps_with_the_finish_roughness(self):
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.unity_material import derive_part_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (8, 8), (200, 30, 30)).save(root / "atlas.png")
+            metal = Image.new("L", (8, 8), 0); metal.paste(255, (0, 0, 4, 8)); metal.save(root / "metal.png")
+            maps = derive_part_maps(root / "atlas.png", root / "metal.png", "matte", root / "maps")
+            self.assertEqual(sorted(maps), ["basecolor", "metallic", "normal", "roughness"])
+            self.assertEqual(Image.open(maps["basecolor"]).getpixel((0, 0)), (200, 30, 30))
+            self.assertEqual(Image.open(maps["normal"]).convert("RGB").getpixel((3, 3)), (128, 128, 255))
+            self.assertEqual(Image.open(maps["roughness"]).convert("L").getpixel((3, 3)), round(0.7 * 255))
+            metallic = Image.open(maps["metallic"]).convert("L")
+            self.assertEqual((metallic.getpixel((1, 1)), metallic.getpixel((6, 6))), (255, 0))
+
+    def test_finish_word(self):
+        from slopforge.unity_material import finish_word
+        self.assertEqual(finish_word([{"region": "blade", "class": "metal", "description": "polished steel"}]), "polished")
+        self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "blued steel"}]), "satin")
+        self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "matte black steel"},
+                                      {"region": "grip", "class": "nonmetal", "description": "polished walnut"}]), "matte")
+
+    def test_part_metal_by_region_name(self):
+        from slopforge.unity_material import part_metal
+        materials = [{"region": "slide and frame", "class": "metal", "description": "blued steel"},
+                     {"region": "grips", "class": "nonmetal", "description": "checkered walnut"}]
+        parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}, {"name": "trigger", "kind": "hinge"}]
+        self.assertEqual(part_metal(parts, materials), {"grip": 0, "slide": 1, "trigger": 1})
+        self.assertEqual(part_metal(parts, [{"region": "all", "class": "nonmetal", "description": "wood"}]),
+                         {"grip": 0, "slide": 0, "trigger": 0})
+
+
+class OmniPartBackendTests(unittest.TestCase):
+    def _config(self, tools):
+        return {"asset_pipeline": {"tools": {"parts_host": "gpu", "blender": "/usr/bin/blender", **tools}}}
+
+    def test_missing_tools_fail_as_configuration_before_any_remote_call(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from slopforge.backends import omnipart
+        from slopforge.failures import StageFailure
+        with tempfile.TemporaryDirectory() as temporary, patch.object(omnipart, "run_remote_tool") as remote, \
+                self.assertRaises(StageFailure) as caught:
+            omnipart.generate_part_model(temporary, self._config({}), Path(temporary) / "c.png", "pistol",
+                                         Path(temporary) / "m/pistol.glb", Path(temporary) / "m/generation.json", 1,
+                                         [{"name": "slide", "kind": "slide"}], Path(temporary), 30000, [], "satin")
+        self.assertEqual((caught.exception.category, caught.exception.operation), ("configuration", "part_model_preflight"))
+        self.assertFalse(remote.called)
+
+    def test_generate_part_model_runs_the_tool_then_blender_and_writes_generation_json(self):
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from PIL import Image
+        from slopforge.backends import omnipart
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cutout.png").write_bytes(b"png")
+            masks = root / "masks"; masks.mkdir()
+            for name in ("grip", "slide"):
+                (masks / f"{name}.png").write_bytes(b"png")
+            seen = {}
+
+            def remote(host, python, script, request, uploads, downloads, **options):
+                seen["remote"] = {"host": host, "python": python, "script": script.name, "request": request,
+                                  "uploads": uploads, **options}
+                out = downloads["."]; out.mkdir(parents=True)
+                (out / "parts.glb").write_bytes(b"glb")
+                (out / "parts.json").write_text(json.dumps({"seed": 5, "x_sign": 1,
+                    "backend": {"provider": "omnipart", "version": "abc", "device": "H100"},
+                    "model_weights": {"omnipart/OmniPart": "rev"},
+                    "parts": {"body": {"kind": "body", "id": 3, "faces": 10, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 9, "coverage": None},
+                              "grip": {"kind": "grip", "id": 1, "faces": 4, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 2, "coverage": None},
+                              "slide": {"kind": "slide", "id": 2, "faces": 6, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 4, "coverage": 0.8}}}))
+
+            def blender(command, **kwargs):
+                seen["blender"] = command
+                for flag, writer in (("--basecolor-output", lambda p: Image.new("RGB", (4, 4), (90, 90, 90)).save(p)),
+                                     ("--metallic-output", lambda p: Image.new("L", (4, 4), 255).save(p))):
+                    writer(command[command.index(flag) + 1])
+                Path(command[command.index("--") + 2]).write_bytes(b"processed")
+                Path(command[command.index("--") + 3]).write_bytes(b"blend")
+            parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0}]
+            materials = [{"region": "slide and frame", "class": "metal", "description": "matte blued steel"},
+                         {"region": "grips", "class": "nonmetal", "description": "walnut"}]
+            with patch.object(omnipart, "run_remote_tool", side_effect=remote), \
+                    patch.object(omnipart.subprocess, "run", side_effect=blender):
+                omnipart.generate_part_model(root, self._config({"omnipart_python": "/opt/env/bin/python",
+                                                                 "omnipart_checkout": "/opt/OmniPart"}),
+                                             root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
+                                             root / "mesh_01/generation.json", 5, parts, masks, 27000, materials,
+                                             "matte")
+            request = seen["remote"]["request"]
+            self.assertEqual(request["image"], "concept.png")
+            self.assertEqual(request["masks"], {"grip": "grip.png", "slide": "slide.png"})
+            self.assertEqual(request["parts"], [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}])
+            self.assertEqual((request["seed"], seen["remote"]["cwd"], seen["remote"]["env"]["SPCONV_ALGO"]),
+                             (5, "/opt/OmniPart", "native"))
+            self.assertEqual(set(seen["remote"]["uploads"]), {"concept.png", "grip.png", "slide.png"})
+            self.assertEqual(seen["remote"]["label"], "omnipart")
+            command = seen["blender"]
+            self.assertIn("--metal", command)
+            self.assertEqual(command[command.index("--face-budget") + 1], "27000")  # the caller's reduction budget
+            metal = {command[i + 1] for i, value in enumerate(command) if value == "--metal"}
+            self.assertEqual(metal, {"grip=0", "slide=1", "body=1"})
+            self.assertTrue((root / "mesh_01/pistol.glb").is_file())
+            info = json.loads((root / "mesh_01/generation.json").read_text())
+            self.assertEqual((info["textured"], info["part_model"], info["seed"]), (True, "omnipart", 5))
+            self.assertEqual(sorted(info["textures"]), ["basecolor", "metallic", "normal", "roughness"])
+            self.assertEqual(info["backend"]["provider"], "omnipart")
+            self.assertEqual(info["provenance"]["model_weights"], {"omnipart/OmniPart": "rev"})
+            self.assertEqual(info["parts"]["slide"]["coverage"], 0.8)
+            self.assertEqual(sorted(info["tool_sha256"]), ["part_model.py", "prepare_parts.py"])
+            self.assertEqual(Image.open(root / "mesh_01/roughness.png").convert("L").getpixel((0, 0)), round(0.7 * 255))
+
+
 if __name__ == "__main__":
     unittest.main()

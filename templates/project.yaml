@@ -116,5 +116,8 @@ asset_pipeline:
     blender: null
     asset_python: null
     hunyuan_checkpoint: hunyuan3d-dit-v2_fp16.safetensors
+    # Weapons with moving parts: OmniPart on the part-mask host (scripts/install-omnipart.sh, docs/WEAPONS.md)
+    # omnipart_python: /home/<user>/SlopForgeOmniPart/omnipart/bin/python
+    # omnipart_checkout: /home/<user>/SlopForgeOmniPart/OmniPart
 
   overwrite_existing: false
