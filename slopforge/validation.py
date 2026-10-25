@@ -425,6 +425,31 @@ def apply_part_penetration(validation, penetration, declared, tolerance):
     return validation
 
 
+def apply_visible_backfaces(validation, shares, maximum):
+    """Fail a candidate whose model shows holes, at rest or with a part at the end of its range (retryable
+    part_open). `shares` is the final pass's measure per pose (rest, and each declared part moved): the share of what
+    is seen from 14 directions that is the back of a face (Blender, mesh_cleanup.visible_backfaces). A hybrid
+    pistol's pieces left open read 0.022 with the slide back and closed by interfaces 0.004; the chest whose lid was
+    only its iron bands 0.168 (2026-10-25). Nothing measured (no part moves), no verdict."""
+    if not shares:
+        return validation
+    shares = {pose: float(share) for pose, share in shares.items()}
+    shown = [pose for pose, share in shares.items() if share > maximum]
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["visible_backfaces"] = shares
+    limits["max_visible_backfaces"] = maximum
+    measured["moving_parts_open"] = len(shown)
+    limits["max_moving_parts_open"] = 0
+    if shown:
+        detail = ", ".join(f"{pose} {shares[pose]:.3f}" for pose in shown)
+        validation["errors"] = [*validation.get("errors", []),
+            f"the model shows the backs of its faces, holes a player sees ({detail} of what is seen, limit "
+            f"{maximum:g}), so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_open"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_hybrid_alignment(validation, error, maximum):
     """Fail a hybrid-parts candidate whose OmniPart parts did not land on the TRELLIS.2 surface they vote on: mean
     distance after alignment, as a share of the surface's size (generation.json hybrid.alignment_error). Two

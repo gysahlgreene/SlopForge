@@ -377,29 +377,73 @@ def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
     (its pivot) or slides along its axis; a point is inside where the others' winding number is over a half
     (generated meshes are open, so a ray's parity lies). Everything is in world space: the body of a weapon stands
     at its grip, away from the origin. Unity repeats the check on the prefab."""
-    import math
     import numpy as np
-    from mathutils import Matrix, Vector
     triangles = world_triangles(others)
     step = max(1, len(part.data.vertices) // limit)
     rest = [part.matrix_world @ vertex.co for index, vertex in enumerate(part.data.vertices) if index % step == 0]
     if not len(triangles) or not rest:
         return 0.0
     share = lambda points: float((np.abs(winding_numbers([tuple(p) for p in points], triangles)) > 0.5).mean())
-    pivot = part.matrix_world.translation.copy()
     rest_share = share(rest)
     far = low if abs(low) > abs(high) else high  # the range runs from rest to its far end
     worst = 0.0
     for sample in range(1, samples + 1):
-        amount = far * sample / samples
-        if part.get("slopforge_part") == "slide":
-            move = Matrix.Translation(Vector(SLIDE_AXES[axis]) * amount)
-        else:
-            direction, sign = HINGE_AXES[axis]
-            move = (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(sign * amount), 4, Vector(direction))
-                    @ Matrix.Translation(-pivot))
+        move = motion_matrix(part, axis, far * sample / samples)
         worst = max(worst, share([move @ point for point in rest]) - rest_share)
     return round(worst, 4)
+
+
+def motion_matrix(part, axis, amount):
+    """The world-space move of a part `amount` along its declared axis (Unity's frame, see HINGE_AXES): a slide
+    along it, a hinge turned about its origin (its pivot)."""
+    import math
+    from mathutils import Matrix, Vector
+    if part.get("slopforge_part") == "slide":
+        return Matrix.Translation(Vector(SLIDE_AXES[axis]) * amount)
+    pivot = part.matrix_world.translation.copy()
+    direction, sign = HINGE_AXES[axis]
+    return (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(sign * amount), 4, Vector(direction))
+            @ Matrix.Translation(-pivot))
+
+
+def visible_backfaces(objects, moves=None, resolution=96):
+    """The share of what a camera sees of `objects` that is the back of a face, from the six axes and the eight
+    diagonals (orthographic): a hole in a piece shows the inside of its far walls. `moves` maps an object's name to a
+    world-space matrix (motion_matrix), to look at the model with a part moved. A hybrid pistol's pieces left open
+    showed holes on 3.6% of its pixels with the slide back and the trigger pulled, 0.4% closed (2026-10-25)."""
+    import numpy as np
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    corners = []
+    for obj in objects:
+        triangles = world_triangles([obj])
+        if moves and obj.name in moves and len(triangles):
+            matrix = np.array(moves[obj.name])
+            triangles = triangles @ matrix[:3, :3].T + matrix[:3, 3]
+        corners.append(triangles)
+    corners = np.concatenate(corners) if corners else np.zeros((0, 3, 3))
+    if not len(corners):
+        return 0.0
+    tree = BVHTree.FromPolygons([Vector(c) for c in corners.reshape(-1, 3)],
+                                [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(len(corners))])
+    points = corners.reshape(-1, 3)
+    centre = Vector(((points.min(0) + points.max(0)) / 2).tolist())
+    radius = float(np.linalg.norm(points.max(0) - points.min(0))) / 2
+    directions = [Vector(d) for d in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))]
+    directions += [Vector((x, y, z)).normalized() for x in (1, -1) for y in (1, -1) for z in (1, -1)]
+    offsets = np.linspace(-radius, radius, resolution)
+    hits = backs = 0
+    for direction in directions:
+        u = direction.orthogonal().normalized()
+        v = direction.cross(u)
+        start = centre - direction * 2 * radius
+        for x in offsets:
+            for y in offsets:
+                location, normal, _index, _distance = tree.ray_cast(start + u * x + v * y, direction, 4 * radius)
+                if location is not None:
+                    hits += 1
+                    backs += normal.dot(direction) > 0
+    return round(backs / max(hits, 1), 4)
 
 
 def _attach(obj, mesh, kind, pivot):
@@ -580,68 +624,6 @@ def _boundary_groups(bm):
     return groups
 
 
-def _simple_cycles(group):
-    """An opening that touches itself (a figure of eight) as simple cycles: a cycle basis of its edge graph."""
-    adjacency = {}
-    for edge in group:
-        a, b = edge.verts
-        adjacency.setdefault(a, []).append((b, edge))
-        adjacency.setdefault(b, []).append((a, edge))
-    cycles, done = [], set()
-    for root in adjacency:
-        if root in done:
-            continue
-        parent, depth, stack, used = {root: (None, None)}, {root: 0}, [root], set()
-        while stack:
-            vertex = stack.pop()
-            done.add(vertex)
-            for other, edge in adjacency[vertex]:
-                if other not in parent:
-                    parent[other], depth[other] = (vertex, edge), depth[vertex] + 1
-                    stack.append(other)
-                elif edge is not parent[vertex][1] and edge not in used and depth[other] <= depth[vertex]:
-                    used.add(edge)
-                    left, right, cycle = vertex, other, [edge]
-                    while left is not right:
-                        if depth[left] >= depth[right]:
-                            left, step = parent[left]
-                        else:
-                            right, step = parent[right]
-                        cycle.append(step)
-                    cycles.append(cycle)
-    return cycles or [group]
-
-
-def _bridge_chain(bm, group):
-    """An opening that is a chain, not a loop, closed into a loop: where a cut crossed an edge with three faces (the
-    generated surface's own non-manifold edges), that edge keeps two faces and is not a boundary edge, so the
-    opening has loose ends (2026-10-25 pistol). Ends are paired nearest first and joined by the edge between them,
-    or by a new edge when they are within a tenth of the opening's size. Returns (edges, bridges)."""
-    degree = {}
-    for edge in group:
-        for vertex in edge.verts:
-            degree[vertex] = degree.get(vertex, 0) + 1
-    ends = [vertex for vertex, count in degree.items() if count % 2]
-    if not ends:
-        return list(group), set()
-    points = [vertex.co for edge in group for vertex in edge.verts]
-    low = [min(point[axis] for point in points) for axis in range(3)]
-    high = [max(point[axis] for point in points) for axis in range(3)]
-    limit = 0.1 * sum((h - l) ** 2 for l, h in zip(low, high)) ** 0.5
-    bridges = set()
-    while len(ends) >= 2:
-        vertex = ends.pop()
-        other = min(ends, key=lambda candidate: (candidate.co - vertex.co).length)
-        ends.remove(other)
-        shared = next((edge for edge in vertex.link_edges if edge.other_vert(vertex) is other), None)
-        if shared is None:
-            if (other.co - vertex.co).length > limit:
-                continue
-            shared = bm.edges.new((vertex, other))
-        bridges.add(shared)
-    return list(group) + list(bridges), bridges
-
-
 def _convex_hull_2d(points):
     """Indices of the 2D points on their convex hull, counter-clockwise (Andrew's monotone chain)."""
     order = sorted(range(len(points)), key=lambda i: (points[i][0], points[i][1]))
@@ -710,31 +692,6 @@ def _inset_polygon(polygon, distance):
         t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / cross
         out.append(p1 + d1 * t)
     return out
-
-
-def _cap_opening(bm, group, centroid):
-    """A flat cap across an opening's convex outline in its plane (_opening_plane), recessed a little into the
-    piece and facing away from it; not stitched to the rim, so the surface's topology around the opening does not
-    matter. For an opening no fill could close: a rim that runs into a pistol's bore (2026-10-25). Returns faces."""
-    import numpy as np
-    middle, normal, u, v, flat, extent = _opening_plane(group, centroid)
-    hull = _convex_hull_2d(flat)
-    if len(hull) < 3:
-        return []
-    centre = np.mean([flat[i] for i in hull], axis=0)
-    shrink = 0.015 * extent  # the outline a little inside the rim, so the cap's edge cannot show through the sheet
-    outline = []
-    for i in hull:
-        offset = np.array(flat[i]) - centre
-        length = np.linalg.norm(offset)
-        outline.append(centre + offset * max(length - shrink, 0) / max(length, 1e-12))
-    base = middle - normal * 0.005 * extent  # a little inside the piece: no flicker against its neighbour
-    verts = [bm.verts.new(base + u * x + v * y) for x, y in outline]
-    face = bm.faces.new(verts)
-    face.normal_update()
-    if face.normal.dot(normal) < 0:
-        face.normal_flip()
-    return bmesh.ops.triangulate(bm, faces=[face])["faces"]
 
 
 def hollow_opening(bm, group, wall=0.04, depth=0.85, basecolor=None):
@@ -840,101 +797,272 @@ def solid_component_count(mesh):
     return len(solid)
 
 
-def inside_test(bm):
-    """A point-in-object test for a mesh as it is now (the unsplit surface): its winding number over a half. A
-    generated surface has holes and edges with three faces, through which a ray's parity lies: parity dropped 24 of a
-    hybrid slide's 26 fill faces as outside the pistol they were cut from (2026-10-25)."""
+# ---------------------------------------------------------------------------
+# Closing hybrid pieces: the interface between a part's region of the solid and the rest
+# ---------------------------------------------------------------------------
+
+MAX_GRID_CELLS = 2_500_000
+INTERFACE_CELLS = 240  # grid cells along the object's longest side; at 100 the rim stood off the cut and a moved
+# pistol showed 1.8% of its pixels as holes, at 240 0.4% (2026-10-25)
+
+
+def _grow(mask):
+    """A boolean grid grown by one cell along each axis."""
     import numpy as np
-    triangles = np.array([[tuple(loop.vert.co) for loop in triangle] for triangle in bm.calc_loop_triangles()])
+    out = mask.copy()
+    for axis in range(3):
+        for shift in (1, -1):
+            moved = np.roll(mask, shift, axis)
+            edge = [slice(None)] * 3
+            edge[axis] = 0 if shift == 1 else -1
+            moved[tuple(edge)] = False
+            out |= moved
+    return out
 
-    def inside(point):
-        return bool(abs(winding_numbers([tuple(point)], triangles)[0]) > 0.5)
-    return inside
 
-
-def close_openings(bm, basecolor=None, lids=None, inside=None):
-    """Close every opening of a piece split from a generated surface (docs/WEAPONS.md, Hybrid parts): each opening
-    is filled flat in its best-fit plane (a triangle fill; the hole filler takes a loop that is not simple), the
-    fill wound so its rim runs against the surface beside it (outwards), and textured with one texel, its ring's
-    median colour: a mating surface such as a slide's underside. An opening under a hinged part (`lids`: their
-    bounds) that covers most of the piece's outline is a container's and becomes a cavity (hollow_opening).
-    Returns the fills."""
+def solid_grid(bm, cells=INTERFACE_CELLS):
+    """The solid a surface encloses, on a grid of `cells` along its longest side: (occupied, low corner, cell size).
+    Walls are the cells that scanlines along two of the three axes find inside by parity; the solid is everything the
+    outside cannot reach through them, the walls thickened a cell so small holes do not leak. TRELLIS.2 makes thin
+    hollow shells (an inner wall a few millimetres inside the outer one): their hollow is solid here."""
     import numpy as np
     from mathutils import Vector
-    # the layer first: adding a layer once fills exist leaves their Python references dead
+    from mathutils.bvhtree import BVHTree
+    verts = [vertex.co.copy() for vertex in bm.verts]
+    bm.verts.index_update()
+    tree = BVHTree.FromPolygons(verts, [[vertex.index for vertex in face.verts] for face in bm.faces])
+    points = np.array([tuple(v) for v in verts])
+    extent = np.ptp(points, 0)
+    # at most MAX_GRID_CELLS: a boxy chest at 240 cells along its width is 8 million cells, a pistol 2 million
+    size = max(float(extent.max()) / cells, float(np.prod(extent + 1e-9) / MAX_GRID_CELLS) ** (1 / 3))
+    low = points.min(0) - 2 * size
+    shape = np.ceil((points.max(0) + 2 * size - low) / size).astype(int)
+    centres = [low[axis] + (np.arange(shape[axis]) + 0.5) * size for axis in range(3)]
+    votes = np.zeros(shape, np.int8)
+    for axis in range(3):
+        a, b = [other for other in range(3) if other != axis]
+        inside = np.zeros(shape, bool)
+        direction = Vector([1.0 if other == axis else 0.0 for other in range(3)])
+        for j, ca in enumerate(centres[a]):
+            for k, cb in enumerate(centres[b]):
+                start = [0.0, 0.0, 0.0]
+                start[axis], start[a], start[b] = low[axis] - size, ca, cb
+                origin, hits = Vector(start), []
+                for _ in range(64):
+                    location = tree.ray_cast(origin, direction)[0]
+                    if location is None:
+                        break
+                    hits.append(location[axis])
+                    origin = location + direction * 1e-6
+                for first in range(0, len(hits) - 1, 2):
+                    i0 = int(np.ceil((hits[first] - low[axis]) / size - 0.5))
+                    i1 = int(np.floor((hits[first + 1] - low[axis]) / size - 0.5))
+                    if i1 >= i0:
+                        index = [slice(None)] * 3
+                        index[axis], index[a], index[b] = slice(i0, i1 + 1), j, k
+                        inside[tuple(index)] = True
+        votes += inside
+    walls = _grow(votes >= 2)
+    outside = np.zeros(shape, bool)
+    outside[0] = outside[-1] = outside[:, 0] = outside[:, -1] = outside[:, :, 0] = outside[:, :, -1] = True
+    outside &= ~walls
+    while True:
+        grown = _grow(outside) & ~walls
+        if grown.sum() == outside.sum():
+            break
+        outside = grown
+    return ~outside, low, size
+
+
+def surface_nets(field, low, size):
+    """The zero set of a grid field (NaN where undefined; cell centres at low + (index + 0.5) * size) as vertices
+    and quads, each quad facing towards +field (naive surface nets: a vertex per cell the sign changes in, at the
+    mean of its edges' crossings, and a quad around each grid edge it changes along)."""
+    import numpy as np
+    finite = np.isfinite(field)
+    values = np.where(finite, field, 0.0)
+    corners = [(dx, dy, dz) for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)]
+    nx, ny, nz = field.shape
+    corner = np.stack([values[dx:nx - 1 + dx, dy:ny - 1 + dy, dz:nz - 1 + dz] for dx, dy, dz in corners], -1)
+    defined = np.stack([finite[dx:nx - 1 + dx, dy:ny - 1 + dy, dz:nz - 1 + dz] for dx, dy, dz in corners], -1).all(-1)
+    positive = corner > 0
+    active = defined & positive.any(-1) & (~positive).any(-1)
+    total = np.zeros(active.shape + (3,))
+    count = np.zeros(active.shape)
+    for p in range(8):
+        for q in range(p + 1, 8):
+            if sum(abs(np.subtract(corners[p], corners[q]))) != 1:
+                continue
+            fp, fq = corner[..., p], corner[..., q]
+            crossing = (fp > 0) != (fq > 0)
+            t = np.where(crossing, fp / np.where(crossing, fp - fq, 1), 0)
+            point = np.array(corners[p], float) + t[..., None] * np.subtract(corners[q], corners[p])
+            total += np.where(crossing[..., None], point, 0)
+            count += crossing
+    cells = np.argwhere(active)
+    index = -np.ones(active.shape, int)
+    index[tuple(cells.T)] = np.arange(len(cells))
+    vertices = low + (cells + 0.5 + total[tuple(cells.T)] / np.maximum(count[tuple(cells.T)], 1)[:, None]) * size
+    quads = []
+    for axis, (a, b) in ((0, (1, 2)), (1, (2, 0)), (2, (0, 1))):
+        first, second = [slice(None)] * 3, [slice(None)] * 3
+        first[axis], second[axis] = slice(0, field.shape[axis] - 1), slice(1, field.shape[axis])
+        f0, f1 = field[tuple(first)], field[tuple(second)]
+        changes = np.isfinite(f0) & np.isfinite(f1) & ((f0 > 0) != (f1 > 0))
+        for edge in np.argwhere(changes):
+            ring = []
+            for da, db in ((-1, -1), (0, -1), (0, 0), (-1, 0)):
+                cell = list(edge)
+                cell[a] += da
+                cell[b] += db
+                if min(cell) < 0 or any(cell[x] >= index.shape[x] for x in range(3)) or index[tuple(cell)] < 0:
+                    ring = None
+                    break
+                ring.append(int(index[tuple(cell)]))
+            if ring is None:
+                continue
+            if f0[tuple(edge)] > 0:  # +field lies back along the axis: the quad faces the other way
+                ring.reverse()
+            quads.append(ring)
+    return vertices, quads
+
+
+def _rim(polygons):
+    """The vertices on a polygon soup's open edges."""
+    uses = {}
+    for polygon in polygons:
+        for u, w in zip(polygon, list(polygon[1:]) + [polygon[0]]):
+            key = (min(u, w), max(u, w))
+            uses[key] = uses.get(key, 0) + 1
+    return {vertex for key, used in uses.items() if used == 1 for vertex in key}
+
+
+def _decimate(vertices, polygons, target):
+    """A polygon soup collapse-decimated to about `target` triangles: (vertices, triangles)."""
+    import bpy
+    import numpy as np
+    mesh = bpy.data.meshes.new("_interface")
+    mesh.from_pydata([tuple(v) for v in vertices], [], [tuple(polygon) for polygon in polygons])
+    mesh.update()
+    obj = bpy.data.objects.new("_interface", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    modifier = obj.modifiers.new("decimate", "DECIMATE")
+    modifier.decimate_type = "COLLAPSE"
+    modifier.ratio = min(1.0, target / max(sum(len(polygon) - 2 for polygon in polygons), 1))
+    modifier.use_collapse_triangulate = True
+    bpy.context.view_layer.update()
+    evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    reduced = evaluated.to_mesh()
+    out = (np.array([tuple(v.co) for v in reduced.vertices]).reshape(-1, 3),
+           [list(polygon.vertices) for polygon in reduced.polygons])
+    evaluated.to_mesh_clear()
+    bpy.data.objects.remove(obj)
+    bpy.data.meshes.remove(mesh)
+    return out
+
+
+def part_interface(bm, layer, part_id, solid, target=None, band=0.1):
+    """The surface that closes a part cut from a generated surface, and the rest where it was cut from: inside the
+    solid (solid_grid), where a point is as far from the part's faces as from the rest's, counting only faces within
+    `band` of the object's size from the cut, so the surface carries the cut across instead of sagging towards
+    distant walls; facing away from the part, collapse-decimated to about `target` triangles, its rim snapped onto
+    the cut. A hybrid split's cut zigzags and crosses itself; no fill in a plane closed it, and a moved pistol showed
+    holes on 3.6% of its pixels against 0.4% with this surface (2026-10-25). Returns (vertices, polygons)."""
+    import numpy as np
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    from mathutils.kdtree import KDTree
+    occupied, low, size = solid
+    samples = []
+    for edge in bm.edges:
+        if len({face[layer] == part_id for face in edge.link_faces}) == 2:
+            a, b = edge.verts[0].co, edge.verts[1].co
+            steps = max(1, int((b - a).length / (size / 4)))
+            samples.extend(a.lerp(b, step / steps) for step in range(steps + 1))
+    if not samples:
+        return np.zeros((0, 3)), []
+    kd = KDTree(len(samples))
+    for index, point in enumerate(samples):
+        kd.insert(point, index)
+    kd.balance()
+    reach = band * size * max(occupied.shape)
+    bm.verts.index_update()
+    verts = [vertex.co.copy() for vertex in bm.verts]
+    near = [face for face in bm.faces if kd.find(face.calc_center_median())[2] <= reach]
+    part = [[vertex.index for vertex in face.verts] for face in near if face[layer] == part_id]
+    rest = [[vertex.index for vertex in face.verts] for face in near if face[layer] != part_id]
+    if not part or not rest:
+        return np.zeros((0, 3)), []
+    tree_part, tree_rest = BVHTree.FromPolygons(verts, part), BVHTree.FromPolygons(verts, rest)
+    points = np.array([tuple(point) for point in samples])
+    first = np.clip(np.floor((points.min(0) - reach - low) / size).astype(int), 0, None)
+    last = np.minimum(np.ceil((points.max(0) + reach - low) / size).astype(int), occupied.shape)
+    box = occupied[first[0]:last[0], first[1]:last[1], first[2]:last[2]]
+    field = np.full(box.shape, np.nan)
+    value = lambda cell: (tree_part.find_nearest(Vector(low + (np.asarray(cell) + first + 0.5) * size))[3]
+                          - tree_rest.find_nearest(Vector(low + (np.asarray(cell) + first + 0.5) * size))[3])
+    # Coarse to fine: the field is a difference of two distances, so it changes by at most twice the distance moved;
+    # a cell whose coarse neighbour reads more than that from zero is far from the surface and not measured.
+    step = 4
+    coarse = {tuple(cell): value(cell) for cell in np.argwhere(box) if not (cell % step).any()}
+    reach_cells = 2 * np.sqrt(3) * step + 2
+    near = np.zeros(box.shape, bool)
+    for cell, measured in coarse.items():
+        if abs(measured) <= reach_cells * size:
+            lo_cell = np.maximum(np.array(cell) - step, 0)
+            hi_cell = np.minimum(np.array(cell) + step + 1, box.shape)
+            near[lo_cell[0]:hi_cell[0], lo_cell[1]:hi_cell[1], lo_cell[2]:hi_cell[2]] = True
+    for i, j, k in np.argwhere(box & near):
+        field[i, j, k] = coarse.get((i, j, k)) if (i, j, k) in coarse else value((i, j, k))
+    vertices, polygons = surface_nets(field, low + first * size, size)
+    if not polygons:
+        return vertices, polygons
+    if target:
+        vertices, polygons = _decimate(vertices, polygons, target)
+    for vertex in _rim(polygons):
+        location, _index, distance = kd.find(Vector(vertices[vertex]))
+        if distance < 2.5 * size:
+            vertices[vertex] = tuple(location)
+    return vertices, polygons
+
+
+def add_interface(bm, vertices, polygons, flip=False, texel=None):
+    """Add an interface (part_interface) to a piece: flipped for the rest's side, triangulated, smooth, marked
+    slopforge_fill (not stitched to the surface, so not a piece of its own for the component budget), every loop
+    on one texel. Returns the faces."""
+    from mathutils import Vector
     marker = bm.faces.layers.int.get("slopforge_fill") or bm.faces.layers.int.new("slopforge_fill")
     uv = bm.loops.layers.uv.active
-    fills = []
-    capped = set()
-    cycles = []
-    for group in _boundary_groups(bm):
-        if _container_opening(bm, group, lids):
-            # a container's top under its lid: a cavity to look into, not a panel at the rim
-            fills.extend(hollow_opening(bm, group, basecolor=basecolor))
-            capped.update(fills)
-            continue
-        edges, bridges = _bridge_chain(bm, group)
-        cycles.extend((cycle, bridges) for cycle in _simple_cycles(edges))
-    for group, bridges in cycles:
-        group = [edge for edge in group if edge.is_valid and (len(edge.link_faces) == 1 or edge in bridges)]
-        if len(group) < 3:
-            continue
-        points = np.array([tuple(vertex.co) for edge in group for vertex in edge.verts])
-        normal = Vector(np.linalg.svd(points - points.mean(0), full_matrices=False)[2][2])
-        ring = [loop for edge in group if edge.link_faces for loop in edge.link_faces[0].loops]  # a new bridge has none
-        texel = _typical_texel(ring, uv, basecolor) if uv is not None and ring else None
-        before = set(bm.faces)
-        bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=group, normal=normal)
-        left = [edge for edge in group if edge.is_valid and len(edge.link_faces) == 1]
-        if left and not [face for face in bm.faces if face not in before]:
-            bmesh.ops.holes_fill(bm, edges=left, sides=0)
-        new = [face for face in bm.faces if face not in before]
-        if any(edge.is_valid and len(edge.link_faces) == 1 for edge in group):
-            # neither fill closed it: drop what they made and cap the opening across its outline
-            bmesh.ops.delete(bm, geom=[face for face in new if face.is_valid], context="FACES_ONLY")
-            centroid = sum((vertex.co for vertex in bm.verts), Vector()) / max(len(bm.verts), 1)
-            new = _cap_opening(bm, [edge for edge in group if edge.is_valid], centroid)
-            capped.update(new)
-        if not new:
-            continue
-        new = bmesh.ops.triangulate(bm, faces=new)["faces"]
-        for face in new:
-            face.smooth = False
-            if texel is not None:
-                for loop in face.loops:
-                    loop[uv].uv = texel
-        fills.extend(new)
-    fill_set = set(fills)
-    for piece in _face_pieces([face for face in fills if face not in capped]):  # caps face away from the piece already
-        piece = list(piece)
-        bmesh.ops.recalc_face_normals(bm, faces=piece)
-        vote = 0
-        for face in piece:
+    new = [bm.verts.new(Vector(tuple(v))) for v in vertices]
+    faces = []
+    for polygon in polygons:
+        ring = [new[index] for index in (reversed(polygon) if flip else polygon)]
+        if len(ring) >= 3 and len(set(ring)) == len(ring):
+            try:
+                faces.append(bm.faces.new(ring))
+            except ValueError:  # the same corners twice after the rim's snapping
+                pass
+    used = {vertex for face in faces for vertex in face.verts}
+    bmesh.ops.delete(bm, geom=[vertex for vertex in new if vertex not in used], context="VERTS")
+    faces = bmesh.ops.triangulate(bm, faces=faces)["faces"] if faces else []
+    for face in faces:
+        face.smooth = True
+        face[marker] = 1
+        if uv is not None and texel is not None:
             for loop in face.loops:
-                for twin in loop.edge.link_faces:
-                    if twin is not face and twin not in fill_set:
-                        twin_loop = next(other for other in twin.loops if other.edge is loop.edge)
-                        vote += 1 if twin_loop.vert is loop.vert else -1
-        if vote > 0:
-            for face in piece:
-                face.normal_flip()
-    for face in fills:
-        if face.is_valid:
-            face[marker] = 1  # inspection leaves a piece made only of fills out of the component count
-    if inside is not None:
-        # a fill must lie inside the unsplit object: one outside it would show with nothing moved (a cap whose
-        # outline overshot a concave opening stood up behind the 2026-10-25 chest's lid)
-        outside = []
-        for face in fills:
-            if not face.is_valid:
-                continue
-            centre = face.calc_center_median()
-            probes = [centre] + [centre + (vertex.co - centre) * 0.75 for vertex in face.verts]
-            if not all(inside(point) for point in probes):
-                outside.append(face)
-        bmesh.ops.delete(bm, geom=outside, context="FACES_ONLY")
-        fills = [face for face in fills if face.is_valid]
-    return fills
+                loop[uv].uv = texel
+    return faces
+
+
+def _cut_texel(bm, layer, part_id, side, basecolor):
+    """The texel for an interface: the typical colour of the faces along the cut on one side (the part's, or the
+    rest's when `side` is False)."""
+    uv = bm.loops.layers.uv.active
+    if uv is None:
+        return None
+    loops = [loop for edge in bm.edges if len({face[layer] == part_id for face in edge.link_faces}) == 2
+             for face in edge.link_faces if (face[layer] == part_id) == side for loop in face.loops]
+    return _typical_texel(loops, uv, basecolor) if loops else None
 
 
 # ---------------------------------------------------------------------------
@@ -956,12 +1084,14 @@ def tag_parts(objects, table):
         attribute.data.foreach_set("value", [value] * len(obj.data.polygons))
 
 
-def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=None):
+def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=None, face_budget=None):
     """Move each hinge or slide's tagged faces into a child of obj (see _attach). A slide pivots at its box centre;
     a hinge at the centroid of its vertices within `contact` of the rest of the weapon, or at its box centre when
     it touches nothing; a hinge with an anchor (faces of its own bounds: front -Y, back +Y, left -X, right +X,
     bottom -Z, top +Z) pivots on that edge of its box. With close (hybrid parts: pieces of one generated surface),
-    every opening the separation leaves, on each part and on the body, is closed (close_openings). Returns the
+    each part and the body are closed where they were cut apart by the interface between them (part_interface),
+    the faces left under `face_budget` shared between the parts by the length of their cuts; an opening under a
+    hinged part that is a container's (a chest's top) becomes a cavity instead (hollow_opening). Returns the
     children."""
     import bpy
     from mathutils import Vector
@@ -991,7 +1121,24 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
     bmesh.ops.delete(rest, geom=[face for face in rest.faces if face[rest_layer] in moving], context="FACES")
     tree = BVHTree.FromBMesh(rest)
     rest.free()
-    whole = inside_test(bm) if close else None  # the unsplit object: a fill outside it is dropped
+    interfaces, texels = {}, {}
+    if close:
+        bm.faces.layers.int.get("slopforge_fill") or bm.faces.layers.int.new("slopforge_fill")
+        solid = solid_grid(bm)
+        cut_edges = {part_id: [edge for edge in bm.edges
+                               if len({face[layer] == part_id for face in edge.link_faces}) == 2] for part_id in parts}
+        cuts = {part_id: sum(edge.calc_length() for edge in edges) for part_id, edges in cut_edges.items()}
+        # each interface is added twice, to its part and (flipped) to the body; about four triangles per edge of its
+        # cut is enough to keep its rim on the cut (a pistol's slide: 1,500 for 365 edges, holes on 0.4% of a moved
+        # view's pixels; 800, 1.6%)
+        spare = max(0, int(0.98 * face_budget) - len(bm.faces)) if face_budget else None
+        for part_id in parts:
+            target = (max(200, min(4 * len(cut_edges[part_id]),
+                                   int(spare / 2 * cuts[part_id] / max(sum(cuts.values()), 1e-12))))
+                      if spare is not None else None)
+            interfaces[part_id] = part_interface(bm, layer, part_id, solid, target=target)
+            texels[part_id] = (_cut_texel(bm, layer, part_id, True, basecolor),
+                               _cut_texel(bm, layer, part_id, False, basecolor))
     children = []
     for part_id, (name, kind) in parts.items():
         faces = [face for face in bm.faces if face[layer] == part_id]
@@ -1017,7 +1164,8 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         piece_layer = piece.faces.layers.int.get("slopforge_part")
         bmesh.ops.delete(piece, geom=[face for face in piece.faces if face[piece_layer] != part_id], context="FACES")
         if close:
-            print(f"Part {name} ({kind}): closed {len(close_openings(piece, basecolor, inside=whole))} faces of openings")
+            closed = add_interface(piece, *interfaces[part_id], texel=texels[part_id][0])
+            print(f"Part {name} ({kind}): closed by {len(closed)} interface faces")
         # The join left the imported part's mesh as an orphan under this name; the child takes the exact name
         for block in (bpy.data.meshes, bpy.data.objects):
             taken = block.get(name)
@@ -1031,12 +1179,25 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         children.append(child)
         bmesh.ops.delete(bm, geom=faces, context="FACES")
     if close and children:
-        lids = []
+        ids = {name: part_id for part_id, (name, _kind) in parts.items()}
+        lids = {}
         for child in children:
             if child.get("slopforge_part") == "hinge":
                 corners = [child.location + vertex.co for vertex in child.data.vertices]  # the body's frame
-                lids.append(([min(c[i] for c in corners) for i in range(3)], [max(c[i] for c in corners) for i in range(3)]))
-        print(f"Body: closed {len(close_openings(bm, basecolor, lids=lids, inside=whole))} faces of openings")
+                lids[ids[child.name]] = ([min(c[i] for c in corners) for i in range(3)],
+                                         [max(c[i] for c in corners) for i in range(3)])
+        marker = bm.faces.layers.int["slopforge_fill"]
+        containers, cavity = set(), 0
+        for group in _boundary_groups(bm):
+            under = [part_id for part_id, bounds in lids.items() if _container_opening(bm, group, [bounds])]
+            if under:
+                containers.update(under)
+                for face in hollow_opening(bm, group, basecolor=basecolor):
+                    face[marker] = 1
+                    cavity += 1
+        closed = sum(len(add_interface(bm, *interfaces[part_id], flip=True, texel=texels[part_id][1]))
+                     for part_id in interfaces if part_id not in containers)
+        print(f"Body: closed by {closed} interface faces and a {cavity}-face cavity")
     bm.to_mesh(obj.data)
     bm.free()
     obj.data.update()

@@ -80,6 +80,15 @@ class MeshPBRTests(unittest.TestCase):
         self.assertEqual(_reduction_budget(30000, {"parts": [{"name": "handle", "kind": "grip"}]}), 30000)
         self.assertEqual(_reduction_budget(30000, {}), 30000)
 
+    def test_a_hybrid_split_leaves_room_for_the_interfaces_that_close_it(self):
+        # The final pass closes hybrid pieces with the interface between them, about four triangles per cut edge,
+        # twice (2026-10-25 pistol: 3,000 faces each way for a slide and a trigger on a 25,700-face surface).
+        from slopforge.pipelines.model import _reduction_budget
+        slide = {"name": "slide", "kind": "slide"}
+        self.assertEqual(_reduction_budget(30000, {"parts": [slide]}, {"part_model": "hybrid"}), 25500)
+        self.assertEqual(_reduction_budget(30000, {"parts": [slide]}, {"part_model": "omnipart"}), 27000)
+        self.assertEqual(_reduction_budget(30000, {}, {"part_model": "hybrid"}), 30000)  # nothing moves
+
     def test_material_identity_binds_prepared_mesh_content_of_bundled_graph(self):
         graph = json.loads((Path(__file__).resolve().parents[1] / "workflows" /
                             "trellis2_image_to_model_h100_api.json").read_text())

@@ -42,6 +42,10 @@ part_cfg: 7.5
 # A hinge or slide swept through its declared range in the final pass: over this share of its vertices inside the
 # rest of the model (over rest), the seed is retried (part_penetrates); Unity repeats the check on the prefab.
 max_part_penetration: 0.02
+# The model seen from 14 directions, at rest and with each part at the end of its range: a share of what is
+# seen above this is the backs of faces, holes a player sees, and the seed is retried (part_open). Hybrid
+# pieces left open read 0.022 with a pistol's slide back, closed by their interfaces 0.004 (2026-10-25).
+max_visible_backfaces: 0.01
 # The share of a mesh's edges whose faces point opposite ways: a thin surface crumpled by the reduction (sound
 # meshes read 0.00-0.02); over this the seed is retried (mesh_folded).
 max_folded_edge_share: 0.1

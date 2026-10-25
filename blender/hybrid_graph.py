@@ -145,7 +145,7 @@ def repair_surface(source, destination):
     """The surface as one mesh with fully enclosed inner shells removed, written as a GLB the split works on (the
     face order hybrid_apply.py reads). Not repaired into a manifold: on a chest with 1,627 non-manifold edges the
     local repair deleted the faces around them and refilled the holes with untextured triangles across the lid
-    (2026-10-25); openings with loose ends are capped instead (mesh_cleanup.close_openings)."""
+    (2026-10-25); the final pass closes the pieces by the interface between them (mesh_cleanup.part_interface)."""
     import bmesh
     from mesh_cleanup import remove_enclosed_components
     bpy.ops.wm.read_factory_settings(use_empty=True)

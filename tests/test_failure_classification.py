@@ -1029,6 +1029,24 @@ class PropComponentBudgetTests(unittest.TestCase):
         unmeasured = apply_part_penetration(_quality_report(component_count=1), {}, declared, 0.02)
         self.assertEqual(unmeasured.get("failure_codes", []), [])  # the cut route measures nothing: no verdict
 
+    def test_a_model_that_shows_holes_when_a_part_moves_is_retried(self):
+        # The final pass looks at the model at rest and with each part at the end of its range: the share of what it
+        # sees that is the back of a face. Hybrid pieces left open read 0.022 with the pistol's slide back, the old
+        # closing 0.023, the interfaces 0.004; the chest whose lid was only its bands 0.168 (2026-10-25).
+        from slopforge.validation import apply_visible_backfaces
+        report = apply_visible_backfaces(_quality_report(component_count=1),
+                                         {"rest": 0.0003, "slide": 0.0227, "trigger": 0.0123}, 0.01)
+        self.assertEqual(report["failure_codes"], ["part_open"])
+        self.assertIn("slide 0.023", report["errors"][-1])
+        self.assertIn("trigger 0.012", report["errors"][-1])
+        self.assertEqual((report["measured"]["moving_parts_open"], report["limits"]["max_visible_backfaces"]), (2, 0.01))
+        self.assertTrue(candidate_quality_rejection(report))
+        closed = apply_visible_backfaces(_quality_report(component_count=1),
+                                         {"rest": 0.0005, "slide": 0.0038, "trigger": 0.0016}, 0.01)
+        self.assertEqual(closed.get("failure_codes", []), [])
+        unmeasured = apply_visible_backfaces(_quality_report(component_count=1), None, 0.01)
+        self.assertEqual(unmeasured.get("failure_codes", []), [])  # nothing moves: no verdict
+
     def test_a_hybrid_split_whose_parts_missed_the_surface_is_retried(self):
         # The hybrid route aligns OmniPart's parts on TRELLIS.2's surface; two generators that made different shapes
         # leave the parts beside the surface, and their votes mean nothing: another seed (part_missing).

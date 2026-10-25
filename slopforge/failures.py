@@ -30,6 +30,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "weapon_orientation",
     "part_missing",
     "part_penetrates",
+    "part_open",
     "mesh_folded",
 })
 
@@ -396,6 +397,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "weapon_orientation": ("weapon_tip_alignment", "min_weapon_tip_alignment"),
         "part_missing": ("moving_parts_missing", "max_moving_parts_missing"),
         "part_penetrates": ("moving_parts_penetrating", "max_moving_parts_penetrating"),
+        "part_open": ("moving_parts_open", "max_moving_parts_open"),
         "mesh_folded": ("max_folded_edge_share", "max_folded_edge_share"),
     }
 

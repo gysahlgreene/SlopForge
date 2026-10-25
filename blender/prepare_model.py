@@ -6,7 +6,8 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          gltf_name, separate_part, separate_tagged, sweep_penetration, tag_parts)
+                          gltf_name, motion_matrix, separate_part, separate_tagged, sweep_penetration, tag_parts,
+                          visible_backfaces)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -894,12 +895,13 @@ if "--pivot" in sys.argv:
 if not mesh_only and parts_table is not None:
     anchors = {value.split("=")[0]: value.split("=")[1].split("-") for index, value in enumerate(sys.argv)
                if index and sys.argv[index - 1] == "--anchor"}
-    # Hybrid parts are pieces of one generated surface: the separation leaves openings, closed here
+    # Hybrid parts are pieces of one generated surface: the separation leaves them open where they were cut apart,
+    # closed here by the interface between them within what the face budget leaves (separate_tagged)
     close = bool(json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text()).get("close_openings"))
     basecolor_image = next((image for image in bpy.data.images if basecolor_path and
                             Path(bpy.path.abspath(image.filepath)).resolve() == Path(basecolor_path).resolve()), None)
     children = separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors, close=close,
-                               basecolor=basecolor_image)
+                               basecolor=basecolor_image, face_budget=target_faces)
     for child in children:
         print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
               f"pivot {[round(v, 4) for v in child.location]}")
@@ -918,6 +920,19 @@ if not mesh_only and parts_table is not None:
                   f"inside the body over rest through {axis} {low:g}..{high:g}")
     if penetration:
         obj["slopforge_part_penetration"] = json.dumps(penetration)
+    # The model seen from 14 directions, at rest and with each part at the far end of its range: the share of what
+    # is seen that is the back of a face, a hole a moved part uncovers (gate part_open; docs/WEAPONS.md)
+    if motions:
+        model = [obj, *children]
+        holes = {"rest": visible_backfaces(model)}
+        for child in children:
+            if child.name in motions:
+                axis, span = motions[child.name].split(":")
+                low, high = (float(bound) for bound in span.split(".."))
+                far = low if abs(low) > abs(high) else high
+                holes[child.name] = visible_backfaces(model, {child.name: motion_matrix(child, axis, far)})
+        print(f"Backs of faces seen: {holes}")
+        obj["slopforge_visible_backfaces"] = json.dumps(holes)
 elif not mesh_only:
     for name, kind, _mask in part_specs():
         part = separate_part(obj, name, kind, basecolor=next(

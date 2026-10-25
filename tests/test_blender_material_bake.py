@@ -901,14 +901,19 @@ held = [v.co for v in obj.data.vertices if group is not None and any(g.group == 
 ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices]
 def record(o):
     points = [o.matrix_world @ v.co for v in o.data.vertices]
-    open_edges = sum(1 for e in o.data.edges if sum(e.key in p.edge_keys for p in o.data.polygons) == 1)
+    uses = {}
+    for p in o.data.polygons:
+        for key in p.edge_keys:
+            uses[key] = uses.get(key, 0) + 1
+    open_edges = sum(1 for e in o.data.edges if uses.get(e.key, 0) == 1)
     cap = [(o.matrix_world @ o.data.vertices[i].co).z for p in o.data.polygons if not p.use_smooth for i in p.vertices]
     return {"parent": o.parent.name if o.parent else None, "origin": list(o.matrix_world.translation),
             "sharp": sum(1 for e in o.data.edges if e.use_edge_sharp),
             "cap_spread": (max(cap) - min(cap)) if cap else None,
             "min": [min(p[i] for p in points) for i in range(3)] if points else None,
             "max": [max(p[i] for p in points) for i in range(3)] if points else None,
-            "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part")}
+            "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part"),
+            "fills": sum(a.value for a in o.data.attributes["slopforge_fill"].data) if "slopforge_fill" in o.data.attributes else 0}
 json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(held) for i in range(3)],
            "min_y": min(ys), "max_y": max(ys), "min_z": min(zs), "max_z": max(zs),
            "view": list(obj["slopforge_concept_view"]), "body": obj.name,
@@ -1039,6 +1044,64 @@ box('lid', (0, 0, 0.45), (0.6, 0.4, 0.1))  # on the body, touching along its who
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
 """
+
+    HYBRID_FIXTURE = """import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+# one closed surface, as TRELLIS.2 makes it, cut into the glTF nodes hybrid_apply.py writes: open where they were cut
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.25))
+whole = bpy.context.object; whole.scale = (0.6, 0.4, 0.5)
+bpy.ops.object.transform_apply(location=True, scale=True)
+bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+bpy.ops.mesh.subdivide(number_cuts=9); bpy.ops.mesh.quads_convert_to_tris(); bpy.ops.uv.smart_project()
+bpy.ops.object.mode_set(mode='OBJECT')
+whole.data.materials.append(bpy.data.materials.new('surface'))
+def piece(name, keep):
+    copy = whole.copy(); copy.data = whole.data.copy(); copy.name = copy.data.name = name
+    bpy.context.collection.objects.link(copy)
+    bm = bmesh.new(); bm.from_mesh(copy.data)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if not keep(f.calc_center_median())], context="FACES")
+    bm.to_mesh(copy.data); bm.free()
+PART_PIECES
+bpy.data.objects.remove(whole)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    def _hybrid(self, pieces, kind, motion):
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        name = "lid" if kind == "hinge" else "drawer"
+        masks = {name: Image.new("L", (120, 120), 0)}
+        masks[name].paste(255, (20, 28, 100, 40) if kind == "hinge" else (30, 60, 90, 90))
+        table = json.dumps({"parts": {"body": {"kind": "body", "id": 1}, name: {"kind": kind, "id": 2}},
+                            "close_openings": True})
+        return self.orient({}, [], concept, None, budget=20000, target="-,-,0.5", masks=masks, pivot="bottom_center",
+                           extra=("--part", name, kind, f"{name}.png", *(("--anchor", "lid=back-bottom")
+                                  if kind == "hinge" else ()), "--parts-json", "parts.json", "--motion", motion),
+                           fixture_script=self.HYBRID_FIXTURE.replace("PART_PIECES", pieces),
+                           files={"parts.json": table})
+
+    def test_a_lid_cut_from_one_surface_is_closed_across_and_its_chest_hollowed(self):
+        # Hybrid parts are pieces of one generated surface, open where they were cut apart (docs/WEAPONS.md, Hybrid
+        # parts). The lid is closed by the interface between it and the body; the body's opening under the lid is a
+        # container's and becomes a cavity. Neither piece of closing counts as a piece of its own.
+        measured = self._hybrid("piece('body', lambda c: c.z < 0.4)\npiece('lid', lambda c: c.z >= 0.4)", "hinge",
+                                "lid=x:-100..0")
+        lid, body = measured["objects"]["lid"], measured["objects"][measured["body"]]
+        self.assertGreater(lid["fills"], 0)  # its underside
+        self.assertGreater(body["fills"], 0)  # the cavity
+        self.assertEqual(measured["inspection"]["component_count"], 1)
+        self.assertLessEqual(measured["inspection"]["part_penetration"]["lid"], 0.02)
+
+    def test_a_drawer_cut_from_one_surface_closes_both_pieces(self):
+        # A slide is not a container's lid: the body takes the interface too, flipped, where the drawer was cut out.
+        measured = self._hybrid("piece('body', lambda c: not (c.y < -0.15 and 0.1 < c.z < 0.3))\n"
+                                "piece('drawer', lambda c: c.y < -0.15 and 0.1 < c.z < 0.3)", "slide",
+                                "drawer=z:0..0.2")
+        drawer, body = measured["objects"]["drawer"], measured["objects"][measured["body"]]
+        self.assertGreater(drawer["fills"], 0)
+        self.assertGreater(body["fills"], 0)
+        self.assertEqual(measured["inspection"]["component_count"], 1)
 
     def test_a_prop_with_a_lid_is_split_without_a_grip(self):
         # A chest: a hinge declared on a prop with a bottom-centre pivot. No grip mask, no full turn, no tip
@@ -1242,125 +1305,60 @@ print("POCKET", sweep_penetration(part, [slab], "z", -0.7, 0.0))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
-class BlenderCloseOpeningsTests(unittest.TestCase):
-    def test_a_piece_split_from_a_surface_is_closed_outwards_in_one_colour_per_opening(self):
-        # A hybrid split (docs/WEAPONS.md, Hybrid parts) leaves each piece of a generated surface open where it was
-        # cut from the rest: a lid cut from a box has an open rim, the box an open top. Both close flat, wound like
-        # their neighbours (outwards), each opening in one texel of its ring's median colour.
-        with tempfile.TemporaryDirectory() as temporary:
-            script = Path(temporary) / "close.py"
-            script.write_text(f'''import bpy, bmesh, sys
-from mathutils.bvhtree import BVHTree
-sys.path.insert(0, {str(ROOT / "blender")!r})
-from mesh_cleanup import close_openings
-bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.mesh.primitive_cube_add(size=1)
-bpy.ops.object.mode_set(mode="EDIT")
-bpy.ops.mesh.subdivide(number_cuts=5)
-bpy.ops.mesh.quads_convert_to_tris()
-bpy.ops.object.mode_set(mode="OBJECT")
-image = bpy.data.images.new("base", 16, 16)
-image.pixels = [0.6, 0.4, 0.2, 1.0] * 256
-for top in (True, False):
-    bm = bmesh.new(); bm.from_mesh(bpy.context.object.data); bm.faces.ensure_lookup_table()
-    bmesh.ops.delete(bm, geom=[f for f in bm.faces if (f.calc_center_median().z > 0.17) != top], context="FACES")
-    opened = sum(1 for e in bm.edges if len(e.link_faces) == 1)
-    fills = close_openings(bm, image)
-    assert opened > 0 and fills, (opened, len(fills))
-    assert sum(1 for e in bm.edges if len(e.link_faces) == 1) == 0, "left open"
-    bm.normal_update()
-    tree = BVHTree.FromBMesh(bm)
-    for f in fills:  # outwards: a ray from the fill along its normal leaves the closed piece
-        hits, origin = 0, f.calc_center_median() + f.normal * 1e-4
-        for _ in range(16):
-            loc = tree.ray_cast(origin, f.normal)[0]
-            if loc is None: break
-            hits += 1; origin = loc + f.normal * 1e-4
-        assert hits % 2 == 0, ("inward fill", top, tuple(f.normal))
-    uv = bm.loops.layers.uv.active
-    assert len({{tuple(round(c, 6) for c in l[uv].uv) for f in fills for l in f.loops}}) == 1
-    assert not any(f.smooth for f in fills)
-    print("CLOSED", top, len(fills))
-''')
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-            self.assertEqual(result.stdout.count("CLOSED"), 2)
-
-    def test_a_chain_whose_ends_are_close_but_not_joined_gets_a_new_edge(self):
-        # Two short rim edges carry an inner shell: the opening's ends are two vertices 2 mm apart with no edge
-        # between them. A new edge joins them and the opening closes (2026-10-25 pistol: an IndexError there).
-        with tempfile.TemporaryDirectory() as temporary:
-            script = Path(temporary) / "close_gap.py"
-            script.write_text(f'''import bpy, bmesh, sys
-from mathutils import Vector
-sys.path.insert(0, {str(ROOT / "blender")!r})
-from mesh_cleanup import close_openings
-bm = bmesh.new()
-# an open box (no top) whose front rim edge runs a - m1 - k - m2 - b, k 2 mm off the line between m1 and m2
-v = [bm.verts.new(co) for co in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1))]
-m1, k, m2 = bm.verts.new((0.499, 0, 1)), bm.verts.new((0.5, 0.0, 1.0005)), bm.verts.new((0.501, 0, 1))
-bm.faces.new((v[0], v[3], v[2], v[1]))
-bm.faces.new((v[0], v[1], v[5], m2, k, m1, v[4]))
-bm.faces.new((v[1], v[2], v[6], v[5])); bm.faces.new((v[2], v[3], v[7], v[6])); bm.faces.new((v[3], v[0], v[4], v[7]))
-q, t = bm.verts.new((0.5, 0.05, 1.0)), bm.verts.new((0.5, 0.1, 0.9))  # a closed pyramid on m1-k and k-m2, no m1-m2 edge
-bm.faces.new((m1, k, m2, q))
-for a, b in ((m1, k), (k, m2), (m2, q), (q, m1)):
-    bm.faces.new((a, b, t))
-uv = bm.loops.layers.uv.new("UVMap")  # the generated surface is textured: each opening takes its ring's texel
-for face in bm.faces:
-    for loop in face.loops:
-        loop[uv].uv = (loop.vert.co.x, loop.vert.co.y)
-ends = [x for x in bm.verts if sum(1 for e in x.link_edges if len(e.link_faces) == 1) % 2]
-assert sorted(round(x.co.x, 3) for x in ends) == [0.499, 0.501], [tuple(x.co) for x in ends]
-fills = close_openings(bm)
-area = sum(f.calc_area() for f in fills)
-assert abs(area - 1.0) < 0.05, area
-print("GAP CLOSED", len(fills), round(area, 3))
-''')
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-            self.assertIn("GAP CLOSED", result.stdout)
-
-    def test_an_opening_no_fill_can_close_gets_a_flat_cap_across_its_outline(self):
-        # A large opening whose rim dips into the surface's inner tubes (a pistol's bore) defeats both fills; it gets a
-        # flat cap across its outline, a little inside its piece, facing out, in its ring's colour (2026-10-25).
-        with tempfile.TemporaryDirectory() as temporary:
-            script = Path(temporary) / "cap.py"
-            script.write_text(f'''import bpy, bmesh, sys
+class BlenderInterfaceTests(unittest.TestCase):
+    def test_a_hollow_shell_cut_in_two_is_closed_across_its_inside(self):
+        # TRELLIS.2 makes thin hollow shells: an inner wall a few millimetres inside the outer (a 2026-10-25 pistol).
+        # A part cut from one is closed by the surface inside the solid where a point is as far from the part as
+        # from the rest: across the hollow, not just the wall's thickness, facing away from the part, its rim on
+        # the cut. A box with a wall 0.05 thick, its top above z 0.25 labelled a lid.
+        script = f'''import bpy, bmesh, sys
+import numpy as np
 sys.path.insert(0, {str(ROOT / "blender")!r})
 import mesh_cleanup
-bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.mesh.primitive_cube_add(size=1)
-bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.subdivide(number_cuts=7); bpy.ops.object.mode_set(mode="OBJECT")
-bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
-uv = bm.loops.layers.uv.active
-bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.calc_center_median().z > 0.49], context="FACES_ONLY")
-rim = sorted((v for v in bm.verts if v.co.z > 0.49 and abs(v.co.y + 0.5) < 1e-6 and abs(v.co.x) < 0.3), key=lambda v: v.co.x)
-for v in rim[1:-1]:
-    v.co.z -= 0.25  # the rim dips into the box along part of one side, as a pistol's rim dips into its bore
-nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
-mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
-mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
-try:
-    fills = mesh_cleanup.close_openings(bm)
-finally:
-    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
-bm.normal_update()
-area = sum(f.calc_area() for f in fills)
-assert 0.9 < area < 1.0, area  # the whole top, its outline a little inside the rim
-assert all(f.normal.z > 0.99 for f in fills), [tuple(f.normal) for f in fills]  # level and outwards despite the dip
-heights = {{round(v.co.z, 4) for f in fills for v in f.verts}}
-assert len(heights) == 1 and 0.49 < heights.pop() < 0.5  # flat, a little inside the box
-assert len({{tuple(round(c, 6) for c in l[uv].uv) for f in fills for l in f.loops}}) == 1
-print("CAPPED", len(fills), round(area, 3))
-''')
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-            self.assertIn("CAPPED", result.stdout)
+bm = bmesh.new()
+for size, flip in ((1.0, False), (0.9, True)):
+    made = bmesh.ops.create_cube(bm, size=size)
+    faces = list({{f for v in made["verts"] for f in v.link_faces}})
+    bmesh.ops.subdivide_edges(bm, edges=list({{e for f in faces for e in f.edges}}), cuts=7, use_grid_fill=True)
+    if flip:
+        inner = [f for f in bm.faces if max(abs(c) for c in f.calc_center_median()) < 0.46]
+        bmesh.ops.reverse_faces(bm, faces=inner)
+bmesh.ops.triangulate(bm, faces=bm.faces)
+layer = bm.faces.layers.int.new("slopforge_part")
+for f in bm.faces:
+    f[layer] = 2 if f.calc_center_median().z > 0.25 else 1
+solid = mesh_cleanup.solid_grid(bm, cells=60)
+occupied, low, h = solid
+centre = tuple(np.floor((np.zeros(3) - low) / h).astype(int))
+print("CENTRE", bool(occupied[centre]))
+vertices, polygons = mesh_cleanup.part_interface(bm, layer, 2, solid)
+v = np.array(vertices)
+normals = []
+for poly in polygons:
+    a, b, c = v[poly[0]], v[poly[1]], v[poly[2]]
+    normals.append(np.cross(b - a, c - a))
+normal = np.sum(normals, 0); normal /= np.linalg.norm(normal)
+print("SPAN", float(np.ptp(v[:, 0])), float(np.ptp(v[:, 1])))
+print("HEIGHT", float(np.median(v[:, 2])))
+print("NORMAL", float(normal[2]))
+rim = mesh_cleanup._rim(polygons)
+print("RIM", float(np.max(np.abs(np.abs(v[list(rim)][:, :2]).max(1) - 0.5))) if rim else -1)
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+        out = {line.split()[0]: line.split()[1:] for line in result.stdout.splitlines()
+               if line.split() and line.split()[0] in ("CENTRE", "SPAN", "HEIGHT", "NORMAL", "RIM")}
+        self.assertEqual(out["CENTRE"], ["True"])  # the hollow counts as solid
+        self.assertGreater(float(out["SPAN"][0]), 0.85)  # across the inside, wall to wall
+        self.assertGreater(float(out["SPAN"][1]), 0.85)
+        self.assertAlmostEqual(float(out["HEIGHT"][0]), 0.25, delta=0.06)  # between the lid and the rest
+        self.assertLess(float(out["NORMAL"][0]), -0.9)  # facing away from the lid, down into the body
+        self.assertLess(float(out["RIM"][0]), 0.03)  # the rim on the outer wall, where the cut is
 
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderClosingTests(unittest.TestCase):
     def test_a_container_under_its_lid_gets_a_cavity_not_a_cap(self):
         # A chest under its lid: the opening becomes a cavity (a rim, inner walls, a floor) a player sees into when
         # the lid opens, not a flat panel at the rim (2026-10-25).
@@ -1395,48 +1393,34 @@ print("CAVITY", len(faces))
             self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
             self.assertIn("CAVITY", result.stdout)
 
-    def test_a_fill_outside_the_whole_object_is_dropped(self):
-        # A cap whose outline overshoots a concave opening stands outside the object, visible with nothing moved
-        # (a panel behind the 2026-10-25 chest's lid): fills are kept only where they lie inside the unsplit object.
-        with tempfile.TemporaryDirectory() as temporary:
-            script = Path(temporary) / "inside.py"
-            script.write_text(f'''import bpy, bmesh, sys
-from mathutils import Vector
+    def test_a_hole_shows_as_the_backs_of_faces(self):
+        # A piece left open where it was cut shows the backs of its far faces through the hole when its part moves:
+        # 3.6% of a moved hybrid pistol's pixels, 0.4% once closed (2026-10-25). Seen along the axes and diagonals, a
+        # closed box shows none; the same box without its top shows the inside of its walls and floor.
+        script = f'''import bpy, sys
 sys.path.insert(0, {str(ROOT / "blender")!r})
 import mesh_cleanup
 bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.mesh.primitive_cube_add(size=1)
-bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
-inside = lambda point: max(abs(point.x), abs(point.y), abs(point.z)) < 0.5  # the unsplit object: the cube
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0.3, 0.2, 0.5))
+box = bpy.context.object
+print("CLOSED", mesh_cleanup.visible_backfaces([box]))
+import bmesh
+bm = bmesh.new(); bm.from_mesh(box.data); bm.normal_update()
 bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
-real = mesh_cleanup._cap_opening
-def overshoot(bm, group, centroid):  # a cap twice the opening's size, as an overshooting outline makes
-    faces = real(bm, group, centroid)
-    for vertex in {{v for f in faces for v in f.verts}}:
-        vertex.co.x *= 2; vertex.co.y *= 2
-    return faces
-mesh_cleanup._cap_opening = overshoot
-nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
-mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
-mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
-try:
-    fills = mesh_cleanup.close_openings(bm, inside=inside)
-finally:
-    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
-    mesh_cleanup._cap_opening = real
-kept = [f for f in fills if f.is_valid]
-assert all(inside(f.calc_center_median() - Vector((0, 0, 0.01))) for f in kept), "a fill outside the object was kept"
-assert len(kept) < len([f for f in bm.faces if not f.smooth]) or kept, "everything dropped"
-print("INSIDE KEPT", len(kept))
-''')
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-            self.assertIn("INSIDE KEPT", result.stdout)
+bm.to_mesh(box.data); bm.free(); box.data.update()
+print("OPEN", mesh_cleanup.visible_backfaces([box]))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        out = {line.split()[0]: float(line.split()[1]) for line in result.stdout.splitlines()
+               if line.startswith(("CLOSED", "OPEN"))}
+        self.assertLess(out["CLOSED"], 0.001)
+        self.assertGreater(out["OPEN"], 0.05)
 
     def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
-        # Caps and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds over the
-        # component budget (2026-10-25). Fills carry slopforge_fill; a piece made only of fills is not counted.
+        # Interfaces and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds
+        # over the component budget (2026-10-25). They carry slopforge_fill; a piece made only of them is not counted.
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "fill_count.py"
             script.write_text(f'''import bpy, bmesh, sys
@@ -1446,17 +1430,12 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.mesh.primitive_cube_add(size=1)
 bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
 bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
-nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
-mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
-mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
-try:
-    fills = mesh_cleanup.close_openings(bm)  # a cap: a separate piece
-finally:
-    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
+square = [(-0.45, -0.45, 0.45), (0.45, -0.45, 0.45), (0.45, 0.45, 0.45), (-0.45, 0.45, 0.45)]
+fills = mesh_cleanup.add_interface(bm, square, [[0, 1, 2, 3]])  # under the open top, not stitched to it
 mesh = bpy.data.meshes.new("closed"); bm.to_mesh(mesh)
 assert mesh.attributes.get("slopforge_fill") is not None
 values = [0] * len(mesh.polygons); mesh.attributes["slopforge_fill"].data.foreach_get("value", values)
-assert sum(values) == len(fills), (sum(values), len(fills))
+assert sum(values) == len(fills) == 2, (sum(values), len(fills))
 assert mesh_cleanup.solid_component_count(mesh) == 1, mesh_cleanup.solid_component_count(mesh)
 print("FILL COUNT", sum(values))
 ''')
@@ -1464,41 +1443,3 @@ print("FILL COUNT", sum(values))
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
             self.assertIn("FILL COUNT", result.stdout)
-
-    def test_an_opening_broken_by_a_non_manifold_edge_is_still_closed(self):
-        # TRELLIS.2's surface has edges where three faces meet; where the cut crosses one, that edge has two faces left
-        # on the piece and is not a boundary edge, so the opening is a chain with two ends (the 2026-10-25 pistol's
-        # frame top stayed open). The ends are joined and the opening filled.
-        with tempfile.TemporaryDirectory() as temporary:
-            script = Path(temporary) / "close_chain.py"
-            script.write_text(f'''import bpy, bmesh, sys
-sys.path.insert(0, {str(ROOT / "blender")!r})
-from mesh_cleanup import close_openings
-bpy.ops.wm.read_factory_settings(use_empty=True)
-bpy.ops.mesh.primitive_cube_add(size=1)
-bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
-bm.faces.ensure_lookup_table()
-top = next(f for f in bm.faces if f.normal.z > 0.9)
-edge = top.edges[0]
-a, b = edge.verts
-from mathutils import Vector
-inward = (Vector((0, 0, a.co.z)) - (a.co + b.co) / 2).normalized() * 0.3
-down = Vector((0, 0, -0.3))
-c, d = bm.verts.new(b.co + inward), bm.verts.new(a.co + inward)
-a2, b2 = bm.verts.new(a.co + down), bm.verts.new(b.co + down)
-c2, d2 = bm.verts.new(b.co + inward + down), bm.verts.new(a.co + inward + down)
-for quad in ((a, b, c, d), (a, a2, b2, b), (b, b2, c2, c), (c, c2, d2, d), (d, d2, a2, a), (a2, d2, c2, b2)):
-    bm.faces.new(quad)  # a small closed box inside, sharing one rim edge of the opening: that edge has four faces
-bmesh.ops.delete(bm, geom=[top], context="FACES_ONLY")
-ends = [v for v in bm.verts if sum(1 for e in v.link_edges if len(e.link_faces) == 1) % 2]
-assert len(ends) == 2, len(ends)  # the opening is a chain, not a loop
-fills = close_openings(bm)
-assert fills, "nothing filled"
-area = sum(f.calc_area() for f in fills)
-assert abs(area - 1.0) < 0.05, area  # the cube's whole top, not a sliver
-print("CHAIN CLOSED", len(fills), round(area, 3))
-''')
-            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
-                                    capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
-            self.assertIn("CHAIN CLOSED", result.stdout)

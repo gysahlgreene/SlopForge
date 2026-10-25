@@ -36,6 +36,7 @@ from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_penetration,
+                          apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1103,7 +1104,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
                 shutil.copy2(tiles[key], paths[key])
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
-                      _reduction_budget(face_budget, asset), surface_source=paths["surface"],
+                      _reduction_budget(face_budget, asset, asset_type), surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
@@ -1304,6 +1305,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
         validation = apply_part_penetration(validation, validation.get("measured", {}).get("part_penetration") or {},
                                             asset.get("parts") or [], float(asset_type.get("max_part_penetration", 0.02)))
+        validation = apply_visible_backfaces(validation, validation.get("measured", {}).get("visible_backfaces"),
+                                             float(asset_type.get("max_visible_backfaces", 0.01)))
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -1438,13 +1441,17 @@ def _face_budget(pipeline, asset_type, asset, default=30000):
     return int(budget) if budget is not None else None
 
 
-def _reduction_budget(face_budget, asset):
+def _reduction_budget(face_budget, asset, asset_type=None):
     """The face count to reduce a mesh to. The final pass cuts a weapon's moving parts from the reduced mesh, and
     the cut adds faces (the bisect's splits, the caps, a barrel): 1,901 on a 30,000-face pistol (2026-10-24 run B2),
-    so the reduction leaves room for them."""
-    # shortcut: a fixed 10% margin, measured on one pistol; make it a per-type setting if another weapon overruns
+    so the reduction leaves room for them. A hybrid split (part_model: hybrid) is closed by the interfaces between
+    its pieces instead, about four triangles per edge of each cut, added to both sides: 6,000 on the 2026-10-25
+    pistol, so it leaves 15%."""
+    # shortcut: fixed margins, measured on one pistol each; make them per-type settings if another asset overruns
     cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
-    return int(face_budget * 0.9) if cut_later else face_budget
+    if not cut_later:
+        return face_budget
+    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") == "hybrid" else 0.9))
 
 
 def _fit_texture_size(maps, size):
@@ -2514,12 +2521,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         materials = asset.get("materials") or []
                         generate_part_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                             mesh_seed, asset["parts"], paths["part_masks"],
-                                            _reduction_budget(_face_budget(pipeline, asset_type, asset), asset),
+                                            _reduction_budget(_face_budget(pipeline, asset_type, asset), asset, asset_type),
                                             materials, finish_word(materials),
                                             texture_size=asset.get("texture_size") or asset_type.get("texture_size")
                                             or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
                     elif workflow:
-                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
+                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset, asset_type)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,

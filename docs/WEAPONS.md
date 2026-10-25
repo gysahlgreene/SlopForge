@@ -278,16 +278,30 @@ need retraining on its latent space, so the two are combined after generation in
    (a trigger a few per cent wide fell through the view's misregistration) and is dropped for that seed
    (`hybrid.masks_dropped`).
 4. `blender/hybrid_apply.py` writes the surface back as one glTF node per part, and the final pass tags, separates
-   and pivots the parts as for OmniPart's. With `close_openings` in the part table, every opening the separation
-   leaves, on each part and on the body, is closed (`mesh_cleanup.close_openings`): a planar fill in the opening's
-   best-fit plane; a chain whose loose ends are close is bridged first; an opening no fill can close (a rim that
-   dips into a pistol's bore) gets a flat cap across its convex outline in the plane most of its rim lies in
-   (RANSAC), a little inside its piece and facing out; an opening under a hinged part that covers at least half the
-   body's outline in that plane (a chest's top) becomes a **cavity**: a rim, inner walls and a floor a player sees
-   into when the lid opens. Fills, caps and cavities take one texel, their ring's median colour, and any that is not
-   inside the unsplit object is dropped (a cap whose outline overshot a concave opening stood up behind a lid).
+   and pivots the parts as for OmniPart's. With `close_openings` in the part table, each part and the body are
+   closed where they were cut apart by the **interface** between them (`mesh_cleanup.part_interface`). The solid
+   is what the outside cannot reach through the surface (a grid of up to 240 cells along the longest side, walls
+   found by scanline parity and thickened a cell): TRELLIS.2 makes thin hollow shells, an inner wall a few
+   millimetres inside the outer one, and their hollow counts as solid. Inside it, the interface is where a point is
+   as far from the part's faces as from the rest's, counting only faces within a tenth of the object's size of the
+   cut, so it carries the cut straight across a wide hollow instead of sagging towards distant walls. It is
+   extracted with surface nets, decimated to about four triangles per edge of its cut (within what the face budget
+   leaves; the hybrid route reduces the surface to 85% of the budget to leave room), its rim snapped onto the cut,
+   and added to the part facing out and to the body flipped, in the typical colour along the cut on each side. A
+   body's opening under a hinged part that covers at least half its outline (a chest's top) becomes a **cavity**
+   instead: a rim, inner walls and a floor a player sees into when the lid opens. Interfaces and cavities are
+   marked `slopforge_fill` and do not count as pieces. A flat fill in the opening's plane, the earlier method,
+   could not close a cut that zigzags and crosses itself (the 2026-10-25 pistol's crossed itself 9–10 times in its
+   best-fit plane): with the slide back and the trigger pulled, holes showed on 3.6% of the pistol's pixels in five
+   views, 3.9% with the pieces left open, 0.4% with interfaces.
 5. Gates: `hybrid_alignment_error` over `max_hybrid_alignment_error` (0.03 of the surface's size) is `part_missing`,
-   as are a part's mask coverage and the motion sweep, so a seed whose generators disagree is replaced.
+   as are a part's mask coverage and the motion sweep, so a seed whose generators disagree is replaced. The final
+   pass also looks at the model from the six axes and eight diagonals, at rest and with each part at the far end of
+   its range, and measures the share of what it sees that is the back of a face (`mesh_cleanup.visible_backfaces`):
+   over `max_visible_backfaces` (0.01) in any pose is the retryable `part_open`. On 2026-10-25: pieces left open
+   0.022 with the pistol's slide back, the flat fills 0.023, interfaces 0.004; the chest whose lid was only its
+   bands 0.168; OmniPart's pistol, whose parts are closed meshes, 0.0; an OmniPart chest with half its faces
+   turned inwards 0.49 at rest.
 
 The mask stage feeds both votes and OmniPart: SAM's three candidates are scored by how well they fill the declared
 box (above), and gaps narrower than ~6% of the object inside the chosen mask are closed, so an iron band across a
@@ -302,9 +316,10 @@ its lid's ends and band stayed on the body until the mask closing.
 
 **Known limits (the clean live reruns, 2026-10-25 evening).** Both passed every gate and neither is usable:
 - On the pistol (HP2) the cut between slide and frame came out as loops that zigzag and cross themselves 9–10 times
-  in their best-fit plane. No flat fill closes such a loop: the slide's 351 open edges kept 355 after closing, the
-  body's fills reached outside the pistol and were dropped, and with the slide back and the trigger pulled the
-  pieces show holes. No gate measures a piece's openings yet.
+  in their best-fit plane. No flat fill closed them: the slide's 351 open edges kept 355 after closing, and with the
+  slide back and the trigger pulled the pieces showed holes. Since then the pieces are closed by their interfaces
+  and the holes are measured (`part_open`, steps 4 and 5); that has been checked on this pistol's pieces offline,
+  not yet on a new live seed.
 - On the side the concept does not show, the pistol's slide was labelled body over its rear half. The coverage gate
   projects the part onto its mask from the concept's view, so it saw only the good side (0.885).
 - The chest's lid box was declared too low (`0.08,0.23,0.94,0.50` on a concept whose dome starts at 0.15): SAM's
