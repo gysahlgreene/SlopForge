@@ -143,9 +143,9 @@ class BoxOrderTests(unittest.TestCase):
         from processing.part_model import check_box_order, part_ids
         alpha, masks, parts = fixture()
         ids, table = part_ids(alpha, masks, parts)
-        # OmniPart's ordered mask: our ids renumbered bottom-up on a coarse grid, as load_bottom_up_mask does
-        from PIL import Image
-        coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize((37, 37), Image.NEAREST)).astype(int)
+        # OmniPart's ordered mask: our ids renumbered bottom-up on its coarse grid, as load_bottom_up_mask does
+        from processing.part_model import coarse_ids
+        coarse = coarse_ids(ids)
         order = sorted(np.unique(coarse[coarse > 0]), key=lambda i: -np.where(coarse == i)[0].max())
         renumbered = np.zeros_like(coarse)
         for new, old in enumerate(order, 1):
@@ -154,6 +154,26 @@ class BoxOrderTests(unittest.TestCase):
         swapped = renumbered.copy(); swapped[renumbered == 1] = 2; swapped[renumbered == 2] = 1
         with self.assertRaisesRegex(RuntimeError, "order"):
             check_box_order(ids, table, swapped)
+
+
+class CoarseGridTests(unittest.TestCase):
+    def test_a_thin_part_keeps_a_cell_at_omniparts_resolution(self):
+        from processing.part_model import coarse_ids
+        alpha = np.ones((896, 1152), bool)
+        trigger = np.zeros_like(alpha); trigger[487:523, 411:420] = True  # 324 px: the R2 rifle's trigger
+        self.assertNotIn(1, coarse_ids(np.where(trigger, 1, 2)))  # the body outnumbers it in every 31x24 cell
+        ids, table = part_ids(alpha, {"trigger": trigger}, [{"name": "trigger", "kind": "hinge"}])
+        self.assertIn(1, coarse_ids(ids))  # so it is given the cell it fills most, or OmniPart drops it
+        self.assertLess(((ids == 1) & ~trigger).sum(), 32 * 25)  # one cell's object pixels, no more
+        self.assertTrue((ids[trigger] == 1).all())
+
+    def test_parts_whose_bottoms_share_a_coarse_row_order_by_id_like_omnipart(self):
+        from processing.part_model import _ordered
+        alpha = np.ones((370, 370), bool)  # ten pixels per coarse cell
+        a = np.zeros_like(alpha); a[100:118, 50:150] = True  # bottom row 117: coarse row 11
+        b = np.zeros_like(alpha); b[100:115, 200:300] = True  # bottom row 114: coarse row 11 too
+        ids, table = part_ids(alpha, {"b": b, "a": a}, [{"name": "b", "kind": "hinge"}, {"name": "a", "kind": "hinge"}])
+        self.assertEqual([e["name"] for e in _ordered(ids, table)], ["body", "b", "a"])
 
 
 class CoverageTests(unittest.TestCase):

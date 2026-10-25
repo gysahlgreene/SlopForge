@@ -50,7 +50,52 @@ def part_ids(alpha, masks, parts):
         run_top = np.where(resting.any(axis=0), resting.argmax(axis=0), -1)
         keep = (run_top == top_row) & (run <= 0.5 * slide.sum(axis=0))
         ids[resting & keep[None, :]] = part["id"]
-    return ids, table
+    return claim_cells(ids, table), table
+
+
+COARSE = (37, 37)  # OmniPart's image-feature grid: its mask is read at this resolution (smart_downsample_mask)
+
+
+def coarse_ids(ids, size=COARSE):
+    """OmniPart's smart_downsample_mask: each coarse cell takes the most common non-zero id of its pixel block."""
+    rows, cols = ids.shape
+    out = np.zeros(size, int)
+    for i in range(size[0]):
+        for j in range(size[1]):
+            block = ids[int(i * rows / size[0]):min(int((i + 1) * rows / size[0]), rows),
+                        int(j * cols / size[1]):min(int((j + 1) * cols / size[1]), cols)]
+            values, counts = np.unique(block[block > 0], return_counts=True)
+            if len(values):
+                out[i, j] = values[counts.argmax()]
+    return out
+
+
+def claim_cells(ids, table, size=COARSE):
+    """OmniPart pairs part k with mask id k on its coarse grid, so a part too thin to be the majority of any cell
+    vanishes from the mask and every part after it takes another part's image features (R2 rifle, 2026-10-25:
+    the bolt took the trigger's). Such a part is given the cell it fills most: that cell's object pixels become
+    its own. The cost is a few body pixels in its box and features, well inside OmniPart's box padding."""
+    ids = ids.copy()
+    rows, cols = ids.shape
+    for entry in table:
+        if entry["id"] in coarse_ids(ids, size):
+            continue
+        best = None
+        for i in range(size[0]):
+            for j in range(size[1]):
+                window = (slice(int(i * rows / size[0]), min(int((i + 1) * rows / size[0]), rows)),
+                          slice(int(j * cols / size[1]), min(int((j + 1) * cols / size[1]), cols)))
+                count = int((ids[window] == entry["id"]).sum())
+                if count and (best is None or count > best[0]):
+                    best = (count, window)
+        if best is None:
+            raise RuntimeError(f"part {entry['name']!r} has no pixels on the concept; draw it or drop the part")
+        block = ids[best[1]]
+        block[block > 0] = entry["id"]
+    missing = [entry["name"] for entry in table if entry["id"] not in coarse_ids(ids, size)]
+    if missing:
+        raise RuntimeError(f"parts {missing} share one cell of OmniPart's {size[0]}x{size[1]} grid; move a box")
+    return ids
 
 
 def check_box_order(ids, table, ordered_mask):
@@ -58,9 +103,8 @@ def check_box_order(ids, table, ordered_mask):
     follow our bottom-up order on the full mask. The two must agree, or a part would get another part's box and
     name. Raises RuntimeError naming both orders when they differ."""
     ordered = _ordered(ids, table)
-    coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize(np.asarray(ordered_mask).shape[::-1],
-                                                                     Image.NEAREST)).astype(int)
     ordered_mask = np.asarray(ordered_mask)
+    coarse = coarse_ids(ids, ordered_mask.shape)
     theirs = []
     for new_id in range(1, int(ordered_mask.max()) + 1):
         cells = coarse[ordered_mask == new_id]
@@ -70,7 +114,7 @@ def check_box_order(ids, table, ordered_mask):
     if theirs != ours:
         names = {entry["id"]: entry["name"] for entry in table}
         raise RuntimeError(f"OmniPart's part order {[names.get(i) for i in theirs]} differs from the box order "
-                           f"{[names.get(i) for i in ours]}: the masks tie at its resolution; move a box")
+                           f"{[names.get(i) for i in ours]}: the masks differ at its resolution; move a box")
 
 
 Frame = namedtuple("Frame", "sign bbox lo hi axis")
@@ -104,8 +148,10 @@ def object_frame(alpha, coords):
 
 
 def _ordered(ids, table):
-    """OmniPart orders part ids bottom-up (load_bottom_up_mask): the part reaching the lowest image row first."""
-    return sorted(table, key=lambda entry: -np.flatnonzero((ids == entry["id"]).any(axis=1)).max())
+    """OmniPart orders part ids bottom-up on its coarse grid (load_bottom_up_mask): the part reaching the lowest
+    row first, ties in id order."""
+    coarse = coarse_ids(ids)
+    return sorted(table, key=lambda entry: -np.flatnonzero((coarse == entry["id"]).any(axis=1)).max())
 
 
 def _grid_span(ids, entry, frame):
