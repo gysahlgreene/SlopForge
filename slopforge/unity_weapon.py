@@ -12,12 +12,15 @@ PIVOT_TOLERANCE = 0.001  # metres a hinge's pivot may drift, and a slide's trave
 ANGLE_TOLERANCE = 0.5  # degrees a hinge may miss its declared limit by
 
 
-def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, render):
+def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, render, held=True, mass=1.0,
+                        layer=None):
     """Build the prefab and clips; returns Unity's report, whose errors list every failed motion check.
 
     parts: the declared hinge and slide parts (name, kind, axis, min, max) in the weapon's frame as Unity shows it:
-    x right, y up, z forward. The limit is the bound farther from rest (0). fbx, prefab, clip_folder and render are
-    paths inside the Unity project.
+    x right, y up, z forward. The limit is the bound farther from rest (0); parts may be empty for a static asset.
+    fbx, prefab, clip_folder and render are paths inside the Unity project. The prefab gets a convex collider per
+    mesh, a Rigidbody of `mass`, the named layer when the project has it (a warning otherwise), sockets, and an
+    Animator with a Rest state, a trigger and a hold bool per part. The tip and root checks are for held assets.
     """
     root = Path(project_root).resolve()
     cli = unity_cli(root)
@@ -32,6 +35,7 @@ def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, 
             "name": name, "fbx": inside(fbx), "prefab": inside(prefab), "clip_folder": inside(clip_folder),
             "report_path": str(report), "render_path": str(Path(render).resolve()),
             "pivot_tolerance": PIVOT_TOLERANCE, "angle_tolerance": ANGLE_TOLERANCE,
+            "held": bool(held), "mass": float(mass), "layer": layer or "",
             "parts": [{"name": part["name"], "kind": part["kind"], "axis": part["axis"],
                        "limit": max((part["min"], part["max"]), key=abs)} for part in parts]}))
         script.write_text(_SCRIPT.replace("CLASS_NAME", class_name).replace("REQUEST_PATH", json.dumps(str(request))))
@@ -58,17 +62,19 @@ public static class CLASS_NAME
     [Serializable] public class Part { public string name, kind, axis; public float limit; }
     [Serializable] public class Request
     {
-        public string name, fbx, prefab, clip_folder, report_path, render_path;
-        public float pivot_tolerance, angle_tolerance; public Part[] parts;
+        public string name, fbx, prefab, clip_folder, report_path, render_path, layer;
+        public float pivot_tolerance, angle_tolerance, mass; public bool held; public Part[] parts;
     }
+    [Serializable] public class Socket { public string name; public float[] position; }
     [Serializable] public class Motion
     {
         public string part, kind, clip; public float pivot_drift, angle, travel; public float[] pivot;
     }
     [Serializable] public class Report
     {
-        public string unity_version, prefab, controller, render; public Motion[] motions;
-        public float[] bounds_min, bounds_max; public bool tip_forward, root_inside; public string[] errors;
+        public string unity_version, prefab, controller, render, default_state; public Motion[] motions;
+        public float[] bounds_min, bounds_max; public bool tip_forward, root_inside; public string[] errors, warnings;
+        public int colliders; public float rigidbody_mass; public Socket[] sockets; public string[] parameters;
     }
 
     public static void Build()
@@ -89,9 +95,17 @@ public static class CLASS_NAME
         child.transform.SetParent(root.transform, false);
         child.transform.localPosition = Vector3.zero;
         var errors = new List<string>();
+        var warnings = new List<string>();
         var controllerPath = request.clip_folder + "/" + request.name + ".controller";
         var controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
+        // A game script drives the parts: Rest by default, a trigger "<part>" pulses rest -> limit -> rest, a bool
+        // "<part>_open" holds the part at its limit while set.
+        var machine = controller.layers[0].stateMachine;
+        var rest = machine.AddState("Rest");
+        machine.defaultState = rest;
+        var parameters = new List<string>();
         var motions = new List<Motion>();
+        var sockets = new List<Socket>();
         foreach (var part in request.parts)
         {
             var transform = root.GetComponentsInChildren<Transform>().FirstOrDefault(t => t.name == part.name);
@@ -116,15 +130,59 @@ public static class CLASS_NAME
             }
             var clipPath = request.clip_folder + "/" + clip.name + ".anim";
             AssetDatabase.CreateAsset(clip, clipPath);
-            controller.AddMotion(clip);
+            // the hold: one key at the limit, so the part stays there while "<part>_open" is set
+            var hold = new AnimationClip { name = request.name + "_" + part.name + "_open" };
+            if (part.kind == "slide")
+                Curve(hold, path, "m_LocalPosition", new[] { restPosition + transform.parent.InverseTransformVector(axis * part.limit) });
+            else
+                Curve(hold, path, "m_LocalRotation", new[] { restRotation * Quaternion.AngleAxis(part.limit, local) });
+            var holdPath = request.clip_folder + "/" + hold.name + ".anim";
+            AssetDatabase.CreateAsset(hold, holdPath);
+            controller.AddParameter(part.name, AnimatorControllerParameterType.Trigger);
+            controller.AddParameter(part.name + "_open", AnimatorControllerParameterType.Bool);
+            parameters.Add(part.name); parameters.Add(part.name + "_open");
+            var pulse = machine.AddState(part.name); pulse.motion = clip;
+            var pulseIn = rest.AddTransition(pulse); pulseIn.AddCondition(AnimatorConditionMode.If, 0, part.name);
+            pulseIn.hasExitTime = false; pulseIn.duration = 0f;
+            var pulseOut = pulse.AddTransition(rest); pulseOut.hasExitTime = true; pulseOut.exitTime = 1f; pulseOut.duration = 0f;
+            var open = machine.AddState(part.name + "_open"); open.motion = hold;
+            var openIn = rest.AddTransition(open); openIn.AddCondition(AnimatorConditionMode.If, 0, part.name + "_open");
+            openIn.hasExitTime = false; openIn.duration = 0.25f;
+            var openOut = open.AddTransition(rest); openOut.AddCondition(AnimatorConditionMode.IfNot, 0, part.name + "_open");
+            openOut.hasExitTime = false; openOut.duration = 0.25f;
             motions.Add(Check(root, transform, clip, clipPath, part, axis, request, errors));
+            // a socket at the part's pivot, parented to the part so it follows it
+            sockets.Add(AddSocket(transform, "Socket_" + part.name, transform.position));
         }
         root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        // Physics: a convex collider per mesh (a part's collider moves with it), a Rigidbody on the root
+        var colliders = 0;
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            var collider = filter.gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = filter.sharedMesh;
+            collider.convex = true;
+            colliders++;
+        }
+        var body = root.AddComponent<Rigidbody>();
+        body.mass = request.mass;
+        if (!string.IsNullOrEmpty(request.layer))
+        {
+            var layer = LayerMask.NameToLayer(request.layer);
+            if (layer < 0) warnings.Add("the project has no layer named " + request.layer + "; the prefab stays on Default");
+            else foreach (var t in root.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        }
         var box = WorldBounds(root);
         var tipForward = box.max.z > -box.min.z;
         var rootInside = box.Contains(root.transform.position);
-        if (!tipForward) errors.Add("the weapon does not point along +Z from its root");
-        if (!rootInside) errors.Add("the root (grip) lies outside the weapon's bounds");
+        if (request.held)
+        {
+            if (!tipForward) errors.Add("the weapon does not point along +Z from its root");
+            if (!rootInside) errors.Add("the root (grip) lies outside the weapon's bounds");
+            // Sockets a character holds and fires from: the grip at the root, the muzzle at the body's +Z end
+            sockets.Add(AddSocket(root.transform, "Socket_Grip", root.transform.position));
+            sockets.Add(AddSocket(root.transform, "Socket_Muzzle", MuzzlePoint(root, request)));
+        }
         Render(root, request, request.render_path);
         var prefab = PrefabUtility.SaveAsPrefabAsset(root, request.prefab);
         UnityEngine.Object.DestroyImmediate(root);
@@ -134,7 +192,9 @@ public static class CLASS_NAME
             unity_version = Application.unityVersion, prefab = AssetDatabase.GetAssetPath(prefab),
             controller = controllerPath, render = request.render_path, motions = motions.ToArray(),
             bounds_min = Floats(box.min), bounds_max = Floats(box.max), tip_forward = tipForward,
-            root_inside = rootInside, errors = errors.ToArray()
+            root_inside = rootInside, errors = errors.ToArray(), warnings = warnings.ToArray(),
+            colliders = colliders, rigidbody_mass = request.mass, sockets = sockets.ToArray(),
+            parameters = parameters.ToArray(), default_state = "Rest"
         }));
         Debug.Log("SLOPFORGE_WEAPON_PREFAB " + request.prefab);
     }
@@ -193,6 +253,30 @@ public static class CLASS_NAME
                            declared.axis + " (declared " + declared.limit.ToString("F2", CultureInfo.InvariantCulture) + ")");
         }
         return motion;
+    }
+
+    static Socket AddSocket(Transform parent, string name, Vector3 position)
+    {
+        var socket = new GameObject(name);
+        socket.transform.SetParent(parent, false);
+        socket.transform.position = position;
+        return new Socket { name = name, position = Floats(position) };
+    }
+
+    // The centroid of the body's vertices within 1% of its +Z extreme: where a held weapon fires from.
+    static Vector3 MuzzlePoint(GameObject root, Request request)
+    {
+        var parts = new HashSet<string>(request.parts.Select(p => p.name));
+        var points = new List<Vector3>();
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (parts.Contains(filter.name)) continue;
+            foreach (var vertex in filter.sharedMesh.vertices) points.Add(filter.transform.TransformPoint(vertex));
+        }
+        if (points.Count == 0) return WorldBounds(root).max;
+        var maxZ = points.Max(p => p.z); var minZ = points.Min(p => p.z);
+        var front = points.Where(p => p.z >= maxZ - 0.01f * (maxZ - minZ)).ToList();
+        return new Vector3(front.Average(p => p.x), front.Average(p => p.y), front.Average(p => p.z));
     }
 
     static Bounds WorldBounds(GameObject go)

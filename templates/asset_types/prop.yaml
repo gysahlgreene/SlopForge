@@ -26,3 +26,8 @@ requirements:
   - complete object visible against a clean white background
   - no floor, pedestal, cast shadow, or unrelated props
 avoid: [environment, concept sheets, multiple variants, fragile floating details, unnecessary tiny geometry]
+# Published with a prefab a game can use: convex colliders and a Rigidbody of this mass; parts, when declared,
+# get a socket, a clip, a trigger and a hold bool each (docs/WEAPONS.md, Moving parts).
+unity_prefab: true
+mass: 5.0
+unity_layer: Props

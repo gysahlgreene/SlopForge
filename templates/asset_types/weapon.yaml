@@ -36,3 +36,8 @@ min_part_coverage: 0.55
 # Weapons are seen at arm's length: the generated parts' textures and the atlas are baked at this size, and Unity
 # imports the maps at it (its default ceiling of 2048 would halve them).
 texture_size: 4096
+# Published with a prefab a game can use: convex colliders, a Rigidbody of this mass, sockets (grip, muzzle, each
+# part), and an Animator with Rest, a trigger and a hold bool per part. The layer is set when the project has it.
+unity_prefab: true
+mass: 1.0
+unity_layer: Weapons

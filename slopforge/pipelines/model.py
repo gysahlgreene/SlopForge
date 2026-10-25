@@ -24,7 +24,7 @@ from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
-from ..taxonomy import output_path
+from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
                               unity_cli, zero_metallic)
@@ -1904,12 +1904,16 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
-            if moving:
-                # A weapon with moving parts also gets a prefab, a clip per part and a motion check (unity_weapon).
+            type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
+            if moving or type_record.get("unity_prefab"):
+                # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a
+                # motion check (unity_weapon). Types that opt in get one for static assets too.
                 motion = build_weapon_prefab(root, asset["name"], paths["fbx"], moving,
                                              prefab=paths["directory"] / f"{asset['name']}.prefab",
                                              clip_folder=paths["directory"] / "Animations",
-                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png")
+                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png",
+                                             held=asset.get("pivot") == "grip", mass=float(type_record.get("mass", 1.0)),
+                                             layer=type_record.get("unity_layer"))
                 if motion["errors"]:
                     raise StageFailure("processing_validation",
                                        "weapon motion checks failed: " + "; ".join(motion["errors"]),

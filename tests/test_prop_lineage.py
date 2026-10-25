@@ -453,6 +453,28 @@ avoid: [environment]
         self.assertNotIn("part_model", stage["settings"])
         self.assertNotIn("part_tools_sha256", stage["settings"])
 
+    def test_a_static_asset_of_a_prefab_type_is_published_with_a_prefab(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        from slopforge.pipelines.model import approve_texture
+        with (self.root / "ai/asset_types/prop.yaml").open("a") as stream:  # publication reads the project's type
+            stream.write("unity_prefab: true\nmass: 25.0\nunity_layer: Props\n")
+        calls = []
+
+        def prefab(root, name, fbx, parts, **options):
+            calls.append((name, parts, options["held"], options["mass"], options["layer"]))
+            return {"errors": [], "prefab": "Assets/relay.prefab", "controller": "Assets/relay.controller",
+                    "motions": [], "tip_forward": True, "root_inside": True}
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material), \
+                patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab):
+            approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
+        self.assertEqual(calls, [("relay", [], False, 25.0, "Props")])
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual(record["validation"]["measured"]["weapon_motion"]["prefab"], "Assets/relay.prefab")
+
     def test_same_bytes_at_different_candidate_and_final_paths_keep_same_hash(self):
         self._concept_candidates()
         self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (

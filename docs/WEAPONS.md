@@ -220,6 +220,25 @@ next seed is tried. The spike of 2026-10-25 lost a part in one seed of four.
 **Identity:** the backend's name and the hashes of `part_model.py` and `prepare_parts.py` are part of the mesh
 stage's settings; changing either invalidates the stage like a workflow change.
 
+## The prefab a game uses
+
+`approve-texture` publishes every weapon, and every asset of a type with `unity_prefab: true` (props too), as a
+prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
+- an identity root at the grip (held assets) or the asset's origin, the imported model under it;
+- a **convex `MeshCollider` per mesh**, so a moving part's collider moves with it, and a **`Rigidbody`** of the type's
+  `mass` (weapon 1 kg, prop 5 kg by default; a brief can override per type);
+- the type's **layer** (`unity_layer`: "Weapons", "Props") when the project defines it, else a visible warning in the
+  report and the prefab stays on Default — SlopForge never edits the project's tag manager;
+- **sockets** as named child transforms: `Socket_Grip` at the root and `Socket_Muzzle` at the body's +Z end on held
+  assets, and `Socket_<part>` at each moving part's pivot, parented to the part;
+- an **Animator** with a `Rest` default state and, per hinge or slide, a trigger `<part>` (one pulse rest → limit →
+  rest, 1 s) and a bool `<part>_open` that holds the part at its limit while set (0.25 s blends);
+- the W9 checks: each pulse clip sampled at rest and limit (pivot drift ≤ 1 mm, angle ±0.5°, travel ±1 mm), and for
+  held assets the tip along +Z and the root inside the bounds. The report records the colliders, the mass, the
+  sockets with their positions, the parameters and the default state (`validation.measured.weapon_motion`).
+
+Not checked yet: Play mode, interpenetration through the motion range, LODs and lightmap UVs.
+
 ## Known limits
 
 - **Thin parts.** Image-to-3D may still thicken, break or drop thin parts.

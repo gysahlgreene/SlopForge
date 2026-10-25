@@ -16,6 +16,36 @@ BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applicat
 
 
 class WeaponPrefabRequestTests(unittest.TestCase):
+    def test_a_static_prop_gets_a_prefab_with_physics_and_no_held_checks(self):
+        # Every published model asset gets a prefab: convex colliders, a Rigidbody, a layer; the tip and root
+        # checks are for held weapons only.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "ProjectSettings").mkdir()
+            (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+            (root / "Assets/Art/Generated/Models/chest").mkdir(parents=True)
+            (root / "Assets/Art/Generated/Models/chest/chest.fbx").write_bytes(b"fbx")
+            seen = {}
+
+            def unity(command, **_kwargs):
+                script = next(path for path in (root / "Assets/Editor").glob("SlopForgeWeapon_*.cs"))
+                text = script.read_text()
+                request_path = text.split("File.ReadAllText(")[1].split(")")[0]
+                seen["request"] = json.loads(Path(json.loads(request_path)).read_text())
+                seen["script"] = text
+                Path(seen["request"]["report_path"]).write_text(json.dumps({"errors": [], "motions": []}))
+
+            with patch("slopforge.unity_material.shutil.which", return_value="/usr/bin/unity"), \
+                    patch.object(unity_weapon.subprocess, "run", side_effect=unity):
+                build_weapon_prefab(root, "chest", root / "Assets/Art/Generated/Models/chest/chest.fbx", [],
+                                    prefab=root / "Assets/Art/Generated/Models/chest/chest.prefab",
+                                    clip_folder=root / "Assets/Art/Generated/Models/chest/Animations",
+                                    render=root / "motion.png", held=False, mass=25.0, layer="Props")
+            self.assertEqual((seen["request"]["parts"], seen["request"]["held"], seen["request"]["mass"],
+                              seen["request"]["layer"]), ([], False, 25.0, "Props"))
+            for needle in ("MeshCollider", "convex = true", "Rigidbody", "\"Rest\"", "AddParameter", "Socket_"):
+                self.assertIn(needle, seen["script"])
+
     def test_the_request_names_each_part_and_the_limit_farther_from_rest(self):
         parts = [{"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0},
                  {"name": "trigger", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0}]
@@ -39,10 +69,11 @@ class WeaponPrefabRequestTests(unittest.TestCase):
                 report = build_weapon_prefab(root, "pistol", root / "Assets/Art/Generated/Weapons/pistol/pistol.fbx",
                                              parts, prefab=root / "Assets/Art/Generated/Weapons/pistol/pistol.prefab",
                                              clip_folder=root / "Assets/Art/Generated/Weapons/pistol/Animations",
-                                             render=root / "motion.png")
+                                             render=root / "motion.png", layer="Weapons")
             self.assertEqual(report["errors"], [])
             self.assertEqual([(part["name"], part["kind"], part["axis"], part["limit"]) for part in seen["request"]["parts"]],
                              [("slide", "slide", "z", -0.03), ("trigger", "hinge", "x", -20.0)])
+            self.assertEqual((seen["request"]["held"], seen["request"]["mass"], seen["request"]["layer"]), (True, 1.0, "Weapons"))
             self.assertEqual(seen["request"]["fbx"], "Assets/Art/Generated/Weapons/pistol/pistol.fbx")
             self.assertEqual(seen["request"]["clip_folder"], "Assets/Art/Generated/Weapons/pistol/Animations")
             self.assertIn("-executeMethod", seen["command"])
@@ -99,7 +130,8 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
                  {"name": "lever", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0}]
         render = self.folder / "motion.png"
         report = build_weapon_prefab(self.root, "weapon", fbx, parts, prefab=self.folder / "weapon.prefab",
-                                     clip_folder=self.folder / "Animations", render=render)
+                                     clip_folder=self.folder / "Animations", render=render, held=True, mass=1.0,
+                                     layer=None)
         self.assertEqual(report["errors"], [])
         self.assertTrue((self.root / report["prefab"]).is_file())
         self.assertTrue(render.is_file())
@@ -110,6 +142,17 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
         self.assertTrue(report["tip_forward"] and report["root_inside"])
         for item in report["motions"]:
             self.assertTrue((self.root / item["clip"]).is_file())
+        # in-game function: a convex collider per mesh, a Rigidbody with the declared mass, sockets, an Animator a
+        # script can drive (Rest by default; a trigger and a hold bool per part)
+        self.assertEqual(report["colliders"], 3)
+        self.assertAlmostEqual(report["rigidbody_mass"], 1.0)
+        sockets = {item["name"]: item["position"] for item in report["sockets"]}
+        self.assertEqual(sorted(sockets), ["Socket_Grip", "Socket_Muzzle", "Socket_lever", "Socket_slide"])
+        self.assertAlmostEqual(sockets["Socket_Muzzle"][2], 1.0, delta=0.01)  # the body's +Z end
+        self.assertAlmostEqual(sockets["Socket_lever"][2], 0.3, delta=0.002)  # the lever's pivot
+        self.assertEqual(report["default_state"], "Rest")
+        self.assertEqual(sorted(report["parameters"]), ["lever", "lever_open", "slide", "slide_open"])
+        self.assertEqual(report["warnings"], [])  # the test project has the layer, or none was asked
         # The lever's pivot sits on its cut, at the body's underside, 0.3 m forward of the root.
         self.assertAlmostEqual(motions["lever"]["pivot"][2], 0.3, delta=0.002)
         self.assertAlmostEqual(motions["lever"]["pivot"][1], 0.0, delta=0.002)
