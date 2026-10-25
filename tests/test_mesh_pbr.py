@@ -531,9 +531,9 @@ if __name__ == "__main__":
 
 class DeclaredMaterialTests(unittest.TestCase):
     def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None, asset_extra=None,
-                   lineage_extra=None, metallic_map=None):
+                   lineage_extra=None, metallic_map=None, mesh_extra=None):
         source = root / "source"
-        source.mkdir()
+        source.mkdir(exist_ok=True)
         (source / "relay.glb").write_bytes(b"mesh")
         basecolor.save(source / "basecolor.png")
         for key, value in (("normal", (128, 128, 255)), ("roughness", (200,) * 3), ("metallic", (metallic_value,) * 3)):
@@ -568,7 +568,8 @@ class DeclaredMaterialTests(unittest.TestCase):
                 patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
             return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}},
                                               {"face_budget": "prop_faces", **(limits or {})},
-                                              asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures},
+                                              asset, 1, {"workflow": "w.json", "seed": 1, "textures": textures,
+                                                         **(mesh_extra or {})},
                                               lineage=lineage)
 
     def test_a_grip_held_type_is_oriented_from_its_concept_and_pivoted_at_its_grip_mask(self):
@@ -600,6 +601,34 @@ class DeclaredMaterialTests(unittest.TestCase):
                     self.assertIn("part_missing", candidate["validation"]["failure_codes"])
                 else:
                     self.assertEqual((options["concept"], options["grip_mask"], options["parts"]), (None, None, []))
+
+    def test_a_weapon_generated_as_parts_is_separated_by_node_names_and_gated_on_coverage(self):
+        # The OmniPart route: the final pass gets parts.json instead of masks, and a part whose mesh covers too
+        # little of its mask is the retryable part_missing.
+        grip = {"name": "grip", "kind": "grip", "text": "the grip"}
+        slide = {"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0, "text": "the slide"}
+        for coverage, expected in ((0.9, []), (0.2, ["part_missing"])):
+            with self.subTest(coverage=coverage), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
+                (root / "source/parts").mkdir(parents=True)
+                (root / "source/parts/parts.json").write_text("{}")
+                with patch("slopforge.pipelines.model._concept_view",
+                           return_value={"status": "skipped", "silhouette_iou": 0.95}):
+                    candidate = self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)),
+                                                cutout=root / "cutout.png", limits={"min_part_coverage": 0.6},
+                                                asset_extra={"pivot": "grip", "parts": [grip, slide]},
+                                                lineage_extra={"part_masks": root / "parts_1"},
+                                                mesh_extra={"part_model": "omnipart", "parts": {
+                                                    "slide": {"kind": "slide", "coverage": coverage},
+                                                    "grip": {"kind": "grip", "coverage": None},
+                                                    "body": {"kind": "body", "coverage": None}}})
+                options = self.process_options
+                self.assertEqual(options["parts"], [])  # no masks to cut: the parts come from the GLB's nodes
+                self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
+                codes = [code for code in candidate["validation"].get("failure_codes", []) if code == "part_missing"]
+                self.assertEqual(codes, expected)
+                self.assertEqual(candidate["validation"]["measured"]["part_coverage"], {"slide": coverage})
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the

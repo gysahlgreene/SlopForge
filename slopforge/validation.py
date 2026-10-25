@@ -377,6 +377,30 @@ def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
     return validation
 
 
+def apply_part_coverage(validation, generated, declared, minimum):
+    """Fail a weapon generated as parts (OmniPart) when a declared hinge or slide covers too little of its concept
+    mask, or was not generated at all (retryable part_missing: another seed may place it)."""
+    moving = [part["name"] for part in declared if part["kind"] in ("hinge", "slide")]
+    coverage = {name: generated[name].get("coverage") for name in moving
+                if name in generated and generated[name].get("coverage") is not None}
+    short = [name for name in moving if coverage.get(name) is None or coverage[name] < minimum]
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["part_coverage"] = coverage
+    limits["min_part_coverage"] = minimum
+    # part_missing's rejection metric (failures.py): how many moving parts are missing against a limit of 0
+    measured["moving_parts_missing"] = max(measured.get("moving_parts_missing", 0), len(short))
+    limits["max_moving_parts_missing"] = 0
+    if short:
+        detail = ", ".join(f"{name} {coverage[name]:.2f}" if coverage.get(name) is not None else f"{name} absent"
+                           for name in short)
+        validation["errors"] = [*validation.get("errors", []),
+            f"moving part(s) {', '.join(short)} came out with mask coverage below {minimum:g} ({detail}), so "
+            "another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_moving_parts(validation, declared):
     """Fail a weapon whose declared moving part did not come out as its own piece (retryable quality code).
 

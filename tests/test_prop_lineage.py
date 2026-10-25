@@ -390,6 +390,51 @@ avoid: [environment]
             self.assertEqual(stage["status"], outcome)
         self.assertEqual(calls, [("relay", ["trigger"], "relay.prefab", "Animations")] * 2)  # the grip is not a clip
 
+    def test_a_weapon_with_a_moving_part_is_generated_as_parts(self):
+        # The part backend replaces mesh generation when the type names it and a hinge or slide is declared; its
+        # name is part of the mesh stage's settings, so a change of backend invalidates the stage.
+        from slopforge.parts import parse_part_spec
+        self._concept_candidates()
+        self.asset_type["part_model"] = "omnipart"
+        self.record["parts"] = [parse_part_spec("grip=grip: the grip"), parse_part_spec("trigger=hinge:x:-20..0: the trigger")]
+
+        def masks(_config, cutout, parts, out_dir):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for part in parts:
+                Image.new("L", (32, 32), 255).save(out_dir / f"{part['name']}.png")
+            (out_dir / "masks.json").write_text(json.dumps({"parts": {part["name"]: {"share": 0.3} for part in parts}}))
+            Image.new("RGB", (32, 32)).save(out_dir / "parts_overlay.png")
+            return {"parts": {part["name"]: {"share": 0.3} for part in parts}}
+        calls = []
+
+        def part_model(root, config, cutout, name, destination, metadata, seed, parts, masks_dir, face_budget,
+                       materials, finish, **options):
+            calls.append({"parts": [part["name"] for part in parts], "masks": masks_dir.name, "budget": face_budget,
+                          "finish": finish, "seed": seed})
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"parts")
+            metadata.write_text(json.dumps({"workflow": None, "seed": seed, "part_model": "omnipart",
+                                            "textured": True, "textures": {}, "parts": {}}))
+        seen = {}
+
+        def native(root, config, context, asset_type, asset, number, mesh_info, lineage=None):
+            seen["mesh_info"] = mesh_info
+            return self._materializer(root, config, asset_type, asset, number, "parts", None, lineage=lineage,
+                                      seed=mesh_info.get("seed"))
+        with patch("slopforge.pipelines.model.make_part_masks", side_effect=masks), \
+                patch("slopforge.pipelines.model.generate_part_model", side_effect=part_model):
+            self._approve(lambda *_args, **_kwargs: self.fail("generate_model must not run on the part route"),
+                          native_materializer=native)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["parts"], ["grip", "trigger"])
+        self.assertTrue(calls[0]["masks"].startswith("parts_"))
+        self.assertEqual((calls[0]["budget"], calls[0]["finish"]), (27000, "satin"))  # 90% of the 30,000 default
+        self.assertEqual(seen["mesh_info"]["part_model"], "omnipart")
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
+        self.assertEqual(stage["settings"]["part_model"], "omnipart")
+        self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]), ["part_model.py", "prepare_parts.py"])
+
     def test_same_bytes_at_different_candidate_and_final_paths_keep_same_hash(self):
         self._concept_candidates()
         self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
