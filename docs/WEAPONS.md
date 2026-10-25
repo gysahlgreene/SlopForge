@@ -208,8 +208,8 @@ pass):
    the centroid of its vertices within 1% of the size of the rest of the weapon's surface (its contact), or at its
    box centre when it touches nothing. The hierarchy, FBX and Unity motion stage are the same as for a cut weapon.
 
-**Gate:** a declared hinge or slide whose coverage is below the type's `min_part_coverage` (0.6, provisional; the
-first live runs calibrate it), or that was not generated at all, fails as the retryable `part_missing` and the
+**Gate:** a declared hinge or slide whose coverage is below the type's `min_part_coverage` (0.55: on the first live
+runs passing parts covered 0.61–0.96 of their masks and rejected ones 0.18–0.38), or that was not generated at all, fails as the retryable `part_missing` and the
 next seed is tried. The spike of 2026-10-25 lost a part in one seed of four.
 
 **Identity:** the backend's name and the hashes of `part_model.py` and `prepare_parts.py` are part of the mesh

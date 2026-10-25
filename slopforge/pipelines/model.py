@@ -1289,7 +1289,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
-                                         asset.get("parts") or [], asset_type.get("min_part_coverage", 0.6))
+                                         asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
