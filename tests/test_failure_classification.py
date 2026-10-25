@@ -1015,6 +1015,28 @@ class PropComponentBudgetTests(unittest.TestCase):
         absent = apply_part_coverage(_quality_report(component_count=1), {"grip": generated["grip"]}, declared, 0.6)
         self.assertEqual(absent["failure_codes"], ["part_missing"])
 
+    def test_a_base_colour_without_textured_pixels_records_no_metric_and_stays_retryable(self):
+        # 2026-10-25 live pistol: an all-black atlas left no texels to measure, the chroma metrics became NaN, the
+        # failure record could not carry its evidence, and a retryable part_missing was reported as final.
+        import json, tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.validation import apply_concept_colour, concept_colour_fidelity
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            concept = Image.new("RGBA", (32, 32), (0, 0, 0, 0)); concept.paste((160, 90, 40, 255), (4, 4, 28, 28))
+            concept.save(root / "cutout.png")
+            Image.new("RGB", (32, 32), (0, 0, 0)).save(root / "basecolor.png")
+            fidelity = concept_colour_fidelity(root / "cutout.png", root / "basecolor.png")
+            self.assertEqual((fidelity["texture_chroma"], fidelity["concept_hue_difference"], fidelity["concept_chroma_ratio"]),
+                             (None, None, None))
+            json.dumps(fidelity, allow_nan=False)  # the failure record must be able to carry it
+            report = apply_concept_colour(_quality_report(component_count=1), fidelity, max_hue_difference=4,
+                                          min_chroma_ratio=0.6)
+            self.assertEqual(report["status"], "passed_with_warnings")
+            self.assertTrue(any("no textured pixels" in warning for warning in report["warnings"]))
+            json.dumps(report, allow_nan=False)
+
     def test_a_declared_moving_part_that_did_not_come_out_is_retried(self):
         from slopforge.validation import apply_moving_parts
         report = _quality_report(component_count=1)

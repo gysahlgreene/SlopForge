@@ -551,8 +551,15 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
             base = np.asarray(image.convert("RGB"), dtype=float)[::step, ::step].reshape(-1, 3)
         texture, source = base[base.sum(-1) > 15], "atlas"  # unused atlas texels are black
     concept = np.median(_lab(cut[..., :3][cut[..., 3] > 200])[:, 1:], 0)
+    c1 = float(np.hypot(*concept))
+    if not len(texture):
+        # An all-black map has no texel to measure (2026-10-25 live pistol); a NaN here would make the failure
+        # record unserialisable and a retryable failure final. The checks skip with a warning instead.
+        return {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": None,
+                "concept_hue_difference": None, "concept_chroma_ratio": None, "concept_darkened_share": darkened,
+                "reason": "no textured pixels"}
     texture = np.median(_lab(texture)[:, 1:], 0)
-    c1, c2 = float(np.hypot(*concept)), float(np.hypot(*texture))
+    c2 = float(np.hypot(*texture))
     hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
     fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
                 "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
@@ -584,6 +591,12 @@ def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chro
             validation["failure_codes"] = [*validation.get("failure_codes", []), "colour_darkened"]
             validation["status"] = "failed"
     if fidelity["concept_chroma"] < MIN_CONCEPT_CHROMA:
+        return validation
+    if fidelity.get("texture_chroma") is None:
+        validation["warnings"] = [*validation.get("warnings", []),
+            f"colour against the concept was not checked: {fidelity.get('reason', 'no textured pixels')}"]
+        if validation.get("status") == "passed":
+            validation["status"] = "passed_with_warnings"
         return validation
     limits = validation.setdefault("limits", {})
     checks = (("colour_hue_shift", "concept_hue_difference", "max_concept_hue_difference", max_hue_difference,
