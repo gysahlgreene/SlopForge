@@ -29,6 +29,19 @@ class PartIdTests(unittest.TestCase):
         self.assertTrue((ids[20:60, 0:40] == 3).all())
         self.assertEqual(int((ids == 0).sum()), 0)
 
+    def test_body_under_a_slide_that_dips_at_the_muzzle_stays_body(self):
+        # 2026-10-25 live pistol: the slide's lowest row was at the muzzle, so "above the slide's bottom line" took
+        # the frame under the whole slide and OmniPart grew a second shell over it. Only body pixels with no slide
+        # below them in their column (the hammer behind it, a sight on top of it) are the rear part.
+        alpha = np.ones((60, 100), bool)
+        slide = np.zeros_like(alpha); slide[0:20, 10:90] = True; slide[20:30, 80:90] = True  # dips at the muzzle
+        ids, table = part_ids(alpha, {"slide": slide}, [{"name": "slide", "kind": "slide"}])
+        rear = table[-1]["id"]
+        self.assertTrue((ids[0:30, 0:10] == rear).all())  # the hammer: columns without slide, above its line
+        self.assertTrue((ids[20:30, 10:80] == 2).all())  # the frame under the slide stays body
+        self.assertTrue((ids[0:20, 90:100] == rear).all())  # ahead of the slide, above its line
+        self.assertTrue((ids[30:60, :] == 2).all())
+
     def test_body_pixels_above_each_slide_become_rear_parts(self):
         alpha = np.ones((60, 100), bool)
         upper = np.zeros_like(alpha); upper[0:10, 20:100] = True
@@ -59,11 +72,34 @@ class PartBoxTests(unittest.TestCase):
         # A wide, low block whose left two thirds are tall: the voxel footprint's tall end is at low x
         alpha = np.zeros((40, 60), bool); alpha[20:40, :] = True; alpha[0:20, 0:40] = True
         coords = np.concatenate([block_coords(0, 60, 0, 20), block_coords(0, 40, 20, 40)])
-        sign, _bbox, lo, hi = object_frame(alpha, coords)
-        self.assertEqual(sign, 1)
-        self.assertEqual(object_frame(alpha[:, ::-1], coords)[0], -1)
+        frame = object_frame(alpha, coords)
+        sign, lo, hi = frame.sign, frame.lo, frame.hi
+        self.assertEqual((sign, frame.axis), (1, 0))
+        self.assertEqual(object_frame(alpha[:, ::-1], coords).sign, -1)
         np.testing.assert_allclose(lo, [-0.5 + 0.5 / 64, -0.5 + 28.5 / 64, -0.5 + 0.5 / 64], atol=1e-6)
         np.testing.assert_allclose(hi, [-0.5 + 59.5 / 64, -0.5 + 35.5 / 64, -0.5 + 39.5 / 64], atol=1e-6)
+
+    def test_an_object_lying_along_grid_y_maps_image_columns_to_y(self):
+        # 2026-10-25 live rifle: OmniPart laid it along y; mapping columns to x gave every part a thin full-length box
+        alpha = np.zeros((40, 60), bool); alpha[20:40, :] = True; alpha[0:20, 0:40] = True
+        xs, ys, zs = np.meshgrid(np.arange(28, 36), np.arange(0, 60), np.arange(0, 20), indexing="ij")
+        low = np.stack([np.zeros(xs.size, int), xs.ravel(), ys.ravel(), zs.ravel()], 1)
+        xs, ys, zs = np.meshgrid(np.arange(28, 36), np.arange(0, 40), np.arange(20, 40), indexing="ij")
+        tall = np.stack([np.zeros(xs.size, int), xs.ravel(), ys.ravel(), zs.ravel()], 1)
+        coords = np.concatenate([low, tall])
+        frame = object_frame(alpha, coords)
+        self.assertEqual((frame.axis, frame.sign), (1, 1))
+        top = np.zeros_like(alpha); top[0:20, 0:40] = True
+        ids, table = part_ids(alpha, {"top": top}, [{"name": "top", "kind": "slide"}])
+        boxes = part_boxes(ids, table, frame)
+        lo, hi = frame.lo, frame.hi
+        names = [entry["name"] for entry in sorted(table, key=lambda e: -np.where(ids == e["id"])[0].max())]
+        box = boxes[names.index("top")]
+        self.assertAlmostEqual(float(box[0][1]), float(lo[1]), places=6)  # along y, the first two thirds
+        self.assertAlmostEqual(float(box[1][1]), float(lo[1] + (hi[1] - lo[1]) * 39 / 59), places=6)
+        self.assertAlmostEqual(float(box[0][0]), float(lo[0]), places=6)  # the full thickness along x
+        self.assertAlmostEqual(float(box[1][0]), float(hi[0]), places=6)
+        self.assertGreaterEqual(coverage(ids, table, frame, {"top": tall})["top"], 0.9)
 
     def test_boxes_follow_a_tall_object(self):
         # A tall object (muzzle down): height along image rows maps to grid z, not to x
@@ -75,7 +111,7 @@ class PartBoxTests(unittest.TestCase):
         boxes = part_boxes(ids, table, frame)
         names = [entry["name"] for entry in sorted(table, key=lambda e: -np.where(ids == e["id"])[0].max())]
         slide = boxes[names.index("slide")]
-        lo, hi = frame[2], frame[3]
+        lo, hi = frame.lo, frame.hi
         self.assertAlmostEqual(float(slide[1][2]), float(hi[2]), places=6)
         self.assertAlmostEqual(float(slide[0][2]), float(hi[2] - (hi[2] - lo[2]) * 19 / 59), places=6)
         self.assertAlmostEqual(float(slide[0][0]), float(lo[0]), places=6)
@@ -91,8 +127,8 @@ class PartBoxTests(unittest.TestCase):
         ordered = [entry["name"] for entry in sorted(table, key=lambda e: -np.where(ids == e["id"])[0].max())]
         self.assertEqual(ordered, ["body", "trigger", "slide", "slide_rear"])
         for box in boxes:
-            self.assertAlmostEqual(float(box[0][1]), float(frame[2][1]), places=6)
-            self.assertAlmostEqual(float(box[1][1]), float(frame[3][1]), places=6)
+            self.assertAlmostEqual(float(box[0][1]), float(frame.lo[1]), places=6)
+            self.assertAlmostEqual(float(box[1][1]), float(frame.hi[1]), places=6)
         self.assertEqual([box[0][0] <= box[1][0] and box[0][2] <= box[1][2] for box in boxes], [True] * 4)
 
 

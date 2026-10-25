@@ -17,6 +17,7 @@ import json
 import re
 import struct
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
@@ -38,39 +39,50 @@ def part_ids(alpha, masks, parts):
     ids[alpha & (ids == 0)] = body
     table.append({"name": "body", "kind": "body", "id": body})
     for part in [entry for entry in table if entry["kind"] == "slide"]:
-        rows = np.flatnonzero((ids == part["id"]).any(axis=1))
+        slide = ids == part["id"]
+        rows = np.flatnonzero(slide.any(axis=1))
         if not len(rows):
             continue
         above = np.zeros(alpha.shape, bool)
         above[: rows.max() + 1] = True
-        rear = (ids == body) & above
+        # ... but not the frame under the slide: a body pixel with slide pixels above it in its column stays body
+        # (2026-10-25 live pistol: the slide dipped at the muzzle and the whole frame top became a second shell)
+        under = np.cumsum(slide, axis=0) > 0
+        rear = (ids == body) & above & ~under
         if rear.any():
             ids[rear] = len(table) + 1
             table.append({"name": f"{part['name']}_rear", "kind": "static", "id": len(table) + 1})
     return ids, table
 
 
-def object_frame(alpha, coords):
-    """How the concept maps onto the occupied voxel grid: (x_sign, (u0, u1, v0, v1), lo, hi).
+Frame = namedtuple("Frame", "sign bbox lo hi axis")
 
-    (u0, u1, v0, v1) is the object's pixel extent; lo and hi its voxel extent in the [-0.5, 0.5] frame. Image columns
-    run along grid x, mirrored when x_sign is -1 (the sign whose (x, z) footprint overlaps the silhouette better);
-    image rows run down grid z; the thickness is y.
+
+def object_frame(alpha, coords):
+    """How the concept maps onto the occupied voxel grid.
+
+    bbox is the object's pixel extent (u0, u1, v0, v1); lo and hi its voxel extent in the [-0.5, 0.5] frame. Image
+    columns run along the horizontal grid axis `axis` (0 or 1: OmniPart lays a weapon along either), mirrored when
+    sign is -1; of the four, the one whose (axis, z) footprint overlaps the silhouette best. Image rows run down
+    grid z; the other horizontal axis is the thickness.
     """
     xyz = np.asarray(coords)[:, 1:]
     low, high = xyz.min(0), xyz.max(0)
     rows, cols = np.nonzero(alpha)
     u0, u1, v0, v1 = int(cols.min()), int(cols.max()), int(rows.min()), int(rows.max())
-    footprint = np.zeros((high[2] - low[2] + 1, high[0] - low[0] + 1), bool)
-    footprint[xyz[:, 2] - low[2], xyz[:, 0] - low[0]] = True
-    silhouette = Image.fromarray(np.asarray(alpha[v0:v1 + 1, u0:u1 + 1], np.uint8) * 255)
-    silhouette = np.asarray(silhouette.resize((footprint.shape[1], footprint.shape[0]), Image.NEAREST)) > 0
-    silhouette = silhouette[::-1]  # image row 0 is the top; grid z grows upwards
-
-    def overlap(candidate):
-        return (footprint & candidate).sum() / max((footprint | candidate).sum(), 1)
-    sign = 1 if overlap(silhouette) >= overlap(silhouette[:, ::-1]) else -1
-    return sign, (u0, u1, v0, v1), (low + 0.5) / GRID - 0.5, (high + 0.5) / GRID - 0.5
+    best = None
+    for axis in (0, 1):
+        footprint = np.zeros((high[2] - low[2] + 1, high[axis] - low[axis] + 1), bool)
+        footprint[xyz[:, 2] - low[2], xyz[:, axis] - low[axis]] = True
+        silhouette = Image.fromarray(np.asarray(alpha[v0:v1 + 1, u0:u1 + 1], np.uint8) * 255)
+        silhouette = np.asarray(silhouette.resize((footprint.shape[1], footprint.shape[0]), Image.NEAREST)) > 0
+        silhouette = silhouette[::-1]  # image row 0 is the top; grid z grows upwards
+        for sign, candidate in ((1, silhouette), (-1, silhouette[:, ::-1])):
+            score = (footprint & candidate).sum() / max((footprint | candidate).sum(), 1)
+            if best is None or score > best[0]:
+                best = (score, sign, axis)
+    _score, sign, axis = best
+    return Frame(sign, (u0, u1, v0, v1), (low + 0.5) / GRID - 0.5, (high + 0.5) / GRID - 0.5, axis)
 
 
 def _ordered(ids, table):
@@ -79,30 +91,34 @@ def _ordered(ids, table):
 
 
 def _grid_span(ids, entry, frame):
-    """A part's mask extent mapped onto the grid: (xa, xb), (za, zb) in the [-0.5, 0.5] frame."""
-    sign, (u0, u1, v0, v1), lo, hi = frame
+    """A part's mask extent mapped onto the grid: (ha, hb) along the horizontal axis, (za, zb) up, in [-0.5, 0.5]."""
+    sign, (u0, u1, v0, v1), lo, hi, axis = frame
     rows, cols = np.nonzero(ids == entry["id"])
     ua, ub = (cols.min() - u0) / max(u1 - u0, 1), (cols.max() - u0) / max(u1 - u0, 1)
     va, vb = (rows.min() - v0) / max(v1 - v0, 1), (rows.max() - v0) / max(v1 - v0, 1)
-    xa, xb = lo[0] + ua * (hi[0] - lo[0]), lo[0] + ub * (hi[0] - lo[0])
+    ha, hb = lo[axis] + ua * (hi[axis] - lo[axis]), lo[axis] + ub * (hi[axis] - lo[axis])
     if sign < 0:
-        xa, xb = lo[0] + hi[0] - xb, lo[0] + hi[0] - xa
-    return (xa, xb), (hi[2] - vb * (hi[2] - lo[2]), hi[2] - va * (hi[2] - lo[2]))
+        ha, hb = lo[axis] + hi[axis] - hb, lo[axis] + hi[axis] - ha
+    return (ha, hb), (hi[2] - vb * (hi[2] - lo[2]), hi[2] - va * (hi[2] - lo[2]))
 
 
 def part_boxes(ids, table, frame):
     """One axis-aligned box per part in OmniPart's bottom-up order, spanning the object's full thickness."""
-    lo, hi = frame[2], frame[3]
+    lo, hi, axis = frame.lo, frame.hi, frame.axis
+    other = 1 - axis
     boxes = []
     for entry in _ordered(ids, table):
-        (xa, xb), (za, zb) = _grid_span(ids, entry, frame)
-        boxes.append([[xa, lo[1], za], [xb, hi[1], zb]])
+        (ha, hb), (za, zb) = _grid_span(ids, entry, frame)
+        box_lo, box_hi = [0.0, 0.0, za], [0.0, 0.0, zb]
+        box_lo[axis], box_hi[axis] = ha, hb
+        box_lo[other], box_hi[other] = lo[other], hi[other]
+        boxes.append([box_lo, box_hi])
     return np.asarray(boxes, np.float32)
 
 
 def coverage(ids, table, frame, part_voxels):
     """For each declared hinge or slide: the share of its mask's grid cells (x, z) that hold one of its voxels."""
-    sign, (u0, u1, v0, v1), lo, hi = frame
+    sign, (u0, u1, v0, v1), lo, hi, axis = frame
     low = np.rint((lo + 0.5) * GRID - 0.5).astype(int)
     high = np.rint((hi + 0.5) * GRID - 0.5).astype(int)
     report = {}
@@ -113,11 +129,11 @@ def coverage(ids, table, frame, part_voxels):
         u = (cols - u0) / max(u1 - u0, 1)
         if sign < 0:
             u = 1 - u
-        x = np.rint(low[0] + u * (high[0] - low[0])).astype(int)
+        h = np.rint(low[axis] + u * (high[axis] - low[axis])).astype(int)
         z = np.rint(high[2] - (rows - v0) / max(v1 - v0, 1) * (high[2] - low[2])).astype(int)
-        cells = set(zip(z.tolist(), x.tolist()))
+        cells = set(zip(z.tolist(), h.tolist()))
         voxels = np.asarray(part_voxels.get(entry["name"], np.zeros((0, 4), int)))
-        held = set(zip(voxels[:, 3].tolist(), voxels[:, 1].tolist())) if len(voxels) else set()
+        held = set(zip(voxels[:, 3].tolist(), voxels[:, 1 + axis].tolist())) if len(voxels) else set()
         report[entry["name"]] = len(cells & held) / len(cells) if cells else 0.0
     return report
 
@@ -244,7 +260,8 @@ def main(request_path):
     covered = coverage(ids, table, frames["frame"], voxels)
     faces = name_parts(out_dir / "mesh_textured.glb", out_dir / "parts.glb", [entry["name"] for entry in ordered])
     boxes = part_boxes(ids, table, frames["frame"])
-    report = {"seed": request["seed"], "x_sign": frames["frame"][0], "backend": backend, "model_weights": weights,
+    report = {"seed": request["seed"], "x_sign": frames["frame"].sign, "axis": frames["frame"].axis,
+              "backend": backend, "model_weights": weights,
               "parts": {entry["name"]: {"kind": entry["kind"], "id": entry["id"],
                                         "faces": faces.get(entry["name"], 0),
                                         "box": boxes[index].tolist(), "voxels": int(len(voxels[entry["name"]])),
