@@ -211,6 +211,45 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'pocket.fbx')!r}, use_selec
         self.assertLessEqual(report["motions"][0]["penetration"], 0.02, report["errors"])
         self.assertFalse([error for error in report["errors"] if "penetrat" in error], report["errors"])
 
+    def test_a_part_moved_into_a_pocket_of_an_open_body_is_not_inside_it(self):
+        """As the pocket above, with the body open as generated bodies are (a hybrid pistol's kept 512 open edges,
+        2026-10-25): no underside to the slab, the block open towards the pocket. Rays up and forward from the pocket
+        each cross one face, so even counted crossing by crossing their parity reads the clear slide inside."""
+        script = f"""import bpy, bmesh
+from mathutils import Vector
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size, drop=None):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    if drop:
+        bm = bmesh.new(); bm.from_mesh(o.data); bm.normal_update()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.dot(drop) > 0.9], context="FACES")
+        bm.to_mesh(o.data); bm.free()
+    bpy.ops.mesh.uv_texture_add(); o.data.materials.append(bpy.data.materials.new(name))
+    return o
+body = box('body', (0, -0.5, 0.1), (0.05, 1.0, 0.2), drop=Vector((0, 0, -1)))  # Unity z 0..1, y 0..0.2; no underside
+block = box('block', (0, -0.9, -0.1), (0.05, 0.2, 0.2), drop=Vector((0, 1, 0)))  # Unity z 0.8..1; open towards the pocket
+bpy.ops.object.select_all(action='DESELECT'); block.select_set(True); body.select_set(True)
+bpy.context.view_layer.objects.active = body; bpy.ops.object.join()
+bpy.context.scene.cursor.location = (0, 0, 0); bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+slide = box('slide', (0, 0.4, -0.1), (0.02, 0.2, 0.1))  # behind the body: Unity z -0.5..-0.3, y -0.15..-0.05
+slide.parent = body; slide['slopforge_part'] = 'slide'
+bpy.context.scene.cursor.location = (0, 0.4, -0.1); bpy.ops.object.select_all(action='DESELECT')
+slide.select_set(True); bpy.context.view_layer.objects.active = slide; bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.fbx(filepath={str(self.folder / 'open.fbx')!r}, use_selection=True, object_types={{'MESH'}},
+    axis_forward='-Z', axis_up='Y', apply_unit_scale=True, bake_space_transform=False, add_leaf_bones=False,
+    use_custom_props=True)
+"""
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                       check=True, capture_output=True)
+        parts = [{"name": "slide", "kind": "slide", "axis": "z", "min": 0.0, "max": 0.7}]
+        report = build_weapon_prefab(self.root, "open", self.folder / "open.fbx", parts,
+                                     prefab=self.folder / "open.prefab", clip_folder=self.folder / "Animations",
+                                     render=self.folder / "open.png", held=False, mass=1.0, layer=None)
+        self.assertLessEqual(report["motions"][0]["penetration"], 0.02, report["errors"])
+
     def test_a_hinge_that_swings_into_the_body_fails_the_penetration_check(self):
         fbx = self._export()
         # a flap at the slab's front end, folded back over the slab: in Unity's sense a negative turn about x takes

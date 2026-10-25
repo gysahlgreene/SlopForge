@@ -275,65 +275,53 @@ public static class CLASS_NAME
     }
 
     // The part's vertices inside the rest of the model, sampled through its clip: a lid swinging into its chest, a
-    // drawer travelling past its housing. A vertex is inside when a ray from it crosses the body's surface an odd
-    // number of times (temporary exact colliders, back faces counted). The share over the rest pose is reported.
+    // drawer travelling past its housing. A vertex is inside where the body's winding number is over a half
+    // (Winding). The share over the rest pose is reported.
     static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request)
     {
+        // The body's triangles in world space; it stays still while the part's clip is sampled.
         var names = new HashSet<string>(request.parts.Select(p => p.name));
-        var temporary = new List<MeshCollider>();
+        var corners = new List<Vector3>();
         foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
         {
             if (names.Contains(filter.name) || filter.transform.IsChildOf(part)) continue;
-            var collider = filter.gameObject.AddComponent<MeshCollider>();
-            collider.sharedMesh = filter.sharedMesh;
-            collider.convex = false;
-            temporary.Add(collider);
+            var points = filter.sharedMesh.vertices;
+            foreach (var index in filter.sharedMesh.triangles) corners.Add(filter.transform.TransformPoint(points[index]));
         }
         var mesh = part.GetComponentInChildren<MeshFilter>()?.sharedMesh;
-        if (mesh == null || temporary.Count == 0) { foreach (var c in temporary) UnityEngine.Object.DestroyImmediate(c); return 0f; }
+        if (mesh == null || corners.Count == 0) return 0f;
+        var body = corners.ToArray();
         var step = Mathf.Max(1, mesh.vertexCount / 400);
         var vertices = mesh.vertices.Where((v, i) => i % step == 0).ToArray();
-        var hadBackfaces = Physics.queriesHitBackfaces;
-        Physics.queriesHitBackfaces = true;
         var shares = new List<float>();
         AnimationMode.StartAnimationMode();
         for (var sample = 0; sample <= 8; sample++)
         {
             AnimationMode.SampleAnimationClip(root, clip, 0.5f * sample / 8f);
-            Physics.SyncTransforms();
             var filter = part.GetComponentInChildren<MeshFilter>();
-            var inside = 0;
-            foreach (var vertex in vertices)
-            {
-                var point = filter.transform.TransformPoint(vertex);
-                // Generated meshes have holes, so one ray's parity lies (a clear chest lid read 0.08 along x,
-                // 2026-10-25): a point is inside when rays along two of three axes cross one body mesh an odd
-                // number of times, as the Blender sweep (mesh_cleanup.sweep_penetration) counts it.
-                if (temporary.Any(c => new[] { Vector3.right, Vector3.up, Vector3.forward }
-                        .Count(direction => Crossings(c, point, direction) % 2 == 1) >= 2)) inside++;
-            }
+            var inside = vertices.Count(vertex => Math.Abs(Winding(filter.transform.TransformPoint(vertex), body)) > 0.5);
             shares.Add((float)inside / vertices.Length);
         }
         AnimationMode.SampleAnimationClip(root, clip, 0f);
         AnimationMode.StopAnimationMode();
-        Physics.queriesHitBackfaces = hadBackfaces;
-        foreach (var c in temporary) UnityEngine.Object.DestroyImmediate(c);
         return Mathf.Max(0f, shares.Max() - shares[0]);
     }
 
-    // The times a ray crosses one collider. RaycastAll reports one hit per collider, so counting its hits read a
-    // ray through a closed body as one crossing (a hybrid pistol's clear slide read 0.103 inside, 2026-10-25): the
-    // ray is marched on from just past the nearest hit.
-    static int Crossings(Collider collider, Vector3 point, Vector3 direction)
+    // The generalized winding number of a point about triangles (three corners each): about 1 inside a closed
+    // surface and 0 outside, and near that where it has holes. Generated bodies are open, so a ray's parity lied
+    // (a hybrid pistol's open body held half its slide by parity, 2026-10-25); the Blender sweep
+    // (mesh_cleanup.sweep_penetration) measures the same way.
+    static double Winding(Vector3 point, Vector3[] corners)
     {
-        var count = 0;
-        for (; count < 64; count++)
+        double total = 0;
+        for (var i = 0; i + 2 < corners.Length; i += 3)
         {
-            var hits = Physics.RaycastAll(point, direction, 1000f).Where(h => h.collider == collider).ToArray();
-            if (hits.Length == 0) break;
-            point = hits.OrderBy(h => h.distance).First().point + direction * 1e-5f;
+            Vector3 a = corners[i] - point, b = corners[i + 1] - point, c = corners[i + 2] - point;
+            double la = a.magnitude, lb = b.magnitude, lc = c.magnitude;
+            total += Math.Atan2(Vector3.Dot(a, Vector3.Cross(b, c)),
+                                la * lb * lc + Vector3.Dot(a, b) * lc + Vector3.Dot(b, c) * la + Vector3.Dot(c, a) * lb);
         }
-        return count;
+        return total / (2 * Math.PI);
     }
 
     static Socket AddSocket(Transform parent, string name, Vector3 position)

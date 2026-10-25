@@ -294,10 +294,25 @@ box (above), and gaps narrower than ~6% of the object inside the chosen mask are
 chest's lid does not split the lid's mask (OmniPart had left the band and the lid's ends with the body).
 
 Live (2026-10-25): on the H1 pistol with P4's OmniPart parts, alignment 1.4% of the pistol's size, the split in 6 s,
-slide 0.98 of its mask with 0.01 outside it, every opening closed, the motion sweep 0.000; with the slide back it
-reads cleanly at inspect distance with single-sided faces. On three new pistol seeds the slides took 27%, 30% and 19%
-of the surface after the vote balancing (7%, 30%, 7% before); the coverage gate rejects the weak ones. A chest from
-the old lid mask opened to a wooden cavity; its lid's ends and band stayed on the body until the mask closing.
+slide 0.98 of its mask with 0.01 outside it, every opening closed; with the slide back it reads cleanly at inspect
+distance with single-sided faces (its motion sweep then read 0.000, but that sweep was blind; see the prefab
+section). On three new pistol seeds the slides took 27%, 30% and 19% of the surface after the vote balancing (7%,
+30%, 7% before); the coverage gate rejects the weak ones. A chest from the old lid mask opened to a wooden cavity;
+its lid's ends and band stayed on the body until the mask closing.
+
+**Known limits (the clean live reruns, 2026-10-25 evening).** Both passed every gate and neither is usable:
+- On the pistol (HP2) the cut between slide and frame came out as loops that zigzag and cross themselves 9–10 times
+  in their best-fit plane. No flat fill closes such a loop: the slide's 351 open edges kept 355 after closing, the
+  body's fills reached outside the pistol and were dropped, and with the slide back and the trigger pulled the
+  pieces show holes. No gate measures a piece's openings yet.
+- On the side the concept does not show, the pistol's slide was labelled body over its rear half. The coverage gate
+  projects the part onto its mask from the concept's view, so it saw only the good side (0.885).
+- The chest's lid box was declared too low (`0.08,0.23,0.94,0.50` on a concept whose dome starts at 0.15): SAM's
+  mask, OmniPart's lid and the split all followed it, the lid came out as its iron bands, and the coverage gate,
+  measured against the same mask, passed it at 0.76. A declared box is trusted as given.
+
+Until these are closed the hybrid route is Experimental: one seed per asset has been inspected, and the pipeline's
+gates do not yet reject what inspection rejected.
 
 ## Props with parts
 
@@ -327,19 +342,30 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
 - the W9 checks: each pulse clip sampled at rest and limit (pivot drift ≤ 1 mm, angle ±0.5°, travel ±1 mm), and for
   held assets the tip along +Z and the root inside the bounds;
 - an **interpenetration check** through each part's range: the clip is sampled at nine points and the share of the
-  part's vertices inside the rest of the model (rays along two of three axes crossing the body an odd number of times)
-  must not rise more than 0.02 over its rest value — a lid swinging into its chest or a drawer travelling past its
+  part's vertices inside the rest of the model (the body's generalized winding number over a half) must not rise more
+  than 0.02 over its rest value — a lid swinging into its chest or a drawer travelling past its
   housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
   the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
 
 The final pass already sweeps each part through its declared range in Blender, before any material is generated:
 the share of the part's vertices inside the rest of the model at the worst point of its range, over its share at
-rest (a point counts as inside when rays along two of three axes cross a mesh an odd number of times, since
-generated meshes have holes). A part over the type's `max_part_penetration` (0.02) is the retryable
-`part_penetrates`, so a seed whose lid turns into its chest is replaced before materials and Unity (the C3 chest's
-lid read 0.047 in Blender and 0.169 in Unity; both reject it). Unity repeats the check on the published prefab
-with the same two-of-three-rays rule; a single ray along x read 0.03–0.08 on pistol triggers and a chest lid that
-were clear to the eye and to the Blender sweep (2026-10-25).
+rest. A part over the type's `max_part_penetration` (0.02) is the retryable `part_penetrates`, so a seed whose lid
+turns into its chest is replaced before materials and Unity. Unity repeats the check on the published prefab with
+the same measure.
+
+Both checks call a point inside where the rest of the model's **generalized winding number** is over a half: the
+signed solid angles of its triangles seen from the point, over 4π (about 1 inside a closed surface, 0 outside). A
+ray's parity is not usable here. Generated surfaces are open, and hybrid pieces more so: the 2026-10-25 hybrid
+pistol's body kept 512 open edges after closing, and by two-of-three ray parity 51% of its slide sat inside the body
+at rest. Two counting bugs also hid this until then. Unity's `Physics.RaycastAll` reports one hit per collider, so a
+ray through a closed body counted one crossing. The Blender sweep built its trees in each object's own space and
+cast from world-space points, so a body away from the origin was never hit. Figures from before that fix (the C3
+chest's lid at 0.047 in Blender and 0.169 in Unity) were measured with the broken counts. With the winding number,
+on the live hybrid pistol and chest: slide 0.007 and trigger 0.0 over rest; the chest's lid 0.0 opening the right
+way and 0.515 turned the wrong way. Points beside a large opening sit near a half and can flip as the part moves;
+the share over rest absorbs most of that, and a part moving along such an opening (the pistol's trigger the wrong
+way, 0.015) stays under the limit. Penetration says nothing about the openings themselves: a piece left open shows
+holes when its part moves (see Hybrid parts).
 
 The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
