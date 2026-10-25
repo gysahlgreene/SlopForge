@@ -110,5 +110,54 @@ class CoverageTests(unittest.TestCase):
         self.assertGreaterEqual(report["slide"], 0.9)
 
 
+class MainTests(unittest.TestCase):
+    def test_main_writes_parts_glb_and_report(self):
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from PIL import Image
+        from processing import part_model
+        from processing.part_model import glb_json, pack_glb
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            image = Image.new("RGBA", (100, 60), (0, 0, 0, 0)); image.paste((90, 90, 90, 255), (0, 0, 100, 60))
+            image.save(root / "concept.png")
+            slide = Image.new("L", (100, 60), 0); slide.paste(255, (10, 0, 100, 20)); slide.save(root / "slide.png")
+            request = {"image": str(root / "concept.png"), "masks": {"slide": str(root / "slide.png")},
+                       "parts": [{"name": "slide", "kind": "slide"}], "seed": 7, "out_dir": str(root / "out")}
+            (root / "request.json").write_text(json.dumps(request))
+            coords = block_coords(2, 62, 10, 46)
+
+            def omnipart(_request, out_dir, boxes_for, _mask_path):
+                _frame, boxes = boxes_for(coords)
+                self.assertEqual(boxes.shape, (3, 2, 3))
+                # OmniPart's merged GLB: geometry_0 is its box visualisation, then one node per box in order
+                names = ["geometry_0", "geometry_1", "geometry_2", "geometry_3"]
+                doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, 1, 2, 3]}],
+                       "nodes": [{"name": name, "mesh": index} for index, name in enumerate(names)],
+                       "meshes": [{"name": name, "primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}
+                                  for name in names],
+                       "accessors": [{"count": 3, "type": "VEC3", "componentType": 5126},
+                                     {"count": 36, "type": "SCALAR", "componentType": 5125}]}
+                (Path(out_dir) / "mesh_textured.glb").write_bytes(pack_glb(doc, b""))
+                top = coords[coords[:, 3] >= 34]
+                return coords, [coords, top, coords[:0]], {"provider": "omnipart", "version": "abc", "device": "H100"}, {"omnipart/OmniPart": "rev"}
+            with patch.object(part_model, "_omnipart", side_effect=omnipart):
+                part_model.main(str(root / "request.json"))
+            names = [node["name"] for node in glb_json(root / "out/parts.glb")["nodes"]]
+            self.assertEqual(names, ["body", "slide", "slide_rear"])  # bottom-up order, box vis dropped
+            report = json.loads((root / "out/parts.json").read_text())
+            self.assertEqual(report["seed"], 7)
+            self.assertEqual(report["parts"]["slide"]["kind"], "slide")
+            self.assertGreaterEqual(report["parts"]["slide"]["coverage"], 0.9)
+            self.assertIsNone(report["parts"]["body"]["coverage"])
+            self.assertEqual(report["parts"]["slide"]["voxels"], int((coords[:, 3] >= 34).sum()))
+            self.assertEqual(len(report["parts"]["slide"]["box"]), 2)
+            self.assertEqual(report["parts"]["slide"]["faces"], 12)
+            self.assertEqual(glb_json(root / "out/parts.glb")["scenes"][0]["nodes"], [0, 1, 2])
+            self.assertEqual(report["backend"]["provider"], "omnipart")
+            self.assertTrue((root / "out/mask.exr").is_file() or (root / "out/mask.png").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

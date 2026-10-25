@@ -14,7 +14,9 @@ only. It is never called: the boxes come from the parts' 2D masks mapped onto th
 (part_boxes), and only the MIT part-synthesis stage runs.
 """
 import json
+import struct
 import sys
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -119,5 +121,134 @@ def coverage(ids, table, frame, part_voxels):
     return report
 
 
+def glb_json(path):
+    """The JSON chunk of a GLB."""
+    data = Path(path).read_bytes()
+    length = struct.unpack_from("<I", data, 12)[0]
+    return json.loads(data[20:20 + length])
+
+
+def pack_glb(doc, binary):
+    """A GLB from a glTF document and its binary chunk (both padded to 4 bytes)."""
+    text = json.dumps(doc, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    binary = binary + b"\0" * (-len(binary) % 4)
+    chunks = struct.pack("<II", len(text), 0x4E4F534A) + text
+    if binary:
+        chunks += struct.pack("<II", len(binary), 0x004E4942) + binary
+    return struct.pack("<III", 0x46546C67, 2, 12 + len(chunks)) + chunks
+
+
+def name_parts(merged, destination, names):
+    """OmniPart's merged GLB has geometry_0 (its box visualisation) then geometry_i per box in order: drop the
+    first, name the rest after their parts, and return each part's triangle count."""
+    data = Path(merged).read_bytes()
+    length = struct.unpack_from("<I", data, 12)[0]
+    doc = json.loads(data[20:20 + length])
+    binary = data[20 + length + 8:] if len(data) > 20 + length else b""
+    keep = [index for index, node in enumerate(doc["nodes"]) if node.get("name") != "geometry_0"]
+    remap = {old: new for new, old in enumerate(keep)}
+    faces = {}
+    for old in keep:
+        node = doc["nodes"][old]
+        index = int(node["name"].split("_")[-1]) - 1
+        node["name"] = names[index]
+        if "mesh" in node:
+            mesh = doc["meshes"][node["mesh"]]
+            mesh["name"] = names[index]
+            faces[names[index]] = sum(doc["accessors"][primitive["indices"]]["count"] // 3
+                                      for primitive in mesh["primitives"] if "indices" in primitive)
+    doc["nodes"] = [doc["nodes"][old] for old in keep]
+    for node in doc["nodes"]:
+        if "children" in node:
+            node["children"] = [remap[child] for child in node["children"] if child in remap]
+    for scene in doc.get("scenes", []):
+        scene["nodes"] = [remap[index] for index in scene["nodes"] if index in remap]
+    Path(destination).write_bytes(pack_glb(doc, binary))
+    return faces
+
+
+def _omnipart(request, out_dir, boxes_for, mask_path):
+    """OmniPart's sparse structure, then its MIT part synthesis in the boxes we build; returns the voxel
+    coordinates, each box's voxels, and the backend's identity. Runs in the OmniPart checkout."""
+    import os
+    import subprocess
+    import torch
+    sys.path.insert(0, os.getcwd())
+    from modules.inference_utils import gen_mesh_from_bounds, load_img_mask, merge_parts, prepare_part_synthesis_input
+    from modules.part_synthesis.pipelines import OmniPartImageTo3DPipeline
+    from modules.part_synthesis.process_utils import save_parts_outputs
+    seed, steps, cfg = int(request["seed"]), int(request.get("steps", 25)), float(request.get("cfg", 7.5))
+    pipe = OmniPartImageTo3DPipeline.from_pretrained("omnipart/OmniPart")
+    pipe.to("cuda")
+    _white, black, ordered_mask, vis = load_img_mask(request["image"], str(mask_path))
+    vis.save(out_dir / "img_mask_vis.png")
+    torch.manual_seed(seed)
+    coords = pipe.get_coords(black, num_samples=1, seed=seed,
+                             sparse_structure_sampler_params={"steps": steps, "cfg_strength": cfg}).cpu().numpy()
+    np.save(out_dir / "voxel_coords.npy", coords)
+    _frame, boxes = boxes_for(coords)
+    np.save(out_dir / "bboxes.npy", boxes)
+    gen_mesh_from_bounds(boxes).export(str(out_dir / "boxes_vis.glb"))
+    inputs = prepare_part_synthesis_input(str(out_dir / "voxel_coords.npy"), str(out_dir / "bboxes.npy"), ordered_mask)
+    result = pipe.get_slat(black, inputs["coords"], [inputs["part_layouts"]], inputs["masks"], seed=seed,
+                           slat_sampler_params={"steps": steps, "cfg_strength": cfg},
+                           formats=["mesh", "gaussian", "radiance_field"], preprocess_image=False)
+    save_parts_outputs(result, output_dir=str(out_dir), simplify_ratio=0.3, save_video=False, save_glb=True,
+                       textured=True)
+    merge_parts(str(out_dir))
+    all_coords = inputs["coords"]
+    all_coords = all_coords.cpu().numpy() if hasattr(all_coords, "cpu") else np.asarray(all_coords)
+    if all_coords.shape[1] == 3:
+        all_coords = np.concatenate([np.zeros((len(all_coords), 1), all_coords.dtype), all_coords], 1)
+    part_voxels = [all_coords[layout] for layout in inputs["part_layouts"][1:]]
+    version = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
+    backend = {"provider": "omnipart", "version": version or "unknown", "device": torch.cuda.get_device_name(0)}
+    ref = Path.home() / ".cache/huggingface/hub/models--omnipart--OmniPart/refs/main"
+    return coords, part_voxels, backend, {"omnipart/OmniPart": ref.read_text().strip() if ref.is_file() else "unknown"}
+
+
+def main(request_path):
+    request = json.loads(Path(request_path).read_text())
+    out_dir = Path(request["out_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(request["image"]) as image:
+        alpha = np.asarray(image.convert("RGBA"))[..., 3] > 0
+    masks = {}
+    for name, path in request["masks"].items():
+        with Image.open(path) as mask:
+            masks[name] = np.asarray(mask.convert("L").resize(alpha.shape[::-1], Image.NEAREST)) > 127
+    ids, table = part_ids(alpha, masks, request["parts"])
+    try:  # load_img_mask reads the ids as a 3-channel EXR
+        import os
+        os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+        import cv2
+        mask_path = out_dir / "mask.exr"
+        cv2.imwrite(str(mask_path), np.stack([ids.astype(np.float32)] * 3, -1))
+    except ImportError:
+        mask_path = out_dir / "mask.png"
+        Image.fromarray(ids.astype(np.uint8)).save(mask_path)
+    frames = {}
+
+    def boxes_for(coords):
+        frames["frame"] = object_frame(alpha, coords)
+        return frames["frame"], part_boxes(ids, table, frames["frame"])
+    coords, part_voxels, backend, weights = _omnipart(request, out_dir, boxes_for, mask_path)
+    ordered = _ordered(ids, table)
+    voxels = {entry["name"]: part_voxels[index] if index < len(part_voxels) else coords[:0]
+              for index, entry in enumerate(ordered)}
+    covered = coverage(ids, table, frames["frame"], voxels)
+    faces = name_parts(out_dir / "mesh_textured.glb", out_dir / "parts.glb", [entry["name"] for entry in ordered])
+    boxes = part_boxes(ids, table, frames["frame"])
+    report = {"seed": request["seed"], "x_sign": frames["frame"][0], "backend": backend, "model_weights": weights,
+              "parts": {entry["name"]: {"kind": entry["kind"], "id": entry["id"],
+                                        "faces": faces.get(entry["name"], 0),
+                                        "box": boxes[index].tolist(), "voxels": int(len(voxels[entry["name"]])),
+                                        "coverage": covered.get(entry["name"])}
+                        for index, entry in enumerate(ordered)}}
+    (out_dir / "parts.json").write_text(json.dumps(report, indent=2) + "\n")
+    print("[INFO] parts " + ", ".join(f"{name} coverage {item['coverage']}" for name, item in report["parts"].items()))
+
+
 if __name__ == "__main__":
-    raise SystemExit("part_model.py main is added in the next step")
+    main(sys.argv[1])
