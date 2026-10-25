@@ -311,6 +311,8 @@ def inspect(source, face_budget, real_scale=False):
              for obj, sizes in zip(objects, component_sizes) if "slopforge_part" in obj]
     part_coverage = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_coverage"]).items()}
                           for obj in objects if isinstance(obj.get("slopforge_part_coverage"), str)), None)
+    part_overflow = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_overflow"]).items()}
+                          for obj in objects if isinstance(obj.get("slopforge_part_overflow"), str)), None)
     component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
@@ -334,6 +336,8 @@ def inspect(source, face_budget, real_scale=False):
                          "measured_unit": "Blender units"}
     measured = {"mesh_objects": len(objects), "vertex_count": vertices, "face_count": faces,
                 **({"part_coverage": part_coverage} if part_coverage is not None else {}),
+                **({"part_overflow": part_overflow} if part_overflow is not None else {}),
+                **({"part_components": {part["name"]: part["components"] for part in parts}} if parts else {}),
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,
                 "uv_layers": uv_layers, "mesh_without_uv_count": mesh_without_uv_count,

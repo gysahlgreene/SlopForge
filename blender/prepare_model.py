@@ -6,7 +6,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          separate_part, separate_tagged, tag_parts)
+                          gltf_name, separate_part, separate_tagged, tag_parts)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -370,7 +370,10 @@ if not reuse_stage_mesh:
     for obj in mesh_objects:
         obj.select_set(True)
 
-    bpy.context.view_layer.objects.active = mesh_objects[0]
+    # The join keeps the active object's name; on the parts route that must be the body, or a moving part listed
+    # first would lose its name to the root (review 2026-10-25).
+    bpy.context.view_layer.objects.active = next(
+        (item for item in mesh_objects if parts_table is not None and gltf_name(item) == "body"), mesh_objects[0])
 
     if len(mesh_objects) > 1:
         bpy.ops.object.join()
@@ -422,7 +425,7 @@ if oriented:
         group = obj.vertex_groups.new(name="slopforge_grip")
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
-    part_coverage = {}
+    part_coverage, part_overflow = {}, {}
     for name, kind, mask_path in part_specs():
         mask = image_mask(mask_path, channel=0)
         if parts_table is not None and name in parts_table:
@@ -442,7 +445,12 @@ if oriented:
                 (c0, r0), (c1, r1) = corners.min(0) // cell, corners.max(0) // cell
                 hit.update((row, col) for row in range(int(r0), int(r1) + 1) for col in range(int(c0), int(c1) + 1))
             part_coverage[name] = round(len(wanted & hit) / len(wanted), 4) if wanted else 0.0
-            print(f"Part {name} ({kind}): covers {part_coverage[name]:.2f} of its mask")
+            # Recorded, not enforced (review 2026-10-25): how much of the part lies outside its mask (one cell of
+            # slack), and how many pieces it is in, for calibration before a gate.
+            slack = {(row + dr, col + dc) for row, col in wanted for dr in (-1, 0, 1) for dc in (-1, 0, 1)}
+            part_overflow[name] = round(len(hit - slack) / len(hit), 4) if hit else 0.0
+            print(f"Part {name} ({kind}): covers {part_coverage[name]:.2f} of its mask, "
+                  f"{part_overflow[name]:.2f} of it outside")
         if kind == "hinge":
             # Widened by 1% of the concept: SAM masked a pistol trigger's blade alone, and the cut left its root in
             # the frame (2026-10-24). A slide's mask is not widened; its cut is snapped to a plane when separated.
@@ -482,6 +490,7 @@ if oriented:
     obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
     if part_coverage:
         obj["slopforge_part_coverage"] = json.dumps(part_coverage)  # a string survives the FBX round trip
+        obj["slopforge_part_overflow"] = json.dumps(part_overflow)
     print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
 
 

@@ -915,8 +915,8 @@ def box(name, centre, size):
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.subdivide(number_cuts=3); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
     o.data.materials.append(bpy.data.materials.new(name))
-box('body', (0, 0, 0), (1.0, 0.2, 0.2))
-box('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))        # on top of the body, touching its top face
+box('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))        # on top of the body, touching its top face; first on purpose
+box('body', (0, 0, 0), (1.0, 0.2, 0.2))              # (review 2026-10-25: the join must not steal a part's name)
 box('trigger', (0, 0, -0.15), (0.05, 0.02, 0.1))  # hangs below the body's middle, touching its underside
 box('floating', (-0.2, 0, -0.5), (0.05, 0.05, 0.05))  # a hinge that touches nothing
 box('grip', (0.4, 0, -0.1), (0.1, 0.22, 0.05))  # a static part: generated separately, keeps the body one piece
@@ -947,6 +947,10 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertGreaterEqual(coverage["slide"], 0.7)
         self.assertGreaterEqual(coverage["trigger"], 0.5)
         self.assertLessEqual(coverage["floating"], 0.2)
+        overflow = measured["inspection"]["part_overflow"]  # recorded, not yet enforced: cells outside the mask
+        self.assertGreaterEqual(overflow["floating"], 0.5)
+        self.assertLess(overflow["slide"], overflow["floating"])  # coarse on this fixture's crude concept
+        self.assertEqual(measured["inspection"]["part_components"]["slide"], 1)
         body = objects[measured["body"]]
         self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]},
                          {"slide": "slide", "trigger": "hinge", "floating": "hinge", "grip": "grip"})  # exact names

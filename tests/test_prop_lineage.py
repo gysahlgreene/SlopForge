@@ -418,7 +418,7 @@ avoid: [environment]
         seen = {}
 
         def native(root, config, context, asset_type, asset, number, mesh_info, lineage=None):
-            seen["mesh_info"] = mesh_info
+            seen["mesh_info"], seen["lineage"] = mesh_info, lineage
             return self._materializer(root, config, asset_type, asset, number, "parts", None, lineage=lineage,
                                       seed=mesh_info.get("seed"))
         with patch("slopforge.pipelines.model.make_part_masks", side_effect=masks), \
@@ -434,6 +434,22 @@ avoid: [environment]
         stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
         self.assertEqual(stage["settings"]["part_model"], "omnipart")
         self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]), ["part_model.py", "prepare_parts.py"])
+        # the derived maps come from the generated parts: the material stage gets the mesh as its lineage parent
+        # (review 2026-10-25: it had no parents, since this route records no texture artifacts)
+        self.assertTrue(seen["lineage"]["material_inputs"], "material_generation has no parents on the part route")
+        self.assertEqual(seen["lineage"]["material_inputs"][-1]["type"], "mesh.glb")
+
+    def test_an_asset_without_a_part_backend_records_no_part_model_in_its_mesh_settings(self):
+        # Adding a key with value None to every mesh stage would make every existing asset's mesh stage a
+        # "settings changed" mismatch on resume, and regenerate it.
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
+        self.assertNotIn("part_model", stage["settings"])
+        self.assertNotIn("part_tools_sha256", stage["settings"])
 
     def test_same_bytes_at_different_candidate_and_final_paths_keep_same_hash(self):
         self._concept_candidates()

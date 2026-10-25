@@ -339,7 +339,6 @@ def _attach(obj, mesh, kind, pivot):
     child.location = pivot
     child["slopforge_part"] = kind
     return child
-    return child
 
 
 def _side(point, centre, normal):
@@ -540,7 +539,8 @@ def separate_tagged(obj, table, contact):
         high = Vector([max(vert.co[axis] for vert in verts) for axis in range(3)])
         pivot = (low + high) / 2
         if kind == "hinge":
-            touching = [vert.co for vert in verts if (tree.find_nearest(vert.co)[3] or contact + 1) <= contact]
+            touching = [vert.co for vert in verts
+                        if tree.find_nearest(vert.co)[3] is not None and tree.find_nearest(vert.co)[3] <= contact]
             if touching:
                 pivot = sum(touching, Vector()) / len(touching)
         piece = bm.copy()

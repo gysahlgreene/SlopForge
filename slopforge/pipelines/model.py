@@ -2406,9 +2406,11 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "quality": mesh_quality,
                              "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
-                             "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint"),
-                             "part_model": part_backend(asset_type, asset)}
-            if mesh_settings["part_model"]:  # a change of the part tools invalidates the stage
+                             "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            if part_backend(asset_type, asset):
+                # Only on the part route: a None here would change every existing asset's mesh settings (review
+                # 2026-10-25). A change of the part tools invalidates the stage.
+                mesh_settings["part_model"] = part_backend(asset_type, asset)
                 mesh_settings["part_tools_sha256"] = {
                     "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
                     "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")}
@@ -2615,7 +2617,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                  if stage_record["attempt"] == attempt_number
                                  and artifact["type"].startswith("texture.")]
             upstream = [candidate_artifact, mesh_artifact]
-            material_inputs = texture_artifacts if mesh_info.get("textured") else upstream
+            # The part route derives its maps from the generated parts and records no texture artifacts, so its
+            # material stage descends from the mesh (review 2026-10-25: it had no parents at all).
+            material_inputs = texture_artifacts if mesh_info.get("textured") and texture_artifacts else upstream
             assembly_inputs = [prepared_artifact or mesh_artifact]
             lineage = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                        "execution_id": execution["id"], "attempt": attempt_number,

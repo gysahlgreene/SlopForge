@@ -177,8 +177,8 @@ weapons (no hinge or slide) keep the profile's model graph.
 **Set-up (once, on the part-mask host):** `scripts/install-omnipart.sh [directory]` builds the environment
 (micromamba, Python 3.10, torch 2.4 + cu121, `setuptools<81`) and prints the two keys for `ai/project.yaml`:
 `tools.omnipart_python` and `tools.omnipart_checkout`. `tools.parts_host` is required: the tool runs there over SSH
-with `SPCONV_ALGO=native ATTN_BACKEND=xformers`, as the part masks do. A missing key stops before any inference
-(`part_model_preflight`, `configuration`).
+with `SPCONV_ALGO=native ATTN_BACKEND=xformers`, as the part masks do. A missing key stops before mesh inference
+(`part_model_preflight`, `configuration`; the part masks have already been made).
 
 **How a run goes** (`processing/part_model.py` on the host, then `blender/prepare_parts.py`, then the usual final
 pass):
@@ -188,13 +188,14 @@ pass):
    OmniPart resolves the overlap from the masks. (A rule that moved the body above a slide's line into a separate
    part was tried first: the sights stretched that part over the whole slide and OmniPart grew a second shell.)
 2. OmniPart's sparse structure gives the object's occupied voxels (64³). Each part's 2D mask extent is mapped onto
-   that extent (image columns along grid x, mirrored when the voxels' footprint matches the mirrored silhouette
-   better; rows down grid z; the full thickness) and becomes its 3D box. OmniPart's own layout model (NVIDIA
+   that extent (image columns along grid x or y, whichever footprint matches the silhouette best, mirrored or not;
+   rows down grid z; the full thickness) and becomes its 3D box. The boxes follow OmniPart's bottom-up part order,
+   and the tool stops with a clear error if the two orders differ. OmniPart's own layout model (NVIDIA
    PartField) is never called: its licence is non-commercial.
 3. OmniPart's MIT part synthesis fills the boxes and returns one textured mesh per part. The tool renames each
-   node after its part and records, per declared hinge or slide, the **coverage**: the share of its mask's grid
-   cells that hold one of its voxels. OmniPart downsamples the mask to 37×37, so a part of under about 0.1% of
-   the concept may vanish.
+   node after its part and records, per declared hinge or slide, a diagnostic `structure_coverage` (the share of
+   its mask's grid cells that hold a sparse-structure voxel; a thin lever barely registers there, so it is not the
+   gate). OmniPart downsamples the mask to 37×37, so a part of under about 0.1% of the concept may vanish.
 4. `prepare_parts.py` welds and reduces each part to its share of the face budget by surface area (floor 2%), with
    the 90% headroom for moving parts, unwraps every part into **one base-colour atlas** baked from the parts' own
    textures, and bakes a **metallic atlas** from each part's declared class (a part named by a declared non-metal

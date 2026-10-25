@@ -42,6 +42,25 @@ class PartIdTests(unittest.TestCase):
         self.assertTrue((ids[0:10, 0:8] == 2).all())  # the hammer is not on the slide
         self.assertTrue((ids[30:60, :] == 2).all())  # the frame under it is body
 
+    def test_a_barrel_above_a_pump_fore_end_stays_body(self):
+        # Review 2026-10-25: the resting rule took the whole barrel above a pump shotgun's fore-end. Only a short
+        # run that reaches the silhouette's top (a sight) rests on a slide; a run taller than half the slide's
+        # height in that column (a barrel, a receiver) is body.
+        alpha = np.zeros((60, 100), bool); alpha[10:40, :] = True
+        fore_end = np.zeros_like(alpha); fore_end[30:40, 20:60] = True
+        ids, table = part_ids(alpha, {"fore_end": fore_end}, [{"name": "fore_end", "kind": "slide"}])
+        self.assertTrue((ids[10:30, 20:60] == 2).all())  # the barrel stays body
+
+    def test_two_slides_keep_their_own_pixels_and_the_receiver_stays_body(self):
+        alpha = np.zeros((60, 100), bool); alpha[0:40, :] = True
+        bolt = np.zeros_like(alpha); bolt[0:10, 20:100] = True
+        release = np.zeros_like(alpha); release[30:40, 50:60] = True
+        ids, table = part_ids(alpha, {"bolt": bolt, "release": release},
+                              [{"name": "bolt", "kind": "slide"}, {"name": "release", "kind": "slide"}])
+        self.assertTrue((ids[0:10, 20:100] == 1).all())
+        self.assertTrue((ids[30:40, 50:60] == 2).all())
+        self.assertTrue((ids[10:30, :] == 3).all())  # the receiver between them is body
+
     def test_an_object_outside_every_mask_is_just_a_body(self):
         alpha = np.ones((8, 8), bool)
         ids, table = part_ids(alpha, {}, [])
@@ -117,6 +136,24 @@ class PartBoxTests(unittest.TestCase):
             self.assertAlmostEqual(float(box[0][1]), float(frame.lo[1]), places=6)
             self.assertAlmostEqual(float(box[1][1]), float(frame.hi[1]), places=6)
         self.assertEqual([box[0][0] <= box[1][0] and box[0][2] <= box[1][2] for box in boxes], [True] * 3)
+
+
+class BoxOrderTests(unittest.TestCase):
+    def test_our_order_must_match_omniparts_ordered_mask(self):
+        from processing.part_model import check_box_order, part_ids
+        alpha, masks, parts = fixture()
+        ids, table = part_ids(alpha, masks, parts)
+        # OmniPart's ordered mask: our ids renumbered bottom-up on a coarse grid, as load_bottom_up_mask does
+        from PIL import Image
+        coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize((37, 37), Image.NEAREST)).astype(int)
+        order = sorted(np.unique(coarse[coarse > 0]), key=lambda i: -np.where(coarse == i)[0].max())
+        renumbered = np.zeros_like(coarse)
+        for new, old in enumerate(order, 1):
+            renumbered[coarse == old] = new
+        check_box_order(ids, table, renumbered)  # agrees: no error
+        swapped = renumbered.copy(); swapped[renumbered == 1] = 2; swapped[renumbered == 2] = 1
+        with self.assertRaisesRegex(RuntimeError, "order"):
+            check_box_order(ids, table, swapped)
 
 
 class CoverageTests(unittest.TestCase):

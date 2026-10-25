@@ -43,8 +43,34 @@ def part_ids(alpha, masks, parts):
         resting = np.zeros(alpha.shape, bool)
         for row in range(alpha.shape[0] - 2, -1, -1):  # scanning upwards: a body pixel rests on the slide when the pixel under it does
             resting[row] = (ids[row] == body) & (slide[row + 1] | resting[row + 1])
-        ids[resting] = part["id"]
+        # Only a short run that reaches the silhouette's top is a sight; a run taller than half the slide's height
+        # in its column is a barrel or a receiver (review 2026-10-25: a pump's whole barrel joined its fore-end).
+        top_row = np.where(alpha.any(axis=0), alpha.argmax(axis=0), -1)
+        run = resting.sum(axis=0)
+        run_top = np.where(resting.any(axis=0), resting.argmax(axis=0), -1)
+        keep = (run_top == top_row) & (run <= 0.5 * slide.sum(axis=0))
+        ids[resting & keep[None, :]] = part["id"]
     return ids, table
+
+
+def check_box_order(ids, table, ordered_mask):
+    """OmniPart renumbers the part ids bottom-up on its own coarse grid (load_bottom_up_mask); the boxes and names
+    follow our bottom-up order on the full mask. The two must agree, or a part would get another part's box and
+    name. Raises RuntimeError naming both orders when they differ."""
+    ordered = _ordered(ids, table)
+    coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize(np.asarray(ordered_mask).shape[::-1],
+                                                                     Image.NEAREST)).astype(int)
+    ordered_mask = np.asarray(ordered_mask)
+    theirs = []
+    for new_id in range(1, int(ordered_mask.max()) + 1):
+        cells = coarse[ordered_mask == new_id]
+        cells = cells[cells > 0]
+        theirs.append(int(np.bincount(cells).argmax()) if len(cells) else None)
+    ours = [entry["id"] for entry in ordered]
+    if theirs != ours:
+        names = {entry["id"]: entry["name"] for entry in table}
+        raise RuntimeError(f"OmniPart's part order {[names.get(i) for i in theirs]} differs from the box order "
+                           f"{[names.get(i) for i in ours]}: the masks tie at its resolution; move a box")
 
 
 Frame = namedtuple("Frame", "sign bbox lo hi axis")
@@ -197,6 +223,7 @@ def _omnipart(request, out_dir, boxes_for, mask_path):
     pipe.to("cuda")
     _white, black, ordered_mask, vis = load_img_mask(request["image"], str(mask_path))
     vis.save(out_dir / "img_mask_vis.png")
+    boxes_for.check(ordered_mask.cpu().numpy() if hasattr(ordered_mask, "cpu") else np.asarray(ordered_mask))
     torch.manual_seed(seed)
     coords = pipe.get_coords(black, num_samples=1, seed=seed,
                              sparse_structure_sampler_params={"steps": steps, "cfg_strength": cfg}).cpu().numpy()
@@ -247,6 +274,7 @@ def main(request_path):
     def boxes_for(coords):
         frames["frame"] = object_frame(alpha, coords)
         return frames["frame"], part_boxes(ids, table, frames["frame"])
+    boxes_for.check = lambda ordered_mask: check_box_order(ids, table, ordered_mask)
     coords, part_voxels, backend, weights = _omnipart(request, out_dir, boxes_for, mask_path)
     ordered = _ordered(ids, table)
     voxels = {entry["name"]: part_voxels[index] if index < len(part_voxels) else coords[:0]

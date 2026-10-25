@@ -31,7 +31,8 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
         raise StageFailure("configuration", "A weapon with moving parts is generated as parts by OmniPart, and no "
                            "OmniPart environment is configured", operation="part_model_preflight",
                            remedy="set tools.parts_host, tools.omnipart_python and tools.omnipart_checkout "
-                                  "(scripts/install-omnipart.sh); see docs/WEAPONS.md")
+                                  "(scripts/install-omnipart.sh), or remove part_model from ai/asset_types/weapon.yaml "
+                                  "to cut the parts from one mesh instead; see docs/WEAPONS.md")
     destination, metadata, masks_dir = Path(destination), Path(metadata), Path(masks_dir)
     declared = [{"name": part["name"], "kind": part["kind"]} for part in parts
                 if part["kind"] in ("hinge", "slide", "grip")]

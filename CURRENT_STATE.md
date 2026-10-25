@@ -1011,7 +1011,7 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
   non-commercial PartField layout model is never used), `blender/prepare_parts.py` (per-part reduction, one
   base-colour atlas, a metallic atlas by declared class), derived maps, then the existing final pass with
   `--parts-json` (tag by node name, join, orient, separate with pivots by kind: slide at its box centre, hinge at
-  its contact with the body). A part below `min_part_coverage` (0.6, provisional) is the retryable `part_missing`.
+  its contact with the body). A part below `min_part_coverage` (0.55, calibrated on the first live runs) is the retryable `part_missing`.
   The backend and tool hashes are in the mesh stage's identity.
 - **Tests:** boxes, ids, coverage and the tool's GLB naming (unit); the backend's request, Blender call and
   generation.json (unit); `prepare_parts` on two textured parts and the final pass on a slab with a touching slide,
