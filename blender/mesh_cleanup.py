@@ -341,7 +341,18 @@ def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
     from mathutils import Matrix, Vector
     from mathutils.bvhtree import BVHTree
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    trees = [BVHTree.FromObject(other, depsgraph) for other in others if other.type == "MESH"]
+
+    def world_tree(other):
+        # in world space, as the part's vertices are: FromObject keeps the object's own space, so a body away from
+        # the origin was missed by every ray (a hybrid pistol's slide read 0.000, 2026-10-25)
+        evaluated = other.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        tree = BVHTree.FromPolygons([other.matrix_world @ vertex.co for vertex in mesh.vertices],
+                                    [tuple(polygon.vertices) for polygon in mesh.polygons])
+        evaluated.to_mesh_clear()
+        return tree
+
+    trees = [world_tree(other) for other in others if other.type == "MESH"]
     step = max(1, len(part.data.vertices) // limit)
     rest = [part.matrix_world @ vertex.co for index, vertex in enumerate(part.data.vertices) if index % step == 0]
     if not trees or not rest:

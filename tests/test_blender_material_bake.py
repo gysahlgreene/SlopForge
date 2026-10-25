@@ -1175,6 +1175,36 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderSweepPenetrationTests(unittest.TestCase):
+    def test_a_body_away_from_the_origin_is_swept_where_it_stands(self):
+        # A weapon's body keeps its object location (the grip centre, 0.27 m from the origin on a hybrid pistol).
+        # The sweep built its trees from the objects, in their own space, and cast from the part's world-space
+        # vertices: every ray missed the body and a slide read 0.000 where Unity's prefab read 0.025 (2026-10-25).
+        # A box above the body slid 0.3 down sinks wholly into it, wherever the body stands.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for location in ((0, 0, 0), (0.1, 0.3, 0.27)):
+    for o in list(bpy.data.objects): bpy.data.objects.remove(o)
+    bpy.ops.mesh.primitive_cube_add(size=0.4, location=location)
+    body = bpy.context.object
+    bpy.ops.mesh.primitive_cube_add(size=0.2, location=(location[0], location[1], location[2] + 0.301))
+    part = bpy.context.object
+    part.parent = body; part.matrix_parent_inverse = body.matrix_world.inverted(); part["slopforge_part"] = "slide"
+    bpy.context.view_layer.update()
+    print("SUNK", location, sweep_penetration(part, [body], "y", -0.3, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        sunk = [float(line.rsplit(" ", 1)[1]) for line in result.stdout.splitlines() if line.startswith("SUNK")]
+        self.assertEqual(len(sunk), 2, result.stdout[-2000:])
+        self.assertGreater(sunk[0], 0.9)  # at the origin
+        self.assertGreater(sunk[1], 0.9)  # away from it
+
+
 class BlenderCloseOpeningsTests(unittest.TestCase):
     def test_a_piece_split_from_a_surface_is_closed_outwards_in_one_colour_per_opening(self):
         # A hybrid split (docs/WEAPONS.md, Hybrid parts) leaves each piece of a generated surface open where it was
