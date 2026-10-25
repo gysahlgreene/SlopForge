@@ -14,6 +14,7 @@ only. It is never called: the boxes come from the parts' 2D masks mapped onto th
 (part_boxes), and only the MIT part-synthesis stage runs.
 """
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -151,7 +152,10 @@ def name_parts(merged, destination, names):
     faces = {}
     for old in keep:
         node = doc["nodes"][old]
-        index = int(node["name"].split("_")[-1]) - 1
+        numbered = re.fullmatch(r"geometry_(\d+)", node.get("name", ""))
+        if not numbered:  # merge_parts' "world" root and anything else stays as it is
+            continue
+        index = int(numbered.group(1)) - 1
         node["name"] = names[index]
         if "mesh" in node:
             mesh = doc["meshes"][node["mesh"]]

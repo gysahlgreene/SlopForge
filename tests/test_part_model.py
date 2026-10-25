@@ -132,9 +132,11 @@ class MainTests(unittest.TestCase):
                 _frame, boxes = boxes_for(coords)
                 self.assertEqual(boxes.shape, (3, 2, 3))
                 # OmniPart's merged GLB: geometry_0 is its box visualisation, then one node per box in order
+                # ... under a "world" root node without a mesh, as merge_parts writes it
                 names = ["geometry_0", "geometry_1", "geometry_2", "geometry_3"]
-                doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, 1, 2, 3]}],
-                       "nodes": [{"name": name, "mesh": index} for index, name in enumerate(names)],
+                doc = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [4]}],
+                       "nodes": [*({"name": name, "mesh": index} for index, name in enumerate(names)),
+                                 {"name": "world", "children": [0, 1, 2, 3]}],
                        "meshes": [{"name": name, "primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}
                                   for name in names],
                        "accessors": [{"count": 3, "type": "VEC3", "componentType": 5126},
@@ -144,8 +146,10 @@ class MainTests(unittest.TestCase):
                 return coords, [coords, top, coords[:0]], {"provider": "omnipart", "version": "abc", "device": "H100"}, {"omnipart/OmniPart": "rev"}
             with patch.object(part_model, "_omnipart", side_effect=omnipart):
                 part_model.main(str(root / "request.json"))
-            names = [node["name"] for node in glb_json(root / "out/parts.glb")["nodes"]]
-            self.assertEqual(names, ["body", "slide", "slide_rear"])  # bottom-up order, box vis dropped
+            doc = glb_json(root / "out/parts.glb")
+            names = [node["name"] for node in doc["nodes"]]
+            self.assertEqual(names, ["body", "slide", "slide_rear", "world"])  # bottom-up order, box vis dropped
+            self.assertEqual(doc["nodes"][3]["children"], [0, 1, 2])
             report = json.loads((root / "out/parts.json").read_text())
             self.assertEqual(report["seed"], 7)
             self.assertEqual(report["parts"]["slide"]["kind"], "slide")
@@ -154,7 +158,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(report["parts"]["slide"]["voxels"], int((coords[:, 3] >= 34).sum()))
             self.assertEqual(len(report["parts"]["slide"]["box"]), 2)
             self.assertEqual(report["parts"]["slide"]["faces"], 12)
-            self.assertEqual(glb_json(root / "out/parts.glb")["scenes"][0]["nodes"], [0, 1, 2])
+            self.assertEqual(glb_json(root / "out/parts.glb")["scenes"][0]["nodes"], [3])
             self.assertEqual(report["backend"]["provider"], "omnipart")
             self.assertTrue((root / "out/mask.exr").is_file() or (root / "out/mask.png").is_file())
 
