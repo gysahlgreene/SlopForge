@@ -637,21 +637,19 @@ def _convex_hull_2d(points):
     return lower[:-1] + upper[:-1]
 
 
-def _cap_opening(bm, group, centroid):
-    """A flat cap across an opening's convex outline in its best-fit plane, recessed a little into the piece and
-    facing away from it; not stitched to the rim, so the surface's topology around the opening does not matter.
-    For an opening no fill could close: a rim that runs into a pistol's bore (2026-10-25). Returns the faces."""
+def _opening_plane(group, centroid):
+    """The plane most of an opening's rim lies in (RANSAC on rim length: a rim that dips into the surface's tubes,
+    a pistol's bore, is an outlier), its normal away from `centroid` (the piece). Returns (middle, normal, u, v,
+    the in-plane rim points as (u, v) coordinates, the opening's size)."""
     import numpy as np
     from mathutils import Vector
     starts = np.array([tuple(edge.verts[0].co) for edge in group])
     ends = np.array([tuple(edge.verts[1].co) for edge in group])
     points, weights = (starts + ends) / 2, np.linalg.norm(ends - starts, axis=1) + 1e-12
     extent = float(np.ptp(np.concatenate([starts, ends]), 0).max())
-    # The plane the most rim length lies in (RANSAC): a rim that dips into the surface's tubes (a bore) is an
-    # outlier, not a reason to tilt the cap through the part (2026-10-25 pistol).
     rng = np.random.default_rng(0)
     best, tolerance = None, 0.015 * extent
-    for _ in range(300):
+    for _ in range(300 if len(points) >= 3 else 0):  # a sliver of one or two edges: all its points are in plane
         a, b, c = points[rng.choice(len(points), 3, replace=False, p=weights / weights.sum())]
         normal = np.cross(b - a, c - a)
         if np.linalg.norm(normal) < 1e-12:
@@ -669,7 +667,35 @@ def _cap_opening(bm, group, centroid):
     if normal.dot(Vector(middle) - centroid) < 0:
         normal = -normal  # away from the piece
     u, v = axes[0], axes[1]
-    flat = [((p - middle) @ u, (p - middle) @ v) for p in chosen]
+    return Vector(middle), normal, Vector(u), Vector(v), [((p - middle) @ u, (p - middle) @ v) for p in chosen], extent
+
+
+def _inset_polygon(polygon, distance):
+    """A convex counter-clockwise polygon with every edge moved `distance` inwards."""
+    import numpy as np
+    points = [np.array(p, float) for p in polygon]
+    lines = []
+    for a, b in zip(points, points[1:] + points[:1]):
+        direction = (b - a) / max(np.linalg.norm(b - a), 1e-12)
+        inward = np.array([-direction[1], direction[0]])  # left of a counter-clockwise edge is inside
+        lines.append((a + inward * distance, direction))
+    out = []
+    for (p1, d1), (p2, d2) in zip(lines[-1:] + lines[:-1], lines):
+        cross = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(cross) < 1e-9:
+            out.append(p2)
+            continue
+        t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / cross
+        out.append(p1 + d1 * t)
+    return out
+
+
+def _cap_opening(bm, group, centroid):
+    """A flat cap across an opening's convex outline in its plane (_opening_plane), recessed a little into the
+    piece and facing away from it; not stitched to the rim, so the surface's topology around the opening does not
+    matter. For an opening no fill could close: a rim that runs into a pistol's bore (2026-10-25). Returns faces."""
+    import numpy as np
+    middle, normal, u, v, flat, extent = _opening_plane(group, centroid)
     hull = _convex_hull_2d(flat)
     if len(hull) < 3:
         return []
@@ -680,8 +706,8 @@ def _cap_opening(bm, group, centroid):
         offset = np.array(flat[i]) - centre
         length = np.linalg.norm(offset)
         outline.append(centre + offset * max(length - shrink, 0) / max(length, 1e-12))
-    base = Vector(middle) - normal * 0.005 * extent  # a little inside the piece: no flicker against its neighbour
-    verts = [bm.verts.new(base + Vector(u) * x + Vector(v) * y) for x, y in outline]
+    base = middle - normal * 0.005 * extent  # a little inside the piece: no flicker against its neighbour
+    verts = [bm.verts.new(base + u * x + v * y) for x, y in outline]
     face = bm.faces.new(verts)
     face.normal_update()
     if face.normal.dot(normal) < 0:
@@ -689,11 +715,113 @@ def _cap_opening(bm, group, centroid):
     return bmesh.ops.triangulate(bm, faces=[face])["faces"]
 
 
-def close_openings(bm, basecolor=None):
+def hollow_opening(bm, group, wall=0.04, depth=0.85, basecolor=None):
+    """A container's opening under its lid as a cavity a player sees into when the lid opens: a rim `wall` thick
+    (a share of the opening's size) at the opening's plane, inner walls down `depth` of the container's height
+    below that plane, and a floor; one texel of the rim's median colour. Not stitched to the surface, like a cap.
+    Returns the faces."""
+    import numpy as np
+    from mathutils import Vector
+    uv = bm.loops.layers.uv.active
+    ring = [loop for edge in group if edge.link_faces for loop in edge.link_faces[0].loops]
+    texel = _typical_texel(ring, uv, basecolor) if uv is not None and ring else None
+    centroid = sum((vertex.co for vertex in bm.verts), Vector()) / max(len(bm.verts), 1)
+    middle, normal, u, v, flat, extent = _opening_plane(group, centroid)
+    hull = _convex_hull_2d(flat)
+    if len(hull) < 3:
+        return []
+    outer = [np.array(flat[i], float) for i in hull]
+    inner = _inset_polygon(outer, wall * extent)
+    height = max(0.0, max(-(vertex.co - middle).dot(normal) for vertex in bm.verts))
+    top = middle - normal * 0.002 * extent
+    bottom = middle - normal * depth * height
+    place = lambda base, point: base + u * float(point[0]) + v * float(point[1])
+    outer_top = [bm.verts.new(place(top, p)) for p in outer]
+    inner_top = [bm.verts.new(place(top, p)) for p in inner]
+    inner_bottom = [bm.verts.new(place(bottom, p)) for p in inner]
+    centre = place(middle, np.mean(inner, axis=0))
+    faces, count = [], len(outer)
+    for i in range(count):
+        j = (i + 1) % count
+        rim = bm.faces.new((outer_top[i], outer_top[j], inner_top[j], inner_top[i]))
+        rim.normal_update()
+        if rim.normal.dot(normal) < 0:
+            rim.normal_flip()
+        side = bm.faces.new((inner_top[i], inner_top[j], inner_bottom[j], inner_bottom[i]))
+        side.normal_update()
+        if side.normal.dot(centre - side.calc_center_median()) < 0:
+            side.normal_flip()  # inner walls face into the cavity
+        faces.extend((rim, side))
+    floor = bm.faces.new(inner_bottom)
+    floor.normal_update()
+    if floor.normal.dot(normal) < 0:
+        floor.normal_flip()
+    faces.append(floor)
+    faces = bmesh.ops.triangulate(bm, faces=faces)["faces"]
+    for face in faces:
+        face.smooth = False
+        if texel is not None:
+            for loop in face.loops:
+                loop[uv].uv = texel
+    return faces
+
+
+def _container_opening(bm, group, lids):
+    """Whether an opening is a container's under a lid: its middle lies in a hinged part's bounds (`lids`, each
+    (low, high) widened by 5%) and its outline covers at least half of the piece's own outline in that plane (a
+    chest's top; a trigger's slot in a frame is a small share of it)."""
+    import numpy as np
+    from mathutils import Vector
+    if not lids or len(group) < 3:
+        return False
+    centroid = sum((vertex.co for vertex in bm.verts), Vector()) / max(len(bm.verts), 1)
+    middle, normal, u, v, flat, extent = _opening_plane(group, centroid)
+    inside = False
+    for low, high in lids:
+        pad = 0.05 * max(high[i] - low[i] for i in range(3))
+        if all(low[i] - pad <= middle[i] <= high[i] + pad for i in range(3)):
+            inside = True
+    if not inside:
+        return False
+
+    def area(points):
+        hull = _convex_hull_2d(points)
+        return 0.5 * abs(sum(points[a][0] * points[b][1] - points[b][0] * points[a][1]
+                             for a, b in zip(hull, hull[1:] + hull[:1])))
+    piece = [((vertex.co - middle).dot(u), (vertex.co - middle).dot(v)) for vertex in bm.verts]
+    return area(flat) >= 0.5 * area(piece)
+
+
+def inside_test(bm):
+    """A point-in-object test for a mesh as it is now (the unsplit surface): rays along two of the three axes
+    crossing it an odd number of times (a generated surface has holes, so one ray's parity lies)."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromBMesh(bm)
+    directions = (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
+
+    def inside(point):
+        odd = 0
+        for direction in directions:
+            hits, origin = 0, point.copy()
+            for _ in range(64):
+                location = tree.ray_cast(origin, direction)[0]
+                if location is None:
+                    break
+                hits += 1
+                origin = location + direction * 1e-6
+            odd += hits % 2
+        return odd >= 2
+    return inside
+
+
+def close_openings(bm, basecolor=None, lids=None, inside=None):
     """Close every opening of a piece split from a generated surface (docs/WEAPONS.md, Hybrid parts): each opening
     is filled flat in its best-fit plane (a triangle fill; the hole filler takes a loop that is not simple), the
     fill wound so its rim runs against the surface beside it (outwards), and textured with one texel, its ring's
-    median colour: a mating surface such as a slide's underside or a box's top under its lid. Returns the fills."""
+    median colour: a mating surface such as a slide's underside. An opening under a hinged part (`lids`: their
+    bounds) that covers most of the piece's outline is a container's and becomes a cavity (hollow_opening).
+    Returns the fills."""
     import numpy as np
     from mathutils import Vector
     uv = bm.loops.layers.uv.active
@@ -701,6 +829,11 @@ def close_openings(bm, basecolor=None):
     capped = set()
     cycles = []
     for group in _boundary_groups(bm):
+        if _container_opening(bm, group, lids):
+            # a container's top under its lid: a cavity to look into, not a panel at the rim
+            fills.extend(hollow_opening(bm, group, basecolor=basecolor))
+            capped.update(fills)
+            continue
         edges, bridges = _bridge_chain(bm, group)
         cycles.extend((cycle, bridges) for cycle in _simple_cycles(edges))
     for group, bridges in cycles:
@@ -746,6 +879,19 @@ def close_openings(bm, basecolor=None):
         if vote > 0:
             for face in piece:
                 face.normal_flip()
+    if inside is not None:
+        # a fill must lie inside the unsplit object: one outside it would show with nothing moved (a cap whose
+        # outline overshot a concave opening stood up behind the 2026-10-25 chest's lid)
+        outside = []
+        for face in fills:
+            if not face.is_valid:
+                continue
+            centre = face.calc_center_median()
+            probes = [centre] + [centre + (vertex.co - centre) * 0.75 for vertex in face.verts]
+            if not all(inside(point) for point in probes):
+                outside.append(face)
+        bmesh.ops.delete(bm, geom=outside, context="FACES_ONLY")
+        fills = [face for face in fills if face.is_valid]
     return fills
 
 
@@ -803,6 +949,7 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
     bmesh.ops.delete(rest, geom=[face for face in rest.faces if face[rest_layer] in moving], context="FACES")
     tree = BVHTree.FromBMesh(rest)
     rest.free()
+    whole = inside_test(bm) if close else None  # the unsplit object: a fill outside it is dropped
     children = []
     for part_id, (name, kind) in parts.items():
         faces = [face for face in bm.faces if face[layer] == part_id]
@@ -828,7 +975,7 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         piece_layer = piece.faces.layers.int.get("slopforge_part")
         bmesh.ops.delete(piece, geom=[face for face in piece.faces if face[piece_layer] != part_id], context="FACES")
         if close:
-            print(f"Part {name} ({kind}): closed {len(close_openings(piece, basecolor))} faces of openings")
+            print(f"Part {name} ({kind}): closed {len(close_openings(piece, basecolor, inside=whole))} faces of openings")
         # The join left the imported part's mesh as an orphan under this name; the child takes the exact name
         for block in (bpy.data.meshes, bpy.data.objects):
             taken = block.get(name)
@@ -842,7 +989,12 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         children.append(child)
         bmesh.ops.delete(bm, geom=faces, context="FACES")
     if close and children:
-        print(f"Body: closed {len(close_openings(bm, basecolor))} faces of openings")
+        lids = []
+        for child in children:
+            if child.get("slopforge_part") == "hinge":
+                corners = [child.location + vertex.co for vertex in child.data.vertices]  # the body's frame
+                lids.append(([min(c[i] for c in corners) for i in range(3)], [max(c[i] for c in corners) for i in range(3)]))
+        print(f"Body: closed {len(close_openings(bm, basecolor, lids=lids, inside=whole))} faces of openings")
     bm.to_mesh(obj.data)
     bm.free()
     obj.data.update()

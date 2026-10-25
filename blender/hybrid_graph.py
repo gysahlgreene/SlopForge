@@ -137,10 +137,12 @@ def part_arrays(path):
 
 
 def repair_surface(source, destination):
-    """The surface as one mesh, inner shells removed and repaired locally into a closed manifold, written as a GLB:
-    a cut across a non-manifold edge leaves an opening with loose ends that cannot be filled (the 2026-10-25
-    pistol's frame top, where the rim ran into the barrel inside). The local repair keeps modelled detail."""
-    from mesh_cleanup import remove_enclosed_components, repair_manifold_locally
+    """The surface as one mesh with fully enclosed inner shells removed, written as a GLB the split works on (the
+    face order hybrid_apply.py reads). Not repaired into a manifold: on a chest with 1,627 non-manifold edges the
+    local repair deleted the faces around them and refilled the holes with untextured triangles across the lid
+    (2026-10-25); openings with loose ends are capped instead (mesh_cleanup.close_openings)."""
+    import bmesh
+    from mesh_cleanup import remove_enclosed_components
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(source))
     objects = mesh_objects()
@@ -156,7 +158,12 @@ def repair_surface(source, destination):
     surface = bpy.context.view_layer.objects.active or objects[0]
     span = max(surface.dimensions)
     removed = remove_enclosed_components(surface.data, span * 1e-5)
-    boundary, nonmanifold = repair_manifold_locally(surface.data, span * 1e-5)
+    bm = bmesh.new()
+    bm.from_mesh(surface.data)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=span * 1e-7)  # recorded: openings the split will meet
+    boundary = sum(1 for edge in bm.edges if len(edge.link_faces) == 1)
+    nonmanifold = sum(1 for edge in bm.edges if len(edge.link_faces) > 2)
+    bm.free()
     bpy.ops.export_scene.gltf(filepath=str(destination), export_format="GLB", export_yup=True)
     return {"enclosed_vertices_removed": removed, "boundary_edges": boundary, "non_manifold_edges": nonmanifold}
 

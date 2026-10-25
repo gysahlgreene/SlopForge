@@ -1294,6 +1294,79 @@ print("CAPPED", len(fills), round(area, 3))
             self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
             self.assertIn("CAPPED", result.stdout)
 
+    def test_a_container_under_its_lid_gets_a_cavity_not_a_cap(self):
+        # A chest under its lid: the opening becomes a cavity (a rim, inner walls, a floor) a player sees into when
+        # the lid opens, not a flat panel at the rim (2026-10-25).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "cavity.py"
+            script.write_text(f'''import bpy, bmesh, sys
+from mathutils import Vector
+from mathutils.bvhtree import BVHTree
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import hollow_opening, _boundary_groups
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.5))
+bpy.ops.object.transform_apply(location=True)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+group = _boundary_groups(bm)[0]
+faces = hollow_opening(bm, group, wall=0.05, depth=0.8)
+bm.normal_update()
+tree = BVHTree.FromBMesh(bm)
+for x in (-0.3, 0.0, 0.3):
+    for y in (-0.3, 0.0, 0.3):  # looking down into the opening: the floor, facing up, at 80% of the height
+        hit = tree.ray_cast(Vector((x, y, 2)), Vector((0, 0, -1)))
+        assert hit[0] is not None and abs(hit[0].z - 0.2) < 0.02 and hit[1].z > 0.9, (x, y, hit[0], hit[1])
+hit = tree.ray_cast(Vector((0.48, 0.0, 2)), Vector((0, 0, -1)))  # on the rim: its top, facing up
+assert hit[0] is not None and hit[0].z > 0.97 and hit[1].z > 0.9, hit
+hit = tree.ray_cast(Vector((0.0, 0.0, 0.6)), Vector((1, 0, 0)))  # inside the cavity, looking at a wall: it faces in
+assert hit[0] is not None and abs(hit[0].x - 0.45) < 0.02 and hit[1].x < -0.9, hit
+print("CAVITY", len(faces))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("CAVITY", result.stdout)
+
+    def test_a_fill_outside_the_whole_object_is_dropped(self):
+        # A cap whose outline overshoots a concave opening stands outside the object, visible with nothing moved
+        # (a panel behind the 2026-10-25 chest's lid): fills are kept only where they lie inside the unsplit object.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "inside.py"
+            script.write_text(f'''import bpy, bmesh, sys
+from mathutils import Vector
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+inside = lambda point: max(abs(point.x), abs(point.y), abs(point.z)) < 0.5  # the unsplit object: the cube
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+real = mesh_cleanup._cap_opening
+def overshoot(bm, group, centroid):  # a cap twice the opening's size, as an overshooting outline makes
+    faces = real(bm, group, centroid)
+    for vertex in {{v for f in faces for v in f.verts}}:
+        vertex.co.x *= 2; vertex.co.y *= 2
+    return faces
+mesh_cleanup._cap_opening = overshoot
+nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
+mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
+mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
+try:
+    fills = mesh_cleanup.close_openings(bm, inside=inside)
+finally:
+    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
+    mesh_cleanup._cap_opening = real
+kept = [f for f in fills if f.is_valid]
+assert all(inside(f.calc_center_median() - Vector((0, 0, 0.01))) for f in kept), "a fill outside the object was kept"
+assert len(kept) < len([f for f in bm.faces if not f.smooth]) or kept, "everything dropped"
+print("INSIDE KEPT", len(kept))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("INSIDE KEPT", result.stdout)
+
     def test_an_opening_broken_by_a_non_manifold_edge_is_still_closed(self):
         # TRELLIS.2's surface has edges where three faces meet; where the cut crosses one, that edge has two faces left
         # on the piece and is not a boundary edge, so the opening is a chain with two ends (the 2026-10-25 pistol's
