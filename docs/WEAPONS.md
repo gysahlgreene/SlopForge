@@ -235,6 +235,11 @@ next seed is tried. The spike of 2026-10-25 lost a part in one seed of four.
 **Identity:** the backend's name and the hashes of `part_model.py` and `prepare_parts.py` are part of the mesh
 stage's settings; changing either invalidates the stage like a workflow change.
 
+A reduction can crumple a thin-walled part: the 2026-10-25 chest's sixth seed came out of the collapse decimation
+with 0.47 of its body's shared edges between faces pointing opposite ways, Unity shaded it in facets and Blender's
+custom normals hid it. Inspection records `folded_edge_share` per mesh and a candidate over the type's
+`max_folded_edge_share` (0.1; sound meshes read 0.00–0.02) is the retryable `mesh_folded`.
+
 ## Props with parts
 
 The same declarations work on a prop: the `prop` type sets `part_model: omnipart`, so a chest that declares

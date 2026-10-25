@@ -34,7 +34,7 @@ from ..unity_playmode import verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_part_coverage, apply_part_penetration,
+                          apply_mesh_folds, apply_part_coverage, apply_part_penetration,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1294,6 +1294,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_weapon_orientation(validation)
     if moving:
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
+    validation = apply_mesh_folds(validation, validation.get("measured", {}).get("folded_edge_share"),
+                                  float(asset_type.get("max_folded_edge_share", 0.1)))
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))

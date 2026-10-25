@@ -425,6 +425,28 @@ def apply_part_penetration(validation, penetration, declared, tolerance):
     return validation
 
 
+def apply_mesh_folds(validation, shares, maximum):
+    """Fail a candidate whose faces fold against each other (retryable mesh_folded): `shares` is inspection's
+    folded_edge_share per mesh object, the share of edges whose two faces point opposite ways. A collapse
+    decimation can crumple a thin-walled generated part into such a sheet (the 2026-10-25 chest, 0.47); it shades
+    in facets in an engine while custom normals hide it in Blender. None (not measured): no verdict."""
+    if not shares:
+        return validation
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["folded_edge_share"] = {name: float(value) for name, value in shares.items()}
+    measured["max_folded_edge_share"] = max(measured["folded_edge_share"].values())
+    limits["max_folded_edge_share"] = maximum
+    folded = [name for name, value in measured["folded_edge_share"].items() if value > maximum]
+    if folded:
+        detail = ", ".join(f"{name} {measured['folded_edge_share'][name]:.2f}" for name in folded)
+        validation["errors"] = [*validation.get("errors", []),
+            f"mesh faces fold against each other ({detail} of their shared edges, limit {maximum:g}): the reduction "
+            "crumpled a thin surface, so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "mesh_folded"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_moving_parts(validation, declared):
     """Fail a weapon whose declared moving part did not come out as its own piece (retryable quality code).
 

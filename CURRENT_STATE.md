@@ -1049,12 +1049,19 @@ Multi-part weapons and props: quality and in-game function (2026-10-25, M3, [gui
   opt-in Unity live (colliders, sockets, Animator, penetration with the mirrored hint, Play mode), `make verify`.
 - **Live (2026-10-25):** pistol P2 published and played (slide −0.0300 m, trigger −20.00°, penetration ≤ 0.002;
   its trigger declared the wrong way, forward); P3, the same brief with the trigger pulling (`0..20`), passed the
-  mesh and colour gates but Unity rejected its slide (0.040 inside the frame drawn back), which led to the Blender
-  sweep; P4 is P3 re-approved through it. Rifle R2 rejected: the bolt handle
+  mesh and colour gates but Unity rejected its slide (0.040 inside the frame drawn back, by a single ray that
+  reads 0.03–0.08 on clear parts), which led to the Blender sweep and to both checks counting inside by two of
+  three rays; P4, re-approved through the sweep, published and played (slide −0.030 m, trigger 20.00°, penetration
+  0.015 and 0.006; Play mode passed). Rifle R2 rejected: the bolt handle
   (1.7 cells) and trigger (2.2 cells) are below OmniPart's grid, three seeds each; the preflight now stops such
   briefs. Chest: lid geometry passed on every seed (0.77–0.91 of its mask); C2 rejected in Unity (`@back-top` is a
   domed lid's apex), C3 rejected with the hint (`-100` clears), C4 with the right declaration failed the colour
-  gates on three seeds (chroma ratio 0.07–0.55: OmniPart paints the chest's sides dark) and is being retried.
-- **Not verified / open:** the chest's colour consistency (2 of 9 seeds passed the colour gates); seed variance of
+  gates on five seeds (chroma ratio 0.07–0.55: OmniPart paints the chest's sides dark) and published and played on
+  the sixth (lid −100.00°, penetration 0.000, `Socket_lid` at the seam, Play mode passed), but Unity shades that
+  mesh in facets: the collapse decimation crumpled the thin-walled box (0.47 of its shared edges between opposed
+  faces; sound meshes 0.00–0.02), hidden in Blender by custom normals. Inspection now records `folded_edge_share`
+  and the retryable `mesh_folded` gate (0.1) rejects such a seed. No chest is published as a usable asset yet.
+- **Not verified / open:** the chest's colour consistency (3 of 12 seeds passed the colour gates) and a reduction
+  that keeps thin walls; seed variance of
   the pistol's trigger coverage and overflow; Play mode checks motion and settling only; no LODs; the crossbow.
   Status Experimental: one brief per kind, no repeatability claim.

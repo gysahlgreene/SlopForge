@@ -40,6 +40,9 @@ part_cfg: 7.5
 # A hinge or slide swept through its declared range in the final pass: over this share of its vertices inside the
 # rest of the model (over rest), the seed is retried (part_penetrates); Unity repeats the check on the prefab.
 max_part_penetration: 0.02
+# The share of a mesh's edges whose faces point opposite ways: a thin surface crumpled by the reduction (sound
+# meshes read 0.00-0.02); over this the seed is retried (mesh_folded).
+max_folded_edge_share: 0.1
 # Weapons are seen at arm's length: the generated parts' textures and the atlas are baked at this size, and Unity
 # imports the maps at it (its default ceiling of 2048 would halve them).
 texture_size: 4096

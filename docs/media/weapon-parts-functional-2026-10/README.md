@@ -31,16 +31,17 @@ page is the live evidence for the branch that followed (`feat/weapon-parts-quali
 
 ## Pistol: published and played
 
-![Pistol: concept, Unity three-quarter view, the motion strip](pistol_unity.jpg)
+![Pistol P4: concept, Unity three-quarter view, the motion strip](pistol_unity.jpg)
 
-The P2 run (branch at PR1–5) passed its gates with the colour transfer and the metal-lightness match measured for
-the first time on this route (metal gain 2.9×, darkened share 0.053, slide 0.90 of its mask, trigger 0.99) and
-published through Unity: slide −0.0300 m, trigger 20.00°, penetration 0.002 and 0.001 over rest, no pivot drift.
-Its trigger had been declared `-20..0`, which in Unity's sense swings a hanging trigger forward. P3 is the same
-brief with `0..20` (a pull): its seed passed the mesh and colour gates (slide 0.86 of its mask, trigger 0.96) but
-Unity rejected the publication, the slide reading 0.040 of its vertices inside the frame over rest when drawn back
-(tolerance 0.02). That is what led to the sweep in Blender's final pass, so such a seed is replaced before
-materials; P4 is P3 re-approved with fresh seeds through it.
+| Run | Trigger declared | Mesh and colour gates | Unity |
+| --- | --- | --- | --- |
+| P2 (branch at PR1–5) | `-20..0` | passed: metal gain 2.9×, darkened 0.053, slide 0.90 of its mask, trigger 0.99 | published: slide −0.030 m, trigger −20°, penetration ≤ 0.002; the trigger swings forward (the sign) |
+| P3 | `0..20` (a pull) | passed: slide 0.86, trigger 0.96 | rejected: slide 0.040 inside the frame drawn back, by a single ray along x |
+| P4 (fresh seeds through the Blender sweep) | `0..20` | passed on seed 1: slide 0.95, trigger 0.86 (0.55 of it outside its mask), chroma ratio 1.41, darkened 0.018; Blender sweep 0.000 for both | **published and played**: slide −0.030 m, trigger 20.00°, penetration 0.015 and 0.006 (two-of-three rays), no pivot drift; 4 colliders, 1 kg, sockets grip/muzzle/slide/trigger, Animator `Rest`/`slide`/`slide_open`/`trigger`/`trigger_open`; Play mode: both pulses and `RestsOnTheGround` passed |
+
+P3's rejection came from the single-ray parity Unity used then: the same seed read 0.000 in Blender with rays along
+two of three axes, and a close-up render showed no clipping. Both checks now count a point inside by two of three
+rays; a single ray along x read 0.03–0.08 on three parts that were clear.
 
 ## Rifle: rejected by the coverage gate, and why
 
@@ -60,14 +61,17 @@ side) and says so; the brief, not a seed, has to change (a bigger bolt handle, o
 | --- | --- | --- | --- | --- |
 | C2 | `lid=hinge:x:0..110@back-top` | lid 0.86 of its mask, one piece, pivot on the lid's apex edge | passed on seed 3 (chroma ratio 0.77, darkened 0.16) | rejected: the lid swept through the body (0.27 of its vertices inside): `back-top` of a domed lid is its apex, and a positive turn sinks the front |
 | C3 | `lid=hinge:x:0..100@back-bottom` | lid 0.87, pivot on the seam | passed on seed 1 (0.72, 0.14) | rejected: 0.17 inside; the error now names `-100` as the sign that clears the body (0.000) |
-| C4 | `lid=hinge:x:-100..0@back-bottom` | lid 0.77 / 0.87 / 0.91 | seeds 1–3 failed (chroma ratio 0.39 / 0.07 / 0.55; darkened 0.65 on seed 2) | pending the retry |
+| C4 | `lid=hinge:x:-100..0@back-bottom` | lid 0.77 / 0.87 / 0.91, then 0.85 / 0.83 / 0.80 | seeds 1–3 failed (chroma ratio 0.39 / 0.07 / 0.55; darkened 0.65 on seed 2); seeds 4–5 failed; seed 6 passed (chroma ratio 0.93, darkened 0.05) | published and played: lid −100.00°, penetration 0.000, no pivot drift; 2 colliders, 5 kg, `Socket_lid` at the seam, Animator `Rest`/`lid`/`lid_open`; Play mode passed — **but Unity shades the mesh in facets**: the collapse decimation crumpled this seed's thin-walled box (0.47 of its shared edges between opposed faces; sound meshes 0.00–0.02), hidden in Blender by custom normals. A new `mesh_folded` gate rejects such a seed at the mesh stage; this one is not a usable asset |
 
+![Chest C4: concept, Unity three-quarter view (Blender preview), and the faceted Unity strip](chest_unity.jpg)
 ![Chest C3 in Unity: the lid turns about its seam, the wrong way](chest_c3_motion.jpg)
 
 OmniPart's chest textures vary from seed to seed: the oak comes out pale in front and dark on the sides and back,
 and one seed in three is grey all over. The colour transfer (median a\*b\* shift capped at 25, lightness up to 3×)
-lifts the lightness but not the chroma of a desaturated bake, so the chest's colour gates passed 2 of 9 seeds
-across these runs while the lid's geometry passed every one. That is the open quality item on props with parts.
+lifts the lightness but not the chroma of a desaturated bake, so the chest's colour gates passed 3 of 12 seeds
+across these runs while the lid's geometry passed every one; the one seed that passed everything else was crumpled
+by the reduction. **No chest is published as a usable asset yet.** Its open items are the colour consistency and a
+reduction that keeps thin walls (the mesh-fold gate now stops the crumpled ones from reaching Unity).
 
 ## What a game gets
 
@@ -81,7 +85,9 @@ the asset). The Play-mode run needs the project's editor installed by the Hub (o
 
 - OmniPart at 64³ cannot make a moving part under about 3 cells across; the preflight stops such briefs.
 - Seed-to-seed consistency: the chest's colour, the pistol's trigger coverage (0.64–0.99 across seeds) and its
-  overflow (0.74 of the trigger outside its mask on P2) all vary; nothing here is a repeatability claim.
+  overflow (0.55–0.74 of the trigger outside its mask) all vary; nothing here is a repeatability claim.
+- The penetration measures are ray-parity approximations on meshes with holes; Unity and Blender now use the same
+  rule, and the eye was the arbiter where they disagreed (renders in the private run folders).
 - Play mode checks that each part moves and returns and that the body settles on a floor; it does not check a
   player picking the asset up, nor the look under a game's own lighting.
 - No LODs; one asset per brief; the crossbow was not rerun.

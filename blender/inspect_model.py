@@ -26,6 +26,17 @@ def write_result(path, result):
     os.replace(temporary, path)
 
 
+def folded_edges(mesh):
+    """The share of a mesh's edges whose two faces point opposite ways: a surface crumpled into a sheet (a collapse
+    decimation on a thin-walled part, 2026-10-25) shades in facets in an engine while custom normals hide it here."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    pairs = [edge for edge in bm.edges if len(edge.link_faces) == 2]
+    folded = sum(1 for edge in pairs if edge.link_faces[0].normal.dot(edge.link_faces[1].normal) < -0.5)
+    bm.free()
+    return round(folded / len(pairs), 4) if pairs else 0.0
+
+
 def connected_components(mesh):
     parent = list(range(len(mesh.vertices)))
     size = [1] * len(parent)
@@ -315,6 +326,7 @@ def inspect(source, face_budget, real_scale=False):
                           for obj in objects if isinstance(obj.get("slopforge_part_overflow"), str)), None)
     part_penetration = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_penetration"]).items()}
                              for obj in objects if isinstance(obj.get("slopforge_part_penetration"), str)), None)
+    folded_edge_share = {obj.name: folded_edges(obj.data) for obj in objects}
     component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
@@ -340,6 +352,7 @@ def inspect(source, face_budget, real_scale=False):
                 **({"part_coverage": part_coverage} if part_coverage is not None else {}),
                 **({"part_overflow": part_overflow} if part_overflow is not None else {}),
                 **({"part_penetration": part_penetration} if part_penetration is not None else {}),
+                "folded_edge_share": folded_edge_share,
                 **({"part_components": {part["name"]: part["components"] for part in parts}} if parts else {}),
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,

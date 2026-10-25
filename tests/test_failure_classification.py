@@ -1029,6 +1029,19 @@ class PropComponentBudgetTests(unittest.TestCase):
         unmeasured = apply_part_penetration(_quality_report(component_count=1), {}, declared, 0.02)
         self.assertEqual(unmeasured.get("failure_codes", []), [])  # the cut route measures nothing: no verdict
 
+    def test_a_mesh_whose_faces_fold_against_each_other_is_retried(self):
+        # The C4 chest (2026-10-25): the collapse decimation crumpled a thin-walled box, 47% of its adjacent faces
+        # came out with opposed normals, and Unity shaded it in facets (Blender's custom normals hid it).
+        from slopforge.validation import apply_mesh_folds
+        report = apply_mesh_folds(_quality_report(component_count=1), {"body": 0.472, "lid": 0.01}, 0.1)
+        self.assertEqual(report["failure_codes"], ["mesh_folded"])
+        self.assertIn("body 0.47", report["errors"][-1])
+        self.assertEqual(report["measured"]["folded_edge_share"], {"body": 0.472, "lid": 0.01})
+        self.assertEqual((report["measured"]["max_folded_edge_share"], report["limits"]["max_folded_edge_share"]), (0.472, 0.1))
+        self.assertTrue(candidate_quality_rejection(report))
+        self.assertEqual(apply_mesh_folds(_quality_report(component_count=1), {"body": 0.026}, 0.1).get("failure_codes", []), [])
+        self.assertEqual(apply_mesh_folds(_quality_report(component_count=1), None, 0.1).get("failure_codes", []), [])
+
     def test_a_base_colour_without_textured_pixels_records_no_metric_and_stays_retryable(self):
         # 2026-10-25 live pistol: an all-black atlas left no texels to measure, the chroma metrics became NaN, the
         # failure record could not carry its evidence, and a retryable part_missing was reported as final.

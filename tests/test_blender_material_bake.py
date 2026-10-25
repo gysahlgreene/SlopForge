@@ -1055,6 +1055,8 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         # swept through its declared range (Unity's sense: a negative turn about x lifts a back-hinged lid): the
         # share of the lid's vertices inside the body over rest; the gate retries a seed that sweeps into the body
         self.assertLessEqual(measured["inspection"]["part_penetration"]["lid"], 0.02)
+        # the faces of a box and its lid agree with their neighbours: a crumpled reduction would read ~0.5
+        self.assertLess(max(measured["inspection"]["folded_edge_share"].values()), 0.05)
         sunk = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
                            extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
                                   "--parts-json", "parts.json", "--motion", "lid=x:0..100"),
