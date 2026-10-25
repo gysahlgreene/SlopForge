@@ -115,6 +115,7 @@ def box(name, centre, size, pivot, parent=None, kind=None):
 body = box('body', (0, -0.5, 0.1), (0.05, 1.0, 0.2), (0, 0, 0))
 box('slide', (0, -0.5, 0.25), (0.05, 1.0, 0.1), (0, -0.5, 0.25), body, 'slide')
 box('lever', (0, -0.3, -0.05), (0.02, 0.05, 0.1), (0, -0.325, 0.0), body, 'hinge')  # pivot on its top-back edge: it swings clear
+box('flap', (0, -0.975, 0.3), (0.02, 0.05, 0.2), (0, -1.0, 0.2), body, 'hinge')  # standing on the slab's front end, hinged on the slab's top-front edge
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selection=True, object_types={{'MESH'}},
     axis_forward='-Z', axis_up='Y', apply_unit_scale=True, bake_space_transform=False, add_leaf_bones=False,
@@ -144,7 +145,7 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
             self.assertTrue((self.root / item["clip"]).is_file())
         # in-game function: a convex collider per mesh, a Rigidbody with the declared mass, sockets, an Animator a
         # script can drive (Rest by default; a trigger and a hold bool per part)
-        self.assertEqual(report["colliders"], 3)
+        self.assertEqual(report["colliders"], 4)  # body, slide, lever, flap: one convex collider per mesh
         self.assertAlmostEqual(report["rigidbody_mass"], 1.0)
         sockets = {item["name"]: item["position"] for item in report["sockets"]}
         self.assertEqual(sorted(sockets), ["Socket_Grip", "Socket_Muzzle", "Socket_lever", "Socket_slide"])
@@ -159,11 +160,28 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
         self.assertAlmostEqual(motions["lever"]["pivot"][2], 0.325, delta=0.002)
         self.assertAlmostEqual(motions["lever"]["pivot"][1], 0.0, delta=0.002)
 
+    def test_the_prefab_plays_in_play_mode(self):
+        from slopforge.unity_playmode import verify_play_mode
+        fbx = self._export()
+        parts = [{"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0},
+                 {"name": "lever", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0}]
+        build_weapon_prefab(self.root, "weapon", fbx, parts, prefab=self.folder / "weapon.prefab",
+                            clip_folder=self.folder / "Animations", render=self.folder / "motion.png",
+                            held=True, mass=1.0, layer=None)
+        prefab = (self.folder / "weapon.prefab").relative_to(self.root).as_posix()
+        report = verify_play_mode(self.root, prefab, parts, results=self.folder / "playmode.xml")
+        self.assertEqual(report["failed"], [])
+        self.assertEqual(sorted(report["passed"]), ['PartPulses("lever")', 'PartPulses("slide")', "RestsOnTheGround"])
+
     def test_a_hinge_that_swings_into_the_body_fails_the_penetration_check(self):
         fbx = self._export()
-        parts = [{"name": "lever", "kind": "hinge", "axis": "x", "min": 0.0, "max": 150.0}]  # up into the slab
+        # a flap at the slab's front end, folded back over the slab: in Unity's sense a negative turn about x takes
+        # +y towards -z, into the slab; the mirrored range folds it forward, clear of everything
+        parts = [{"name": "flap", "kind": "hinge", "axis": "x", "min": -150.0, "max": 0.0}]
         report = build_weapon_prefab(self.root, "weapon", fbx, parts, prefab=self.folder / "weapon.prefab",
                                      clip_folder=self.folder / "Animations", render=self.folder / "motion.png",
                                      held=True, mass=1.0, layer=None)
         self.assertTrue(any("penetrat" in error for error in report["errors"]), report["errors"])
         self.assertGreater(report["motions"][0]["penetration"], 0.1)
+        # the usual cause is the sign (docs/WEAPONS.md, Axes): the error names the range that clears the slab
+        self.assertTrue(any("opposite sign, 150" in error for error in report["errors"]), report["errors"])

@@ -116,20 +116,10 @@ public static class CLASS_NAME
             // The root's axis in the part's space. The imported FBX root is scaled (100 with the importer's 0.01
             // file scale), so a slide's travel goes through the parent's scale too: 0.03 m once moved 3 m.
             var local = transform.parent.InverseTransformDirection(axis);
-            var clip = new AnimationClip { name = request.name + "_" + part.name };
             var path = AnimationUtility.CalculateTransformPath(transform, root.transform);
             var restPosition = transform.localPosition;
             var restRotation = transform.localRotation;
-            if (part.kind == "slide")
-            {
-                var limitPosition = restPosition + transform.parent.InverseTransformVector(axis * part.limit);
-                Curve(clip, path, "m_LocalPosition", new[] { restPosition, limitPosition, restPosition });
-            }
-            else
-            {
-                var limitRotation = restRotation * Quaternion.AngleAxis(part.limit, local);
-                Curve(clip, path, "m_LocalRotation", new[] { restRotation, limitRotation, restRotation });
-            }
+            var clip = Pulse(request.name + "_" + part.name, transform, path, axis, part.kind, part.limit);
             var clipPath = request.clip_folder + "/" + clip.name + ".anim";
             AssetDatabase.CreateAsset(clip, clipPath);
             // the hold: one key at the limit, so the part stays there while "<part>_open" is set
@@ -201,6 +191,20 @@ public static class CLASS_NAME
         Debug.Log("SLOPFORGE_WEAPON_PREFAB " + request.prefab);
     }
 
+    // One pulse rest -> limit -> rest (1 s). The root's axis is taken into the part's space: the imported FBX root
+    // is scaled (100 with the importer's 0.01 file scale), so a slide's travel goes through the parent's scale too.
+    static AnimationClip Pulse(string name, Transform transform, string path, Vector3 axis, string kind, float limit)
+    {
+        var clip = new AnimationClip { name = name };
+        var rest = transform.localPosition; var restRotation = transform.localRotation;
+        if (kind == "slide")
+            Curve(clip, path, "m_LocalPosition", new[] { rest, rest + transform.parent.InverseTransformVector(axis * limit), rest });
+        else
+            Curve(clip, path, "m_LocalRotation", new[] { restRotation,
+                restRotation * Quaternion.AngleAxis(limit, transform.parent.InverseTransformDirection(axis)), restRotation });
+        return clip;
+    }
+
     static void Curve(AnimationClip clip, string path, string property, Vector3[] keys)
     {
         var names = new[] { ".x", ".y", ".z" };
@@ -236,8 +240,16 @@ public static class CLASS_NAME
         var label = declared.kind + " " + declared.name;
         motion.penetration = Penetration(root, part, clip, request);
         if (motion.penetration > request.penetration_tolerance)
+        {
+            // The usual cause is the range's sign (docs/WEAPONS.md, Axes): say so when the mirrored range clears.
+            var mirrored = Penetration(root, part, Pulse(clip.name + "_mirrored", part,
+                AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request);
             errors.Add(label + " penetrates the body through its range (" +
-                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices inside, over rest)");
+                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices inside, over rest" +
+                       (mirrored <= request.penetration_tolerance ? "; the opposite sign, " +
+                        (-declared.limit).ToString("G", CultureInfo.InvariantCulture) + ", clears the body at " +
+                        mirrored.ToString("F3", CultureInfo.InvariantCulture) : "") + ")");
+        }
         if (declared.kind == "slide")
         {
             var displacement = limitPosition - restPosition;

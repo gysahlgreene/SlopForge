@@ -378,7 +378,8 @@ avoid: [environment]
                         "motions": [{"part": "trigger", "angle": -20.0}], "tip_forward": True, "root_inside": True}
             with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
                     patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material), \
-                    patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab):
+                    patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab), \
+                    patch("slopforge.pipelines.model.verify_play_mode", return_value={"passed": [], "failed": []}):
                 if outcome == "succeeded":
                     validation = approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
                     self.assertEqual(validation["measured"]["weapon_motion"]["motions"][0]["angle"], -20.0)
@@ -475,11 +476,21 @@ avoid: [environment]
         def unity_material(root, fbx, material, maps, **options):
             imports.append(options.get("lightmap_uvs"))
             return fake_unity_material(root, fbx, material, maps, **options)
+        played = []
+
+        def play(root, prefab_path, parts, *, results):
+            played.append((prefab_path, [part["name"] for part in parts], Path(results).name))
+            return {"passed": ["RestsOnTheGround"], "failed": []}
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
                 patch("slopforge.pipelines.model.build_unity_material", side_effect=unity_material), \
-                patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab):
+                patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab), \
+                patch("slopforge.pipelines.model.verify_play_mode", side_effect=play):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         self.assertEqual(calls, [("relay", [], False, 25.0, "Props")])
+        # the prefab is then played: the Animator and physics run in Play mode, not only sampled in the editor
+        self.assertEqual(played, [("Assets/relay.prefab", [], "relay_playmode.xml")])
+        record = self.manifest["assets"]["prop:relay"]
+        self.assertEqual(record["validation"]["measured"]["play_mode"], {"passed": ["RestsOnTheGround"], "failed": []})
         self.assertEqual(imports, [True])  # a static prop gets lightmap UVs; a held weapon does not
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         self.assertEqual(record["validation"]["measured"]["weapon_motion"]["prefab"], "Assets/relay.prefab")

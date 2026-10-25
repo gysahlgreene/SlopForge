@@ -80,16 +80,21 @@ slopforge --project ~/UnityProjects/MyGame generate weapon longsword "A medieval
 Declare each moving part, and the grip, as `--part`. The final Blender pass splits each hinge or slide from the mesh:
 
 ```sh
---part "grip=grip: the leather-wrapped grip" --part "trigger=hinge:x:-20..0: the curved trigger inside the guard"
+--part "grip=grip: the leather-wrapped grip" --part "trigger=hinge:x:0..20: the curved trigger inside the guard"
 ```
 
 - **Kinds:**
   - `grip`: one at most, the weapon's handle;
   - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
-    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:0..110@back-top`. Without it the
+    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`. Without it the
     pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
   - `slide`: moves along an axis, with its range in metres.
-- **Axes:** in the weapon's frame as Unity shows it: x right, y up, z forward along the blade or barrel.
+- **Axes:** in the weapon's frame as Unity shows it: x right, y up, z forward along the blade or barrel (a prop:
+  z towards its concept's camera). A range's sign is Unity's: a positive turn about x takes +y towards +z, about
+  y +z towards +x, about z +x towards +y. So a trigger hanging below its pivot pulls back with `0..20`, and a lid
+  hinged on the back edge opens with `-100..0`; a slide's range is signed along its axis (`-0.03..0` draws a
+  pistol's slide back). The interpenetration check rejects a part turned the wrong way into its body and names
+  the sign that clears it.
 - **Description:** the text after the second colon names the part as the concept draws it. Without one, the part's
   name stands in.
 
@@ -233,13 +238,14 @@ stage's settings; changing either invalidates the stage like a workflow change.
 ## Props with parts
 
 The same declarations work on a prop: the `prop` type sets `part_model: omnipart`, so a chest that declares
-`--part "lid=hinge:x:0..100@back-bottom: the domed lid"` is generated as a body and a lid, framed from its concept
-(front towards the concept's camera at −Y, top up; no grip, no full-turn search, no tip check), the lid measured
-against its mask, separated with its pivot on its back-bottom edge, and published as a prefab whose `lid` trigger
-and `lid_open` bool open it. The anchor names an edge of the part's own bounds, so a lid's hinge is `back-bottom`,
-the seam it rests on: `back-top` put a domed lid's pivot at its apex, and the rim swept through the body, which
-the interpenetration check rejected (2026-10-25 live run, 0.27 of the lid's vertices inside). A chest is the first
-prop proven this way (see the evidence pages).
+`--part "lid=hinge:x:-100..0@back-bottom: the domed lid"` is generated as a body and a lid, framed from its concept
+(front towards the concept's camera, top up; no grip, no full-turn search, no tip check), the lid measured against
+its mask, separated with its pivot on its back-bottom edge, and published as a prefab whose `lid` trigger and
+`lid_open` bool open it. The anchor names an edge of the part's own bounds, so a lid's hinge is `back-bottom`, the
+seam it rests on (`back-top` put a domed lid's pivot at its apex), and the sign follows the axis rule above (a
+positive turn sank the lid through the body). Both mistakes were made and caught by the interpenetration check on
+the 2026-10-25 live runs (0.27 and 0.17 of the lid's vertices inside). A chest is the first prop proven this way
+(see the evidence pages).
 
 ## The prefab a game uses
 
@@ -266,7 +272,16 @@ The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
 player. LODs are not generated (the mesh budget is the one LOD).
 
-Not checked yet: Play mode, LODs and lightmap UVs.
+After the prefab, the publication **plays it**: a play-mode test assembly is written into the project
+(`Assets/SlopForgeTests/PlayMode`, `slopforge/unity_playmode.py`) and run with Unity's test runner. Each hinge or
+slide gets `PartPulses("<part>")`: the Animator's trigger is set, the part must have moved at mid-pulse and be back
+at rest within 2 mm and 0.5° after 2 s. `RestsOnTheGround` drops the prefab on a floor plane: after 3 s it must be
+above the floor and still. The NUnit results are kept beside the asset (`<name>_playmode.xml`) and summarised in
+`validation.measured.play_mode`; a failed test fails the publication with its message. The run launches the editor
+binary itself (the `unity` wrapper's `-quit` would end a test run before it starts), so it needs the project's
+editor version installed by the Hub, or `UNITY_EDITOR_PATH`.
+
+Not checked yet: LODs.
 
 ## Known limits
 

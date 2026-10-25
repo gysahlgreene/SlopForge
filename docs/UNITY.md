@@ -18,6 +18,14 @@ An approved asset keeps its Unity identity when it is published again. Its files
 - its importer type;
 - a hash of its importer settings.
 
+A published prefab is also played before it is recorded: a play-mode test assembly under
+`Assets/SlopForgeTests/PlayMode` runs each part's Animator trigger and drops the prefab on a floor through
+Unity's test runner ([Weapons](WEAPONS.md#the-prefab-a-game-uses)). That run launches the project's editor
+binary directly (the `unity` wrapper's `-quit` ends a test run before it starts), so the editor version in
+`ProjectSettings/ProjectVersion.txt` must be installed by the Hub under `/Applications/Unity/Hub/Editor`, or
+`UNITY_EDITOR_PATH` must name the binary; the project needs `com.unity.test-framework` (every Unity project
+template includes it). The NUnit results stay beside the asset as `<name>_playmode.xml`.
+
 SlopForge adds each file's SHA-256 and records the report as `unity_import` on the asset, under its logical ID (for example `prop:crate`). Approval stops before it is recorded in two cases: the material does not reference the published maps, or republishing changed a GUID at the same path, for example when a `.meta` file was lost and Unity made a new one on a checkout without its `Library/` cache. The previous files and `.meta` files are then restored. Restore the `.meta` files from version control, or publish under a new name. On a machine whose `Library/` still knows the path, Unity gave a deleted `.meta` its old GUID back.
 
 To check a material candidate in Unity before anyone approves it, run `slopforge --project <project> unity-preview <name> <material-number>`. It copies the candidate's FBX and maps to `<output_root>/CandidatePreviews/<name>/material_NN/`, imports them with the same Lit material assignment check as approval, and saves a four-view render from the active pipeline to the candidate's `unity_preview.png`. The result and the hashes of its inputs are recorded as `unity_preview` on the candidate; the candidate's status, approval and the asset's published outputs are not changed. This is an editor batch render, not a Play-mode or in-scene check.

@@ -25,6 +25,9 @@ class PublicationTestCase(unittest.TestCase):
                                    "motions": [], "tip_forward": True, "root_inside": True})
         stub.start()
         self.addCleanup(stub.stop)
+        played = patch("slopforge.pipelines.model.verify_play_mode", return_value={"passed": [], "failed": []})
+        played.start()
+        self.addCleanup(played.stop)
 
 
 class TextureApprovalRollbackTests(PublicationTestCase):
