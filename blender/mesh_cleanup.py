@@ -371,25 +371,37 @@ def world_triangles(objects):
     return np.concatenate(found) if found else np.zeros((0, 3, 3))
 
 
-def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
-    """The share of `part`'s vertices inside `others` at the worst of `samples` points of its declared range, over
-    the share at rest: a lid turned into its chest, a drawer through its housing. The part turns about its origin
-    (its pivot) or slides along its axis; a point is inside where the others' winding number is over a half
-    (generated meshes are open, so a ray's parity lies). Everything is in world space: the body of a weapon stands
-    at its grip, away from the origin. Unity repeats the check on the prefab."""
+def sweep_penetration(part, others, axis, low, high, samples=9, limit=400, depth=0.005):
+    """The share of `part`'s vertices that go inside `others` at the worst of `samples` points of its declared range
+    and were not inside at rest: a lid turned into its chest, a drawer through its housing. The part turns about its
+    origin (its pivot) or slides along its axis. A point is inside where the others' winding number is over a half
+    (generated meshes are open, so a ray's parity lies) and counts when it is deeper than `depth` of the model's
+    size: a hybrid slide and frame are one surface cut along a zigzag, and moved back the slide's edge dips a
+    fraction of a millimetre under the frame's along the whole seam (6% of a pistol's slide newly inside, 0.14%
+    deeper than half a percent; a chest lid turned the wrong way 18% and 7.4%, 2026-10-25). Everything is in world
+    space: the body of a weapon stands at its grip, away from the origin. Unity repeats the check on the prefab."""
     import numpy as np
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
     triangles = world_triangles(others)
     step = max(1, len(part.data.vertices) // limit)
     rest = [part.matrix_world @ vertex.co for index, vertex in enumerate(part.data.vertices) if index % step == 0]
     if not len(triangles) or not rest:
         return 0.0
-    share = lambda points: float((np.abs(winding_numbers([tuple(p) for p in points], triangles)) > 0.5).mean())
-    rest_share = share(rest)
+    corners = triangles.reshape(-1, 3)
+    tree = BVHTree.FromPolygons([Vector(c) for c in corners], [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(len(triangles))])
+    points = np.array([tuple(p) for p in rest])
+    size = float(np.ptp(np.concatenate([corners, points]), 0).max())
+    inside = lambda pts: np.abs(winding_numbers(pts, triangles)) > 0.5
+    at_rest = inside(points)
     far = low if abs(low) > abs(high) else high  # the range runs from rest to its far end
     worst = 0.0
     for sample in range(1, samples + 1):
-        move = motion_matrix(part, axis, far * sample / samples)
-        worst = max(worst, share([move @ point for point in rest]) - rest_share)
+        move = np.array(motion_matrix(part, axis, far * sample / samples))
+        moved = points @ move[:3, :3].T + move[:3, 3]
+        entered = np.nonzero(inside(moved) & ~at_rest)[0]
+        deep = sum(1 for index in entered if tree.find_nearest(Vector(moved[index]))[3] > depth * size)
+        worst = max(worst, deep / len(points))
     return round(worst, 4)
 
 
@@ -1125,8 +1137,8 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
     if close:
         bm.faces.layers.int.get("slopforge_fill") or bm.faces.layers.int.new("slopforge_fill")
         solid = solid_grid(bm)
-        cut_edges = {part_id: [edge for edge in bm.edges
-                               if len({face[layer] == part_id for face in edge.link_faces}) == 2] for part_id in parts}
+        cut_edges = {part_id: {edge for edge in bm.edges
+                               if len({face[layer] == part_id for face in edge.link_faces}) == 2} for part_id in parts}
         cuts = {part_id: sum(edge.calc_length() for edge in edges) for part_id, edges in cut_edges.items()}
         # each interface is added twice, to its part and (flipped) to the body; about four triangles per edge of its
         # cut is enough to keep its rim on the cut (a pistol's slide: 1,500 for 365 edges, holes on 0.4% of a moved
@@ -1189,7 +1201,11 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         marker = bm.faces.layers.int["slopforge_fill"]
         containers, cavity = set(), 0
         for group in _boundary_groups(bm):
-            under = [part_id for part_id, bounds in lids.items() if _container_opening(bm, group, [bounds])]
+            # a container's opening is its own lid's cut: a pistol's trigger cut touches the slide's, and the opening
+            # along both, its middle in the trigger's bounds, became a cavity hanging under the pistol (2026-10-25)
+            under = [part_id for part_id, bounds in lids.items()
+                     if sum(edge in cut_edges[part_id] for edge in group) >= 0.5 * len(group)
+                     and _container_opening(bm, group, [bounds])]
             if under:
                 containers.update(under)
                 for face in hollow_opening(bm, group, basecolor=basecolor):

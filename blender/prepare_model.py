@@ -917,7 +917,7 @@ if not mesh_only and parts_table is not None:
             others = [obj, *[other for other in children if other is not child]]
             penetration[child.name] = sweep_penetration(child, others, axis, low, high)
             print(f"Part {child.name} ({child['slopforge_part']}): {penetration[child.name]:.3f} of its vertices "
-                  f"inside the body over rest through {axis} {low:g}..{high:g}")
+                  f"deep inside the body through {axis} {low:g}..{high:g}")
     if penetration:
         obj["slopforge_part_penetration"] = json.dumps(penetration)
     # The model seen from 14 directions, at rest and with each part at the far end of its range: the share of what

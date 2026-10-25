@@ -49,11 +49,14 @@ def crease_weights(lengths, angles, lam, sigma):
 
 
 def label_faces(distances, names, pairs, lengths, angles, areas, masks=None, lam=2.0, sigma=25.0, tau=0.01,
-                mask_weight=3.0, moving=None):
+                mask_weight=25.0, moving=None):
     """Each face's part. distances[i, k]: face i's distance to OmniPart's part names[k] (weapon lengths);
     masks[name][i]: +1 the concept sees face i inside that part's mask, -1 outside, 0 unseen. tau is the distance
-    difference that counts as one unit of evidence. Faces start as body; each moving part (in `moving`'s order,
-    larger first, so a trigger is cut from what a slide leaves) is cut from the rest."""
+    difference that counts as one unit of evidence, at most 20; a mask vote weighs more (`mask_weight`), so where the
+    concept sees a face its mask decides and OmniPart only where it does not (at 3 units OmniPart outvoted the mask
+    where it disagreed: a live pistol's slide lost its rear on its far side, recall 0.82, a chest's lid its planks,
+    0.22-0.31; at 25, 0.99 and 1.00 with no more spill, 2026-10-25). Faces start as body; each moving part (in
+    `moving`'s order, larger first, so a trigger is cut from what a slide leaves) is cut from the rest."""
     names = list(names)
     pairs = np.asarray(pairs)
     area = np.asarray(areas, float) / np.mean(areas)
@@ -64,6 +67,7 @@ def label_faces(distances, names, pairs, lengths, angles, areas, masks=None, lam
     for part in moving:
         rivals = [n for n in names if n != part and (n not in moving or moving.index(n) > moving.index(part))]
         gap = (distances[:, names.index(part)] - distances[:, [names.index(r) for r in rivals]].min(1)) / tau
+        gap = np.clip(np.nan_to_num(gap), -20, 20)  # OmniPart's evidence is capped before the mask's is weighed
         if masks is not None and part in masks:
             vote = np.asarray(masks[part], float)
             # OmniPart's parts vary by seed: its vote counts as far as its part agrees with the mask where the mask

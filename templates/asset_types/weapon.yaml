@@ -39,8 +39,9 @@ min_part_coverage: 0.55
 # type, and a change regenerates the parts.
 part_steps: 25
 part_cfg: 7.5
-# A hinge or slide swept through its declared range in the final pass: over this share of its vertices inside the
-# rest of the model (over rest), the seed is retried (part_penetrates); Unity repeats the check on the prefab.
+# A hinge or slide swept through its declared range in the final pass: over this share of its vertices going inside
+# the rest of the model, deeper than half a percent of the model's size, the seed is retried (part_penetrates); Unity
+# repeats the check on the prefab.
 max_part_penetration: 0.02
 # The model seen from 14 directions, at rest and with each part at the end of its range: a share of what is
 # seen above this is the backs of faces, holes a player sees, and the seed is retried (part_open). Hybrid

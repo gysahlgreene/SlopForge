@@ -81,6 +81,22 @@ class LabelFacesTests(unittest.TestCase):
         labels = label_faces(distances, ["body", "slide"], pairs, lengths, angles, areas, masks={"slide": mask})
         self.assertEqual(list(labels), ["slide"] * 10 + ["body"] * 10)
 
+    def test_where_the_concept_sees_a_face_its_mask_decides_and_omnipart_only_where_it_does_not(self):
+        # OmniPart's part agrees with the mask on half the mask's faces, so it keeps its full vote, and where it
+        # disagrees by its whole range it outvoted a 3-unit mask: a live pistol's slide lost its rear on the side the
+        # concept does not show (recall 0.82; 0.99 once the mask outweighs it), a chest's lid its planks (recall
+        # 0.22-0.31; 1.00), 2026-10-25. Unseen faces still follow OmniPart.
+        n = 20
+        pairs, lengths, angles, areas = strip(n, crease_at=50)  # no crease to lean on
+        distances = np.zeros((n, 2))  # body, slide
+        distances[:10, 1] = 0.001; distances[:10, 0] = 0.4  # OmniPart: slide on the first half...
+        distances[10:, 0] = 0.001; distances[10:, 1] = 0.4  # ...body on the second
+        mask = np.array([1] * 5 + [-1] * 3 + [0] * 2 + [1] * 3 + [0] * 7)
+        labels = label_faces(distances, ["body", "slide"], pairs, lengths, angles, areas, masks={"slide": mask})
+        self.assertEqual(list(labels[5:8]), ["body"] * 3)  # seen outside the mask, though OmniPart says slide
+        self.assertEqual(list(labels[10:13]), ["slide"] * 3)  # seen inside it, though OmniPart says body
+        self.assertEqual(list(labels[15:]), ["body"] * 5)  # unseen: OmniPart's call
+
     def test_a_trigger_is_cut_from_what_the_slide_leaves(self):
         n = 30
         pairs, lengths, angles, areas = strip(n, crease_at=9)

@@ -1267,6 +1267,37 @@ for location in ((0, 0, 0), (0.1, 0.3, 0.27)):
         self.assertGreater(sunk[1], 0.9)  # away from it
 
 
+    def test_a_slide_moved_along_the_cut_it_was_made_from_is_not_inside(self):
+        # A hybrid slide and frame are one surface cut along a line that zigzags; moved back, the slide's lower edge
+        # dips a fraction of a millimetre under the frame's along the whole seam: 6% of a live pistol's slide newly
+        # inside, 0.14% deeper than half a percent of the pistol (2026-10-25). Only points that go deeper count. A
+        # box cut by a wavy line, its top part slid along the cut.
+        script = f'''import bpy, bmesh, math, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+box = bpy.context.object
+bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.mesh.subdivide(number_cuts=19); bpy.ops.object.mode_set(mode="OBJECT")
+cut = lambda c: c.z > 0.2 + 0.01 * math.sin(40 * c.y)  # a cut that wavers by 1% of the box
+bm = bmesh.new(); bm.from_mesh(box.data)
+top = bm.copy()
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if cut(f.calc_center_median())], context="FACES")
+bmesh.ops.delete(top, geom=[f for f in top.faces if not cut(f.calc_center_median())], context="FACES")
+bm.to_mesh(box.data); bm.free()
+mesh = bpy.data.meshes.new("slide"); top.to_mesh(mesh); top.free()
+slide = bpy.data.objects.new("slide", mesh); bpy.context.collection.objects.link(slide)
+slide.parent = box; slide["slopforge_part"] = "slide"
+bpy.context.view_layer.update()
+print("SEAM", sweep_penetration(slide, [box], "z", -0.3, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        seam = float(next(line for line in result.stdout.splitlines() if line.startswith("SEAM")).split()[1])
+        self.assertLessEqual(seam, 0.02)
+
     def test_a_part_moved_into_a_pocket_of_an_open_body_is_not_inside_it(self):
         # Generated bodies are open: the hybrid pistol's kept 512 open edges after closing, and by ray parity half
         # its slide sat inside the body at rest (2026-10-25). A slab with no underside and a block open to the front,
@@ -1417,6 +1448,36 @@ print("OPEN", mesh_cleanup.visible_backfaces([box]))
                if line.startswith(("CLOSED", "OPEN"))}
         self.assertLess(out["CLOSED"], 0.001)
         self.assertGreater(out["OPEN"], 0.05)
+
+    def test_a_hinged_part_inside_another_parts_cut_does_not_make_a_container(self):
+        # A pistol's trigger cut touches the slide's: the body's opening along both read as the trigger's container
+        # (its middle in the trigger's bounds, half the body's outline), and a cavity's walls hung under the pistol,
+        # 0.37 of the model seen as the backs of faces (2026-10-25). An opening is a container only along its own
+        # hinged part's cut. A box's top cut away as a slide, a small hinged part in the middle of that top.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+box = bpy.context.object
+bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.mesh.subdivide(number_cuts=9); bpy.ops.mesh.quads_convert_to_tris(); bpy.ops.object.mode_set(mode="OBJECT")
+attribute = box.data.attributes.new("slopforge_part", "INT", "FACE")
+for polygon in box.data.polygons:
+    x, y, z = polygon.center
+    attribute.data[polygon.index].value = (3 if abs(x) < 0.12 and abs(y) < 0.12 else 2) if z > 0.45 else 1
+table = {{"body": {{"kind": "body", "id": 1}}, "slide": {{"kind": "slide", "id": 2}}, "flap": {{"kind": "hinge", "id": 3}}}}
+mesh_cleanup.separate_tagged(box, table, contact=0.01, close=True)
+values = [0] * len(box.data.polygons); box.data.attributes["slopforge_fill"].data.foreach_get("value", values)
+fills = [polygon for polygon, value in zip(box.data.polygons, values) if value]
+print("FILLS", len(fills), "LOWEST", min(polygon.center.z for polygon in fills))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        line = next(line for line in result.stdout.splitlines() if line.startswith("FILLS")).split()
+        self.assertGreater(int(line[1]), 0)
+        self.assertGreater(float(line[3]), 0.3)  # the slide's interface near the top, no cavity floor deep inside
 
     def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
         # Interfaces and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds

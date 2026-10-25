@@ -403,10 +403,10 @@ def apply_part_coverage(validation, coverage, declared, minimum):
 
 def apply_part_penetration(validation, penetration, declared, tolerance):
     """Fail a candidate whose hinge or slide sweeps into the rest of the model (retryable part_penetrates: another
-    seed may shape the part clear). `penetration` is the final pass's sweep per part: the share of its vertices
-    inside the rest of the model at the worst point of its declared range, over its rest value (Blender,
-    mesh_cleanup.sweep_penetration); nothing measured, no verdict (the cut route). Unity repeats the check on
-    the published prefab."""
+    seed may shape the part clear). `penetration` is the final pass's sweep per part: the share of its vertices that
+    go inside the rest of the model, deeper than half a percent of its size, at the worst point of the declared range
+    (Blender, mesh_cleanup.sweep_penetration); nothing measured, no verdict (the cut route). Unity repeats the check
+    on the published prefab."""
     moving = [part["name"] for part in declared if part["kind"] in ("hinge", "slide")]
     penetration = {name: float(penetration[name]) for name in moving if penetration.get(name) is not None}
     deep = [name for name in moving if penetration.get(name) is not None and penetration[name] > tolerance]
@@ -419,7 +419,7 @@ def apply_part_penetration(validation, penetration, declared, tolerance):
         detail = ", ".join(f"{name} {penetration[name]:.2f}" for name in deep)
         validation["errors"] = [*validation.get("errors", []),
             f"moving part(s) {', '.join(deep)} sweep into the body through their range ({detail} of their vertices "
-            f"inside over rest, limit {tolerance:g}), so another seed is tried"]
+            f"go deep inside it, limit {tolerance:g}), so another seed is tried"]
         validation["failure_codes"] = [*validation.get("failure_codes", []), "part_penetrates"]
         validation["status"] = "failed"
     return validation

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from .unity_material import unity_cli
 
-PENETRATION_TOLERANCE = 0.02  # share of a part's vertices inside the body over its rest value, through its range
+PENETRATION_TOLERANCE = 0.02  # share of a part's vertices that go inside the body through its range
+PENETRATION_DEPTH = 0.005  # ...deeper than this share of the model's size: contact along a cut seam is shallower
 PIVOT_TOLERANCE = 0.001  # metres a hinge's pivot may drift, and a slide's travel may miss its declared range by
 ANGLE_TOLERANCE = 0.5  # degrees a hinge may miss its declared limit by
 
@@ -36,7 +37,7 @@ def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, 
             "name": name, "fbx": inside(fbx), "prefab": inside(prefab), "clip_folder": inside(clip_folder),
             "report_path": str(report), "render_path": str(Path(render).resolve()),
             "pivot_tolerance": PIVOT_TOLERANCE, "angle_tolerance": ANGLE_TOLERANCE,
-            "penetration_tolerance": PENETRATION_TOLERANCE,
+            "penetration_tolerance": PENETRATION_TOLERANCE, "penetration_depth": PENETRATION_DEPTH,
             "held": bool(held), "mass": float(mass), "layer": layer or "",
             "parts": [{"name": part["name"], "kind": part["kind"], "axis": part["axis"],
                        "limit": max((part["min"], part["max"]), key=abs)} for part in parts]}))
@@ -65,7 +66,8 @@ public static class CLASS_NAME
     [Serializable] public class Request
     {
         public string name, fbx, prefab, clip_folder, report_path, render_path, layer;
-        public float pivot_tolerance, angle_tolerance, penetration_tolerance, mass; public bool held; public Part[] parts;
+        public float pivot_tolerance, angle_tolerance, penetration_tolerance, penetration_depth, mass; public bool held;
+        public Part[] parts;
     }
     [Serializable] public class Socket { public string name; public float[] position; }
     [Serializable] public class Motion
@@ -246,7 +248,7 @@ public static class CLASS_NAME
             var mirrored = declared.kind != "hinge" ? 1f : Penetration(root, part, Pulse(clip.name + "_mirrored", part,
                 AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request);
             errors.Add(label + " penetrates the body through its range (" +
-                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices inside, over rest" +
+                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices deep inside the body" +
                        (mirrored <= request.penetration_tolerance ? "; the opposite sign, " +
                         (-declared.limit).ToString("G", CultureInfo.InvariantCulture) + ", clears the body at " +
                         mirrored.ToString("F3", CultureInfo.InvariantCulture) : "") + ")");
@@ -274,9 +276,10 @@ public static class CLASS_NAME
         return motion;
     }
 
-    // The part's vertices inside the rest of the model, sampled through its clip: a lid swinging into its chest, a
-    // drawer travelling past its housing. A vertex is inside where the body's winding number is over a half
-    // (Winding). The share over the rest pose is reported.
+    // The part's vertices that go inside the rest of the model, sampled through its clip: a lid swinging into its
+    // chest, a drawer travelling past its housing. A vertex is inside where the body's winding number is over a half
+    // (Winding) and counts when it was not inside at rest and lies deeper than penetration_depth of the model's size:
+    // a slide cut from the same surface as its frame dips a fraction of a millimetre under it along the seam.
     static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request)
     {
         // The body's triangles in world space; it stays still while the part's clip is sampled.
@@ -293,18 +296,28 @@ public static class CLASS_NAME
         var body = corners.ToArray();
         var step = Mathf.Max(1, mesh.vertexCount / 400);
         var vertices = mesh.vertices.Where((v, i) => i % step == 0).ToArray();
-        var shares = new List<float>();
+        var bounds = new Bounds(body[0], Vector3.zero);
+        foreach (var corner in body) bounds.Encapsulate(corner);
+        var partFilter = part.GetComponentInChildren<MeshFilter>();
+        foreach (var vertex in vertices) bounds.Encapsulate(partFilter.transform.TransformPoint(vertex));
+        var depth = request.penetration_depth * Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
+        bool[] atRest = null;
+        var worst = 0f;
         AnimationMode.StartAnimationMode();
         for (var sample = 0; sample <= 8; sample++)
         {
             AnimationMode.SampleAnimationClip(root, clip, 0.5f * sample / 8f);
             var filter = part.GetComponentInChildren<MeshFilter>();
-            var inside = vertices.Count(vertex => Math.Abs(Winding(filter.transform.TransformPoint(vertex), body)) > 0.5);
-            shares.Add((float)inside / vertices.Length);
+            var points = vertices.Select(vertex => filter.transform.TransformPoint(vertex)).ToArray();
+            var inside = points.Select(point => Math.Abs(Winding(point, body)) > 0.5).ToArray();
+            if (atRest == null) { atRest = inside; continue; }
+            var deep = Enumerable.Range(0, points.Length)
+                .Count(i => inside[i] && !atRest[i] && Distance(points[i], body) > depth);
+            worst = Mathf.Max(worst, (float)deep / points.Length);
         }
         AnimationMode.SampleAnimationClip(root, clip, 0f);
         AnimationMode.StopAnimationMode();
-        return Mathf.Max(0f, shares.Max() - shares[0]);
+        return worst;
     }
 
     // The generalized winding number of a point about triangles (three corners each): about 1 inside a closed
@@ -322,6 +335,37 @@ public static class CLASS_NAME
                                 la * lb * lc + Vector3.Dot(a, b) * lc + Vector3.Dot(b, c) * la + Vector3.Dot(c, a) * lb);
         }
         return total / (2 * Math.PI);
+    }
+
+    // The distance from a point to the nearest of the triangles.
+    static float Distance(Vector3 point, Vector3[] corners)
+    {
+        var nearest = float.MaxValue;
+        for (var i = 0; i + 2 < corners.Length; i += 3)
+            nearest = Mathf.Min(nearest, (point - Closest(point, corners[i], corners[i + 1], corners[i + 2])).sqrMagnitude);
+        return Mathf.Sqrt(nearest);
+    }
+
+    // The point of triangle abc nearest p (Ericson, Real-Time Collision Detection, 5.1.5).
+    static Vector3 Closest(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0f && d2 <= 0f) return a;
+        Vector3 bp = p - b;
+        float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0f && d4 <= d3) return b;
+        float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0f && d1 >= 0f && d3 <= 0f) return a + ab * (d1 / (d1 - d3));
+        Vector3 cp = p - c;
+        float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0f && d5 <= d6) return c;
+        float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0f && d2 >= 0f && d6 <= 0f) return a + ac * (d2 / (d2 - d6));
+        float va = d3 * d6 - d5 * d4;
+        if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+        float denominator = 1f / (va + vb + vc);
+        return a + ab * (vb * denominator) + ac * (vc * denominator);
     }
 
     static Socket AddSocket(Transform parent, string name, Vector3 position)

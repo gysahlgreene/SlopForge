@@ -71,6 +71,26 @@ def choose_mask(masks, scores, box, alpha):
     return best[1], report
 
 
+def grid_points(alpha, box, n=3):
+    """n x n prompt points over a box (20% to 80% of its width and height), each moved to the nearest object pixel
+    inside the box. SAM's answers for a box alone were each one row of a chest lid's planks (fill 0.04 at best,
+    2026-10-25); with these points as well it took the dome (0.65), a pistol's trigger rose from 0.13 to 0.49 and its
+    slide held at 0.70 (fill minus twice the spill)."""
+    x0, y0, x1, y1 = (int(round(value)) for value in box)
+    inside = np.zeros(alpha.shape, bool)
+    inside[max(y0, 0):max(y1, 0), max(x0, 0):max(x1, 0)] = True
+    ys, xs = np.nonzero(alpha & inside)
+    if not len(xs):
+        return []
+    points = []
+    for fy in np.linspace(0.2, 0.8, n):
+        for fx in np.linspace(0.2, 0.8, n):
+            tx, ty = x0 + fx * (x1 - x0), y0 + fy * (y1 - y0)
+            nearest = int(np.argmin((xs - tx) ** 2 + (ys - ty) ** 2))
+            points.append([int(xs[nearest]), int(ys[nearest])])
+    return points
+
+
 def ground(model, processor, image, text, device):
     """The box Florence-2 detects for the part's description, or None.
 
@@ -113,17 +133,25 @@ def run(request):
             box, source = ground(florence, florence_processor, image, part["text"], device), "detected"
         entry = {"text": part["text"], "box": box, "box_source": source}
         if box is not None:
-            inputs = sam_processor(images=image, input_boxes=[[box]], return_tensors="pt").to(device)
-            with torch.no_grad():
-                outputs = sam(**inputs, multimask_output=True)
-            candidates = sam_processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])[0]
-            candidates = np.asarray(candidates).reshape(-1, image.size[1], image.size[0]) > 0.5
-            scores = outputs.iou_scores.flatten().tolist()
+            candidates, scores = [], []
+            points = grid_points(alpha, box)
+            # SAM's three answers to the box alone, then to the box with points on the object inside it: a lid of
+            # planks and iron bands is one region to the second prompt and a single plank row to the first
+            for prompt in ({"input_boxes": [[box]]},
+                           *([{"input_boxes": [[box]], "input_points": [[points]], "input_labels": [[[1] * len(points)]]}]
+                             if points else [])):
+                inputs = sam_processor(images=image, return_tensors="pt", **prompt).to(device)
+                with torch.no_grad():
+                    outputs = sam(**inputs, multimask_output=True)
+                masks = sam_processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])[0]
+                candidates.extend(np.asarray(masks).reshape(-1, image.size[1], image.size[0]) > 0.5)
+                scores.extend(outputs.iou_scores.flatten().tolist())
             chosen, choices = choose_mask(list(candidates), scores, box, alpha)
             mask = close_mask(candidates[chosen], alpha)  # a part lies on the object, a strap does not split it
             entry.update({"score": round(float(scores[chosen]), 4), "pixels": int(mask.sum()),
                           "share": round(float(mask.sum() / max(alpha.sum(), 1)), 4),
-                          "candidate": chosen, "candidates": choices})
+                          "candidate": chosen, "prompt": "box" if chosen < 3 else "box and points",
+                          "candidates": choices})
             Image.fromarray((mask * 255).astype(np.uint8)).save(out / f"{part['name']}.png")
             entry["mask"] = f"{part['name']}.png"
         report["parts"][part["name"]] = entry

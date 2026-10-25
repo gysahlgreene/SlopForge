@@ -64,3 +64,22 @@ class CloseMaskTests(unittest.TestCase):
         guard = box_mask(alpha.shape, (100, 140), (120, 126))  # another part, 24 px away: not in this mask
         closed = close_mask(trigger, alpha)
         self.assertFalse(closed[:, 110:].any())
+
+
+class GridPointsTests(unittest.TestCase):
+    def test_the_prompt_points_lie_on_the_object_inside_the_box(self):
+        # SAM's three answers for a chest's lid box were each one row of planks (fill 0.04 at best, 2026-10-25); with
+        # nine points on the object inside the box as well, it took the dome (0.65). A point the grid places off the
+        # object (between a chest's legs, beside a trigger) moves to the nearest object pixel in the box.
+        from processing.part_masks import grid_points
+        alpha = np.zeros((100, 200), bool)
+        alpha[20:60, 10:190] = True  # a body
+        alpha[60:90, 10:30] = True  # a leg
+        box = (0, 10, 200, 95)
+        points = grid_points(alpha, box)
+        self.assertEqual(len(points), 9)
+        for x, y in points:
+            self.assertTrue(alpha[int(y), int(x)], (x, y))
+            self.assertTrue(box[0] <= x < box[2] and box[1] <= y < box[3], (x, y))
+        self.assertEqual(len({tuple(point) for point in points}), 9)
+        self.assertIn((29, 78), {tuple(point) for point in points})  # off the object, onto the leg beside it

@@ -109,13 +109,16 @@ slopforge approve pistol 2 --part-box "slide=0.17,0.23,0.93,0.39" --part-box "tr
 **How approval masks the parts:**
 - After the concept is cut out, approval masks each part on it.
 - [SAM 2.1](https://huggingface.co/facebook/sam2.1-hiera-large) (Apache-2.0) cuts each part's mask inside the
-  concept's outline, from its box. SAM returns three candidate masks; the stage keeps the one that fills the box's
-  part of the object without spilling out of the box (fill minus twice the spill, SAM's score breaking ties) and
-  records every candidate in `masks.json`. SAM's single best answer for a chest's lid box was the two iron band
-  arcs on it, 5% of the chest, and every part-level run after it inherited that lid (2026-10-25); the chosen
-  candidate covers the whole lid. Gaps narrower than ~6% of the object inside the chosen mask are then closed and its
-  holes filled (`close_mask`): the chosen lid mask still stopped at the iron band across the lid, and OmniPart left
-  the band and the lid's ends with the body. The tool's hash is in the stage identity, so a change to it re-masks.
+  concept's outline, from its box. SAM is asked twice, with the box alone and with the box and nine points on the
+  object inside it (`grid_points`), and returns three candidate masks each time; the stage keeps the one of the six
+  that fills the box's part of the object without spilling out of the box (fill minus twice the spill, SAM's score
+  breaking ties) and records every candidate and the prompt in `masks.json`. SAM's single best answer for a chest's
+  lid box was the two iron band arcs on it, 5% of the chest, and every part-level run after it inherited that lid
+  (2026-10-25). For the same chest's box measured on the concept, all three answers to the box alone were one row of
+  planks (fill 0.04 at best); with the points, the dome (0.65 fill minus twice the spill), a pistol's trigger rose
+  from 0.13 to 0.49 and its slide held at 0.70. Gaps narrower than ~6% of the object inside the chosen mask are then
+  closed and its holes filled (`close_mask`), so an iron band across a lid does not split its mask. The tool's hash
+  is in the stage identity, so a change to it re-masks.
 - A part without a box is found from its description by
   [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) (MIT) open-vocabulary detection.
 - `masks.json` records which method found each part (`box_source`).
@@ -269,7 +272,10 @@ need retraining on its latent space, so the two are combined after generation in
 3. `slopforge/part_split.py` aligns OmniPart's parts on the surface (the best of the 24 quarter turns with bounds
    fitted, refined by ICP: TRELLIS.2 lays a pistol along Y, OmniPart along X), measures each face's distance to
    each part, and labels the faces with graph cuts on scipy's maximum flow: a face's vote is how much closer it is
-   to a part than to the others (1% of the object's size is one unit, at most 20) plus 3 units for a mask vote;
+   to a part than to the others (1% of the object's size is one unit, at most 20) plus 25 units for a mask vote, so
+   where the concept sees a face its mask decides and OmniPart only where it does not (at 3 units OmniPart outvoted
+   the mask where it disagreed: a live pistol's slide lost its rear on its far side, mask recall 0.82, and a chest's
+   lid its planks, 0.22–0.31; at 25 every saved split read 0.99–1.00 with no more spill);
    cutting between two faces costs the edge's length times exp(-(angle/25°)²), so a boundary runs along the
    surface's own creases (a slide's groove, a lid's seam). Moving parts are cut larger first, a trigger from what
    the slide leaves. OmniPart's parts vary by seed, so its vote is scaled by its agreement with the mask (the share
@@ -303,7 +309,7 @@ need retraining on its latent space, so the two are combined after generation in
    bands 0.168; OmniPart's pistol, whose parts are closed meshes, 0.0; an OmniPart chest with half its faces
    turned inwards 0.49 at rest.
 
-The mask stage feeds both votes and OmniPart: SAM's three candidates are scored by how well they fill the declared
+The mask stage feeds both votes and OmniPart: SAM's six candidates are scored by how well they fill the declared
 box (above), and gaps narrower than ~6% of the object inside the chosen mask are closed, so an iron band across a
 chest's lid does not split the lid's mask (OmniPart had left the band and the lid's ends with the body).
 
@@ -356,15 +362,15 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
   rest, 1 s) and a bool `<part>_open` that holds the part at its limit while set (0.25 s blends);
 - the W9 checks: each pulse clip sampled at rest and limit (pivot drift ≤ 1 mm, angle ±0.5°, travel ±1 mm), and for
   held assets the tip along +Z and the root inside the bounds;
-- an **interpenetration check** through each part's range: the clip is sampled at nine points and the share of the
-  part's vertices inside the rest of the model (the body's generalized winding number over a half) must not rise more
-  than 0.02 over its rest value — a lid swinging into its chest or a drawer travelling past its
-  housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
+- an **interpenetration check** through each part's range: the clip is sampled at nine points, and the share of
+  the part's vertices that go inside the rest of the model (the body's generalized winding number over a half),
+  deeper than half a percent of the model's size, must not exceed 0.02 — a lid swinging into its chest or a drawer
+  travelling past its housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
   the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
 
 The final pass already sweeps each part through its declared range in Blender, before any material is generated:
-the share of the part's vertices inside the rest of the model at the worst point of its range, over its share at
-rest. A part over the type's `max_part_penetration` (0.02) is the retryable `part_penetrates`, so a seed whose lid
+the share of the part's vertices that go inside the rest of the model, deeper than half a percent of its size, at
+the worst point of its range. A part over the type's `max_part_penetration` (0.02) is the retryable `part_penetrates`, so a seed whose lid
 turns into its chest is replaced before materials and Unity. Unity repeats the check on the published prefab with
 the same measure.
 
@@ -376,11 +382,13 @@ at rest. Two counting bugs also hid this until then. Unity's `Physics.RaycastAll
 ray through a closed body counted one crossing. The Blender sweep built its trees in each object's own space and
 cast from world-space points, so a body away from the origin was never hit. Figures from before that fix (the C3
 chest's lid at 0.047 in Blender and 0.169 in Unity) were measured with the broken counts. With the winding number,
-on the live hybrid pistol and chest: slide 0.007 and trigger 0.0 over rest; the chest's lid 0.0 opening the right
-way and 0.515 turned the wrong way. Points beside a large opening sit near a half and can flip as the part moves;
-the share over rest absorbs most of that, and a part moving along such an opening (the pistol's trigger the wrong
-way, 0.015) stays under the limit. Penetration says nothing about the openings themselves: a piece left open shows
-holes when its part moves (see Hybrid parts).
+the chest's lid read 0.0 opening the right way and 0.515 turned the wrong way (share over rest). A point counts
+only when it was not inside at rest and goes deeper than half a percent of the model's size (`PENETRATION_DEPTH`,
+`depth` in the sweep): a hybrid slide and its frame are one surface cut along a zigzag, and moved back the slide's
+edge dips a fraction of a millimetre under the frame's along the whole seam. On a live pistol 6.3% of the slide went
+inside, 0.14% deeper than that; its trigger pulled 20° 22% and 3.3%; OmniPart's pistol 0.29% and 0.39%; a chest's lid
+turned the wrong way 18% and 7.4%, the right way none. Penetration says nothing about the openings themselves: a
+piece left open shows holes when its part moves (see Hybrid parts).
 
 The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
