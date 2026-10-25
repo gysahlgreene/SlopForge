@@ -377,12 +377,12 @@ def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
     return validation
 
 
-def apply_part_coverage(validation, generated, declared, minimum):
-    """Fail a weapon generated as parts (OmniPart) when a declared hinge or slide covers too little of its concept
-    mask, or was not generated at all (retryable part_missing: another seed may place it)."""
+def apply_part_coverage(validation, coverage, declared, minimum):
+    """Fail a weapon generated as parts (OmniPart) when a declared hinge or slide's mesh, projected through the
+    concept's fitted view, covers too little of its mask, or was not generated at all (retryable part_missing:
+    another seed may place it). `coverage` is the final pass's measurement per part (inspection part_coverage)."""
     moving = [part["name"] for part in declared if part["kind"] in ("hinge", "slide")]
-    coverage = {name: generated[name].get("coverage") for name in moving
-                if name in generated and generated[name].get("coverage") is not None}
+    coverage = {name: float(coverage[name]) for name in moving if coverage.get(name) is not None}
     short = [name for name in moving if coverage.get(name) is None or coverage[name] < minimum]
     measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
     measured["part_coverage"] = coverage

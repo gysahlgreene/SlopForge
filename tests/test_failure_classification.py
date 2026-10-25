@@ -1001,18 +1001,16 @@ class PropComponentBudgetTests(unittest.TestCase):
     def test_a_generated_part_below_its_mask_coverage_is_retried(self):
         from slopforge.validation import apply_part_coverage
         declared = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}, {"name": "trigger", "kind": "hinge"}]
-        generated = {"slide": {"kind": "slide", "coverage": 0.5}, "trigger": {"kind": "hinge", "coverage": 0.9},
-                     "grip": {"kind": "grip", "coverage": None}}
+        generated = {"slide": 0.5, "trigger": 0.9}
         report = apply_part_coverage(_quality_report(component_count=1), generated, declared, 0.6)
         self.assertEqual(report["failure_codes"], ["part_missing"])
         self.assertIn("slide", report["errors"][-1])
         self.assertEqual(report["measured"]["part_coverage"], {"slide": 0.5, "trigger": 0.9})
         self.assertEqual(report["limits"]["min_part_coverage"], 0.6)
         self.assertTrue(candidate_quality_rejection(report))
-        passing = apply_part_coverage(_quality_report(component_count=1),
-                                      {**generated, "slide": {"kind": "slide", "coverage": 0.6}}, declared, 0.6)
+        passing = apply_part_coverage(_quality_report(component_count=1), {**generated, "slide": 0.6}, declared, 0.6)
         self.assertEqual(passing.get("failure_codes", []), [])
-        absent = apply_part_coverage(_quality_report(component_count=1), {"grip": generated["grip"]}, declared, 0.6)
+        absent = apply_part_coverage(_quality_report(component_count=1), {}, declared, 0.6)
         self.assertEqual(absent["failure_codes"], ["part_missing"])
 
     def test_a_base_colour_without_textured_pixels_records_no_metric_and_stays_retryable(self):

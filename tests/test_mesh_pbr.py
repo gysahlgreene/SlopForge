@@ -531,7 +531,7 @@ if __name__ == "__main__":
 
 class DeclaredMaterialTests(unittest.TestCase):
     def _candidate(self, root, materials, metallic_value, basecolor, cutout=None, limits=None, asset_extra=None,
-                   lineage_extra=None, metallic_map=None, mesh_extra=None):
+                   lineage_extra=None, metallic_map=None, mesh_extra=None, inspection_extra=None):
         source = root / "source"
         source.mkdir(exist_ok=True)
         (source / "relay.glb").write_bytes(b"mesh")
@@ -563,7 +563,7 @@ class DeclaredMaterialTests(unittest.TestCase):
                       "measured": {"mesh_objects": 1, "vertex_count": 1000, "face_count": 500,
                                    "dimensions": [1, 1, 1], "uv_layers": 1, "material_count": 1,
                                    "image_texture_count": 4, "component_count": 1, "nonmanifold_edge_count": 0,
-                                   "transforms_applied": True, "missing_textures": []}}
+                                   "transforms_applied": True, "missing_textures": [], **(inspection_extra or {})}}
         with patch("slopforge.pipelines.model.process_model", side_effect=process), \
                 patch("slopforge.pipelines.model.inspect_model", return_value=inspection):
             return _native_material_candidate(root, config, {**lineage, "_stage_handles": {}},
@@ -620,11 +620,13 @@ class DeclaredMaterialTests(unittest.TestCase):
                                                 asset_extra={"pivot": "grip", "parts": [grip, slide]},
                                                 lineage_extra={"part_masks": root / "parts_1"},
                                                 mesh_extra={"part_model": "omnipart", "parts": {
-                                                    "slide": {"kind": "slide", "coverage": coverage},
-                                                    "grip": {"kind": "grip", "coverage": None},
-                                                    "body": {"kind": "body", "coverage": None}}})
+                                                    "slide": {"kind": "slide"}, "grip": {"kind": "grip"},
+                                                    "body": {"kind": "body"}}},
+                                                inspection_extra={"part_coverage": {"slide": coverage},
+                                                                  "parts": [{"name": "slide", "kind": "slide"}]})
                 options = self.process_options
-                self.assertEqual(options["parts"], [])  # no masks to cut: the parts come from the GLB's nodes
+                # the masks go along for the coverage projection; the parts themselves come from the GLB's nodes
+                self.assertEqual(options["parts"], [("slide", "slide", root / "parts_1/slide.png")])
                 self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
                 codes = [code for code in candidate["validation"].get("failure_codes", []) if code == "part_missing"]
                 self.assertEqual(codes, expected)

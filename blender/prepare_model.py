@@ -422,8 +422,27 @@ if oriented:
         group = obj.vertex_groups.new(name="slopforge_grip")
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
+    part_coverage = {}
     for name, kind, mask_path in part_specs():
         mask = image_mask(mask_path, channel=0)
+        if parts_table is not None and name in parts_table:
+            # A generated part against its mask: the share of the mask's cells (32 across its longer side) that one
+            # of the part's vertices projects into. The gate (part_coverage) retries a seed that misplaced a part.
+            values = [0] * len(obj.data.polygons)
+            obj.data.attributes["slopforge_part"].data.foreach_get("value", values)
+            part_id = int(parts_table[name]["id"])
+            rows, cols = np.nonzero(mask)
+            cell = max(1, int(math.ceil(max(rows.max() - rows.min() + 1, cols.max() - cols.min() + 1) / 32)))
+            wanted = set(zip((rows // cell).tolist(), (cols // cell).tolist()))
+            hit = set()
+            for polygon, value in zip(obj.data.polygons, values):  # each face fills the cells its projection spans
+                if value != part_id:
+                    continue
+                corners = pixels[list(polygon.vertices)]
+                (c0, r0), (c1, r1) = corners.min(0) // cell, corners.max(0) // cell
+                hit.update((row, col) for row in range(int(r0), int(r1) + 1) for col in range(int(c0), int(c1) + 1))
+            part_coverage[name] = round(len(wanted & hit) / len(wanted), 4) if wanted else 0.0
+            print(f"Part {name} ({kind}): covers {part_coverage[name]:.2f} of its mask")
         if kind == "hinge":
             # Widened by 1% of the concept: SAM masked a pistol trigger's blade alone, and the cut left its root in
             # the frame (2026-10-24). A slide's mask is not widened; its cut is snapped to a plane when separated.
@@ -461,6 +480,8 @@ if oriented:
     obj.data.transform((target @ source.inverted()).to_4x4())
     obj.data.update()
     obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
+    if part_coverage:
+        obj["slopforge_part_coverage"] = json.dumps(part_coverage)  # a string survives the FBX round trip
     print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
 
 

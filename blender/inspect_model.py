@@ -309,6 +309,8 @@ def inspect(source, face_budget, real_scale=False):
               "components": len(sizes), "parent": obj.parent.name if obj.parent else None,
               "pivot": [float(value) for value in obj.matrix_world.translation]}
              for obj, sizes in zip(objects, component_sizes) if "slopforge_part" in obj]
+    part_coverage = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_coverage"]).items()}
+                          for obj in objects if isinstance(obj.get("slopforge_part_coverage"), str)), None)
     component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
@@ -331,6 +333,7 @@ def inspect(source, face_budget, real_scale=False):
                          "up_axis": "Z", "forward_axis": "-Y", "basis": "Blender world",
                          "measured_unit": "Blender units"}
     measured = {"mesh_objects": len(objects), "vertex_count": vertices, "face_count": faces,
+                **({"part_coverage": part_coverage} if part_coverage is not None else {}),
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,
                 "uv_layers": uv_layers, "mesh_without_uv_count": mesh_without_uv_count,

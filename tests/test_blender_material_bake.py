@@ -917,7 +917,7 @@ def box(name, centre, size):
     o.data.materials.append(bpy.data.materials.new(name))
 box('body', (0, 0, 0), (1.0, 0.2, 0.2))
 box('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))        # on top of the body, touching its top face
-box('trigger', (0.1, 0, -0.15), (0.05, 0.02, 0.1))  # hangs below the body, touching its underside
+box('trigger', (0, 0, -0.15), (0.05, 0.02, 0.1))  # hangs below the body's middle, touching its underside
 box('floating', (-0.2, 0, -0.5), (0.05, 0.05, 0.05))  # a hinge that touches nothing
 box('grip', (0.4, 0, -0.1), (0.1, 0.22, 0.05))  # a static part: generated separately, keeps the body one piece
 bpy.ops.object.select_all(action='SELECT')
@@ -933,11 +933,20 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         # its contact with the body, or at its box centre when it touches nothing.
         concept = Image.new("RGBA", (200, 80), (0, 0, 0, 0))
         concept.paste((110, 110, 110, 255), (20, 30, 180, 50)); concept.paste((110, 110, 110, 255), (36, 22, 164, 30))
+        concept.paste((110, 110, 110, 255), (96, 50, 104, 58))  # the trigger below the body
         grip = Image.new("L", (200, 80), 0); grip.paste(255, (150, 30, 180, 50))
-        measured = self.orient({}, [], concept, grip, budget=20000, target="-,1.0,-",
-                               extra=("--parts-json", "parts.json"), fixture_script=self.PARTS_FIXTURE,
-                               files={"parts.json": self.PARTS_TABLE})
+        masks = {}
+        for name, box in (("slide", (36, 22, 164, 30)), ("trigger", (96, 50, 104, 58)), ("floating", (0, 0, 16, 16))):
+            masks[name] = Image.new("L", (200, 80), 0); masks[name].paste(255, box)  # floating's mask is nowhere near it
+        measured = self.orient({}, [], concept, grip, budget=20000, target="-,1.0,-", masks=masks,
+                               extra=("--part", "slide", "slide", "slide.png", "--part", "trigger", "hinge", "trigger.png",
+                                      "--part", "floating", "hinge", "floating.png", "--parts-json", "parts.json"),
+                               fixture_script=self.PARTS_FIXTURE, files={"parts.json": self.PARTS_TABLE})
         objects = measured["objects"]
+        coverage = measured["inspection"]["part_coverage"]  # the generated part projected onto its mask
+        self.assertGreaterEqual(coverage["slide"], 0.7)
+        self.assertGreaterEqual(coverage["trigger"], 0.5)
+        self.assertLessEqual(coverage["floating"], 0.2)
         body = objects[measured["body"]]
         self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]},
                          {"slide": "slide", "trigger": "hinge", "floating": "hinge", "grip": "grip"})  # exact names

@@ -109,7 +109,9 @@ def part_boxes(ids, table, frame):
 
 
 def coverage(ids, table, frame, part_voxels):
-    """For each declared hinge or slide: the share of its mask's grid cells (x, z) that hold one of its voxels."""
+    """For each declared hinge or slide: the share of its mask's grid cells that hold one of the sparse structure's
+    voxels inside its box. Diagnostic only: a thin lever barely registers in a 64-cell structure even when the
+    synthesised part is fine, so the gate projects the generated mesh instead (prepare_model.py)."""
     sign, (u0, u1, v0, v1), lo, hi, axis = frame
     low = np.rint((lo + 0.5) * GRID - 0.5).astype(int)
     high = np.rint((hi + 0.5) * GRID - 0.5).astype(int)
@@ -257,10 +259,10 @@ def main(request_path):
               "parts": {entry["name"]: {"kind": entry["kind"], "id": entry["id"],
                                         "faces": faces.get(entry["name"], 0),
                                         "box": boxes[index].tolist(), "voxels": int(len(voxels[entry["name"]])),
-                                        "coverage": covered.get(entry["name"])}
+                                        "structure_coverage": covered.get(entry["name"])}
                         for index, entry in enumerate(ordered)}}
     (out_dir / "parts.json").write_text(json.dumps(report, indent=2) + "\n")
-    print("[INFO] parts " + ", ".join(f"{name} coverage {item['coverage']}" for name, item in report["parts"].items()))
+    print("[INFO] parts " + ", ".join(f"{name} structure coverage {item['structure_coverage']}" for name, item in report["parts"].items()))
 
 
 if __name__ == "__main__":

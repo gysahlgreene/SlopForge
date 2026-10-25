@@ -1242,8 +1242,10 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
+    # The masks also go to the final pass of a weapon generated as parts: not to cut, but to measure how much of
+    # each mask the generated part covers (part_coverage).
     moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in asset.get("parts") or []
-              if part["kind"] in ("hinge", "slide")] if held and masks and not mesh_info.get("part_model") else []
+              if part["kind"] in ("hinge", "slide")] if held and masks else []
     parts_json = mesh_path.parent / "parts/parts.json" if mesh_info.get("part_model") else None
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
@@ -1286,8 +1288,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if moving:
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
     if mesh_info.get("part_model"):
-        validation = apply_part_coverage(validation, mesh_info.get("parts") or {}, asset.get("parts") or [],
-                                         asset_type.get("min_part_coverage", 0.6))
+        validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
+                                         asset.get("parts") or [], asset_type.get("min_part_coverage", 0.6))
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),

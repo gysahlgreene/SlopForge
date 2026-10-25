@@ -176,8 +176,8 @@ class MainTests(unittest.TestCase):
             report = json.loads((root / "out/parts.json").read_text())
             self.assertEqual(report["seed"], 7)
             self.assertEqual(report["parts"]["slide"]["kind"], "slide")
-            self.assertGreaterEqual(report["parts"]["slide"]["coverage"], 0.9)
-            self.assertIsNone(report["parts"]["body"]["coverage"])
+            self.assertGreaterEqual(report["parts"]["slide"]["structure_coverage"], 0.9)  # diagnostic, not the gate
+            self.assertIsNone(report["parts"]["body"]["structure_coverage"])
             self.assertEqual(report["parts"]["slide"]["voxels"], int((coords[:, 3] >= 34).sum()))
             self.assertEqual(len(report["parts"]["slide"]["box"]), 2)
             self.assertEqual(report["parts"]["slide"]["faces"], 12)
@@ -263,7 +263,7 @@ class OmniPartBackendTests(unittest.TestCase):
                     "model_weights": {"omnipart/OmniPart": "rev"},
                     "parts": {"body": {"kind": "body", "id": 3, "faces": 10, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 9, "coverage": None},
                               "grip": {"kind": "grip", "id": 1, "faces": 4, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 2, "coverage": None},
-                              "slide": {"kind": "slide", "id": 2, "faces": 6, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 4, "coverage": 0.8}}}))
+                              "slide": {"kind": "slide", "id": 2, "faces": 6, "box": [[0, 0, 0], [1, 1, 1]], "voxels": 4, "structure_coverage": 0.8}}}))
 
             def blender(command, **kwargs):
                 seen["blender"] = command
@@ -301,7 +301,7 @@ class OmniPartBackendTests(unittest.TestCase):
             self.assertEqual(sorted(info["textures"]), ["basecolor", "metallic", "normal", "roughness"])
             self.assertEqual(info["backend"]["provider"], "omnipart")
             self.assertEqual(info["provenance"]["model_weights"], {"omnipart/OmniPart": "rev"})
-            self.assertEqual(info["parts"]["slide"]["coverage"], 0.8)
+            self.assertEqual(info["parts"]["slide"]["structure_coverage"], 0.8)
             self.assertEqual(sorted(info["tool_sha256"]), ["part_model.py", "prepare_parts.py"])
             self.assertEqual(Image.open(root / "mesh_01/roughness.png").convert("L").getpixel((0, 0)), round(0.7 * 255))
 
