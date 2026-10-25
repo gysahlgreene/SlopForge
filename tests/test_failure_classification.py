@@ -1060,6 +1060,40 @@ class PropComponentBudgetTests(unittest.TestCase):
         self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), 0.014, 0.03).get("failure_codes", []), [])
         self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), None, 0.03).get("failure_codes", []), [])
 
+    def test_a_hybrid_split_the_mask_decided_is_not_retried_for_omniparts_alignment(self):
+        # Seen from the side, every face votes and the mask decides; OmniPart only leans where a mask edge fades. A
+        # pistol seed whose slide covered its mask 1.00 and trigger 0.95, clear of the body and closed, failed only
+        # on OmniPart landing 0.048 off the surface (2026-10-25). The error is recorded; it decides only where
+        # OmniPart does: a view that does not vote through the thickness, or a part whose mask was dropped.
+        from slopforge.validation import apply_hybrid_alignment
+        decided = apply_hybrid_alignment(_quality_report(component_count=1), 0.048, 0.03, decisive=False)
+        self.assertEqual(decided.get("failure_codes", []), [])
+        self.assertEqual(decided["measured"]["hybrid_alignment_error"], 0.048)
+        self.assertFalse(decided["measured"]["hybrid_alignment_decisive"])
+        guided = apply_hybrid_alignment(_quality_report(component_count=1), 0.048, 0.03, decisive=True)
+        self.assertEqual(guided["failure_codes"], ["part_missing"])
+
+    def test_a_coloured_region_that_came_out_grey_is_retried(self):
+        # A black pistol with red-brown walnut grips: the concept's median colour is the steel's, near grey, so the
+        # chroma check never ran, and grips the metal steps had greyed passed (2026-10-25). Per cell seen from the
+        # concept's side: grey-gripped seeds 0.246-0.258 of the object lost the concept's colour, wood-gripped ones
+        # 0.00-0.04, hybrid chests 0.02.
+        import numpy as np
+        from slopforge.validation import apply_concept_colour, concept_desaturated_share
+        concept = np.zeros((96, 96, 4)); concept[8:88, 8:88] = (20, 20, 22, 255)
+        concept[50:88, 8:40] = (98, 37, 19, 255)  # the grips: a fifth of the object
+        grey = concept.copy(); grey[50:88, 8:40] = (60, 60, 60, 255)
+        wood = concept.copy(); wood[50:88, 8:40] = (67, 43, 28, 255)  # darker, still wood
+        lost, kept = concept_desaturated_share(concept, grey), concept_desaturated_share(concept, wood)
+        self.assertGreater(lost, 0.1)
+        self.assertLess(kept, 0.05)
+        fidelity = {"colour_source": "concept_view", "concept_chroma": 0.6, "texture_chroma": 0.0,
+                    "concept_hue_difference": 0.1, "concept_chroma_ratio": 0.0, "concept_darkened_share": 0.0,
+                    "concept_desaturated_share": lost}
+        report = apply_concept_colour(_quality_report(component_count=1), fidelity, 25.0, 0.6, 0.4, 0.1)
+        self.assertEqual(report["failure_codes"], ["colour_lost"])
+        self.assertTrue(candidate_quality_rejection(report))
+
     def test_a_mesh_whose_faces_fold_against_each_other_is_retried(self):
         # The C4 chest (2026-10-25): the collapse decimation crumpled a thin-walled box, 47% of its adjacent faces
         # came out with opposed normals, and Unity shaded it in facets (Blender's custom normals hid it).

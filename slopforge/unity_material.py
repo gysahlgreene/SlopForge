@@ -583,21 +583,54 @@ def finish_word(materials):
     return "satin"
 
 
+def _words(text):
+    import re
+    return [word for word in re.findall(r"[a-z]+", (text or "").lower()) if len(word) >= 3]
+
+
+def _names_part(region_words, part):
+    """Whether a declared region's words name a part: its "grips" for a "grip", or "stock" in "the pistol grip of the
+    stock"."""
+    own = {part["name"].lower(), *_words(part.get("text"))}
+    return any(word.startswith(part["name"].lower()) or part["name"].lower().startswith(word) or word in own
+               for word in region_words)
+
+
+def concept_part_colours(materials, parts, masks_dir, cutout):
+    """The declared materials, a non-metal without a colour given the median colour of the concept's coloured pixels
+    under the mask of the part its region names. Declared non-metals are kept off metal by their colour
+    (zero_metallic); a pistol's grips declared as plain "walnut wood" had none, the generated metallic map called the
+    whole pistol metal, and the metal steps greyed the grips (2026-10-25)."""
+    if not masks_dir or not cutout or not Path(cutout).is_file():
+        return list(materials or [])
+    with Image.open(cutout) as image:
+        concept = np.asarray(image.convert("RGBA"), dtype=float)
+    coloured = []
+    for item in materials or []:
+        item = dict(item)
+        if item.get("class") == "nonmetal" and not item.get("color"):
+            for part in parts or []:
+                mask_path = Path(masks_dir) / f"{part['name']}.png"
+                if not _names_part(_words(item.get("region")), part) or not mask_path.is_file():
+                    continue
+                with Image.open(mask_path) as image:
+                    mask = np.asarray(image.convert("L").resize(concept.shape[1::-1]), dtype=float) > 127
+                pixels = concept[mask & (concept[..., 3] > 200)][:, :3]
+                pixels = pixels[(pixels.max(1) - pixels.min(1)) > 40]  # its colour, not the steel under the mask
+                if len(pixels):
+                    item["color"] = "#%02x%02x%02x" % tuple(int(v) for v in np.median(pixels, 0))
+                    item["color_source"] = f"concept under the {part['name']} mask"
+                    break
+        coloured.append(item)
+    return coloured
+
+
 def part_metal(parts, materials):
     """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip", or
     "stock" in "the pistol grip of the stock"), else 1 when the brief declares any metal, else 0."""
-    import re
-
-    def words(text):
-        return [word for word in re.findall(r"[a-z]+", (text or "").lower()) if len(word) >= 3]
-    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in words(item.get("region"))]
+    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in _words(item.get("region"))]
     default = 1 if any(item.get("class") == "metal" for item in materials or []) else 0
-
-    def named(part):
-        own = {part["name"].lower(), *words(part.get("text"))}
-        return any(word.startswith(part["name"].lower()) or part["name"].lower().startswith(word) or word in own
-                   for word in nonmetal)
-    return {part["name"]: 0 if named(part) else default for part in parts}
+    return {part["name"]: 0 if _names_part(nonmetal, part) else default for part in parts}
 
 
 def derive_part_maps(atlas, metal, finish, out_dir, normal=None):

@@ -28,7 +28,7 @@ from ..style import build_prompt, style_identity
 from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
-                              unity_cli, zero_metallic)
+                              unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import verify_play_mode
@@ -1178,7 +1178,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if asset.get("texture_size"):
         _fit_texture_size({key: paths[key] for key in ("basecolor", "normal", "roughness", "metallic")},
                           asset["texture_size"])
-    declared = asset.get("materials") or []
+    declared = concept_part_colours(asset.get("materials") or [], asset.get("parts") or [],
+                                    (lineage or {}).get("part_masks"), (lineage or {}).get("concept_cutout"))
     declares_metal = any(item.get("class") == "metal" for item in declared)
     generator_metallic = None
     if declared and not declares_metal:
@@ -1298,8 +1299,11 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
     validation = apply_mesh_folds(validation, validation.get("measured", {}).get("folded_edge_share"),
                                   float(asset_type.get("max_folded_edge_share", 0.1)))
-    validation = apply_hybrid_alignment(validation, (mesh_info.get("hybrid") or {}).get("alignment_error"),
-                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)))
+    hybrid_info = mesh_info.get("hybrid") or {}
+    # OmniPart decides labels where the mask did not vote: faces the concept's view did not see, or a dropped mask
+    decisive = not ((hybrid_info.get("view") or {}).get("through") and not hybrid_info.get("masks_dropped"))
+    validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
+                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
@@ -1314,7 +1318,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     with Image.open(paths["basecolor"]) as image:
         validation.setdefault("measured", {})["texture_size"] = list(image.size)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"),
-                     asset_type.get("max_concept_darkened_share"))
+                     asset_type.get("max_concept_darkened_share"), asset_type.get("max_concept_desaturated_share"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():

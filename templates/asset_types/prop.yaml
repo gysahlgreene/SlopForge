@@ -47,6 +47,10 @@ max_part_penetration: 0.02
 # seen above this is the backs of faces, holes a player sees, and the seed is retried (part_open). Hybrid
 # pieces left open read 0.022 with a pistol's slide back, closed by their interfaces 0.004 (2026-10-25).
 max_visible_backfaces: 0.01
+# A share of the object above this that is clearly coloured in the concept but grey in the base colour, seen from
+# the concept's side, is retried (colour_lost): a black pistol's greyed walnut grips read 0.25, wood-gripped seeds
+# 0.00-0.04 (2026-10-25).
+max_concept_desaturated_share: 0.1
 # The share of a mesh's edges whose faces point opposite ways: a thin surface crumpled by the reduction (sound
 # meshes read 0.00-0.02); over this the seed is retried (mesh_folded).
 max_folded_edge_share: 0.1

@@ -31,6 +31,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "part_missing",
     "part_penetrates",
     "part_open",
+    "colour_lost",
     "mesh_folded",
 })
 
@@ -387,6 +388,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "colour_hue_shift": ("concept_hue_difference", "max_concept_hue_difference"),
         "colour_desaturated": ("concept_chroma_ratio", "min_concept_chroma_ratio"),
         "colour_darkened": ("concept_darkened_share", "max_concept_darkened_share"),
+        "colour_lost": ("concept_desaturated_share", "max_concept_desaturated_share"),
         "thin_feature_missing": ("concept_thin_recall", "min_concept_thin_recall"),
         "glass_missing": ("glass_fraction", "min_glass_fraction"),
         "nonmetal_missing": ("nonmetal_fraction", "min_nonmetal_fraction"),

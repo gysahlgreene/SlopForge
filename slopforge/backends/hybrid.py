@@ -91,6 +91,8 @@ def split_surface(project_root, config, surface, parts_glb, concept, masks, part
               "tools": {script: file_sha256(tool_root() / "blender" / script)
                         for script in ("hybrid_graph.py", "hybrid_apply.py")}}
     report["parts"]["body"]["kind"] = "body"
+    # the concept's fitted view: whether its masks voted on every face (through the thickness) or on the seen ones
+    report["view"] = json.loads(graph.with_suffix(".json").read_text())["view"]
     (work_dir / "hybrid.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
@@ -110,7 +112,8 @@ def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed,
     info = json.loads(metadata.read_text())
     info["part_model"] = "hybrid"
     info["parts"] = report["parts"]
-    info["hybrid"] = {key: report[key] for key in ("alignment_error", "shares", "cut_length", "masks_dropped", "tools")}
+    info["hybrid"] = {key: report[key] for key in ("alignment_error", "shares", "cut_length", "masks_dropped", "tools",
+                                                   "view")}
     info["part_generator"] = {"backend": omnipart.get("backend", {}), "model_weights": omnipart.get("model_weights", {}),
                               "seed": seed}
     for output in info.get("outputs") or []:  # the surface is rewritten as nodes: its recorded hash follows it

@@ -450,15 +450,21 @@ def apply_visible_backfaces(validation, shares, maximum):
     return validation
 
 
-def apply_hybrid_alignment(validation, error, maximum):
+def apply_hybrid_alignment(validation, error, maximum, decisive=True):
     """Fail a hybrid-parts candidate whose OmniPart parts did not land on the TRELLIS.2 surface they vote on: mean
     distance after alignment, as a share of the surface's size (generation.json hybrid.alignment_error). Two
     generators that made different shapes give votes that mean nothing; another seed is tried (part_missing).
-    None (not the hybrid route): no verdict."""
+    `decisive` is whether OmniPart's votes decided labels: not when the concept's view voted on every face and no
+    mask was dropped, where the mask decides and OmniPart only leans where a mask edge fades (a pistol seed whose
+    slide covered its mask 1.00 failed only on OmniPart landing 0.048 off, 2026-10-25); the error is recorded either
+    way. None (not the hybrid route): no verdict."""
     if error is None:
         return validation
     measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
     measured["hybrid_alignment_error"] = float(error)
+    measured["hybrid_alignment_decisive"] = bool(decisive)
+    if not decisive:
+        return validation
     limits["max_hybrid_alignment_error"] = maximum
     if error > maximum:
         validation["errors"] = [*validation.get("errors", []),
@@ -571,6 +577,8 @@ MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept ha
 DARKENED_GRIDS = (8, 12, 16, 24)  # cell grids the darkened share is averaged over
 DARKENED_LIT = 30  # CIELAB L* above which a concept cell is lit enough to judge
 DARKENED_FRACTION = 0.6  # a base-colour cell under this share of the concept's lightness has turned dark
+DESATURATED_CHROMATIC = 15  # CIELAB chroma above which a concept cell's colour is to be kept
+DESATURATED_KEPT = 0.33  # a base-colour cell under this share of such a cell's chroma has lost its colour
 
 
 def _lab(rgb):
@@ -619,6 +627,23 @@ def concept_darkened_share(cutout, view):
     return float(np.mean(shares))
 
 
+def concept_desaturated_share(cutout, view):
+    """Share of the object that is clearly coloured in the concept but near grey in the base colour seen from the
+    concept's side, on the darkening check's cells and grids. A concept's median colour misses a small coloured
+    region: a black pistol's median is its steel, near grey, so its colour check never ran, and red-brown walnut
+    grips the metal steps had greyed passed (2026-10-25; such seeds 0.246-0.258, wood-gripped ones 0.00-0.04, hybrid
+    chests 0.02)."""
+    shares = []
+    for n in DARKENED_GRIDS:
+        (concept, concept_cover, _), (texture, texture_cover, _) = _lab_cells(cutout, n), _lab_cells(view, n)
+        both = concept_cover & texture_cover
+        concept_chroma = np.hypot(concept[..., 1], concept[..., 2])
+        texture_chroma = np.hypot(texture[..., 1], texture[..., 2])
+        lost = (concept_chroma > DESATURATED_CHROMATIC) & (texture_chroma < DESATURATED_KEPT * concept_chroma)
+        shares.append(float(lost[both].mean()) if both.any() else 0.0)
+    return float(np.mean(shares))
+
+
 def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_report=None):
     """How far the candidate's base colour drifted from the approved concept's dominant colour.
 
@@ -631,12 +656,13 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
     """
     with Image.open(cutout_path) as image:
         cut = np.asarray(image.convert("RGBA"), dtype=float)
-    darkened = None
+    darkened = desaturated = None
     if view_path is not None:
         with Image.open(view_path) as image:
             view = np.asarray(image.convert("RGBA"), dtype=float)
         texture, source = view[..., :3][view[..., 3] > 200], "concept_view"
         darkened = round(concept_darkened_share(cut, view), 3)
+        desaturated = round(concept_desaturated_share(cut, view), 3)
     else:
         with Image.open(basecolor_path) as image:
             step = max(1, image.width // 1024)  # a 4096 map at full size needs 400 MB of floats
@@ -649,13 +675,14 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
         # record unserialisable and a retryable failure final. The checks skip with a warning instead.
         return {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": None,
                 "concept_hue_difference": None, "concept_chroma_ratio": None, "concept_darkened_share": darkened,
-                "reason": "no textured pixels"}
+                "concept_desaturated_share": desaturated, "reason": "no textured pixels"}
     texture = np.median(_lab(texture)[:, 1:], 0)
     c2 = float(np.hypot(*texture))
     hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
     fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
                 "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
-                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None, "concept_darkened_share": darkened}
+                "concept_chroma_ratio": round(c2 / c1, 3) if c1 else None, "concept_darkened_share": darkened,
+                "concept_desaturated_share": desaturated}
     if view_report:
         fidelity["concept_view"] = {key: view_report.get(key) for key in ("status", "silhouette_iou", "reason")
                                     if view_report.get(key) is not None}
@@ -669,10 +696,20 @@ def _view_reason(fidelity):
 
 
 def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None,
-                         max_darkened_share=None):
-    """Fail a candidate whose base colour lost the concept's hue or saturation, or turned dark where the concept is
-    light (retryable quality codes). Darkening is checked on near-grey concepts too: TRELLIS blackened grey stone."""
+                         max_darkened_share=None, max_desaturated_share=None):
+    """Fail a candidate whose base colour lost the concept's hue or saturation, turned dark where the concept is
+    light, or went grey where the concept is coloured (retryable quality codes). Darkening and lost colour are
+    checked on near-grey concepts too: TRELLIS blackened grey stone, and a black pistol's grips went grey."""
     validation.setdefault("measured", {}).update(fidelity)
+    desaturated = fidelity.get("concept_desaturated_share")
+    if max_desaturated_share is not None and desaturated is not None:
+        validation.setdefault("limits", {})["max_concept_desaturated_share"] = max_desaturated_share
+        if desaturated > max_desaturated_share:
+            validation["errors"] = [*validation.get("errors", []),
+                f"base colour went grey where the concept is coloured (concept_desaturated_share {desaturated}, "
+                f"limit {max_desaturated_share}), so another seed is tried"]
+            validation["failure_codes"] = [*validation.get("failure_codes", []), "colour_lost"]
+            validation["status"] = "failed"
     darkened = fidelity.get("concept_darkened_share")
     if max_darkened_share is not None and darkened is None:
         validation["warnings"] = [*validation.get("warnings", []),

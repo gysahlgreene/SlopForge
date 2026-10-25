@@ -336,6 +336,37 @@ class DerivedMapTests(unittest.TestCase):
         self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "matte black steel"},
                                       {"region": "grip", "class": "nonmetal", "description": "polished walnut"}]), "matte")
 
+    def test_a_non_metal_declared_without_a_colour_takes_its_parts_colour_in_the_concept(self):
+        # A pistol's grips were declared "nonmetal: checkered walnut wood" with no colour; the generated metallic map
+        # called the whole pistol metal and the metal steps greyed the grips (2026-10-25). The colour the rule needs
+        # is in the concept under the grip's mask: the median of its coloured pixels (the frame's steel under the
+        # same mask is left out). A declared colour is kept; a region that names no masked part gets none.
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.unity_material import concept_part_colours
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            concept = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+            concept.paste((20, 20, 22, 255), (10, 10, 90, 50))  # black steel
+            concept.paste((98, 37, 19, 255), (20, 50, 45, 95))  # walnut grip panel
+            concept.paste((20, 20, 22, 255), (45, 50, 55, 95))  # steel beside it, under the grip's mask
+            concept.save(root / "concept.png")
+            mask = Image.new("L", (100, 100), 0); mask.paste(255, (15, 45, 55, 95)); mask.save(root / "grip.png")
+            materials = [{"region": "slide and frame", "class": "metal", "description": "blued steel"},
+                         {"region": "grips", "class": "nonmetal", "description": "walnut"},
+                         {"region": "lanyard", "class": "nonmetal", "description": "cord"},
+                         {"region": "sights", "class": "nonmetal", "color": "#ffffff", "description": "paint"}]
+            parts = [{"name": "grip", "kind": "grip", "text": "the walnut grip panels"},
+                     {"name": "slide", "kind": "slide", "text": "the slide"}]
+            coloured = concept_part_colours(materials, parts, root, root / "concept.png")
+        by_region = {item["region"]: item for item in coloured}
+        self.assertEqual(by_region["grips"]["color"], "#622513")
+        self.assertEqual(by_region["grips"]["color_source"], "concept under the grip mask")
+        self.assertNotIn("color", by_region["lanyard"])  # names no part
+        self.assertEqual(by_region["sights"]["color"], "#ffffff")  # declared
+        self.assertNotIn("color", by_region["slide and frame"])  # metal
+
     def test_part_metal_by_region_text(self):
         # The rifle's declared non-metal "stock" named no part, so its walnut grip came out metal (2026-10-25);
         # a region word in the part's own description counts too
@@ -547,7 +578,8 @@ class HybridBackendTests(unittest.TestCase):
                 surface_.write_bytes(b"nodes")
                 return {"alignment_error": 0.014, "shares": {"body": 0.7, "slide": 0.3}, "cut_length": 8.1, "masks_dropped": [],
                         "parts": {"body": {"kind": "body", "id": 1}, "slide": {"kind": "slide", "id": 2}},
-                        "tools": {"hybrid_graph.py": "abc"}}
+                        "tools": {"hybrid_graph.py": "abc"},
+                        "view": {"theta": -90, "phi": 0, "fit": 0.96, "seen": 0.13, "through": True}}
             with patch.object(hybrid, "run_omnipart", side_effect=omnipart), \
                     patch.object(hybrid, "split_surface", side_effect=split):
                 hybrid.generate_hybrid_parts(root, {}, root / "cutout.png", surface, metadata, 7, parts, masks)
@@ -559,6 +591,7 @@ class HybridBackendTests(unittest.TestCase):
             info = json.loads(metadata.read_text())
             self.assertEqual(info["part_model"], "hybrid")
             self.assertEqual(info["hybrid"]["alignment_error"], 0.014)
+            self.assertTrue(info["hybrid"]["view"]["through"])  # whether the mask voted on every face
             self.assertEqual(info["part_generator"]["model_weights"], {"omnipart/OmniPart": "rev"})
             from slopforge.provenance import file_sha256
             self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))

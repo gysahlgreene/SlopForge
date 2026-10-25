@@ -304,8 +304,11 @@ need retraining on its latent space, so the two are combined after generation in
    could not close a cut that zigzags and crosses itself (the 2026-10-25 pistol's crossed itself 9–10 times in its
    best-fit plane): with the slide back and the trigger pulled, holes showed on 3.6% of the pistol's pixels in five
    views, 3.9% with the pieces left open, 0.4% with interfaces.
-5. Gates: `hybrid_alignment_error` over `max_hybrid_alignment_error` (0.03 of the surface's size) is `part_missing`,
-   as are a part's mask coverage and the motion sweep, so a seed whose generators disagree is replaced. The final
+5. Gates: `hybrid_alignment_error` over `max_hybrid_alignment_error` (0.03 of the surface's size) is `part_missing`
+   where OmniPart's votes decide labels (a view that does not vote through the thickness, or a dropped mask); it is
+   recorded either way (`hybrid_alignment_decisive`): a side-profile pistol whose slide covered its mask 1.00 failed
+   only on OmniPart landing 0.048 off. A part's mask coverage and the motion sweep are gates too, so a seed whose
+   generators disagree is replaced. The final
    pass also looks at the model from the six axes and eight diagonals, at rest and with each part at the far end of
    its range, and measures the share of what it sees that is the back of a face (`mesh_cleanup.visible_backfaces`):
    over `max_visible_backfaces` (0.01) in any pose is the retryable `part_open`. On 2026-10-25: pieces left open
@@ -424,6 +427,13 @@ Not checked yet: LODs.
   - grip checkering is lost;
   - a small coloured region such as wooden grips can drift in colour, which the whole-object colour checks miss; the
     weapon type shifts non-metal colours towards the concept's (`concept_colour_transfer`, see Materials);
+  - a small coloured region can also go grey: a hybrid pistol's generated metallic map called the whole pistol metal,
+    and the metal steps greyed its walnut grips while the concept's median colour (its black steel) kept the chroma
+    check from running (2026-10-25). The share of the object coloured in the concept but grey in the base colour, seen
+    from the concept's side (`concept_desaturated_share`), over the type's `max_concept_desaturated_share` (0.1) is the
+    retryable `colour_lost` (greyed grips 0.25, wooden ones 0.00–0.04). A declared non-metal without a colour now takes
+    the median colour of the concept's coloured pixels under the mask of the part it names (`concept_part_colours`;
+    `#622513` for those grips), so its metallic is zeroed as for a declared colour;
   - generated steel is glossy where a concept shows it satin.
 - **Moving parts** (pistol, 2026-10-24 and 2026-10-25):
   - masks project straight through the concept's view, so a part must be separate in that view;
