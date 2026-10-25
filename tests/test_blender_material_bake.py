@@ -842,7 +842,7 @@ class BlenderSurfaceSourceGuardTests(unittest.TestCase):
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderWeaponOrientationTests(unittest.TestCase):
     def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=(),
-               fixture_script=None, files=None):
+               fixture_script=None, files=None, pivot="grip"):
         """Box parts joined into one mesh (subdivided by cuts) and turned, then the final pass with --target-size and
         --pivot grip; masks are written beside the concept for extra arguments that name them. Returns the body's
         dimensions, extremes, grip centre and recorded concept view, and every mesh object's parent, origin, world
@@ -878,14 +878,16 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
                            check=True, capture_output=True, text=True)
             concept.save(root / "concept.png")
-            grip.save(root / "grip.png")
+            if grip is not None:
+                grip.save(root / "grip.png")
             for name, mask in (masks or {}).items():
                 mask.save(root / f"{name}.png")
             prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                                        str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
                                        str(blend), *map(str, maps), "--face-budget", str(budget), "--surface-source",
-                                       str(_swatch(maps[0])), "--target-size", target, "--pivot", "grip", "--concept",
-                                       str(root / "concept.png"), "--grip-mask", str(root / "grip.png"),
+                                       str(_swatch(maps[0])), "--target-size", target, "--pivot", pivot, "--concept",
+                                       str(root / "concept.png"),
+                                       *(["--grip-mask", str(root / "grip.png")] if grip is not None else []),
                                        *[str(root / value) if value.endswith((".png", ".json")) else value for value in extra]],
                                       capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
@@ -894,8 +896,8 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             probe.write_text("""import bpy, json, sys
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 obj = next(o for o in meshes if o.parent is None)
-group = obj.vertex_groups["slopforge_grip"].index
-held = [v.co for v in obj.data.vertices if any(g.group == group for g in v.groups)]
+group = obj.vertex_groups["slopforge_grip"].index if "slopforge_grip" in obj.vertex_groups else None
+held = [v.co for v in obj.data.vertices if group is not None and any(g.group == group for g in v.groups)] or [obj.location]
 ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices]
 def record(o):
     points = [o.matrix_world @ v.co for v in o.data.vertices]
@@ -1022,6 +1024,39 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
                          ["floating", "grip", "slide", "trigger"])
         self.assertEqual(sum(1 for item in objects.values() if item["open_edges"]), 0)  # nothing was cut open
         self.assertGreater(objects[measured["body"]]["sharp"], 0)  # hard edges stay hard: sharp by angle on this route
+
+    CHEST_FIXTURE = """import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=3); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.materials.append(bpy.data.materials.new(name))
+box('body', (0, 0, 0.2), (0.6, 0.4, 0.4))
+box('lid', (0, 0, 0.45), (0.6, 0.4, 0.1))  # on the body, touching along its whole rim
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    def test_a_prop_with_a_lid_is_split_without_a_grip(self):
+        # A chest: a hinge declared on a prop with a bottom-centre pivot. No grip mask, no full turn, no tip
+        # check; the lid becomes a child with coverage measured, and the body stays one piece.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
+                               extra=("--part", "lid", "hinge", "lid.png", "--parts-json", "parts.json"),
+                               fixture_script=self.CHEST_FIXTURE,
+                               files={"parts.json": json.dumps({"parts": {"body": {"kind": "body", "id": 2},
+                                                                         "lid": {"kind": "hinge", "id": 1}}})})
+        objects = measured["objects"]
+        self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]}, {"lid": "hinge"})
+        self.assertEqual(measured["inspection"]["component_count"], 1)
+        self.assertGreaterEqual(measured["inspection"]["part_coverage"]["lid"], 0.5)
+        height = objects["lid"]["max"][2] - objects[measured["body"]]["min"][2]
+        self.assertAlmostEqual(height, 0.6, delta=0.02)  # the target size held over body and lid together
 
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:

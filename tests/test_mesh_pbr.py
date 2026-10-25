@@ -600,7 +600,9 @@ class DeclaredMaterialTests(unittest.TestCase):
                     # the fake pass split nothing, so the declared trigger is missing and the next seed is tried
                     self.assertIn("part_missing", candidate["validation"]["failure_codes"])
                 else:
-                    self.assertEqual((options["concept"], options["grip_mask"], options["parts"]), (None, None, []))
+                    # not held, but a hinge is declared: framed from the concept for its parts, no grip, no full turn
+                    self.assertEqual((options["concept"], options["grip_mask"], options["parts"]),
+                                     (root / "cutout.png", None, [("trigger", "hinge", root / "parts_1/trigger.png")]))
 
     def test_a_weapon_generated_as_parts_is_separated_by_node_names_and_gated_on_coverage(self):
         # The OmniPart route: the final pass gets parts.json instead of masks, and a part whose mesh covers too
@@ -631,6 +633,38 @@ class DeclaredMaterialTests(unittest.TestCase):
                 codes = [code for code in candidate["validation"].get("failure_codes", []) if code == "part_missing"]
                 self.assertEqual(codes, expected)
                 self.assertEqual(candidate["validation"]["measured"]["part_coverage"], {"slide": coverage})
+
+    def test_a_prop_with_a_hinge_is_framed_from_its_concept_without_a_grip(self):
+        # Props with parts (a chest's lid): the split, the coverage and the frame key on the declared parts, not on
+        # a grip; the weapon-only checks (full turn, tip alignment) stay off.
+        lid = {"name": "lid", "kind": "hinge", "axis": "x", "min": 0.0, "max": 110.0, "text": "the lid"}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
+            (root / "source/parts").mkdir(parents=True)
+            (root / "source/parts/parts.json").write_text("{}")
+            views = []
+
+            def view(_root, _config, _cutout, _mesh, paths, name, **options):
+                views.append(options)
+                return {"status": "skipped", "silhouette_iou": 0.95}
+            with patch("slopforge.pipelines.model._concept_view", side_effect=view):
+                candidate = self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)),
+                                            cutout=root / "cutout.png", limits={"min_part_coverage": 0.55},
+                                            asset_extra={"pivot": "bottom_center", "parts": [lid]},
+                                            lineage_extra={"part_masks": root / "parts_1"},
+                                            mesh_extra={"part_model": "omnipart",
+                                                        "parts": {"lid": {"kind": "hinge"}, "body": {"kind": "body"}}},
+                                            inspection_extra={"part_coverage": {"lid": 0.9},
+                                                              "parts": [{"name": "lid", "kind": "hinge"}]})
+            options = self.process_options
+            self.assertEqual(options["concept"], root / "cutout.png")
+            self.assertIsNone(options["grip_mask"])
+            self.assertEqual(options["parts"], [("lid", "hinge", root / "parts_1/lid.png")])
+            self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
+            self.assertEqual([item.get("full_turn", False) for item in views], [False] * len(views))
+            self.assertNotIn("weapon_orientation", candidate["validation"].get("failure_codes", []))
+            self.assertNotIn("part_missing", candidate["validation"].get("failure_codes", []))
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the

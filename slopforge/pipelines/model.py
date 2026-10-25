@@ -1242,16 +1242,18 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
-    # The masks also go to the final pass of a weapon generated as parts: not to cut, but to measure how much of
-    # each mask the generated part covers (part_coverage).
-    moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in asset.get("parts") or []
-              if part["kind"] in ("hinge", "slide")] if held and masks else []
+    declared = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
+    # A held weapon, or any asset with a moving part (a chest's lid), is framed from its concept: the masks go to the
+    # final pass to split a cut weapon's parts, or to measure how much of each mask a generated part covers
+    # (part_coverage). The grip mask and the full-turn search are the held weapon's alone.
+    framed = held or bool(declared)
+    moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in declared] if framed and masks else []
     parts_json = mesh_path.parent / "parts/parts.json" if mesh_info.get("part_model") else None
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
-                  concept=(lineage or {}).get("concept_cutout") if held else None,
+                  concept=(lineage or {}).get("concept_cutout") if framed else None,
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
