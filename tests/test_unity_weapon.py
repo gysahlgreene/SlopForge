@@ -113,9 +113,9 @@ def box(name, centre, size, pivot, parent=None, kind=None):
     bpy.ops.mesh.uv_texture_add(); o.data.materials.append(bpy.data.materials.new(name))
     return o
 body = box('body', (0, -0.5, 0.1), (0.05, 1.0, 0.2), (0, 0, 0))
-box('slide', (0, -0.5, 0.25), (0.05, 1.0, 0.1), (0, -0.5, 0.25), body, 'slide')
+box('slide', (0, -0.5, 0.2505), (0.05, 1.0, 0.1), (0, -0.5, 0.2505), body, 'slide')  # half a millimetre above the slab: faces that coincide exactly make a ray's parity undefined
 box('lever', (0, -0.3, -0.05), (0.02, 0.05, 0.1), (0, -0.325, 0.0), body, 'hinge')  # pivot on its top-back edge: it swings clear
-box('flap', (0, -0.975, 0.3), (0.02, 0.05, 0.2), (0, -1.0, 0.2), body, 'hinge')  # standing on the slab's front end, hinged on the slab's top-front edge
+box('flap', (0, -0.975, 0.3005), (0.02, 0.05, 0.2), (0, -1.0, 0.2005), body, 'hinge')  # standing on the slab's front end, hinged just above its top-front edge
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selection=True, object_types={{'MESH'}},
     axis_forward='-Z', axis_up='Y', apply_unit_scale=True, bake_space_transform=False, add_leaf_bones=False,

@@ -263,7 +263,7 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
 - the W9 checks: each pulse clip sampled at rest and limit (pivot drift ≤ 1 mm, angle ±0.5°, travel ±1 mm), and for
   held assets the tip along +Z and the root inside the bounds;
 - an **interpenetration check** through each part's range: the clip is sampled at nine points and the share of the
-  part's vertices inside the rest of the model (a ray from each crossing the body's surface an odd number of times)
+  part's vertices inside the rest of the model (rays along two of three axes crossing the body an odd number of times)
   must not rise more than 0.02 over its rest value — a lid swinging into its chest or a drawer travelling past its
   housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
   the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
@@ -273,8 +273,9 @@ the share of the part's vertices inside the rest of the model at the worst point
 rest (a point counts as inside when rays along two of three axes cross a mesh an odd number of times, since
 generated meshes have holes). A part over the type's `max_part_penetration` (0.02) is the retryable
 `part_penetrates`, so a seed whose lid turns into its chest is replaced before materials and Unity (the C3 chest's
-lid read 0.047 in Blender and 0.169 in Unity; both reject it). Unity's single-ray check on the published prefab
-stays the final word, and the two can differ at the margin on an imperfect mesh.
+lid read 0.047 in Blender and 0.169 in Unity; both reject it). Unity repeats the check on the published prefab
+with the same two-of-three-rays rule; a single ray along x read 0.03–0.08 on pistol triggers and a chest lid that
+were clear to the eye and to the Blender sweep (2026-10-25).
 
 The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the

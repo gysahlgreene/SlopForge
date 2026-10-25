@@ -306,8 +306,13 @@ public static class CLASS_NAME
             foreach (var vertex in vertices)
             {
                 var point = filter.transform.TransformPoint(vertex);
-                var hits = Physics.RaycastAll(point, Vector3.right, 1000f).Count(h => temporary.Contains(h.collider as MeshCollider));
-                if (hits % 2 == 1) inside++;
+                // Generated meshes have holes, so one ray's parity lies (a clear chest lid read 0.08 along x,
+                // 2026-10-25): a point is inside when rays along two of three axes cross the body an odd number
+                // of times, as the Blender sweep (mesh_cleanup.sweep_penetration) counts it.
+                var odd = 0;
+                foreach (var direction in new[] { Vector3.right, Vector3.up, Vector3.forward })
+                    odd += Physics.RaycastAll(point, direction, 1000f).Count(h => temporary.Contains(h.collider as MeshCollider)) % 2;
+                if (odd >= 2) inside++;
             }
             shares.Add((float)inside / vertices.Length);
         }
