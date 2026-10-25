@@ -167,6 +167,52 @@ A pistol's slide and trigger were split this way on three live runs
 The travel check caught a real fault on its first run: the imported FBX root is scaled 100 under Unity's 0.01 file
 scale, so a slide moved 3 m until its travel was taken through the parent's scale.
 
+## Moving parts from part-level generation
+
+A weapon that declares a hinge or slide is generated as **separate parts** by OmniPart (MIT; TRELLIS v1 backbone),
+not as one mesh cut along masks: cutting one closed surface gave hollow parts with flat caps and lumpy small
+mechanisms, which the owner rejected three times (2026-10-24). The weapon type sets `part_model: omnipart`; static
+weapons (no hinge or slide) keep the profile's model graph.
+
+**Set-up (once, on the part-mask host):** `scripts/install-omnipart.sh [directory]` builds the environment
+(micromamba, Python 3.10, torch 2.4 + cu121, `setuptools<81`) and prints the two keys for `ai/project.yaml`:
+`tools.omnipart_python` and `tools.omnipart_checkout`. `tools.parts_host` is required: the tool runs there over SSH
+with `SPCONV_ALGO=native ATTN_BACKEND=xformers`, as the part masks do. A missing key stops before any inference
+(`part_model_preflight`, `configuration`).
+
+**How a run goes** (`processing/part_model.py` on the host, then `blender/prepare_parts.py`, then the usual final
+pass):
+1. Every object pixel of the concept cutout gets a part id: the declared parts in order, then the body. Body pixels
+   above a slide's bottom line (a pistol's hammer, beavertail and rear sight) become a static `<slide>_rear` part,
+   so the body's 3D box stops at the slide line and the slide's box is not contested.
+2. OmniPart's sparse structure gives the object's occupied voxels (64³). Each part's 2D mask extent is mapped onto
+   that extent (image columns along grid x, mirrored when the voxels' footprint matches the mirrored silhouette
+   better; rows down grid z; the full thickness) and becomes its 3D box. OmniPart's own layout model (NVIDIA
+   PartField) is never called: its licence is non-commercial.
+3. OmniPart's MIT part synthesis fills the boxes and returns one textured mesh per part. The tool renames each
+   node after its part and records, per declared hinge or slide, the **coverage**: the share of its mask's grid
+   cells that hold one of its voxels. OmniPart downsamples the mask to 37×37, so a part of under about 0.1% of
+   the concept may vanish.
+4. `prepare_parts.py` welds and reduces each part to its share of the face budget by surface area (floor 2%), with
+   the 90% headroom for moving parts, unwraps every part into **one base-colour atlas** baked from the parts' own
+   textures, and bakes a **metallic atlas** from each part's declared class (a part named by a declared non-metal
+   region, as "grips" names "grip", is 0; else 1 when the brief declares metal). The bake margin equals the packing
+   margin, so one part's metallic does not bleed into its neighbour's islands.
+5. The backend writes `generation.json` as the TRELLIS route does (`textured`, four maps: the atlas, a flat normal,
+   a roughness from the brief's finish word, the metallic atlas), so the material stage runs unchanged, including
+   metal lightness and concept colour transfer.
+6. The final pass (`prepare_model.py --parts-json`) tags each node's faces by part, joins, orients, scales and
+   pivots the weapon as one, then separates the hinges and slides: a slide pivots at its box centre, a hinge at
+   the centroid of its vertices within 1% of the size of the rest of the weapon's surface (its contact), or at its
+   box centre when it touches nothing. The hierarchy, FBX and Unity motion stage are the same as for a cut weapon.
+
+**Gate:** a declared hinge or slide whose coverage is below the type's `min_part_coverage` (0.6, provisional; the
+first live runs calibrate it), or that was not generated at all, fails as the retryable `part_missing` and the
+next seed is tried. The spike of 2026-10-25 lost a part in one seed of four.
+
+**Identity:** the backend's name and the hashes of `part_model.py` and `prepare_parts.py` are part of the mesh
+stage's settings; changing either invalidates the stage like a workflow change.
+
 ## Known limits
 
 - **Thin parts.** Image-to-3D may still thicken, break or drop thin parts.
@@ -183,10 +229,11 @@ scale, so a slide moved 3 m until its travel was taken through the parent's scal
   - a small coloured region such as wooden grips can drift in colour, which the whole-object colour checks miss; the
     weapon type shifts non-metal colours towards the concept's (`concept_colour_transfer`, see Materials);
   - generated steel is glossy where a concept shows it satin.
-- **Moving parts** (pistol, 2026-10-24):
+- **Moving parts** (pistol, 2026-10-24 and 2026-10-25):
   - masks project straight through the concept's view, so a part must be separate in that view;
-  - the parts are hollow and the caps flat; a barrel hides most of the frame's cut at full travel, but a strip of the
-    slide's underside at the muzzle stays with the frame and shows under it;
-  - a small part can leave too few faces under its mask on some seeds (one in two for a trigger of 0.6% of the
-    concept), which costs a retry;
+  - generated as parts (OmniPart): one seed in four lost a part in the spike (a retry); a tiny part's texture comes
+    out pale; large smooth surfaces are TRELLIS v1 quality; the `_rear` rule was needed on a pistol and is untested
+    on other weapons;
+  - cut from one mesh (the route without `part_model`): the parts are hollow and the caps flat; a strip of the
+    slide's underside at the muzzle stays with the frame;
   - the clips are editor-sampled for the checks; Play mode is not run.

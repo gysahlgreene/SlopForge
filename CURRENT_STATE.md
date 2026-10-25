@@ -1001,3 +1001,22 @@ Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-mov
 - **Tests:** an opt-in Unity test (a slab with a slide and a hinged lever from Blender, checked in Unity); the request
   built from the declared parts; publication records the checks and fails on an error; `make verify`.
 - **Not verified:** Play mode; any weapon other than this pistol.
+
+Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WEAPONS.md#moving-parts-from-part-level-generation)).
+- **Why:** the owner rejected the cut-one-mesh moving parts three times (hollow parts, flat caps, lumpy small
+  mechanisms). A spike on the H100 showed OmniPart (MIT) generates each declared part as its own solid textured
+  mesh from the concept and our SAM masks, with an assembly that looked better than the cut pistol.
+- **Change:** a weapon type with `part_model: omnipart` and a declared hinge or slide is generated as parts:
+  `processing/part_model.py` on the part-mask host (boxes from the masks mapped onto OmniPart's voxels, so its
+  non-commercial PartField layout model is never used), `blender/prepare_parts.py` (per-part reduction, one
+  base-colour atlas, a metallic atlas by declared class), derived maps, then the existing final pass with
+  `--parts-json` (tag by node name, join, orient, separate with pivots by kind: slide at its box centre, hinge at
+  its contact with the body). A part below `min_part_coverage` (0.6, provisional) is the retryable `part_missing`.
+  The backend and tool hashes are in the mesh stage's identity.
+- **Tests:** boxes, ids, coverage and the tool's GLB naming (unit); the backend's request, Blender call and
+  generation.json (unit); `prepare_parts` on two textured parts and the final pass on a slab with a touching slide,
+  a touching trigger and a floating hinge (opt-in Blender); the route, settings identity and the coverage gate
+  (unit); `make verify` (844 passed).
+- **Not verified:** no live run through `approve` yet (the spike ran the tool by hand on one pistol, 4 seeds, 3
+  good); any weapon other than a pistol; the 0.6 limit and the `_rear` rule on other weapons; OmniPart's VRAM peak
+  beside ComfyUI.
