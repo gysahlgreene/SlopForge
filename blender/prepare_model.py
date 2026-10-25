@@ -894,7 +894,12 @@ if "--pivot" in sys.argv:
 if not mesh_only and parts_table is not None:
     anchors = {value.split("=")[0]: value.split("=")[1].split("-") for index, value in enumerate(sys.argv)
                if index and sys.argv[index - 1] == "--anchor"}
-    children = separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors)
+    # Hybrid parts are pieces of one generated surface: the separation leaves openings, closed here
+    close = bool(json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text()).get("close_openings"))
+    basecolor_image = next((image for image in bpy.data.images if basecolor_path and
+                            Path(bpy.path.abspath(image.filepath)).resolve() == Path(basecolor_path).resolve()), None)
+    children = separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors, close=close,
+                               basecolor=basecolor_image)
     for child in children:
         print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
               f"pivot {[round(v, 4) for v in child.location]}")

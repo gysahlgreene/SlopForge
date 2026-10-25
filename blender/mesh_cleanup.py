@@ -540,6 +540,215 @@ def _typical_texel(loops, uv, basecolor):
     return loops[nearest][uv].uv.copy()
 
 
+def _boundary_groups(bm):
+    """The openings of a mesh: its boundary edges grouped by connectivity through shared vertices."""
+    edges = {edge for edge in bm.edges if len(edge.link_faces) == 1}
+    groups = []
+    while edges:
+        seed = edges.pop()
+        group, stack = [seed], [seed]
+        while stack:
+            for vertex in stack.pop().verts:
+                for other in vertex.link_edges:
+                    if other in edges:
+                        edges.discard(other)
+                        group.append(other)
+                        stack.append(other)
+        groups.append(group)
+    return groups
+
+
+def _simple_cycles(group):
+    """An opening that touches itself (a figure of eight) as simple cycles: a cycle basis of its edge graph."""
+    adjacency = {}
+    for edge in group:
+        a, b = edge.verts
+        adjacency.setdefault(a, []).append((b, edge))
+        adjacency.setdefault(b, []).append((a, edge))
+    cycles, done = [], set()
+    for root in adjacency:
+        if root in done:
+            continue
+        parent, depth, stack, used = {root: (None, None)}, {root: 0}, [root], set()
+        while stack:
+            vertex = stack.pop()
+            done.add(vertex)
+            for other, edge in adjacency[vertex]:
+                if other not in parent:
+                    parent[other], depth[other] = (vertex, edge), depth[vertex] + 1
+                    stack.append(other)
+                elif edge is not parent[vertex][1] and edge not in used and depth[other] <= depth[vertex]:
+                    used.add(edge)
+                    left, right, cycle = vertex, other, [edge]
+                    while left is not right:
+                        if depth[left] >= depth[right]:
+                            left, step = parent[left]
+                        else:
+                            right, step = parent[right]
+                        cycle.append(step)
+                    cycles.append(cycle)
+    return cycles or [group]
+
+
+def _bridge_chain(bm, group):
+    """An opening that is a chain, not a loop, closed into a loop: where a cut crossed an edge with three faces (the
+    generated surface's own non-manifold edges), that edge keeps two faces and is not a boundary edge, so the
+    opening has loose ends (2026-10-25 pistol). Ends are paired nearest first and joined by the edge between them,
+    or by a new edge when they are within a tenth of the opening's size. Returns (edges, bridges)."""
+    degree = {}
+    for edge in group:
+        for vertex in edge.verts:
+            degree[vertex] = degree.get(vertex, 0) + 1
+    ends = [vertex for vertex, count in degree.items() if count % 2]
+    if not ends:
+        return list(group), set()
+    points = [vertex.co for edge in group for vertex in edge.verts]
+    low = [min(point[axis] for point in points) for axis in range(3)]
+    high = [max(point[axis] for point in points) for axis in range(3)]
+    limit = 0.1 * sum((h - l) ** 2 for l, h in zip(low, high)) ** 0.5
+    bridges = set()
+    while len(ends) >= 2:
+        vertex = ends.pop()
+        other = min(ends, key=lambda candidate: (candidate.co - vertex.co).length)
+        ends.remove(other)
+        shared = next((edge for edge in vertex.link_edges if edge.other_vert(vertex) is other), None)
+        if shared is None:
+            if (other.co - vertex.co).length > limit:
+                continue
+            shared = bm.edges.new((vertex, other))
+        bridges.add(shared)
+    return list(group) + list(bridges), bridges
+
+
+def _convex_hull_2d(points):
+    """Indices of the 2D points on their convex hull, counter-clockwise (Andrew's monotone chain)."""
+    order = sorted(range(len(points)), key=lambda i: (points[i][0], points[i][1]))
+    cross = lambda o, a, b: ((points[a][0] - points[o][0]) * (points[b][1] - points[o][1])
+                             - (points[a][1] - points[o][1]) * (points[b][0] - points[o][0]))
+    lower, upper = [], []
+    for i in order:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], i) <= 0:
+            lower.pop()
+        lower.append(i)
+    for i in reversed(order):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], i) <= 0:
+            upper.pop()
+        upper.append(i)
+    return lower[:-1] + upper[:-1]
+
+
+def _cap_opening(bm, group, centroid):
+    """A flat cap across an opening's convex outline in its best-fit plane, recessed a little into the piece and
+    facing away from it; not stitched to the rim, so the surface's topology around the opening does not matter.
+    For an opening no fill could close: a rim that runs into a pistol's bore (2026-10-25). Returns the faces."""
+    import numpy as np
+    from mathutils import Vector
+    starts = np.array([tuple(edge.verts[0].co) for edge in group])
+    ends = np.array([tuple(edge.verts[1].co) for edge in group])
+    points, weights = (starts + ends) / 2, np.linalg.norm(ends - starts, axis=1) + 1e-12
+    extent = float(np.ptp(np.concatenate([starts, ends]), 0).max())
+    # The plane the most rim length lies in (RANSAC): a rim that dips into the surface's tubes (a bore) is an
+    # outlier, not a reason to tilt the cap through the part (2026-10-25 pistol).
+    rng = np.random.default_rng(0)
+    best, tolerance = None, 0.015 * extent
+    for _ in range(300):
+        a, b, c = points[rng.choice(len(points), 3, replace=False, p=weights / weights.sum())]
+        normal = np.cross(b - a, c - a)
+        if np.linalg.norm(normal) < 1e-12:
+            continue
+        normal /= np.linalg.norm(normal)
+        inliers = np.abs((points - a) @ normal) < tolerance
+        score = weights[inliers].sum()
+        if best is None or score > best[0]:
+            best = (score, inliers)
+    inliers = best[1] if best is not None else np.ones(len(points), bool)
+    chosen = np.concatenate([starts[inliers], ends[inliers]])
+    middle = chosen.mean(0)
+    _, _, axes = np.linalg.svd(chosen - middle, full_matrices=False)
+    normal = Vector(axes[2])
+    if normal.dot(Vector(middle) - centroid) < 0:
+        normal = -normal  # away from the piece
+    u, v = axes[0], axes[1]
+    flat = [((p - middle) @ u, (p - middle) @ v) for p in chosen]
+    hull = _convex_hull_2d(flat)
+    if len(hull) < 3:
+        return []
+    centre = np.mean([flat[i] for i in hull], axis=0)
+    shrink = 0.015 * extent  # the outline a little inside the rim, so the cap's edge cannot show through the sheet
+    outline = []
+    for i in hull:
+        offset = np.array(flat[i]) - centre
+        length = np.linalg.norm(offset)
+        outline.append(centre + offset * max(length - shrink, 0) / max(length, 1e-12))
+    base = Vector(middle) - normal * 0.005 * extent  # a little inside the piece: no flicker against its neighbour
+    verts = [bm.verts.new(base + Vector(u) * x + Vector(v) * y) for x, y in outline]
+    face = bm.faces.new(verts)
+    face.normal_update()
+    if face.normal.dot(normal) < 0:
+        face.normal_flip()
+    return bmesh.ops.triangulate(bm, faces=[face])["faces"]
+
+
+def close_openings(bm, basecolor=None):
+    """Close every opening of a piece split from a generated surface (docs/WEAPONS.md, Hybrid parts): each opening
+    is filled flat in its best-fit plane (a triangle fill; the hole filler takes a loop that is not simple), the
+    fill wound so its rim runs against the surface beside it (outwards), and textured with one texel, its ring's
+    median colour: a mating surface such as a slide's underside or a box's top under its lid. Returns the fills."""
+    import numpy as np
+    from mathutils import Vector
+    uv = bm.loops.layers.uv.active
+    fills = []
+    capped = set()
+    cycles = []
+    for group in _boundary_groups(bm):
+        edges, bridges = _bridge_chain(bm, group)
+        cycles.extend((cycle, bridges) for cycle in _simple_cycles(edges))
+    for group, bridges in cycles:
+        group = [edge for edge in group if edge.is_valid and (len(edge.link_faces) == 1 or edge in bridges)]
+        if len(group) < 3:
+            continue
+        points = np.array([tuple(vertex.co) for edge in group for vertex in edge.verts])
+        normal = Vector(np.linalg.svd(points - points.mean(0), full_matrices=False)[2][2])
+        ring = [loop for edge in group if edge.link_faces for loop in edge.link_faces[0].loops]  # a new bridge has none
+        texel = _typical_texel(ring, uv, basecolor) if uv is not None and ring else None
+        before = set(bm.faces)
+        bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=group, normal=normal)
+        left = [edge for edge in group if edge.is_valid and len(edge.link_faces) == 1]
+        if left and not [face for face in bm.faces if face not in before]:
+            bmesh.ops.holes_fill(bm, edges=left, sides=0)
+        new = [face for face in bm.faces if face not in before]
+        if any(edge.is_valid and len(edge.link_faces) == 1 for edge in group):
+            # neither fill closed it: drop what they made and cap the opening across its outline
+            bmesh.ops.delete(bm, geom=[face for face in new if face.is_valid], context="FACES_ONLY")
+            centroid = sum((vertex.co for vertex in bm.verts), Vector()) / max(len(bm.verts), 1)
+            new = _cap_opening(bm, [edge for edge in group if edge.is_valid], centroid)
+            capped.update(new)
+        if not new:
+            continue
+        new = bmesh.ops.triangulate(bm, faces=new)["faces"]
+        for face in new:
+            face.smooth = False
+            if texel is not None:
+                for loop in face.loops:
+                    loop[uv].uv = texel
+        fills.extend(new)
+    fill_set = set(fills)
+    for piece in _face_pieces([face for face in fills if face not in capped]):  # caps face away from the piece already
+        piece = list(piece)
+        bmesh.ops.recalc_face_normals(bm, faces=piece)
+        vote = 0
+        for face in piece:
+            for loop in face.loops:
+                for twin in loop.edge.link_faces:
+                    if twin is not face and twin not in fill_set:
+                        twin_loop = next(other for other in twin.loops if other.edge is loop.edge)
+                        vote += 1 if twin_loop.vert is loop.vert else -1
+        if vote > 0:
+            for face in piece:
+                face.normal_flip()
+    return fills
+
+
 # ---------------------------------------------------------------------------
 # Moving parts generated as separate meshes (OmniPart): tag by node name, separate after the join
 # ---------------------------------------------------------------------------
@@ -559,11 +768,13 @@ def tag_parts(objects, table):
         attribute.data.foreach_set("value", [value] * len(obj.data.polygons))
 
 
-def separate_tagged(obj, table, contact, anchors=None):
+def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=None):
     """Move each hinge or slide's tagged faces into a child of obj (see _attach). A slide pivots at its box centre;
     a hinge at the centroid of its vertices within `contact` of the rest of the weapon, or at its box centre when
     it touches nothing; a hinge with an anchor (faces of its own bounds: front -Y, back +Y, left -X, right +X,
-    bottom -Z, top +Z) pivots on that edge of its box. Returns the children."""
+    bottom -Z, top +Z) pivots on that edge of its box. With close (hybrid parts: pieces of one generated surface),
+    every opening the separation leaves, on each part and on the body, is closed (close_openings). Returns the
+    children."""
     import bpy
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
@@ -616,6 +827,8 @@ def separate_tagged(obj, table, contact, anchors=None):
         piece = bm.copy()
         piece_layer = piece.faces.layers.int.get("slopforge_part")
         bmesh.ops.delete(piece, geom=[face for face in piece.faces if face[piece_layer] != part_id], context="FACES")
+        if close:
+            print(f"Part {name} ({kind}): closed {len(close_openings(piece, basecolor))} faces of openings")
         # The join left the imported part's mesh as an orphan under this name; the child takes the exact name
         for block in (bpy.data.meshes, bpy.data.objects):
             taken = block.get(name)
@@ -628,6 +841,8 @@ def separate_tagged(obj, table, contact, anchors=None):
         child.name = mesh.name = name
         children.append(child)
         bmesh.ops.delete(bm, geom=faces, context="FACES")
+    if close and children:
+        print(f"Body: closed {len(close_openings(bm, basecolor))} faces of openings")
     bm.to_mesh(obj.data)
     bm.free()
     obj.data.update()

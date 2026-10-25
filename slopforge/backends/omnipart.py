@@ -41,13 +41,10 @@ def part_cells(cutout, masks_dir, declared):
     return cells
 
 
-def generate_part_model(project_root, config, cutout, name, destination, metadata, seed, parts, masks_dir,
-                        face_budget, materials, finish, texture_size=2048, steps=25, cfg=7.5):
-    """Write `destination` (the processed parts GLB, one named node per part), processed_mesh.blend beside it, the
-    four maps, and `metadata` (generation.json) for a weapon whose parts are given by `masks_dir/<name>.png`.
-    face_budget is the reduction target (the caller leaves headroom for moving parts); steps and cfg are OmniPart's
-    sampler settings for both its sparse structure and its parts (its defaults 25 and 7.5)."""
-    root = Path(project_root).resolve()
+def run_omnipart(config, cutout, parts, masks_dir, out, seed, texture_size=2048, steps=25, cfg=7.5):
+    """OmniPart on the part-mask host: one textured mesh per declared part (hinge, slide, grip) and the body, as
+    `out`/parts.glb (nodes named after the parts) with `out`/parts.json. Checks the environment and each part's
+    size on OmniPart's grid first. Returns parts.json's report."""
     tools = config["asset_pipeline"].get("tools", {})
     host, python, checkout = tools.get("parts_host"), tools.get("omnipart_python"), tools.get("omnipart_checkout")
     if not (host and python and checkout):
@@ -56,7 +53,7 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
                            remedy="set tools.parts_host, tools.omnipart_python and tools.omnipart_checkout "
                                   "(scripts/install-omnipart.sh), or remove part_model from ai/asset_types/weapon.yaml "
                                   "to cut the parts from one mesh instead; see docs/WEAPONS.md")
-    destination, metadata, masks_dir = Path(destination), Path(metadata), Path(masks_dir)
+    masks_dir, out = Path(masks_dir), Path(out)
     declared = [{"name": part["name"], "kind": part["kind"]} for part in parts
                 if part["kind"] in ("hinge", "slide", "grip")]
     small = {name: cells for name, cells in part_cells(cutout, masks_dir, declared).items() if cells < MIN_PART_CELLS}
@@ -71,9 +68,21 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
                                                 for part in declared}}
     request = {"image": "concept.png", "masks": {part["name"]: f"{part['name']}.png" for part in declared},
                "parts": declared, "seed": seed, "texture_size": texture_size, "steps": steps, "cfg": cfg}
-    out = destination.parent / "parts"
     run_remote_tool(host, python, tool_root() / "processing/part_model.py", request, uploads, {".": out},
                     label="omnipart", cwd=checkout, env=OMNIPART_ENV)
+    return json.loads((out / "parts.json").read_text())
+
+
+def generate_part_model(project_root, config, cutout, name, destination, metadata, seed, parts, masks_dir,
+                        face_budget, materials, finish, texture_size=2048, steps=25, cfg=7.5):
+    """Write `destination` (the processed parts GLB, one named node per part), processed_mesh.blend beside it, the
+    four maps, and `metadata` (generation.json) for a weapon whose parts are given by `masks_dir/<name>.png`.
+    face_budget is the reduction target (the caller leaves headroom for moving parts); steps and cfg are OmniPart's
+    sampler settings for both its sparse structure and its parts (its defaults 25 and 7.5)."""
+    root = Path(project_root).resolve()
+    destination, metadata, masks_dir = Path(destination), Path(metadata), Path(masks_dir)
+    out = destination.parent / "parts"
+    run_omnipart(config, cutout, parts, masks_dir, out, seed, texture_size, steps, cfg)
     report = json.loads((out / "parts.json").read_text())
     metal = part_metal([{"name": part, "kind": item["kind"]} for part, item in report["parts"].items()], materials)
     atlas, metal_atlas = destination.parent / "atlas.png", destination.parent / "metal_atlas.png"

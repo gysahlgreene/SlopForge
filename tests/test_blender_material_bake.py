@@ -1172,3 +1172,162 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
         self.assertAlmostEqual(measured["dims"][2], 0.176, delta=0.03)
         self.assertLess(measured["min_y"], -0.7)  # the tip, 0.75 ahead of the grip at 1.1 scale, is forward
         self.assertGreater(measured["max_z"], -measured["min_z"])  # the stock sits above the grip
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderCloseOpeningsTests(unittest.TestCase):
+    def test_a_piece_split_from_a_surface_is_closed_outwards_in_one_colour_per_opening(self):
+        # A hybrid split (docs/WEAPONS.md, Hybrid parts) leaves each piece of a generated surface open where it was
+        # cut from the rest: a lid cut from a box has an open rim, the box an open top. Both close flat, wound like
+        # their neighbours (outwards), each opening in one texel of its ring's median colour.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "close.py"
+            script.write_text(f'''import bpy, bmesh, sys
+from mathutils.bvhtree import BVHTree
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import close_openings
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.subdivide(number_cuts=5)
+bpy.ops.mesh.quads_convert_to_tris()
+bpy.ops.object.mode_set(mode="OBJECT")
+image = bpy.data.images.new("base", 16, 16)
+image.pixels = [0.6, 0.4, 0.2, 1.0] * 256
+for top in (True, False):
+    bm = bmesh.new(); bm.from_mesh(bpy.context.object.data); bm.faces.ensure_lookup_table()
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if (f.calc_center_median().z > 0.17) != top], context="FACES")
+    opened = sum(1 for e in bm.edges if len(e.link_faces) == 1)
+    fills = close_openings(bm, image)
+    assert opened > 0 and fills, (opened, len(fills))
+    assert sum(1 for e in bm.edges if len(e.link_faces) == 1) == 0, "left open"
+    bm.normal_update()
+    tree = BVHTree.FromBMesh(bm)
+    for f in fills:  # outwards: a ray from the fill along its normal leaves the closed piece
+        hits, origin = 0, f.calc_center_median() + f.normal * 1e-4
+        for _ in range(16):
+            loc = tree.ray_cast(origin, f.normal)[0]
+            if loc is None: break
+            hits += 1; origin = loc + f.normal * 1e-4
+        assert hits % 2 == 0, ("inward fill", top, tuple(f.normal))
+    uv = bm.loops.layers.uv.active
+    assert len({{tuple(round(c, 6) for c in l[uv].uv) for f in fills for l in f.loops}}) == 1
+    assert not any(f.smooth for f in fills)
+    print("CLOSED", top, len(fills))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertEqual(result.stdout.count("CLOSED"), 2)
+
+    def test_a_chain_whose_ends_are_close_but_not_joined_gets_a_new_edge(self):
+        # Two short rim edges carry an inner shell: the opening's ends are two vertices 2 mm apart with no edge
+        # between them. A new edge joins them and the opening closes (2026-10-25 pistol: an IndexError there).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "close_gap.py"
+            script.write_text(f'''import bpy, bmesh, sys
+from mathutils import Vector
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import close_openings
+bm = bmesh.new()
+# an open box (no top) whose front rim edge runs a - m1 - k - m2 - b, k 2 mm off the line between m1 and m2
+v = [bm.verts.new(co) for co in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1))]
+m1, k, m2 = bm.verts.new((0.499, 0, 1)), bm.verts.new((0.5, 0.0, 1.0005)), bm.verts.new((0.501, 0, 1))
+bm.faces.new((v[0], v[3], v[2], v[1]))
+bm.faces.new((v[0], v[1], v[5], m2, k, m1, v[4]))
+bm.faces.new((v[1], v[2], v[6], v[5])); bm.faces.new((v[2], v[3], v[7], v[6])); bm.faces.new((v[3], v[0], v[4], v[7]))
+q, t = bm.verts.new((0.5, 0.05, 1.0)), bm.verts.new((0.5, 0.1, 0.9))  # a closed pyramid on m1-k and k-m2, no m1-m2 edge
+bm.faces.new((m1, k, m2, q))
+for a, b in ((m1, k), (k, m2), (m2, q), (q, m1)):
+    bm.faces.new((a, b, t))
+uv = bm.loops.layers.uv.new("UVMap")  # the generated surface is textured: each opening takes its ring's texel
+for face in bm.faces:
+    for loop in face.loops:
+        loop[uv].uv = (loop.vert.co.x, loop.vert.co.y)
+ends = [x for x in bm.verts if sum(1 for e in x.link_edges if len(e.link_faces) == 1) % 2]
+assert sorted(round(x.co.x, 3) for x in ends) == [0.499, 0.501], [tuple(x.co) for x in ends]
+fills = close_openings(bm)
+area = sum(f.calc_area() for f in fills)
+assert abs(area - 1.0) < 0.05, area
+print("GAP CLOSED", len(fills), round(area, 3))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("GAP CLOSED", result.stdout)
+
+    def test_an_opening_no_fill_can_close_gets_a_flat_cap_across_its_outline(self):
+        # A large opening whose rim dips into the surface's inner tubes (a pistol's bore) defeats both fills; it gets a
+        # flat cap across its outline, a little inside its piece, facing out, in its ring's colour (2026-10-25).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "cap.py"
+            script.write_text(f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.subdivide(number_cuts=7); bpy.ops.object.mode_set(mode="OBJECT")
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+uv = bm.loops.layers.uv.active
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.calc_center_median().z > 0.49], context="FACES_ONLY")
+rim = sorted((v for v in bm.verts if v.co.z > 0.49 and abs(v.co.y + 0.5) < 1e-6 and abs(v.co.x) < 0.3), key=lambda v: v.co.x)
+for v in rim[1:-1]:
+    v.co.z -= 0.25  # the rim dips into the box along part of one side, as a pistol's rim dips into its bore
+nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
+mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
+mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
+try:
+    fills = mesh_cleanup.close_openings(bm)
+finally:
+    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
+bm.normal_update()
+area = sum(f.calc_area() for f in fills)
+assert 0.9 < area < 1.0, area  # the whole top, its outline a little inside the rim
+assert all(f.normal.z > 0.99 for f in fills), [tuple(f.normal) for f in fills]  # level and outwards despite the dip
+heights = {{round(v.co.z, 4) for f in fills for v in f.verts}}
+assert len(heights) == 1 and 0.49 < heights.pop() < 0.5  # flat, a little inside the box
+assert len({{tuple(round(c, 6) for c in l[uv].uv) for f in fills for l in f.loops}}) == 1
+print("CAPPED", len(fills), round(area, 3))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("CAPPED", result.stdout)
+
+    def test_an_opening_broken_by_a_non_manifold_edge_is_still_closed(self):
+        # TRELLIS.2's surface has edges where three faces meet; where the cut crosses one, that edge has two faces left
+        # on the piece and is not a boundary edge, so the opening is a chain with two ends (the 2026-10-25 pistol's
+        # frame top stayed open). The ends are joined and the opening filled.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "close_chain.py"
+            script.write_text(f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import close_openings
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+bm.faces.ensure_lookup_table()
+top = next(f for f in bm.faces if f.normal.z > 0.9)
+edge = top.edges[0]
+a, b = edge.verts
+from mathutils import Vector
+inward = (Vector((0, 0, a.co.z)) - (a.co + b.co) / 2).normalized() * 0.3
+down = Vector((0, 0, -0.3))
+c, d = bm.verts.new(b.co + inward), bm.verts.new(a.co + inward)
+a2, b2 = bm.verts.new(a.co + down), bm.verts.new(b.co + down)
+c2, d2 = bm.verts.new(b.co + inward + down), bm.verts.new(a.co + inward + down)
+for quad in ((a, b, c, d), (a, a2, b2, b), (b, b2, c2, c), (c, c2, d2, d), (d, d2, a2, a), (a2, d2, c2, b2)):
+    bm.faces.new(quad)  # a small closed box inside, sharing one rim edge of the opening: that edge has four faces
+bmesh.ops.delete(bm, geom=[top], context="FACES_ONLY")
+ends = [v for v in bm.verts if sum(1 for e in v.link_edges if len(e.link_faces) == 1) % 2]
+assert len(ends) == 2, len(ends)  # the opening is a chain, not a loop
+fills = close_openings(bm)
+assert fills, "nothing filled"
+area = sum(f.calc_area() for f in fills)
+assert abs(area - 1.0) < 0.05, area  # the cube's whole top, not a sliver
+print("CHAIN CLOSED", len(fills), round(area, 3))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("CHAIN CLOSED", result.stdout)
