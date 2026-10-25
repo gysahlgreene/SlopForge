@@ -28,12 +28,16 @@ class RemoteToolTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "", "")
             with patch("slopforge.remote_tool.subprocess.run", side_effect=run):
                 run_remote_tool("gpu", "/opt/env/bin/python", root / "tool.py",
-                                {"image": "concept.png", "seed": 3}, {"concept.png": root / "concept.png"},
+                                {"image": "concept.png", "seed": 3, "masks": {"grip": "grip.png"},
+                                 "extra": ["grip.png", 7]},
+                                {"concept.png": root / "concept.png", "grip.png": root / "concept.png"},
                                 {".": root / "out"}, label="omnipart", cwd="/opt/omnipart",
                                 env={"SPCONV_ALGO": "native"})
             self.assertEqual(calls[0], ["ssh", "-o", "BatchMode=yes", "gpu", "mktemp", "-d", "/tmp/slopforge-omnipart-XXXXXX"])
             self.assertEqual(requests, [{"image": "/tmp/slopforge-omnipart-abc123/concept.png", "seed": 3,
-                                         "out_dir": "/tmp/slopforge-omnipart-abc123/out"}])
+                                         "masks": {"grip": "/tmp/slopforge-omnipart-abc123/grip.png"},
+                                         "extra": ["/tmp/slopforge-omnipart-abc123/grip.png", 7],
+                                         "out_dir": "/tmp/slopforge-omnipart-abc123/out"}])  # nested names too
             script = next(command for command in calls if command[0] == "ssh" and "python" in command[-1])
             self.assertEqual(script[-1], "cd /opt/omnipart && SPCONV_ALGO=native /opt/env/bin/python - "
                                          "/tmp/slopforge-omnipart-abc123/request.json")

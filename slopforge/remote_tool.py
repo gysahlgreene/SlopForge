@@ -32,9 +32,16 @@ def run_remote_tool(host, python, script, request, uploads, downloads, *, label=
         with tempfile.TemporaryDirectory() as temporary:
             request_path = Path(temporary) / "request.json"
             remote = {name: str(work / name) for name in uploads}
-            request_path.write_text(json.dumps({**{key: remote.get(value, value) if isinstance(value, str) else value
-                                                   for key, value in request.items()},
-                                                "out_dir": str(work / "out")}))
+
+            def placed(value):  # an upload's name anywhere in the request, nested dicts and lists included
+                if isinstance(value, str):
+                    return remote.get(value, value)
+                if isinstance(value, dict):
+                    return {key: placed(item) for key, item in value.items()}
+                if isinstance(value, list):
+                    return [placed(item) for item in value]
+                return value
+            request_path.write_text(json.dumps({**placed(request), "out_dir": str(work / "out")}))
             for local, target in (*((path, work / name) for name, path in uploads.items()),
                                   (request_path, work / "request.json")):
                 if subprocess.run(["scp", "-q", "-o", "BatchMode=yes", str(local), f"{host}:{target}"],
