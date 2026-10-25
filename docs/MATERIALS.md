@@ -192,7 +192,13 @@ derives the other maps before the material stage runs:
   0.55 (the default, blued steel), `polished` 0.25;
 - **metallic:** the metallic atlas baked by part from each part's declared class, thresholded at 0.5.
 
-Metal lightness, concept colour transfer and the declared non-metal zeroing then run as for any textured mesh.
+Metal lightness, concept colour transfer and the declared non-metal zeroing then run as for any textured mesh, with
+two differences for this route (2026-10-25 chest and pistol): the colour transfer moves non-metal lightness the
+whole way to the concept's (cap 3×; other routes move half way), since generated parts come out darker and duller
+all over, and brightened metal keeps no more chroma than the concept's lit metal shows (brightening had exposed a
+pink tint the decoder left in a pistol's serrations). The `prop` type opts into the transfer for its parts.
+Which parts are metal follows the brief's material regions: a declared non-metal region names a part by the part's
+name or a word of its description (the rifle's "stock" and its "pistol grip of the stock").
 
 ## Checks before review
 
