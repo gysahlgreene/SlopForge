@@ -1029,6 +1029,19 @@ class PropComponentBudgetTests(unittest.TestCase):
         unmeasured = apply_part_penetration(_quality_report(component_count=1), {}, declared, 0.02)
         self.assertEqual(unmeasured.get("failure_codes", []), [])  # the cut route measures nothing: no verdict
 
+    def test_a_hybrid_split_whose_parts_missed_the_surface_is_retried(self):
+        # The hybrid route aligns OmniPart's parts on TRELLIS.2's surface; two generators that made different shapes
+        # leave the parts beside the surface, and their votes mean nothing: another seed (part_missing).
+        from slopforge.validation import apply_hybrid_alignment
+        report = apply_hybrid_alignment(_quality_report(component_count=1), 0.051, 0.03)
+        self.assertEqual(report["failure_codes"], ["part_missing"])
+        self.assertIn("0.051", report["errors"][-1])
+        self.assertEqual((report["measured"]["hybrid_alignment_error"], report["limits"]["max_hybrid_alignment_error"]),
+                         (0.051, 0.03))
+        self.assertTrue(candidate_quality_rejection(report))
+        self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), 0.014, 0.03).get("failure_codes", []), [])
+        self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), None, 0.03).get("failure_codes", []), [])
+
     def test_a_mesh_whose_faces_fold_against_each_other_is_retried(self):
         # The C4 chest (2026-10-25): the collapse decimation crumpled a thin-walled box, 47% of its adjacent faces
         # came out with opposed normals, and Unity shaded it in facets (Blender's custom normals hid it).

@@ -513,3 +513,53 @@ class OmniPartBackendTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HybridBackendTests(unittest.TestCase):
+    def test_the_split_is_recorded_for_the_final_pass_and_the_stage(self):
+        # generate_hybrid_parts writes parts.json (the final pass's part table, with close_openings) and records the
+        # route, the split's quality and OmniPart's provenance in generation.json; the surface's recorded hash follows
+        # its rewrite as nodes and the unsplit surface is kept as an output.
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from slopforge.backends import hybrid
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            surface = root / "mesh_01/pistol.glb"
+            surface.parent.mkdir()
+            surface.write_bytes(b"whole")
+            metadata = root / "mesh_01/generation.json"
+            metadata.write_text(json.dumps({"workflow": "trellis2", "outputs": [{"path": "pistol.glb", "sha256": "old"}]}))
+            masks = root / "masks"
+            masks.mkdir()
+            parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}]
+            seen = {}
+
+            def omnipart(config, cutout, parts_, masks_dir, out, seed, *args):
+                seen["omnipart"] = (out.name, seed)
+                out.mkdir(parents=True, exist_ok=True)
+                return {"backend": {"provider": "omnipart"}, "model_weights": {"omnipart/OmniPart": "rev"}}
+
+            def split(root_, config, surface_, parts_glb, cutout, masks_, parts_, work_dir):
+                seen["split"] = (parts_glb.name, sorted(masks_))
+                surface_.with_name("pistol_whole.glb").write_bytes(b"whole")
+                surface_.write_bytes(b"nodes")
+                return {"alignment_error": 0.014, "shares": {"body": 0.7, "slide": 0.3}, "cut_length": 8.1,
+                        "parts": {"body": {"kind": "body", "id": 1}, "slide": {"kind": "slide", "id": 2}},
+                        "tools": {"hybrid_graph.py": "abc"}}
+            with patch.object(hybrid, "run_omnipart", side_effect=omnipart), \
+                    patch.object(hybrid, "split_surface", side_effect=split):
+                hybrid.generate_hybrid_parts(root, {}, root / "cutout.png", surface, metadata, 7, parts, masks)
+            self.assertEqual(seen["omnipart"], ("parts", 7))
+            self.assertEqual(seen["split"], ("parts.glb", ["slide"]))  # moving parts vote with their masks
+            table = json.loads((surface.parent / "parts/parts.json").read_text())
+            self.assertTrue(table["close_openings"])
+            self.assertEqual(table["parts"]["slide"], {"kind": "slide", "id": 2})
+            info = json.loads(metadata.read_text())
+            self.assertEqual(info["part_model"], "hybrid")
+            self.assertEqual(info["hybrid"]["alignment_error"], 0.014)
+            self.assertEqual(info["part_generator"]["model_weights"], {"omnipart/OmniPart": "rev"})
+            from slopforge.provenance import file_sha256
+            self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))
+            self.assertEqual(info["outputs"][-1]["kind"], "mesh.whole")

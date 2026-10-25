@@ -14,6 +14,7 @@ from PIL import Image, ImageStat
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
 from ..backends.omnipart import generate_part_model
+from ..backends.hybrid import generate_hybrid_parts
 from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
@@ -34,7 +35,7 @@ from ..unity_playmode import verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_mesh_folds, apply_part_coverage, apply_part_penetration,
+                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_penetration,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1218,7 +1219,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             if transfer:
                 # the parts route's textures are dark all over, so lightness moves the whole way to the concept's
                 colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays,
-                                                        **({"lightness_share": 1.0} if mesh_info.get("part_model") else {}))
+                                                        **({"lightness_share": 1.0} if mesh_info.get("part_model") == "omnipart" else {}))
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1296,6 +1297,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
     validation = apply_mesh_folds(validation, validation.get("measured", {}).get("folded_edge_share"),
                                   float(asset_type.get("max_folded_edge_share", 0.1)))
+    validation = apply_hybrid_alignment(validation, (mesh_info.get("hybrid") or {}).get("alignment_error"),
+                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)))
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
@@ -2437,7 +2440,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 mesh_settings["part_model"] = part_backend(asset_type, asset)
                 mesh_settings["part_tools_sha256"] = {
                     "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
-                    "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")}
+                    **({"hybrid_graph.py": file_sha256(tool_root() / "blender/hybrid_graph.py"),
+                        "hybrid_apply.py": file_sha256(tool_root() / "blender/hybrid_apply.py"),
+                        "part_split.py": file_sha256(tool_root() / "slopforge/part_split.py"),
+                        "hybrid.py": file_sha256(tool_root() / "slopforge/backends/hybrid.py")}
+                       if part_backend(asset_type, asset) == "hybrid" else
+                       {"prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")})}
                 mesh_settings["part_sampler"] = _part_sampler(asset_type)
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
@@ -2521,6 +2529,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                        **({"views": views} if views else {}))
                     else:
                         generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                    if part_backend(asset_type, asset) == "hybrid":
+                        # The generated surface, split by OmniPart's parts (docs/WEAPONS.md, Hybrid parts)
+                        generate_hybrid_parts(root, config, paths["cutout"], source_mesh, model_metadata, mesh_seed,
+                                              asset["parts"], paths["part_masks"],
+                                              texture_size=asset.get("texture_size") or asset_type.get("texture_size")
+                                              or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]

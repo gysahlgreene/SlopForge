@@ -425,6 +425,27 @@ def apply_part_penetration(validation, penetration, declared, tolerance):
     return validation
 
 
+def apply_hybrid_alignment(validation, error, maximum):
+    """Fail a hybrid-parts candidate whose OmniPart parts did not land on the TRELLIS.2 surface they vote on: mean
+    distance after alignment, as a share of the surface's size (generation.json hybrid.alignment_error). Two
+    generators that made different shapes give votes that mean nothing; another seed is tried (part_missing).
+    None (not the hybrid route): no verdict."""
+    if error is None:
+        return validation
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["hybrid_alignment_error"] = float(error)
+    limits["max_hybrid_alignment_error"] = maximum
+    if error > maximum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"OmniPart's parts did not land on the generated surface (mean distance {error:.3f} of its size, limit "
+            f"{maximum:g}), so another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_missing"]
+        measured["moving_parts_missing"] = max(measured.get("moving_parts_missing", 0), 1)
+        limits["max_moving_parts_missing"] = 0
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_mesh_folds(validation, shares, maximum):
     """Fail a candidate whose faces fold against each other (retryable mesh_folded): `shares` is inspection's
     folded_edge_share per mesh object, the share of edges whose two faces point opposite ways. A collapse

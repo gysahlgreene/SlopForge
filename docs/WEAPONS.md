@@ -182,8 +182,10 @@ scale, so a slide moved 3 m until its travel was taken through the parent's scal
 
 A weapon that declares a hinge or slide is generated as **separate parts** by OmniPart (MIT; TRELLIS v1 backbone),
 not as one mesh cut along masks: cutting one closed surface gave hollow parts with flat caps and lumpy small
-mechanisms, which the owner rejected three times (2026-10-24). The weapon type sets `part_model: omnipart`; static
-weapons (no hinge or slide) keep the profile's model graph.
+mechanisms, which the owner rejected three times (2026-10-24). The weapon type sets `part_model`: `hybrid` (the
+default, [below](#hybrid-parts-trellis2s-surface-split-by-omniparts-parts)) keeps TRELLIS.2's surface and uses
+OmniPart's parts to split it; `omnipart` uses OmniPart's parts as they are. Static weapons (no hinge or slide) keep the
+profile's model graph. The rest of this section describes OmniPart's run, which both routes share.
 
 **Set-up (once, on the part-mask host):** `scripts/install-omnipart.sh [directory]` builds the environment
 (micromamba, Python 3.10, torch 2.4 + cu121, `setuptools<81`) and prints the two keys for `ai/project.yaml`:
@@ -243,6 +245,42 @@ A reduction can crumple a thin-walled part: the 2026-10-25 chest's sixth seed ca
 with 0.47 of its body's shared edges between faces pointing opposite ways, Unity shaded it in facets and Blender's
 custom normals hid it. Inspection records `folded_edge_share` per mesh and a candidate over the type's
 `max_folded_edge_share` (0.1; sound meshes read 0.00–0.02) is the retryable `mesh_folded`.
+
+## Hybrid parts: TRELLIS.2's surface, split by OmniPart's parts
+
+`part_model: hybrid` (the template default for weapons and props) keeps TRELLIS.2's surface, with its detail, and
+uses OmniPart only to say where the parts are. The owner rejected OmniPart's own parts on looks (2026-10-25):
+OmniPart is TRELLIS v1 retrained for parts, a 64-cell structure (3.4 mm voxels on a pistol) with Gaussian-splat
+textures, and no colour or normal work downstream can add detail it never made. A part model on TRELLIS.2 would
+need retraining on its latent space, so the two are combined after generation instead:
+
+1. TRELLIS.2 generates the surface as for any asset (the workflow route), and OmniPart generates the parts for the
+   same concept and masks (`run_omnipart`; its textures are not used).
+2. `blender/hybrid_graph.py` repairs the surface locally into a closed manifold (a cut across one of its
+   non-manifold edges leaves an opening with loose ends that no fill can close), then records its face graph (faces
+   that share an edge, the edge's length and angle), OmniPart's parts, and per moving part a vote from its concept
+   mask: +1 where the concept's fitted view sees the face inside the mask, -1 outside, 0 unseen or within 2% of
+   the mask's edge (a mask edge carried through the view lands a few millimetres off the surface's crease; at full
+   weight it pulled the cut across a panel in teeth). A flat side-profile concept, one that looks along the
+   object's thinnest axis within ~11°, votes through the thickness.
+3. `slopforge/part_split.py` aligns OmniPart's parts on the surface (the best of the 24 quarter turns with bounds
+   fitted, refined by ICP: TRELLIS.2 lays a pistol along Y, OmniPart along X), measures each face's distance to
+   each part, and labels the faces with graph cuts on scipy's maximum flow: a face's vote is how much closer it is
+   to a part than to the others (1% of the object's size counts as one unit) plus 3 units for a mask vote; cutting
+   between two faces costs the edge's length times exp(-(angle/25°)²), so a boundary runs along the surface's own
+   creases (a slide's groove, a lid's seam). Moving parts are cut larger first, a trigger from what the slide leaves.
+4. `blender/hybrid_apply.py` writes the surface back as one glTF node per part, and the final pass tags, separates
+   and pivots the parts as for OmniPart's. With `close_openings` in the part table, every opening the separation
+   leaves, on each part and on the body, is closed (`mesh_cleanup.close_openings`): a planar fill in the opening's
+   best-fit plane; a chain whose loose ends are close is bridged first; an opening no fill can close (a rim that
+   dips into a pistol's bore) gets a flat cap across its convex outline in the plane most of its rim lies in
+   (RANSAC), a little inside its piece and facing out. Fills and caps take one texel, their ring's median colour.
+5. Gates: `hybrid_alignment_error` over `max_hybrid_alignment_error` (0.03 of the surface's size) is `part_missing`,
+   as are a part's mask coverage and the motion sweep, so a seed whose generators disagree is replaced.
+
+Live (2026-10-25, the H1 pistol and P4's OmniPart parts): alignment 1.4% of the pistol's size, the split in 6 s,
+slide 0.98 of its mask with 0.01 outside it, trigger 0.83, every opening closed, the motion sweep 0.000. Not yet
+verified: the chest through this route, a run through the whole pipeline on the H100, Unity.
 
 ## Props with parts
 

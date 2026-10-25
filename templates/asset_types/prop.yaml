@@ -31,9 +31,9 @@ avoid: [environment, concept sheets, multiple variants, fragile floating details
 unity_prefab: true
 mass: 5.0
 unity_layer: Props
-# A prop that declares a hinge or slide (a chest's lid, a drawer) is generated as separate parts by OmniPart, as
-# weapons are (docs/WEAPONS.md, Moving parts); a part covering less of its concept mask than this is retried.
-part_model: omnipart
+# A prop that declares a hinge or slide (a chest's lid, a drawer) has its parts generated as weapons do
+# (docs/WEAPONS.md, Moving parts; hybrid or omnipart); a part covering less of its concept mask than this is retried.
+part_model: hybrid
 min_part_coverage: 0.55
 # OmniPart's sampler (sparse structure and parts): its defaults; more steps or a lower guidance can be tried per
 # type, and a change regenerates the parts.

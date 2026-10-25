@@ -443,6 +443,56 @@ avoid: [environment]
         self.assertTrue(seen["lineage"]["material_inputs"], "material_generation has no parents on the part route")
         self.assertEqual(seen["lineage"]["material_inputs"][-1]["type"], "mesh.glb")
 
+    def test_the_hybrid_route_generates_the_surface_then_splits_it_by_part_level_votes(self):
+        # Hybrid parts (docs/WEAPONS.md): TRELLIS.2's surface is generated as for any asset, then OmniPart's parts
+        # vote on how it is split; the scripts that split it are in the mesh stage's identity.
+        from slopforge.parts import parse_part_spec
+        self._concept_candidates()
+        self.asset_type["part_model"] = "hybrid"
+        self.record["parts"] = [parse_part_spec("grip=grip: the grip"), parse_part_spec("trigger=hinge:x:0..20: the trigger")]
+
+        def masks(_config, cutout, parts, out_dir):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for part in parts:
+                Image.new("L", (32, 32), 255).save(out_dir / f"{part['name']}.png")
+            (out_dir / "masks.json").write_text(json.dumps({"parts": {part["name"]: {"share": 0.3} for part in parts}}))
+            Image.new("RGB", (32, 32)).save(out_dir / "parts_overlay.png")
+            return {"parts": {part["name"]: {"share": 0.3} for part in parts}}
+        order = []
+
+        def surface(_root, _config, _image, _name, dest, metadata, seed):
+            order.append("surface")
+            dest.write_bytes(b"mesh")
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "textured": True}))
+
+        def split(root, config, cutout, surface_path, metadata, seed, parts, masks_dir, **options):
+            order.append(("split", surface_path.name, masks_dir.name.startswith("parts_"), seed,
+                          [part["name"] for part in parts]))
+            info = json.loads(metadata.read_text())
+            info.update({"part_model": "hybrid", "parts": {}})
+            metadata.write_text(json.dumps(info))
+        seen = {}
+
+        def native(root, config, context, asset_type, asset, number, mesh_info, lineage=None):
+            seen["mesh_info"] = mesh_info
+            return self._materializer(root, config, asset_type, asset, number, "parts", None, lineage=lineage,
+                                      seed=mesh_info.get("seed"))
+        with patch("slopforge.pipelines.model.make_part_masks", side_effect=masks), \
+                patch("slopforge.pipelines.model.generate_hybrid_parts", side_effect=split), \
+                patch("slopforge.pipelines.model.generate_part_model",
+                      side_effect=lambda *a, **k: self.fail("OmniPart's own parts are not the hybrid's mesh")):
+            self._approve(surface, native_materializer=native)
+        self.assertEqual(order[0], "surface")
+        self.assertEqual(order[1][0], "split")
+        self.assertTrue(order[1][2])  # the masks of this concept
+        self.assertEqual(order[1][4], ["grip", "trigger"])
+        self.assertEqual(seen["mesh_info"]["part_model"], "hybrid")
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
+        self.assertEqual(stage["settings"]["part_model"], "hybrid")
+        self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]),
+                         ["hybrid.py", "hybrid_apply.py", "hybrid_graph.py", "part_model.py", "part_split.py"])
+
     def test_an_asset_without_a_part_backend_records_no_part_model_in_its_mesh_settings(self):
         # Adding a key with value None to every mesh stage would make every existing asset's mesh stage a
         # "settings changed" mismatch on resume, and regenerate it.
