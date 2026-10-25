@@ -42,3 +42,25 @@ class ChooseMaskTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CloseMaskTests(unittest.TestCase):
+    def test_a_strap_across_a_lid_does_not_split_its_mask(self):
+        # SAM's lid mask stopped at the iron band across the chest's lid, and OmniPart then left the band and the
+        # lid's ends with the body (2026-10-25): gaps narrower than ~4% of the object close; nothing outside the
+        # object is added.
+        from processing.part_masks import close_mask
+        alpha = box_mask((100, 100), (20, 90), (5, 95))
+        lid = box_mask(alpha.shape, (20, 45), (5, 47)) | box_mask(alpha.shape, (20, 45), (51, 95))  # band at 47-51
+        closed = close_mask(lid, alpha)
+        self.assertTrue(closed[20:45, 47:51].all())
+        self.assertFalse((closed & ~alpha).any())
+        self.assertFalse(closed[60:90].any())  # the body below stays out
+
+    def test_a_trigger_and_its_guard_stay_apart(self):
+        from processing.part_masks import close_mask
+        alpha = box_mask((200, 200), (10, 190), (10, 190))
+        trigger = box_mask(alpha.shape, (100, 130), (90, 96))
+        guard = box_mask(alpha.shape, (100, 140), (120, 126))  # another part, 24 px away: not in this mask
+        closed = close_mask(trigger, alpha)
+        self.assertFalse(closed[:, 110:].any())

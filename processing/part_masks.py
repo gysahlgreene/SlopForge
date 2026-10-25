@@ -23,6 +23,31 @@ import numpy as np
 from PIL import Image
 
 
+def close_mask(mask, alpha, share=0.03):
+    """A part's mask with its narrow gaps closed (a dilation then an erosion by `share` of the object's longer
+    side), holes filled, and kept on the object. SAM's lid mask stopped at the iron band across a chest's lid, and
+    OmniPart then left the band and the lid's ends with the body (2026-10-25)."""
+    rows, cols = np.nonzero(alpha)
+    radius = max(1, round(share * max(np.ptp(rows) + 1, np.ptp(cols) + 1))) if len(rows) else 1
+    grown = np.pad(np.asarray(mask, bool), radius + 1)
+    for _ in range(radius):  # a square element (rows, then columns) keeps straight edges straight
+        grown = grown | np.roll(grown, 1, 0) | np.roll(grown, -1, 0)
+        grown = grown | np.roll(grown, 1, 1) | np.roll(grown, -1, 1)
+    for _ in range(radius):
+        grown = grown & np.roll(grown, 1, 0) & np.roll(grown, -1, 0)
+        grown = grown & np.roll(grown, 1, 1) & np.roll(grown, -1, 1)
+    closed = grown[radius + 1:-radius - 1, radius + 1:-radius - 1]
+    # holes: background not reachable from the border
+    outside = np.zeros(closed.shape, bool)
+    outside[0, :], outside[-1, :], outside[:, 0], outside[:, -1] = ~closed[0, :], ~closed[-1, :], ~closed[:, 0], ~closed[:, -1]
+    while True:
+        grown = outside | (np.roll(outside, 1, 0) | np.roll(outside, -1, 0) | np.roll(outside, 1, 1) | np.roll(outside, -1, 1)) & ~closed
+        if (grown == outside).all():
+            break
+        outside = grown
+    return (closed | ~outside) & np.asarray(alpha, bool)
+
+
 def choose_mask(masks, scores, box, alpha):
     """Of SAM's candidate masks for a declared box, the one that fills the box's object pixels without spilling
     out of it: fill (share of the object inside the box the mask covers) minus twice the spill (share of the mask
@@ -95,7 +120,7 @@ def run(request):
             candidates = np.asarray(candidates).reshape(-1, image.size[1], image.size[0]) > 0.5
             scores = outputs.iou_scores.flatten().tolist()
             chosen, choices = choose_mask(list(candidates), scores, box, alpha)
-            mask = candidates[chosen] & alpha  # a part lies on the object
+            mask = close_mask(candidates[chosen], alpha)  # a part lies on the object, a strap does not split it
             entry.update({"score": round(float(scores[chosen]), 4), "pixels": int(mask.sum()),
                           "share": round(float(mask.sum() / max(alpha.sum(), 1)), 4),
                           "candidate": chosen, "candidates": choices})
