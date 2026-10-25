@@ -1017,6 +1017,11 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
   generation.json (unit); `prepare_parts` on two textured parts and the final pass on a slab with a touching slide,
   a touching trigger and a floating hinge (opt-in Blender); the route, settings identity and the coverage gate
   (unit); `make verify` (844 passed).
-- **Not verified:** no live run through `approve` yet (the spike ran the tool by hand on one pistol, 4 seeds, 3
-  good); any weapon other than a pistol; the 0.6 limit on other weapons; OmniPart's VRAM peak
-  beside ComfyUI.
+- **Live (2026-10-25, [evidence](docs/media/weapon-parts-2026-10/README.md)):** pistol passed on one seed (slide
+  0.61 of its mask, trigger 0.96); rifle passed on its second seed (bolt 0.93, trigger 0.81; seed 1 `part_missing`);
+  crossbow rejected on three seeds (its long thin trigger lever comes out as a short blob, 0.18–0.38). The runs
+  found nine faults, each fixed with a test (nested upload names, OmniPart's `world` node, `.001` child names,
+  static parts as children, a black atlas from glTF's metallic default, NaN colour metrics making a retry final, a
+  rear-part rule that duplicated the slide, the grid axis along y, a voxel coverage that missed thin levers).
+- **Not verified:** any seed-to-seed consistency beyond these runs; the pistol's slide coverage sat at the limit;
+  OmniPart's VRAM peak beside ComfyUI; Unity motion on these runs is recorded below when published.

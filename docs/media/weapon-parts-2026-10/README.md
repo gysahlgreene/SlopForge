@@ -1,44 +1,45 @@
-# Weapon part masks: detection against boxes (2026-10-24)
+# Weapons with moving parts generated as parts (2026-10-25)
 
-Step W4 of M3 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)). A weapon's moving parts will be split
-from its one generated mesh along masks drawn on the approved concept, so each part's mask has to be right. The concepts
-are a longsword (side profile, wide canvas), a pistol (side profile) and a crossbow (three-quarter from above). Each was
-cut out as approval does it, and SAM 2.1 (Apache-2.0) cut every mask, on the H100.
+Step W8b of M3 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)): the moving parts of a weapon come
+from part-level generation (OmniPart, MIT) instead of a cut through one mesh, after the owner rejected the cut
+three times. Three briefs went through `approve` on the `h100` profile with the route described in
+[the weapons guide](../../WEAPONS.md#moving-parts-from-part-level-generation); the private run folders are
+`private/weapons-parts-2026-10-25/{P1,R1,X1}` (commit of each in `commit.txt`).
 
-**Text detection: unreliable.** These are [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large)
-(MIT) open-vocabulary detection results, one row per weapon:
-- **Longsword:** "grip", "crossguard" and "blade" each came back as the whole sword.
-- **Pistol:**
-  - "slide" boxed the grip panel;
-  - "grip panel" boxed a patch of the slide;
-  - "trigger" found a spot beside the trigger.
-- **Crossbow:** "bowstring" and "bow" each boxed the whole crossbow; only the trigger was right.
+![Pistol, rifle and crossbow: concept, generated parts, at rest and moved](three_weapons.jpg)
 
-![Florence-2 detection: whole swords, swapped pistol parts](detection.jpg)
+| Weapon | Declared parts | Seeds | Result |
+| --- | --- | --- | --- |
+| Pistol (bold concept 4 of the 2026-10-24 runs) | grip, slide, trigger | 1 | passed: slide covers 0.61 of its mask, trigger 0.96; body one piece; 25,644 faces |
+| Bolt-action rifle (concept 2) | grip, bolt (slide), trigger | 2 | seed 1 rejected (`part_missing`: trigger 0.29); seed 2 passed: bolt 0.93, trigger 0.81 |
+| Crossbow (concept 6) | grip, trigger lever | 3 | rejected three times (`part_missing`: trigger 0.18, 0.38, 0.38): the long thin lever comes out as a short blob |
 
-The two other Apache-2.0 detectors did no better:
-- **Grounding DINO base** boxed the whole weapon for every part.
-- **OWLv2 large** found the sword's blade and the pistol's grip panel, but missed the slide, the trigger and the bow.
+![The pistol's slide and trigger moving](pistol_motion.gif) ![The rifle's bolt and trigger moving](rifle_motion.gif)
 
-**Single points: partly.** A point inside each part found the sword's grip, crossguard and blade, the pistol's grip
-panel, and the crossbow's trigger and stock. It missed the pistol's trigger: the point fell in the gap inside the guard.
-It returned the whole pistol for the slide, which shares the frame's black finish, and nothing for the bowstring.
+**What the live runs found and fixed** (each with a regression test):
+- the part masks' names nested in the request were not placed in the remote work directory;
+- OmniPart's merged GLB has a `world` root node;
+- the final pass's join left the parts' meshes as orphans, so the children came out as `slide.001`;
+- static parts (the grip) stayed in the body as loose pieces and counted as components; every part is a child now;
+- the colour atlas was black: glTF's default metallic factor is 1 and a diffuse bake of a metal is black (baked as
+  emission now);
+- an all-black map made the colour metrics NaN, the failure record unserialisable, and a retryable failure final;
+- the rear-part rule (body above the slide's line as its own part) spanned the whole slide band through the sights
+  on top of the slide, and OmniPart grew a second shell over the slide: dropped; what rests on a slide joins it;
+- OmniPart lays a long weapon along grid y, not x: the frame picks the axis by silhouette overlap;
+- the coverage gate measured OmniPart's sparse-structure voxels, which a thin lever barely registers in; it now
+  projects the generated mesh through the concept's fitted view.
 
-**Boxes: clean.** A box per part, drawn on the concept, gave each part on its own:
-- the pistol's slide, separate from the frame despite the shared finish;
-- the pistol's curved trigger and its grip panel;
-- the crossbow's trigger;
-- the sword's pommel.
+**Pistol run, closer:**
 
-The one failure was the crossbow's bow: a long diagonal limb whose box also covered the barrel. It is not a moving part.
+![The pistol: untextured parts, textured at rest and with the slide back](pistol_review.jpg)
 
-![Box prompts: pistol slide, trigger and grip; crossbow bow (too much) and trigger; sword pommel](boxes.jpg)
-
-**Decision:**
-- Parts are located with `approve --part-box name=x0,y0,x1,y1`, given on the approved concept.
-- Detection stays as the fallback for parts without a box. On a lantern, it found the globe, the wire guard and the
-  ring.
-- `masks.json` records each part's `box_source`.
-- Thin parts like bowstrings are built procedurally, not masked.
-
-**Not checked:** the masks have not yet been used to split a mesh (step W8).
+**Limits seen:**
+- The slide's coverage sat at the limit (0.61) on the passing seed, and one earlier seed gave a slide in 7 pieces:
+  seed variance in how OmniPart resolves the overlap of the body's box with the slide's.
+- A long thin part (the crossbow's lever) is not reproduced; the gate rejects every seed. Hinges that are blobs
+  (a trigger inside a guard) pass.
+- The parts are reduced to the 30,000 budget (90% headroom) from OmniPart's ~100k faces per part, and the textures
+  come from a Gaussian bake at TRELLIS v1 quality: softer and darker than the concept. Both are parameters now, not
+  method limits (the face budget is an owner decision).
+- Static-weapon quality is untouched (TRELLIS.2 route).
