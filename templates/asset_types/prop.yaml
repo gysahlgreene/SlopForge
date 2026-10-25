@@ -35,6 +35,10 @@ unity_layer: Props
 # weapons are (docs/WEAPONS.md, Moving parts); a part covering less of its concept mask than this is retried.
 part_model: omnipart
 min_part_coverage: 0.55
+# OmniPart's sampler (sparse structure and parts): its defaults; more steps or a lower guidance can be tried per
+# type, and a change regenerates the parts.
+part_steps: 25
+part_cfg: 7.5
 # Generated parts' textures come out darker and duller than the concept: their colours are moved to the concept's
 # from its side (docs/MATERIALS.md).
 concept_colour_transfer: true

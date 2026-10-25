@@ -2063,6 +2063,11 @@ def _published_artifacts(root, paths, candidate, execution_id):
     return published
 
 
+def _part_sampler(asset_type):
+    """OmniPart's sampler settings from the type (part_steps, part_cfg); part of the mesh identity on that route."""
+    return {"steps": int(asset_type.get("part_steps", 25)), "cfg": float(asset_type.get("part_cfg", 7.5))}
+
+
 def part_backend(asset_type, asset):
     """The part-level generator (asset type `part_model`) for a weapon that declares a hinge or slide, else None."""
     moving = any(part.get("kind") in ("hinge", "slide") for part in asset.get("parts") or [])
@@ -2423,6 +2428,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 mesh_settings["part_tools_sha256"] = {
                     "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
                     "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")}
+                mesh_settings["part_sampler"] = _part_sampler(asset_type)
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
                 "settings": {key: value for key, value in mesh_settings.items() if key != "seed"},
@@ -2493,7 +2499,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                             _reduction_budget(_face_budget(pipeline, asset_type, asset), asset),
                                             materials, finish_word(materials),
                                             texture_size=asset.get("texture_size") or asset_type.get("texture_size")
-                                            or pipeline.get("texture_size", 2048))
+                                            or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
                     elif workflow:
                         budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]

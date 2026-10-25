@@ -436,6 +436,7 @@ avoid: [environment]
         stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
         self.assertEqual(stage["settings"]["part_model"], "omnipart")
         self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]), ["part_model.py", "prepare_parts.py"])
+        self.assertEqual(stage["settings"]["part_sampler"], {"steps": 25, "cfg": 7.5})  # a change regenerates
         # the derived maps come from the generated parts: the material stage gets the mesh as its lineage parent
         # (review 2026-10-25: it had no parents, since this route records no texture artifacts)
         self.assertTrue(seen["lineage"]["material_inputs"], "material_generation has no parents on the part route")

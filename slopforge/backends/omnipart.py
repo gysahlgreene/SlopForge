@@ -20,10 +20,11 @@ OMNIPART_ENV = {"SPCONV_ALGO": "native", "ATTN_BACKEND": "xformers"}  # the H100
 
 
 def generate_part_model(project_root, config, cutout, name, destination, metadata, seed, parts, masks_dir,
-                        face_budget, materials, finish, texture_size=2048):
+                        face_budget, materials, finish, texture_size=2048, steps=25, cfg=7.5):
     """Write `destination` (the processed parts GLB, one named node per part), processed_mesh.blend beside it, the
     four maps, and `metadata` (generation.json) for a weapon whose parts are given by `masks_dir/<name>.png`.
-    face_budget is the reduction target (the caller leaves headroom for moving parts)."""
+    face_budget is the reduction target (the caller leaves headroom for moving parts); steps and cfg are OmniPart's
+    sampler settings for both its sparse structure and its parts (its defaults 25 and 7.5)."""
     root = Path(project_root).resolve()
     tools = config["asset_pipeline"].get("tools", {})
     host, python, checkout = tools.get("parts_host"), tools.get("omnipart_python"), tools.get("omnipart_checkout")
@@ -39,7 +40,7 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
     uploads = {"concept.png": Path(cutout), **{f"{part['name']}.png": masks_dir / f"{part['name']}.png"
                                                 for part in declared}}
     request = {"image": "concept.png", "masks": {part["name"]: f"{part['name']}.png" for part in declared},
-               "parts": declared, "seed": seed, "texture_size": texture_size}
+               "parts": declared, "seed": seed, "texture_size": texture_size, "steps": steps, "cfg": cfg}
     out = destination.parent / "parts"
     run_remote_tool(host, python, tool_root() / "processing/part_model.py", request, uploads, {".": out},
                     label="omnipart", cwd=checkout, env=OMNIPART_ENV)

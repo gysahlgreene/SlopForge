@@ -451,8 +451,9 @@ class OmniPartBackendTests(unittest.TestCase):
                                                                  "omnipart_checkout": "/opt/OmniPart"}),
                                              root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
                                              root / "mesh_01/generation.json", 5, parts, masks, 27000, materials,
-                                             "matte", texture_size=4096)
+                                             "matte", texture_size=4096, steps=40, cfg=5.0)
             request = seen["remote"]["request"]
+            self.assertEqual((request["steps"], request["cfg"]), (40, 5.0))  # OmniPart's samplers, from the type
             self.assertEqual(request["image"], "concept.png")
             self.assertEqual(request["masks"], {"grip": "grip.png", "slide": "slide.png"})
             self.assertEqual(request["parts"], [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}])

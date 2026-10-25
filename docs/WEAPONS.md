@@ -202,7 +202,8 @@ pass):
    part's image features; such a part is given the one cell it fills most before the mask is written.
 4. `prepare_parts.py` welds and reduces each part to its share of the face budget by surface area (floor 2%), with
    the 90% headroom for moving parts, unwraps every part into **one base-colour atlas** baked from the parts' own
-   textures (OmniPart bakes each part at the type's `texture_size`, 4096 for weapons, not its 1024 default), bakes
+   textures (OmniPart bakes each part at the type's `texture_size`, 4096 for weapons, not its 1024 default; its
+   sampler runs the type's `part_steps` and `part_cfg`, 25 and 7.5 by default, and a change regenerates), bakes
    a **metallic atlas** from each part's declared class (a part named by a declared non-metal region, as "grips"
    names "grip", is 0; else 1 when the brief declares metal), and bakes each part's **tangent normals** from a
    full-detail copy kept before its reduction, so the generator's bumps, panels and checkering survive. The bake

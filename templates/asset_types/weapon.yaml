@@ -33,6 +33,10 @@ avoid: [hands, holsters, sheaths, scabbards, straps, mounts, multiple weapons, e
 # Calibrated on the first live runs (2026-10-25): passing parts covered 0.61-0.96, rejected ones 0.18-0.38.
 part_model: omnipart
 min_part_coverage: 0.55
+# OmniPart's sampler (sparse structure and parts): its defaults; more steps or a lower guidance can be tried per
+# type, and a change regenerates the parts.
+part_steps: 25
+part_cfg: 7.5
 # Weapons are seen at arm's length: the generated parts' textures and the atlas are baked at this size, and Unity
 # imports the maps at it (its default ceiling of 2048 would halve them).
 texture_size: 4096
