@@ -59,6 +59,22 @@ class UnityImportReportTests(unittest.TestCase):
                 build_unity_material(root, root / "Assets/Relic/relic.fbx", root / "Assets/Relic/relic.mat", maps)
             self.assertEqual(set(re.findall(r"TextureImporterType\.\w+, (?:true|false), (\d+)", scripts[0])), {"32"})
             self.assertIn("importer.maxTextureSize = maxSize", scripts[0])
+            self.assertIn("importer.generateSecondaryUV = false", scripts[0])  # a held weapon is never lightmapped
+
+    def test_a_static_asset_gets_lightmap_uvs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            maps = self._project(root)
+            guids = {role: uuid.uuid4().hex for role in ("fbx", "material", *ROLES)}
+            scripts = []
+            def run(*args, **kwargs):
+                scripts.append(next((root / "Assets/Editor").glob("*.cs")).read_text())
+                return fake_unity(root, guids)(*args, **kwargs)
+            with patch("slopforge.unity_material.unity_cli", return_value="unity"), \
+                    patch("slopforge.unity_material.subprocess.run", side_effect=run):
+                build_unity_material(root, root / "Assets/Relic/relic.fbx", root / "Assets/Relic/relic.mat", maps,
+                                     lightmap_uvs=True)
+            self.assertIn("importer.generateSecondaryUV = true", scripts[0])
 
     def test_report_records_guid_importer_and_file_hash_per_role(self):
         with tempfile.TemporaryDirectory() as temporary:

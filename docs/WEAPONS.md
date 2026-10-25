@@ -251,6 +251,10 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
   housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
   the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
 
+The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
+props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
+player. LODs are not generated (the mesh budget is the one LOD).
+
 Not checked yet: Play mode, LODs and lightmap UVs.
 
 ## Known limits

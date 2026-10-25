@@ -86,7 +86,7 @@ class TextureApprovalRollbackTests(PublicationTestCase):
                     final['surface'].write_bytes(b'orphan prior output')
                 originals = {path: path.read_bytes() for path in destinations + metadata if path.exists()}
 
-                def fail_material(*args):
+                def fail_material(*args, **_options):
                     final['unity_material'].write_bytes(b'partly replaced material')
                     for path in metadata:
                         path.write_bytes(b'Unity changed importer metadata')
@@ -199,7 +199,7 @@ class TextureApprovalRollbackTests(PublicationTestCase):
 
             with patch('slopforge.pipelines.model.unity_cli', return_value='unity'), \
                  patch('slopforge.pipelines.model.build_unity_material',
-                       side_effect=lambda _r, _f, out, _m: (_ for _ in ()).throw(RuntimeError("Unity failed"))), \
+                       side_effect=lambda _r, _f, out, _m, **_o: (_ for _ in ()).throw(RuntimeError("Unity failed"))), \
                  patch('slopforge.pipelines.model.shutil.copy2', side_effect=selective_fail):
                 with self.assertRaises(RuntimeError):
                     model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
@@ -370,7 +370,7 @@ class UnityIdentityTests(PublicationTestCase):
         return config, {"assets": {"prop:relic": asset}}
 
     def _unity(self, guids):
-        def build(project_root, fbx, material, maps, render=None):
+        def build(project_root, fbx, material, maps, render=None, lightmap_uvs=False):
             Path(material).write_bytes(b"material")
             paths = {"fbx": fbx, "material": material, **maps}
             return {"unity_version": "6000.6.3f1",

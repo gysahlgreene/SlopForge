@@ -15,7 +15,7 @@ from slopforge.taxonomy import load_taxonomy
 from slopforge.validation import validate_model_outputs
 
 
-def fake_unity_material(_root, _fbx, material, _maps, render=None):
+def fake_unity_material(_root, _fbx, material, _maps, render=None, lightmap_uvs=False):
     Path(material).write_bytes(b"mat")
     return {"unity_version": "test", "assets": {}, "material_textures": {}}
 
@@ -467,11 +467,17 @@ avoid: [environment]
             calls.append((name, parts, options["held"], options["mass"], options["layer"]))
             return {"errors": [], "prefab": "Assets/relay.prefab", "controller": "Assets/relay.controller",
                     "motions": [], "tip_forward": True, "root_inside": True}
+        imports = []
+
+        def unity_material(root, fbx, material, maps, **options):
+            imports.append(options.get("lightmap_uvs"))
+            return fake_unity_material(root, fbx, material, maps, **options)
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
-                patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material), \
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=unity_material), \
                 patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab):
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         self.assertEqual(calls, [("relay", [], False, 25.0, "Props")])
+        self.assertEqual(imports, [True])  # a static prop gets lightmap UVs; a held weapon does not
         record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         self.assertEqual(record["validation"]["measured"]["weapon_motion"]["prefab"], "Assets/relay.prefab")
 

@@ -1901,7 +1901,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 shutil.copy2(root / mesh_source, paths["glb"])
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
-                                                {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
+                                                {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")},
+                                                lightmap_uvs=asset.get("pivot") != "grip")
             _require_stable_unity_identity(asset.get("unity_import"), unity_import)
             validation = dict(candidate["validation"])
             validation["measured"] = dict(validation.get("measured", {}))

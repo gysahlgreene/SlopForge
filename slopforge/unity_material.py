@@ -282,8 +282,10 @@ def glass_material_path(material):
     return material.with_name(material.stem + "_Glass.mat")
 
 
-def build_unity_material(project_root, fbx, material, maps, render=None):
+def build_unity_material(project_root, fbx, material, maps, render=None, lightmap_uvs=False):
     """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG.
+
+    lightmap_uvs asks Unity to generate the lightmap UV set (uv2): static props are lightmapped, held weapons never.
 
     Returns Unity's import record: per role (fbx, material, each map) its path, GUID, importer type, a hash
     of the importer settings and the file hash, plus the GUID of each texture the material references.
@@ -398,6 +400,7 @@ public static class {class_name}
         var importer = (ModelImporter)AssetImporter.GetAtPath(fbxPath);
         importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
         importer.materialSearch = ModelImporterMaterialSearch.Everywhere;
+        importer.generateSecondaryUV = {'true' if lightmap_uvs else 'false'};
         importer.AddRemap(sourceId, mat);
         if (glass != null)
             importer.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), glassSource.name), glass);
