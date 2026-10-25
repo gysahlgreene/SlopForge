@@ -12,6 +12,17 @@ from slopforge.parts import (check_part_masks, make_part_masks, parse_part_box, 
                              validate_parts)
 
 
+class PartSettingsTests(unittest.TestCase):
+    def test_the_mask_tool_hash_is_in_the_conditioning_identity(self):
+        # A change to processing/part_masks.py (2026-10-25: SAM's three candidates instead of its first) must re-mask;
+        # recording only the tool's name reused masks cut by the old code.
+        from slopforge.parts import part_settings
+        from slopforge.paths import tool_root
+        from slopforge.provenance import file_sha256
+        settings = part_settings({"asset_pipeline": {"tools": {}}}, [{"name": "lid", "kind": "hinge"}])
+        self.assertEqual(settings["tool_sha256"], file_sha256(tool_root() / "processing/part_masks.py"))
+
+
 class PartSpecTests(unittest.TestCase):
     def test_parts_parse_with_kind_axis_range_and_description(self):
         self.assertEqual(parse_part_spec("grip=grip: leather-wrapped grip"),

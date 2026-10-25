@@ -20,9 +20,30 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 from PIL import Image
-from transformers import AutoProcessor, Florence2ForConditionalGeneration, Sam2Model, Sam2Processor
+
+
+def choose_mask(masks, scores, box, alpha):
+    """Of SAM's candidate masks for a declared box, the one that fills the box's object pixels without spilling
+    out of it: fill (share of the object inside the box the mask covers) minus twice the spill (share of the mask
+    outside the box), SAM's score breaking ties. SAM's single best answer for a chest's lid box was the two iron
+    band arcs on it, 5% of the chest (2026-10-25); a tight trigger box must not take the guard or the frame.
+    Returns (index, report): each candidate's score, fill and spill."""
+    x0, y0, x1, y1 = (int(round(value)) for value in box)
+    inside = np.zeros(alpha.shape, bool)
+    inside[max(y0, 0):max(y1, 0), max(x0, 0):max(x1, 0)] = True
+    object_in_box = max(int((alpha & inside).sum()), 1)
+    report, best = [], None
+    for index, (mask, score) in enumerate(zip(masks, scores)):
+        mask = np.asarray(mask, bool) & alpha
+        total = max(int(mask.sum()), 1)
+        fill = float((mask & inside).sum()) / object_in_box
+        spill = float((mask & ~inside).sum()) / total
+        report.append({"score": round(float(score), 4), "fill": round(fill, 4), "spill": round(spill, 4)})
+        key = (round(fill - 2 * spill, 3), float(score))
+        if best is None or key > best[0]:
+            best = (key, index)
+    return best[1], report
 
 
 def ground(model, processor, image, text, device):
@@ -31,6 +52,7 @@ def ground(model, processor, image, text, device):
     Open-vocabulary detection, not phrase grounding: on a lantern concept, grounding "glass globe" or "carrying ring"
     also boxed the whole lantern, while detection boxed just the globe, the ring and the wire guard (2026-10-24).
     """
+    import torch
     task = "<OPEN_VOCABULARY_DETECTION>"
     inputs = processor(text=task + text, images=image, return_tensors="pt").to(device, torch.float16)
     ids = model.generate(**inputs, max_new_tokens=256, num_beams=3, do_sample=False)
@@ -40,6 +62,8 @@ def ground(model, processor, image, text, device):
 
 
 def run(request):
+    import torch
+    from transformers import AutoProcessor, Florence2ForConditionalGeneration, Sam2Model, Sam2Processor
     device = "cuda" if torch.cuda.is_available() else "cpu"
     rgba = Image.open(request["image"]).convert("RGBA")
     alpha = np.asarray(rgba)[..., 3] > 127
@@ -66,12 +90,15 @@ def run(request):
         if box is not None:
             inputs = sam_processor(images=image, input_boxes=[[box]], return_tensors="pt").to(device)
             with torch.no_grad():
-                outputs = sam(**inputs, multimask_output=False)
-            mask = sam_processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])[0]
-            mask = np.asarray(mask).reshape(-1, image.size[1], image.size[0])[0] > 0.5
-            mask &= alpha  # a part lies on the object
-            entry.update({"score": round(float(outputs.iou_scores.flatten()[0]), 4), "pixels": int(mask.sum()),
-                          "share": round(float(mask.sum() / max(alpha.sum(), 1)), 4)})
+                outputs = sam(**inputs, multimask_output=True)
+            candidates = sam_processor.post_process_masks(outputs.pred_masks.cpu(), inputs["original_sizes"])[0]
+            candidates = np.asarray(candidates).reshape(-1, image.size[1], image.size[0]) > 0.5
+            scores = outputs.iou_scores.flatten().tolist()
+            chosen, choices = choose_mask(list(candidates), scores, box, alpha)
+            mask = candidates[chosen] & alpha  # a part lies on the object
+            entry.update({"score": round(float(scores[chosen]), 4), "pixels": int(mask.sum()),
+                          "share": round(float(mask.sum() / max(alpha.sum(), 1)), 4),
+                          "candidate": chosen, "candidates": choices})
             Image.fromarray((mask * 255).astype(np.uint8)).save(out / f"{part['name']}.png")
             entry["mask"] = f"{part['name']}.png"
         report["parts"][part["name"]] = entry

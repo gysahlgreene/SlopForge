@@ -109,7 +109,11 @@ slopforge approve pistol 2 --part-box "slide=0.17,0.23,0.93,0.39" --part-box "tr
 **How approval masks the parts:**
 - After the concept is cut out, approval masks each part on it.
 - [SAM 2.1](https://huggingface.co/facebook/sam2.1-hiera-large) (Apache-2.0) cuts each part's mask inside the
-  concept's outline, from its box.
+  concept's outline, from its box. SAM returns three candidate masks; the stage keeps the one that fills the box's
+  part of the object without spilling out of the box (fill minus twice the spill, SAM's score breaking ties) and
+  records every candidate in `masks.json`. SAM's single best answer for a chest's lid box was the two iron band
+  arcs on it, 5% of the chest, and every part-level run after it inherited that lid (2026-10-25); the chosen
+  candidate covers the whole lid. The tool's hash is in the stage identity, so a change to it re-masks.
 - A part without a box is found from its description by
   [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) (MIT) open-vocabulary detection.
 - `masks.json` records which method found each part (`box_source`).
