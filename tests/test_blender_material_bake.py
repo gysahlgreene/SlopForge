@@ -1238,6 +1238,29 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderViewFitTests(unittest.TestCase):
+    def test_an_elevation_is_taken_only_when_it_fits_clearly_better(self):
+        # A side-profile pistol's silhouette barely changes when seen from a little above: three seeds fitted best at
+        # 20, 15 and 5 degrees by under 0.01 of overlap over the flat side, and at 20 its far side stopped voting and a
+        # trigger's mask was dropped (2026-10-25: the first seed's fits below). Within 0.01 of the best, the least
+        # elevated view wins; a longsword whose flat mesh fitted 0.92 at 30 degrees and 0.83 at 0 keeps its 30.
+        script = f'''import sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from concept_view import least_elevated
+pistol = [(0.9491, -95, 0), (0.948, -95, 5), (0.9512, -85, 10), (0.9488, -90, 15), (0.9558, -90, 20), (0.9291, -95, 25)]
+sword = [(0.83, 0, 0), (0.86, 0, 10), (0.90, 0, 20), (0.92, 0, 30), (0.91, 0, 35)]
+print("PISTOL", least_elevated(pistol)); print("SWORD", least_elevated(sword))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        out = {line.split()[0]: line[len(line.split()[0]) + 1:] for line in result.stdout.splitlines()
+               if line.startswith(("PISTOL", "SWORD"))}
+        self.assertEqual(eval(out["PISTOL"]), (0.9558, -95, 0))  # the best fit, from the flat side
+        self.assertEqual(eval(out["SWORD"]), (0.92, 0, 30))
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderSweepPenetrationTests(unittest.TestCase):
     def test_a_body_away_from_the_origin_is_swept_where_it_stands(self):
         # A weapon's body keeps its object location (the grip centre, 0.27 m from the origin on a hybrid pistol).
@@ -1337,6 +1360,30 @@ print("POCKET", sweep_penetration(part, [slab], "z", -0.7, 0.0))
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderInterfaceTests(unittest.TestCase):
+    def test_a_face_seen_edge_on_at_the_outline_votes_for_the_part_there(self):
+        # From a side view a slide's top is seen edge-on, on the outline, and the margin kept along every mask edge
+        # gave it no vote: with the mask deciding, the top and the band above the frame line went to the body
+        # (2026-10-25). The margin is for where a part meets another part; at the object's outline the part is the
+        # only candidate. An object rows 20-79, its top band rows 20-44 the part's mask, a margin of 5.
+        script = f'''import sys
+import numpy as np
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from hybrid_graph import pixel_votes
+alpha = np.zeros((100, 200), bool); alpha[20:80, 20:180] = True
+mask = np.zeros_like(alpha); mask[20:45, 20:180] = True
+grid = pixel_votes(mask, alpha, 5)
+print("VOTES", [round(float(grid[row, 100]), 2) for row in (22, 30, 43, 46, 60, 78, 18, 82)])
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        votes = eval(next(line for line in result.stdout.splitlines() if line.startswith("VOTES"))[6:])
+        # just inside the top outline, inside, near the boundary with the rest (fading to nothing at it: a crease
+        # within the margin still decides, and without one the mask's lean holds the cut at the mask's edge, where
+        # an empty margin left the band above a slide's frame line with the body), the rest, just inside the bottom
+        # outline, just above the object, just below it
+        self.assertEqual(votes, [1, 1, 0.4, -0.4, -1, -1, 1, -1])
+
     def test_a_hollow_shell_cut_in_two_is_closed_across_its_inside(self):
         # TRELLIS.2 makes thin hollow shells: an inner wall a few millimetres inside the outer (a 2026-10-25 pistol).
         # A part cut from one is closed by the surface inside the solid where a point is as far from the part as

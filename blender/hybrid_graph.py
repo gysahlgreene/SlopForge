@@ -9,7 +9,7 @@ Writes, in the surface's own face order (every mesh object in name order, as hyb
 centres, areas, normals; pairs of faces that share an edge (by vertex position, so UV seams do not cut the graph)
 with the edge's length and the angle between the faces; surface vertices (to align the parts on); each part's
 vertices and triangles as OmniPart made them; and per masked part a vote per face: +1 the concept's view sees the
-face inside the mask, -1 outside, 0 unseen.
+face inside the mask, -1 in the rest of the object, 0 unseen, fading near the mask's edge (pixel_votes).
 """
 import json
 import math
@@ -108,18 +108,38 @@ def mask_votes(vertices, polygons, centres, concept_path, masks):
         rows_m, cols_m = np.nonzero(mask)
         narrow = min(np.ptp(rows_m) + 1, np.ptp(cols_m) + 1) if len(rows_m) else 0
         part_margin = max(1, min(margin, round(0.25 * narrow)))  # a trigger is not one band of uncertainty
-        core, hull = mask.copy(), mask.copy()
-        for _ in range(part_margin):
-            core &= np.roll(core, 1, 0) & np.roll(core, -1, 0) & np.roll(core, 1, 1) & np.roll(core, -1, 1)
-            hull |= np.roll(hull, 1, 0) | np.roll(hull, -1, 0) | np.roll(hull, 1, 1) | np.roll(hull, -1, 1)
+        grid = pixel_votes(mask, concept, part_margin)
         inside = (pixels[:, 0] >= 0) & (pixels[:, 0] < mask.shape[1]) & (pixels[:, 1] >= 0) & (pixels[:, 1] < mask.shape[0])
-        deep, near = np.zeros(len(centres), bool), np.zeros(len(centres), bool)
-        deep[inside] = core[pixels[inside, 1], pixels[inside, 0]]
-        near[inside] = hull[pixels[inside, 1], pixels[inside, 0]]
+        vote = np.zeros(len(centres), np.float32)
+        vote[inside] = grid[pixels[inside, 1], pixels[inside, 0]]
         voting = np.ones(len(centres), bool) if through else seen
-        votes[name] = np.where(voting & deep, 1, np.where(voting & ~near, -1, 0)).astype(np.int8)
+        votes[name] = np.where(voting, vote, 0).astype(np.float32)
     return votes, {"theta": theta, "phi": phi, "fit": round(float(fit), 4), "seen": round(float(seen.mean()), 4),
                    "through": through}
+
+
+def pixel_votes(mask, alpha, margin):
+    """Each concept pixel's vote for one part, from +1 in its mask to -1 in the rest of the object: full a margin
+    away from where the mask meets the rest, fading to nothing at it, so a crease near a mask edge (carried through a
+    fitted view a few millimetres off) still decides and the mask's lean holds the cut at its edge where there is
+    none (an empty margin left the band above a slide's frame line with the body, 2026-10-25). A pixel off the
+    object (a face's centre lands a little outside the outline) takes the side it lies beside. There is no margin
+    along the object's outline: a slide's top seen edge-on from the side belongs to the part at the outline."""
+    def reach(region):  # steps to reach each pixel from the region, margin + 1 beyond
+        steps = np.full(region.shape, margin + 1, np.int32)
+        steps[region] = 0
+        for step in range(1, margin + 1):
+            region = region | np.roll(region, 1, 0) | np.roll(region, -1, 0) | np.roll(region, 1, 1) | np.roll(region, -1, 1)
+            steps[region & (steps > step)] = step
+        return steps
+    to_part, to_other = reach(mask), reach(alpha & ~mask)
+    vote = np.clip((to_other - to_part) / margin, -1.0, 1.0)
+    beside_part, beside_other = to_part <= margin, to_other <= margin
+    background = ~alpha
+    vote[background & beside_part & ~beside_other] = 1.0
+    vote[background & beside_other & ~beside_part] = -1.0
+    vote[background & ~beside_part & ~beside_other] = 0.0
+    return vote.astype(np.float32)
 
 
 def part_arrays(path):

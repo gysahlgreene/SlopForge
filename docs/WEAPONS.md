@@ -263,11 +263,15 @@ need retraining on its latent space, so the two are combined after generation in
    same concept and masks (`run_omnipart`; its textures are not used).
 2. `blender/hybrid_graph.py` removes the surface's fully enclosed inner shells and records its face graph (faces
    that share an edge, the edge's length and angle), OmniPart's parts, and per moving part a vote from its concept
-   mask: +1 where the concept's fitted view sees the face inside the mask, -1 outside, 0 unseen or within a band at
-   the mask's edge (2% of the object, at most a quarter of the part's narrow width: a mask edge carried through the
-   view lands a few millimetres off the surface's crease, and at full weight it pulled the cut across a panel in
-   teeth). A concept that looks along the object's thinnest axis within ~18° (a weapon's side profile) votes through
-   the thickness. The surface is not repaired into a manifold: on a chest with 1,627 non-manifold edges the local
+   mask (`pixel_votes`): +1 where the concept's fitted view sees the face inside the mask, -1 in the rest of the
+   object, 0 unseen, fading to nothing within a margin of where the mask meets the rest (2% of the object, at most a
+   quarter of the part's narrow width: a mask edge carried through the view lands a few millimetres off the
+   surface's crease, so a crease there still decides, while the mask's lean holds the cut at its edge where there is
+   no crease; an empty margin left the band above a slide's frame line with the body). There is no margin along the
+   object's outline, so a slide's top, seen edge-on from the side, votes with the slide. A concept that looks along
+   the object's thinnest axis within ~18° (a weapon's side profile) votes through the thickness; the fitted view is
+   the least elevated within 0.01 of the best silhouette fit (`least_elevated`): a side-profile pistol fits from 5°,
+   15° or 20° above about as well as from the side, and a tilted view stopped its far side voting. The surface is not repaired into a manifold: on a chest with 1,627 non-manifold edges the local
    repair refilled holes with untextured triangles across the lid.
 3. `slopforge/part_split.py` aligns OmniPart's parts on the surface (the best of the 24 quarter turns with bounds
    fitted, refined by ICP: TRELLIS.2 lays a pistol along Y, OmniPart along X), measures each face's distance to
