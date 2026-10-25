@@ -46,16 +46,17 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
     report = json.loads((out / "parts.json").read_text())
     metal = part_metal([{"name": part, "kind": item["kind"]} for part, item in report["parts"].items()], materials)
     atlas, metal_atlas = destination.parent / "atlas.png", destination.parent / "metal_atlas.png"
+    normal_atlas = destination.parent / "normal_atlas.png"
     command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python",
                str(tool_root() / "blender/prepare_parts.py"), "--", str(out / "parts.glb"), str(destination),
                str(destination.parent / "processed_mesh.blend"), "--parts-json", str(out / "parts.json"),
                "--face-budget", str(face_budget), "--basecolor-output", str(atlas), "--metallic-output",
-               str(metal_atlas), "--texture-size", str(texture_size)]
+               str(metal_atlas), "--texture-size", str(texture_size), "--normal-output", str(normal_atlas)]
     for part, value in metal.items():
         command.extend(("--metal", f"{part}={value}"))
     destination.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(command, check=True, env=blender_environment())
-    maps = derive_part_maps(atlas, metal_atlas, finish, destination.parent)
+    maps = derive_part_maps(atlas, metal_atlas, finish, destination.parent, normal=normal_atlas)
     metadata.write_text(json.dumps({
         "workflow": None, "seed": seed, "model": "omnipart", "part_model": "omnipart", "name": name,
         "backend": report.get("backend", {}),

@@ -241,6 +241,19 @@ class DerivedMapTests(unittest.TestCase):
             metallic = Image.open(maps["metallic"]).convert("L")
             self.assertEqual((metallic.getpixel((1, 1)), metallic.getpixel((6, 6))), (255, 0))
 
+    def test_derive_part_maps_uses_a_baked_normal_when_given(self):
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.unity_material import derive_part_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (8, 8), (200, 30, 30)).save(root / "atlas.png")
+            Image.new("L", (8, 8), 255).save(root / "metal.png")
+            Image.new("RGB", (8, 8), (140, 120, 250)).save(root / "baked.png")
+            maps = derive_part_maps(root / "atlas.png", root / "metal.png", "satin", root / "maps", normal=root / "baked.png")
+            self.assertEqual(Image.open(maps["normal"]).convert("RGB").getpixel((3, 3)), (140, 120, 250))
+
     def test_finish_word(self):
         from slopforge.unity_material import finish_word
         self.assertEqual(finish_word([{"region": "blade", "class": "metal", "description": "polished steel"}]), "polished")
@@ -305,7 +318,8 @@ class OmniPartBackendTests(unittest.TestCase):
             def blender(command, **kwargs):
                 seen["blender"] = command
                 for flag, writer in (("--basecolor-output", lambda p: Image.new("RGB", (4, 4), (90, 90, 90)).save(p)),
-                                     ("--metallic-output", lambda p: Image.new("L", (4, 4), 255).save(p))):
+                                     ("--metallic-output", lambda p: Image.new("L", (4, 4), 255).save(p)),
+                                     ("--normal-output", lambda p: Image.new("RGB", (4, 4), (128, 128, 255)).save(p))):
                     writer(command[command.index(flag) + 1])
                 Path(command[command.index("--") + 2]).write_bytes(b"processed")
                 Path(command[command.index("--") + 3]).write_bytes(b"blend")

@@ -374,7 +374,12 @@ def part(name, size, colour, cuts):
     m.node_tree.links.new(tex.outputs['Color'], m.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
     m.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 1.0  # glTF's default: a diffuse bake of a metal is black
     o.data.materials.append(m)
-part('body', (2, 1, 1), (1, 0, 0, 1), 6)
+part('body', (2, 1, 1), (1, 0, 0, 1), 24)
+import mathutils, random
+random.seed(1)
+body = bpy.data.objects['body']
+for v in body.data.vertices:  # bumps the reduced mesh loses and the normal bake must keep
+    v.co += v.normal * 0.02 * mathutils.noise.noise(v.co * 6.0)
 part('slide', (2, 0.3, 0.3), (0, 0, 1, 1), 6)
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
@@ -388,6 +393,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
                                        "--parts-json", str(root / "parts.json"), "--face-budget", "400",
                                        "--basecolor-output", str(root / "atlas.png"), "--metallic-output",
                                        str(root / "metal.png"), "--texture-size", "256",
+                                       "--normal-output", str(root / "normal.png"),
                                        "--metal", "body=1", "--metal", "slide=0"], capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
             probe, result = root / "probe.py", root / "probe.json"
@@ -421,6 +427,13 @@ json.dump(report, open(sys.argv[-1], 'w'))
                 x, y = int(u * (metal.shape[1] - 1)), int((1 - v) * (metal.shape[0] - 1))
                 self.assertAlmostEqual(float(metal[y, x]), expected, delta=0.1, msg=name)
             self.assertIn("Part slide:", prepared.stdout)
+            # the tangent normal baked from the part before its reduction: bumps on the body, flat on the slide
+            normal = np.asarray(Image.open(root / "normal.png").convert("RGB"), dtype=float)
+            body_island = (atlas[..., 0] > 150) & (atlas[..., 2] < 100)
+            slide_island = (atlas[..., 2] > 150) & (atlas[..., 0] < 100)
+            self.assertGreater(normal[body_island][:, :2].std(), 4.0)
+            self.assertLess(normal[slide_island][:, :2].std(), 2.0)
+            self.assertTrue((np.abs(normal[~(body_island | slide_island)] - (128, 128, 255)).mean() < 8))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
@@ -876,6 +889,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                                        *[str(root / value) if value.endswith((".png", ".json")) else value for value in extra]],
                                       capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
+            (root / "prepare.log").write_text(prepared.stdout + prepared.stderr)  # for a look when a probe fails
             probe, result = root / "probe.py", root / "probe.json"
             probe.write_text("""import bpy, json, sys
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
@@ -888,6 +902,7 @@ def record(o):
     open_edges = sum(1 for e in o.data.edges if sum(e.key in p.edge_keys for p in o.data.polygons) == 1)
     cap = [(o.matrix_world @ o.data.vertices[i].co).z for p in o.data.polygons if not p.use_smooth for i in p.vertices]
     return {"parent": o.parent.name if o.parent else None, "origin": list(o.matrix_world.translation),
+            "sharp": sum(1 for e in o.data.edges if e.use_edge_sharp),
             "cap_spread": (max(cap) - min(cap)) if cap else None,
             "min": [min(p[i] for p in points) for i in range(3)] if points else None,
             "max": [max(p[i] for p in points) for i in range(3)] if points else None,
@@ -1006,6 +1021,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertEqual(sorted(part["name"] for part in measured["fbx_inspection"]["parts"]),
                          ["floating", "grip", "slide", "trigger"])
         self.assertEqual(sum(1 for item in objects.values() if item["open_edges"]), 0)  # nothing was cut open
+        self.assertGreater(objects[measured["body"]]["sharp"], 0)  # hard edges stay hard: sharp by angle on this route
 
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:

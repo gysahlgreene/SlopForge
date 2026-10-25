@@ -517,6 +517,12 @@ def separate_tagged(obj, table, contact):
         return []
     # The GLB split its vertices along UV seams; welded, each part is closed again and its seam edges are not open.
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=max(obj.dimensions) * 1e-6)
+    # Generated parts are hard-surface: an edge over 30 degrees stays sharp instead of shading as a gradient.
+    # Only after the weld do faces share edges, so the angle can be measured here and not before.
+    import math
+    for edge in bm.edges:
+        if len(edge.link_faces) == 2 and edge.calc_face_angle(0.0) > math.radians(30):
+            edge.smooth = False
     # Every part but the body becomes a child, static ones too (a grip, a slide's rear): the body stays one piece
     # for the component budget, and the moving parts get their pivots.
     parts = {entry["id"]: (name, entry["kind"]) for name, entry in table.items() if entry["kind"] != "body"}

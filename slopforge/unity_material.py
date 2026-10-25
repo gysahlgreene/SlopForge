@@ -577,16 +577,19 @@ def part_metal(parts, materials):
                                    for word in nonmetal) else default for part in parts}
 
 
-def derive_part_maps(atlas, metal, finish, out_dir):
-    """basecolor (the atlas), a flat normal, a constant roughness from the finish word, and metallic from the
-    metallic atlas thresholded at 0.5; returns the four paths."""
+def derive_part_maps(atlas, metal, finish, out_dir, normal=None):
+    """basecolor (the atlas), the baked tangent normal (flat when none), a constant roughness from the finish
+    word, and metallic from the metallic atlas thresholded at 0.5; returns the four paths."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {key: out_dir / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
     shutil.copy2(atlas, paths["basecolor"])
     with Image.open(atlas) as image:
         size = image.size
-    Image.new("RGB", size, (128, 128, 255)).save(paths["normal"])
+    if normal is not None:
+        shutil.copy2(normal, paths["normal"])
+    else:
+        Image.new("RGB", size, (128, 128, 255)).save(paths["normal"])
     Image.new("RGB", size, (round(FINISH_ROUGHNESS.get(finish, FINISH_ROUGHNESS["satin"]) * 255),) * 3).save(paths["roughness"])
     with Image.open(metal) as image:
         image.convert("L").point(lambda value: 255 if value >= 128 else 0).convert("RGB").save(paths["metallic"])
