@@ -39,7 +39,7 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
     uploads = {"concept.png": Path(cutout), **{f"{part['name']}.png": masks_dir / f"{part['name']}.png"
                                                 for part in declared}}
     request = {"image": "concept.png", "masks": {part["name"]: f"{part['name']}.png" for part in declared},
-               "parts": declared, "seed": seed}
+               "parts": declared, "seed": seed, "texture_size": texture_size}
     out = destination.parent / "parts"
     run_remote_tool(host, python, tool_root() / "processing/part_model.py", request, uploads, {".": out},
                     label="omnipart", cwd=checkout, env=OMNIPART_ENV)

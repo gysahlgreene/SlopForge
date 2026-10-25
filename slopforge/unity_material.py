@@ -279,6 +279,7 @@ def build_unity_material(project_root, fbx, material, maps, render=None):
     with Image.open(maps["basecolor"]) as image:
         # Declared glass is the only source of base colour alpha (apply_glass).
         transparent = "A" in image.getbands() and image.getchannel("A").getextrema()[0] < 255
+        max_size = max(32, *image.size)  # the importer's ceiling: Unity's default of 2048 would halve a 4096 map
 
     fbx = Path(fbx).resolve()
     material = Path(material).resolve()
@@ -331,10 +332,10 @@ public static class {class_name}
         if (shader == null)
             throw new Exception("Lit shader '" + shaderName + "' was not found for the active render pipeline");
 
-        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true, {str(transparent).lower()});
-        SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false);
-        SetImport({quote(map_assets["metallic_gloss"])}, TextureImporterType.Default, false);
-        SetImport({quote(map_assets["emission"])}, TextureImporterType.Default, true);
+        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true, {max_size}, {str(transparent).lower()});
+        SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false, {max_size});
+        SetImport({quote(map_assets["metallic_gloss"])}, TextureImporterType.Default, false, {max_size});
+        SetImport({quote(map_assets["emission"])}, TextureImporterType.Default, true, {max_size});
         var mat = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
         if (mat == null)
         {{
@@ -473,13 +474,14 @@ public static class {class_name}
             if (current.FullName == "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset") return true;
         return false;
     }}
-    static void SetImport(string path, TextureImporterType type, bool srgb, bool alpha = false)
+    static void SetImport(string path, TextureImporterType type, bool srgb, int maxSize, bool alpha = false)
     {{
         var importer = (TextureImporter)AssetImporter.GetAtPath(path);
         if (importer == null) throw new Exception("Texture did not import: " + path);
         importer.textureType = type;
         importer.sRGBTexture = srgb;
         importer.alphaIsTransparency = alpha;
+        importer.maxTextureSize = maxSize;  // Unity's default of 2048 would halve a 4096 map
         importer.SaveAndReimport();
     }}
     static void SetTransparent(Material mat)
@@ -583,9 +585,15 @@ def derive_part_maps(atlas, metal, finish, out_dir, normal=None):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {key: out_dir / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
-    shutil.copy2(atlas, paths["basecolor"])
     with Image.open(atlas) as image:
         size = image.size
+        pixels = np.asarray(image.convert("RGB")).copy()
+    # Unused atlas texels are exact black and darken every island's edge at the smaller mips: the median used
+    # colour instead (a generated texel is never exactly black)
+    unused = pixels.sum(-1) == 0
+    if unused.any() and not unused.all():
+        pixels[unused] = np.median(pixels[~unused], axis=0).astype(np.uint8)
+    Image.fromarray(pixels).save(paths["basecolor"])
     if normal is not None:
         shutil.copy2(normal, paths["normal"])
     else:

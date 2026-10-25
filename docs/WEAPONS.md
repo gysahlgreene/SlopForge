@@ -198,14 +198,18 @@ pass):
    gate). OmniPart downsamples the mask to 37×37, so a part of under about 0.1% of the concept may vanish.
 4. `prepare_parts.py` welds and reduces each part to its share of the face budget by surface area (floor 2%), with
    the 90% headroom for moving parts, unwraps every part into **one base-colour atlas** baked from the parts' own
-   textures, and bakes a **metallic atlas** from each part's declared class (a part named by a declared non-metal
-   region, as "grips" names "grip", is 0; else 1 when the brief declares metal). The bake margin equals the packing
-   margin, so one part's metallic does not bleed into its neighbour's islands.
-5. The backend writes `generation.json` as the TRELLIS route does (`textured`, four maps: the atlas, a flat normal,
-   a roughness from the brief's finish word, the metallic atlas), so the material stage runs unchanged, including
-   metal lightness and concept colour transfer.
+   textures (OmniPart bakes each part at the type's `texture_size`, 4096 for weapons, not its 1024 default), bakes
+   a **metallic atlas** from each part's declared class (a part named by a declared non-metal region, as "grips"
+   names "grip", is 0; else 1 when the brief declares metal), and bakes each part's **tangent normals** from a
+   full-detail copy kept before its reduction, so the generator's bumps, panels and checkering survive. The bake
+   margin equals the packing margin, so one part's metallic does not bleed into its neighbour's islands.
+5. The backend writes `generation.json` as the TRELLIS route does (`textured`, four maps: the atlas with its unused
+   texels filled by the median colour, the baked normal, a roughness from the brief's finish word, the metallic
+   atlas), so the material stage runs unchanged, including metal lightness and concept colour transfer: the
+   concept-side view joins the parts into one mesh for the render. Unity imports the maps at their size.
 6. The final pass (`prepare_model.py --parts-json`) tags each node's faces by part, joins, orients, scales and
-   pivots the weapon as one, then separates the hinges and slides: a slide pivots at its box centre, a hinge at
+   pivots the weapon as one, welds, marks edges over 30° sharp (hard surfaces shade as facets, not gradients), then
+   separates the hinges and slides: a slide pivots at its box centre, a hinge at
    the centroid of its vertices within 1% of the size of the rest of the weapon's surface (its contact), or at its
    box centre when it touches nothing. The hierarchy, FBX and Unity motion stage are the same as for a cut weapon.
 

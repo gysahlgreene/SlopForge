@@ -396,6 +396,7 @@ avoid: [environment]
         from slopforge.parts import parse_part_spec
         self._concept_candidates()
         self.asset_type["part_model"] = "omnipart"
+        self.asset_type["texture_size"] = 4096
         self.record["parts"] = [parse_part_spec("grip=grip: the grip"), parse_part_spec("trigger=hinge:x:-20..0: the trigger")]
 
         def masks(_config, cutout, parts, out_dir):
@@ -410,7 +411,7 @@ avoid: [environment]
         def part_model(root, config, cutout, name, destination, metadata, seed, parts, masks_dir, face_budget,
                        materials, finish, **options):
             calls.append({"parts": [part["name"] for part in parts], "masks": masks_dir.name, "budget": face_budget,
-                          "finish": finish, "seed": seed})
+                          "finish": finish, "seed": seed, "texture_size": options.get("texture_size")})
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"parts")
             metadata.write_text(json.dumps({"workflow": None, "seed": seed, "part_model": "omnipart",
@@ -429,6 +430,7 @@ avoid: [environment]
         self.assertEqual(calls[0]["parts"], ["grip", "trigger"])
         self.assertTrue(calls[0]["masks"].startswith("parts_"))
         self.assertEqual((calls[0]["budget"], calls[0]["finish"]), (27000, "satin"))  # 90% of the 30,000 default
+        self.assertEqual(calls[0]["texture_size"], 4096)  # the asset type's texture size
         self.assertEqual(seen["mesh_info"]["part_model"], "omnipart")
         asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")

@@ -217,7 +217,6 @@ def _omnipart(request, out_dir, boxes_for, mask_path):
     sys.path.insert(0, os.getcwd())
     from modules.inference_utils import gen_mesh_from_bounds, load_img_mask, merge_parts, prepare_part_synthesis_input
     from modules.part_synthesis.pipelines import OmniPartImageTo3DPipeline
-    from modules.part_synthesis.process_utils import save_parts_outputs
     seed, steps, cfg = int(request["seed"]), int(request.get("steps", 25)), float(request.get("cfg", 7.5))
     pipe = OmniPartImageTo3DPipeline.from_pretrained("omnipart/OmniPart")
     pipe.to("cuda")
@@ -235,8 +234,14 @@ def _omnipart(request, out_dir, boxes_for, mask_path):
     result = pipe.get_slat(black, inputs["coords"], [inputs["part_layouts"]], inputs["masks"], seed=seed,
                            slat_sampler_params={"steps": steps, "cfg_strength": cfg},
                            formats=["mesh", "gaussian", "radiance_field"], preprocess_image=False)
-    save_parts_outputs(result, output_dir=str(out_dir), simplify_ratio=0.3, save_video=False, save_glb=True,
-                       textured=True)
+    # save_parts_outputs bakes every part at 1024; the same calls with the requested size (part 0 is the whole)
+    from modules.part_synthesis.utils import postprocessing_utils
+    texture_size = int(request.get("texture_size", 2048))
+    for index in range(1, min(len(result["gaussian"]), len(result["mesh"]))):
+        glb = postprocessing_utils.to_glb(result["gaussian"][index], result["mesh"][index], simplify=0.3,
+                                          texture_size=texture_size, textured=True)
+        if glb is not None:
+            glb.export(str(out_dir / f"part{index}.glb"))
     merge_parts(str(out_dir))
     all_coords = inputs["coords"]
     all_coords = all_coords.cpu().numpy() if hasattr(all_coords, "cpu") else np.asarray(all_coords)

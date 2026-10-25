@@ -188,7 +188,8 @@ class MainTests(unittest.TestCase):
             (root / "request.json").write_text(json.dumps(request))
             coords = block_coords(2, 62, 10, 46)
 
-            def omnipart(_request, out_dir, boxes_for, _mask_path):
+            def omnipart(request_, out_dir, boxes_for, _mask_path):
+                self.assertEqual(request_.get("texture_size", 2048), 2048)  # the tool's default when absent
                 _frame, boxes = boxes_for(coords)
                 self.assertEqual(boxes.shape, (2, 2, 3))
                 # OmniPart's merged GLB: geometry_0 is its box visualisation, then one node per box in order
@@ -253,6 +254,23 @@ class DerivedMapTests(unittest.TestCase):
             Image.new("RGB", (8, 8), (140, 120, 250)).save(root / "baked.png")
             maps = derive_part_maps(root / "atlas.png", root / "metal.png", "satin", root / "maps", normal=root / "baked.png")
             self.assertEqual(Image.open(maps["normal"]).convert("RGB").getpixel((3, 3)), (140, 120, 250))
+
+    def test_derive_part_maps_fills_unused_texels_with_the_median_used_colour(self):
+        # Unused atlas texels are exact black; at the smaller mips they darken every island's edge
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import derive_part_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            atlas = Image.new("RGB", (16, 16), (0, 0, 0)); atlas.paste((180, 60, 40), (2, 2, 10, 10)); atlas.save(root / "atlas.png")
+            Image.new("L", (16, 16), 255).save(root / "metal.png")
+            maps = derive_part_maps(root / "atlas.png", root / "metal.png", "satin", root / "maps")
+            base = np.asarray(Image.open(maps["basecolor"]).convert("RGB"))
+            self.assertEqual(int((base.sum(-1) == 0).sum()), 0)
+            self.assertEqual(tuple(base[5, 5]), (180, 60, 40))
+            self.assertEqual(tuple(base[14, 14]), (180, 60, 40))
 
     def test_finish_word(self):
         from slopforge.unity_material import finish_word
@@ -332,18 +350,20 @@ class OmniPartBackendTests(unittest.TestCase):
                                                                  "omnipart_checkout": "/opt/OmniPart"}),
                                              root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
                                              root / "mesh_01/generation.json", 5, parts, masks, 27000, materials,
-                                             "matte")
+                                             "matte", texture_size=4096)
             request = seen["remote"]["request"]
             self.assertEqual(request["image"], "concept.png")
             self.assertEqual(request["masks"], {"grip": "grip.png", "slide": "slide.png"})
             self.assertEqual(request["parts"], [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}])
             self.assertEqual((request["seed"], seen["remote"]["cwd"], seen["remote"]["env"]["SPCONV_ALGO"]),
                              (5, "/opt/OmniPart", "native"))
+            self.assertEqual(request["texture_size"], 4096)  # OmniPart's per-part bake, not its 1024 default
             self.assertEqual(set(seen["remote"]["uploads"]), {"concept.png", "grip.png", "slide.png"})
             self.assertEqual(seen["remote"]["label"], "omnipart")
             command = seen["blender"]
             self.assertIn("--metal", command)
             self.assertEqual(command[command.index("--face-budget") + 1], "27000")  # the caller's reduction budget
+            self.assertEqual(command[command.index("--texture-size") + 1], "4096")
             metal = {command[i + 1] for i, value in enumerate(command) if value == "--metal"}
             self.assertEqual(metal, {"grip=0", "slide=1", "body=1"})
             self.assertTrue((root / "mesh_01/pistol.glb").is_file())

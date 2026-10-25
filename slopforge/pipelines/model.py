@@ -2483,7 +2483,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                             mesh_seed, asset["parts"], paths["part_masks"],
                                             _reduction_budget(_face_budget(pipeline, asset_type, asset), asset),
                                             materials, finish_word(materials),
-                                            texture_size=asset.get("texture_size") or pipeline.get("texture_size", 2048))
+                                            texture_size=asset.get("texture_size") or asset_type.get("texture_size")
+                                            or pipeline.get("texture_size", 2048))
                     elif workflow:
                         budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]

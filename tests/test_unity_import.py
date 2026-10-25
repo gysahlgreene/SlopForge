@@ -44,6 +44,22 @@ class UnityImportReportTests(unittest.TestCase):
         (root / "Assets/Relic/relic.fbx").write_bytes(b"fbx")
         return maps
 
+    def test_the_importer_keeps_the_maps_at_their_size(self):
+        # Unity's default maxTextureSize of 2048 would halve a 4096 map; the ceiling follows the map (floor 32)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            maps = self._project(root)
+            guids = {role: uuid.uuid4().hex for role in ("fbx", "material", *ROLES)}
+            scripts = []
+            def run(*args, **kwargs):
+                scripts.append(next((root / "Assets/Editor").glob("*.cs")).read_text())
+                return fake_unity(root, guids)(*args, **kwargs)
+            with patch("slopforge.unity_material.unity_cli", return_value="unity"), \
+                    patch("slopforge.unity_material.subprocess.run", side_effect=run):
+                build_unity_material(root, root / "Assets/Relic/relic.fbx", root / "Assets/Relic/relic.mat", maps)
+            self.assertEqual(set(re.findall(r"TextureImporterType\.\w+, (?:true|false), (\d+)", scripts[0])), {"32"})
+            self.assertIn("importer.maxTextureSize = maxSize", scripts[0])
+
     def test_report_records_guid_importer_and_file_hash_per_role(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

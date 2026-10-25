@@ -186,7 +186,8 @@ result against that declaration before anyone reviews it.
 
 OmniPart returns a base colour only (see [Weapons](WEAPONS.md#moving-parts-from-part-level-generation)). The backend
 derives the other maps before the material stage runs:
-- **normal:** flat (128, 128, 255);
+- **normal:** tangent normals baked in Blender from each part's full-detail copy onto the reduced part (flat where
+  no island lands);
 - **roughness:** a constant from the brief's finish word in a declared metal's description: `matte` 0.7, `satin`
   0.55 (the default, blued steel), `polished` 0.25;
 - **metallic:** the metallic atlas baked by part from each part's declared class, thresholded at 0.5.
