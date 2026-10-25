@@ -482,16 +482,28 @@ if oriented:
     # How far the length runs along the concept's right; near 0 the view looks along it and the tip's end is a guess,
     # which validation rejects (weapon_orientation) so another seed is tried.
     towards_tip = float(length @ np.array(right))
-    forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
-    source = Matrix((forward, top, forward.cross(top))).transposed()
-    target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
-    obj.data.transform((target @ source.inverted()).to_4x4())
+    if held is None:
+        # A prop with parts (a chest): its width (the longer horizontal axis) along X, its depth along Y with the
+        # front, the side the concept's camera sees, towards -Y, so a lid's "back" edge is away from the viewer.
+        towards, _right, _up = view_axes(math.radians(theta), math.radians(phi))
+        depth = axes[1] * (-1.0 if float(axes[1] @ np.array(towards)) > 0 else 1.0)  # +Y points away from the camera
+        depth, top = Vector(depth), Vector(top)
+        source = Matrix((depth.cross(top), depth, top)).transposed()
+        obj.data.transform(source.inverted().to_4x4())
+        towards_tip = 1.0
+        frame = "width to X, front to -Y, top to +Z"
+    else:
+        forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
+        source = Matrix((forward, top, forward.cross(top))).transposed()
+        target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
+        obj.data.transform((target @ source.inverted()).to_4x4())
+        frame = "tip to -Y, top to +Z"
     obj.data.update()
     obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
     if part_coverage:
         obj["slopforge_part_coverage"] = json.dumps(part_coverage)  # a string survives the FBX round trip
         obj["slopforge_part_overflow"] = json.dumps(part_overflow)
-    print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
+    print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): {frame}")
 
 
 # -------------------------------------------------

@@ -1058,6 +1058,11 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertGreaterEqual(measured["inspection"]["part_coverage"]["lid"], 0.5)
         height = objects["lid"]["max"][2] - objects[measured["body"]]["min"][2]
         self.assertAlmostEqual(height, 0.6, delta=0.02)  # the target size held over body and lid together
+        # a prop's frame: its width (the longer horizontal axis) along X, its depth along Y, front towards -Y; the
+        # weapon rule (length to -Y) would turn the chest on its side and put the lid's "back" edge at an end
+        body = objects[measured["body"]]
+        self.assertAlmostEqual(body["max"][0] - body["min"][0], 0.72, delta=0.02)
+        self.assertAlmostEqual(body["max"][1] - body["min"][1], 0.48, delta=0.02)
         # anchored back-top: the pivot on the lid's back edge (+Y) at its top (+Z), centred along X
         lid = objects["lid"]
         self.assertAlmostEqual(lid["origin"][1], lid["max"][1], delta=0.005)
