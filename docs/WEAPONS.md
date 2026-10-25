@@ -85,7 +85,9 @@ Declare each moving part, and the grip, as `--part`. The final Blender pass spli
 
 - **Kinds:**
   - `grip`: one at most, the weapon's handle;
-  - `hinge`: rotates about an axis, with its range in degrees;
+  - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
+    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:0..110@back-top`. Without it the
+    pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
   - `slide`: moves along an axis, with its range in metres.
 - **Axes:** in the weapon's frame as Unity shows it: x right, y up, z forward along the blade or barrel.
 - **Description:** the text after the second colon names the part as the concept draws it. Without one, the part's
@@ -219,6 +221,14 @@ next seed is tried. The spike of 2026-10-25 lost a part in one seed of four.
 
 **Identity:** the backend's name and the hashes of `part_model.py` and `prepare_parts.py` are part of the mesh
 stage's settings; changing either invalidates the stage like a workflow change.
+
+## Props with parts
+
+The same declarations work on a prop: the `prop` type sets `part_model: omnipart`, so a chest that declares
+`--part "lid=hinge:x:0..110@back-top: the domed lid"` is generated as a body and a lid, framed from its concept
+(front towards the concept's camera, top up; no grip, no full-turn search, no tip check), the lid measured against
+its mask, separated with its pivot on its back-top edge, and published as a prefab whose `lid` trigger and
+`lid_open` bool open it. A chest is the first prop proven this way (2026-10-25 live run, see the evidence pages).
 
 ## The prefab a game uses
 
