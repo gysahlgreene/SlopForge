@@ -9,6 +9,9 @@ import json
 import subprocess
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 from ..failures import StageFailure
 from ..paths import blender_executable, tool_root
 from ..provenance import file_sha256
@@ -17,6 +20,25 @@ from ..unity_material import derive_part_maps, part_metal
 from .blender import blender_environment
 
 OMNIPART_ENV = {"SPCONV_ALGO": "native", "ATTN_BACKEND": "xformers"}  # the H100 recipe (2026-10-25)
+
+
+MIN_PART_CELLS = 3  # the R2 rifle's 1.7- and 2.2-cell parts never came out (2026-10-25); a 3.3-cell trigger did
+
+
+def part_cells(cutout, masks_dir, declared):
+    """Each declared part's narrow extent in cells of OmniPart's structure: 64 cells over its 1.2x square crop of the
+    object. A part under a few cells has no voxels of its own, and no seed gives it a shape."""
+    with Image.open(cutout) as image:
+        alpha = np.asarray(image.convert("RGBA"))[..., 3] > 0
+    rows, cols = np.nonzero(alpha)
+    cell = max(cols.max() - cols.min() + 1, rows.max() - rows.min() + 1) * 1.2 / 64
+    cells = {}
+    for part in declared:
+        with Image.open(Path(masks_dir) / f"{part['name']}.png") as mask:
+            inside = (np.asarray(mask.convert("L").resize(alpha.shape[::-1], Image.NEAREST)) > 127) & alpha
+        ys, xs = np.nonzero(inside)
+        cells[part["name"]] = 0.0 if not len(ys) else min(xs.max() - xs.min() + 1, ys.max() - ys.min() + 1) / cell
+    return cells
 
 
 def generate_part_model(project_root, config, cutout, name, destination, metadata, seed, parts, masks_dir,
@@ -37,6 +59,14 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
     destination, metadata, masks_dir = Path(destination), Path(metadata), Path(masks_dir)
     declared = [{"name": part["name"], "kind": part["kind"]} for part in parts
                 if part["kind"] in ("hinge", "slide", "grip")]
+    small = {name: cells for name, cells in part_cells(cutout, masks_dir, declared).items() if cells < MIN_PART_CELLS}
+    if small:
+        raise StageFailure("configuration", "Part(s) too small for part-level generation: " + ", ".join(
+            f"{name} spans {cells:.1f} cells" for name, cells in small.items()) +
+            f" of OmniPart's 64-cell structure (at least {MIN_PART_CELLS} cells across its narrow side)",
+            operation="part_size_preflight",
+            remedy="draw the part larger on the concept (about 5% of the object's longer side), declare a larger "
+                   "moving assembly, or drop the part; see docs/WEAPONS.md, Moving parts")
     uploads = {"concept.png": Path(cutout), **{f"{part['name']}.png": masks_dir / f"{part['name']}.png"
                                                 for part in declared}}
     request = {"image": "concept.png", "masks": {part["name"]: f"{part['name']}.png" for part in declared},

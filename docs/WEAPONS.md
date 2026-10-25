@@ -189,7 +189,12 @@ pass):
    slide's, since it moves with it. The body's box therefore spans the whole weapon and overlaps every part's box;
    OmniPart resolves the overlap from the masks. (A rule that moved the body above a slide's line into a separate
    part was tried first: the sights stretched that part over the whole slide and OmniPart grew a second shell.)
-2. OmniPart's sparse structure gives the object's occupied voxels (64³). Each part's 2D mask extent is mapped onto
+2. Before the run, each declared part is measured in cells of that structure (64 across OmniPart's 1.2× square
+   crop of the object): a part narrower than 3 cells stops the stage as a brief problem, because no seed gives
+   it a shape (the 2026-10-25 rifle's 1.7-cell bolt handle and 2.2-cell trigger failed three seeds each;
+   a 3.3-cell pistol trigger passed). Draw a moving part at about 5% of the object's longer side or more,
+   or declare a larger moving assembly (a bolt with its carrier).
+   OmniPart's sparse structure gives the object's occupied voxels (64³). Each part's 2D mask extent is mapped onto
    that extent (image columns along grid x or y, whichever footprint matches the silhouette best, mirrored or not;
    rows down grid z; the full thickness) and becomes its 3D box. The boxes follow OmniPart's bottom-up part order,
    and the tool stops with a clear error if the two orders differ. OmniPart's own layout model (NVIDIA

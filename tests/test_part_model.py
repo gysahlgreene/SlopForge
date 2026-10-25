@@ -390,7 +390,42 @@ class DerivedMapTests(unittest.TestCase):
                          {"grip": 0, "slide": 0, "trigger": 0})
 
 
+def fixture_masks(root):
+    """A 100x60 object cutout with a grip (30x40 px) and a slide (90x20 px) mask; returns the masks directory."""
+    from PIL import Image
+    cutout = Image.new("RGBA", (120, 80), (0, 0, 0, 0)); cutout.paste((90, 90, 90, 255), (10, 10, 110, 70))
+    cutout.save(root / "cutout.png")
+    masks = root / "masks"; masks.mkdir()
+    grip = Image.new("L", (120, 80), 0); grip.paste(255, (20, 30, 50, 70)); grip.save(masks / "grip.png")
+    slide = Image.new("L", (120, 80), 0); slide.paste(255, (20, 10, 110, 30)); slide.save(masks / "slide.png")
+    return masks
+
+
 class OmniPartBackendTests(unittest.TestCase):
+    def test_a_part_under_three_cells_of_omniparts_grid_stops_before_the_run(self):
+        # OmniPart's structure is 64 cells across its 1.2x crop of the object: a 100 px object has 1.9 px cells, and
+        # the R2 rifle's 3.6x1.7-cell bolt and 2.8x2.2-cell trigger never came out (2026-10-25, three seeds each).
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from PIL import Image
+        from slopforge.backends import omnipart
+        from slopforge.failures import StageFailure
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            masks = fixture_masks(root)
+            trigger = Image.new("L", (120, 80), 0); trigger.paste(255, (60, 40, 66, 45)); trigger.save(masks / "trigger.png")
+            parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}, {"name": "trigger", "kind": "hinge"}]
+            with patch.object(omnipart, "run_remote_tool") as remote, self.assertRaises(StageFailure) as caught:
+                omnipart.generate_part_model(root, self._config({"omnipart_python": "/opt/env/bin/python",
+                                                                 "omnipart_checkout": "/opt/OmniPart"}),
+                                             root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
+                                             root / "mesh_01/generation.json", 5, parts, masks, 27000, [], "matte")
+            self.assertFalse(remote.called)
+            self.assertIn("trigger", str(caught.exception))
+            self.assertIn("3 cells", str(caught.exception))
+            self.assertEqual(caught.exception.category, "configuration")  # the brief must change; no seed fixes it
+
     def _config(self, tools):
         return {"asset_pipeline": {"tools": {"parts_host": "gpu", "blender": "/usr/bin/blender", **tools}}}
 
@@ -416,10 +451,7 @@ class OmniPartBackendTests(unittest.TestCase):
         from slopforge.backends import omnipart
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "cutout.png").write_bytes(b"png")
-            masks = root / "masks"; masks.mkdir()
-            for name in ("grip", "slide"):
-                (masks / f"{name}.png").write_bytes(b"png")
+            masks = fixture_masks(root)  # the real images: generate_part_model measures the parts before the run
             seen = {}
 
             def remote(host, python, script, request, uploads, downloads, **options):
