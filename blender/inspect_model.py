@@ -14,6 +14,8 @@ from mathutils.kdtree import KDTree
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.character_readiness import classify_character_readiness
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mesh_cleanup import solid_component_count  # noqa: E402
 
 
 def write_result(path, result):
@@ -315,7 +317,9 @@ def inspect(source, face_budget, real_scale=False):
                          for _, rotation, scale in (obj.matrix_world.decompose() for obj in objects))
     component_sizes = [connected_components(obj.data) for obj in objects]
     # A weapon's moving parts are separate pieces by design; the component budget counts the rest.
-    components = sum(len(sizes) for obj, sizes in zip(objects, component_sizes) if "slopforge_part" not in obj)
+    # Caps and cavities closing a hybrid split's openings are separate pieces by design (slopforge_fill): not counted
+    components = sum(solid_component_count(obj.data) if obj.data.attributes.get("slopforge_fill") else len(sizes)
+                     for obj, sizes in zip(objects, component_sizes) if "slopforge_part" not in obj)
     parts = [{"name": obj.name, "kind": obj["slopforge_part"], "faces": len(obj.data.polygons),
               "components": len(sizes), "parent": obj.parent.name if obj.parent else None,
               "pivot": [float(value) for value in obj.matrix_world.translation]}

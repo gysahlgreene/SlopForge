@@ -1367,6 +1367,37 @@ print("INSIDE KEPT", len(kept))
             self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
             self.assertIn("INSIDE KEPT", result.stdout)
 
+    def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
+        # Caps and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds over the
+        # component budget (2026-10-25). Fills carry slopforge_fill; a piece made only of fills is not counted.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "fill_count.py"
+            script.write_text(f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+nothing = lambda bm, **kwargs: {{"faces": [], "geom": []}}
+mesh_cleanup.bmesh.ops.triangle_fill, real_fill = nothing, mesh_cleanup.bmesh.ops.triangle_fill
+mesh_cleanup.bmesh.ops.holes_fill, real_holes = nothing, mesh_cleanup.bmesh.ops.holes_fill
+try:
+    fills = mesh_cleanup.close_openings(bm)  # a cap: a separate piece
+finally:
+    mesh_cleanup.bmesh.ops.triangle_fill, mesh_cleanup.bmesh.ops.holes_fill = real_fill, real_holes
+mesh = bpy.data.meshes.new("closed"); bm.to_mesh(mesh)
+assert mesh.attributes.get("slopforge_fill") is not None
+values = [0] * len(mesh.polygons); mesh.attributes["slopforge_fill"].data.foreach_get("value", values)
+assert sum(values) == len(fills), (sum(values), len(fills))
+assert mesh_cleanup.solid_component_count(mesh) == 1, mesh_cleanup.solid_component_count(mesh)
+print("FILL COUNT", sum(values))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("FILL COUNT", result.stdout)
+
     def test_an_opening_broken_by_a_non_manifold_edge_is_still_closed(self):
         # TRELLIS.2's surface has edges where three faces meet; where the cut crosses one, that edge has two faces left
         # on the piece and is not a boundary edge, so the opening is a chain with two ends (the 2026-10-25 pistol's

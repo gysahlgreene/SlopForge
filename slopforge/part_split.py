@@ -158,3 +158,41 @@ def part_distances(centres, parts, samples=60000, seed=0):
         points = np.einsum("sk,skd->sd", weights, corners[chosen])
         out[:, k] = cKDTree(np.concatenate([points, np.asarray(vertices)])).query(centres)[0]
     return out
+
+
+def merge_islands(labels, pairs, areas, min_share=0.1):
+    """Each label's connected regions but its largest, when smaller than `min_share` of that label's area, take the
+    label most of their neighbours have: a speck of slide inside the frame would be a loose piece of its own once the
+    parts are separated (live seeds failed the component budget with 22-233 pieces, 2026-10-25)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    labels = np.array(labels, dtype=object)
+    pairs = np.asarray(pairs)
+    areas = np.asarray(areas, float)
+    n = len(labels)
+    same = labels[pairs[:, 0]] == labels[pairs[:, 1]]
+    graph = coo_matrix((np.ones(int(same.sum())), (pairs[same, 0], pairs[same, 1])), shape=(n, n))
+    count, region = connected_components(graph, directed=False)
+    region_area = np.bincount(region, weights=areas, minlength=count)
+    region_label = {r: labels[i] for i, r in enumerate(region)}
+    largest = {}
+    for r in range(count):
+        name = region_label[r]
+        if name not in largest or region_area[r] > region_area[largest[name]]:
+            largest[name] = r
+    total = {name: sum(region_area[r] for r in range(count) if region_label[r] == name) for name in largest}
+    small = {r for r in range(count) if r != largest[region_label[r]] and region_area[r] < min_share * total[region_label[r]]}
+    if not small:
+        return labels
+    neighbours = {r: {} for r in small}
+    for a, b in pairs:
+        for x, y in ((a, b), (b, a)):
+            r = region[x]
+            if r in small and region[y] != r:
+                other = labels[y]
+                neighbours[r][other] = neighbours[r].get(other, 0) + 1
+    out = labels.copy()
+    for r in small:
+        if neighbours[r]:
+            out[region == r] = max(neighbours[r], key=neighbours[r].get)
+    return out

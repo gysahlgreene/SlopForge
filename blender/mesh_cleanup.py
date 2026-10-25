@@ -792,6 +792,32 @@ def _container_opening(bm, group, lids):
     return area(flat) >= 0.5 * area(piece)
 
 
+def solid_component_count(mesh):
+    """Connected pieces of a mesh (vertices joined by position, as glTF splits them along seams) that are not made
+    only of fill faces (slopforge_fill: caps and cavities closing a hybrid split's openings, not stitched to the
+    surface by design)."""
+    attribute = mesh.attributes.get("slopforge_fill")
+    fill = [0] * len(mesh.polygons)
+    if attribute is not None:
+        attribute.data.foreach_get("value", fill)
+    parent = {}
+
+    def find(item):
+        while parent.setdefault(item, item) != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+    keys = [tuple(round(c, 7) for c in vertex.co) for vertex in mesh.vertices]
+    for polygon in mesh.polygons:
+        first = find(keys[polygon.vertices[0]])
+        for index in polygon.vertices[1:]:
+            other = find(keys[index])
+            if other != first:
+                parent[other] = first
+    solid = {find(keys[polygon.vertices[0]]) for polygon, value in zip(mesh.polygons, fill) if not value}
+    return len(solid)
+
+
 def inside_test(bm):
     """A point-in-object test for a mesh as it is now (the unsplit surface): rays along two of the three axes
     crossing it an odd number of times (a generated surface has holes, so one ray's parity lies)."""
@@ -824,6 +850,8 @@ def close_openings(bm, basecolor=None, lids=None, inside=None):
     Returns the fills."""
     import numpy as np
     from mathutils import Vector
+    # the layer first: adding a layer once fills exist leaves their Python references dead
+    marker = bm.faces.layers.int.get("slopforge_fill") or bm.faces.layers.int.new("slopforge_fill")
     uv = bm.loops.layers.uv.active
     fills = []
     capped = set()
@@ -879,6 +907,9 @@ def close_openings(bm, basecolor=None, lids=None, inside=None):
         if vote > 0:
             for face in piece:
                 face.normal_flip()
+    for face in fills:
+        if face.is_valid:
+            face[marker] = 1  # inspection leaves a piece made only of fills out of the component count
     if inside is not None:
         # a fill must lie inside the unsplit object: one outside it would show with nothing moved (a cap whose
         # outline overshot a concave opening stood up behind the 2026-10-25 chest's lid)

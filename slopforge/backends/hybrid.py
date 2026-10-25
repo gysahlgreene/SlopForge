@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from ..part_split import align, label_faces, part_distances
+from ..part_split import align, label_faces, merge_islands, part_distances
 from ..paths import blender_executable, tool_root
 from ..provenance import file_sha256
 from .blender import blender_environment
@@ -75,6 +75,7 @@ def split_surface(project_root, config, surface, parts_glb, concept, masks, part
             del votes[name]
     labels = label_faces(distances / span, names, data["pairs"], data["lengths"], data["angles"], data["areas"],
                          masks=votes, moving=moving)
+    labels = merge_islands(labels, data["pairs"], data["areas"])  # no speck of one part left inside another
     shares = {n: round(float(np.mean(labels == n)), 4) for n in ["body", *moving]}
     np.save(work_dir / "labels.npy", labels.astype(str))
     apply_request = work_dir / "hybrid_apply_request.json"

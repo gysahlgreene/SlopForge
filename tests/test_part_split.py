@@ -128,3 +128,22 @@ class PartDistancesTests(unittest.TestCase):
         lifted = (square[0] + [0, 0, 1], square[1])
         distances = part_distances(np.array([[0.5, 0.5, 0.1], [0.5, 0.5, 0.8]]), [square, lifted], samples=20000)
         self.assertTrue(np.allclose(distances, [[0.1, 0.9], [0.8, 0.2]], atol=0.01))
+
+
+class MergeIslandsTests(unittest.TestCase):
+    def test_a_speck_of_one_part_inside_another_joins_its_surroundings(self):
+        # The cut left specks (a few faces of slide inside the frame); separated, each became a loose piece and the
+        # live seeds failed the component budget with 22-233 pieces (2026-10-25).
+        from slopforge.part_split import merge_islands
+        n = 30
+        pairs = np.array([(i, i + 1) for i in range(n - 1)])
+        labels = np.array(["slide"] * 10 + ["body"] * 20, dtype=object)
+        labels[20] = "slide"  # a one-face speck of slide in the body
+        merged = merge_islands(labels, pairs, np.ones(n))
+        self.assertEqual(list(merged), ["slide"] * 10 + ["body"] * 20)
+
+    def test_a_part_that_is_all_one_island_is_kept(self):
+        from slopforge.part_split import merge_islands
+        pairs = np.array([(i, i + 1) for i in range(9)])
+        labels = np.array(["body"] * 8 + ["trigger"] * 2, dtype=object)  # a small part, but its only island
+        self.assertEqual(list(merge_islands(labels, pairs, np.ones(10))), list(labels))
