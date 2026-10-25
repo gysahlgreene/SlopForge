@@ -311,6 +311,77 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderPreparePartsTests(unittest.TestCase):
+    """blender/prepare_parts.py: generated parts (one textured GLB node each) are reduced to shares of the budget,
+    unwrapped into one base-colour atlas with a metallic atlas by part, and exported with their node names kept."""
+
+    def test_parts_are_reduced_into_one_atlas_with_their_names_kept(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def part(name, size, colour, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    o = bpy.context.object; o.name = name; o.scale = size
+    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    image = bpy.data.images.new(name + '_tex', 16, 16); image.pixels = list(colour) * 256; image.pack()
+    m = bpy.data.materials.new(name); m.use_nodes = True
+    tex = m.node_tree.nodes.new('ShaderNodeTexImage'); tex.image = image
+    m.node_tree.links.new(tex.outputs['Color'], m.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
+    o.data.materials.append(m)
+part('body', (2, 1, 1), (1, 0, 0, 1), 6)
+part('slide', (2, 0.3, 0.3), (0, 0, 1, 1), 6)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture), "--",
+                            str(root / "parts.glb")], check=True, capture_output=True, text=True)
+            (root / "parts.json").write_text(json.dumps({"parts": {"body": {"kind": "body"}, "slide": {"kind": "slide"}}}))
+            prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                       str(ROOT / "blender/prepare_parts.py"), "--", str(root / "parts.glb"),
+                                       str(root / "processed.glb"), str(root / "processed.blend"),
+                                       "--parts-json", str(root / "parts.json"), "--face-budget", "400",
+                                       "--basecolor-output", str(root / "atlas.png"), "--metallic-output",
+                                       str(root / "metal.png"), "--texture-size", "256",
+                                       "--metal", "body=1", "--metal", "slide=0"], capture_output=True, text=True)
+            self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
+            probe, result = root / "probe.py", root / "probe.json"
+            probe.write_text("""import bpy, json, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath=sys.argv[-2])
+report = {}
+for o in [o for o in bpy.data.objects if o.type == 'MESH']:
+    uv = o.data.uv_layers.active.data
+    report[o.name] = {"faces": len(o.data.polygons), "uv_layers": len(o.data.uv_layers),
+                      "uv_centre": [sum(uv[i].uv[k] for i in o.data.polygons[0].loop_indices) / len(o.data.polygons[0].loop_indices) for k in range(2)],
+                      "images": [n.image.name for m in o.data.materials if m for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image]}
+json.dump(report, open(sys.argv[-1], 'w'))
+""")
+            probed = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(probe), "--",
+                                     str(root / "processed.glb"), str(result)], capture_output=True, text=True)
+            self.assertEqual(probed.returncode, 0, (probed.stdout + probed.stderr)[-3000:])
+            report = json.loads(result.read_text())
+            self.assertEqual(sorted(report), ["body", "slide"])
+            self.assertLessEqual(sum(item["faces"] for item in report.values()), 400)
+            self.assertTrue(all(item["faces"] >= 8 for item in report.values()))
+            self.assertEqual([item["uv_layers"] for item in report.values()], [1, 1])
+            self.assertEqual([item["images"] for item in report.values()], [[], []])  # textures live in the atlas
+            atlas = np.asarray(Image.open(root / "atlas.png").convert("RGB"), dtype=int)
+            red = ((atlas[..., 0] > 150) & (atlas[..., 2] < 100)).mean()
+            blue = ((atlas[..., 2] > 150) & (atlas[..., 0] < 100)).mean()
+            self.assertGreater(red, 0.01); self.assertGreater(blue, 0.01)
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"), dtype=float) / 255
+            for name, expected in (("body", 1.0), ("slide", 0.0)):
+                u, v = report[name]["uv_centre"]
+                x, y = int(u * (metal.shape[1] - 1)), int((1 - v) * (metal.shape[0] - 1))
+                self.assertAlmostEqual(float(metal[y, x]), expected, delta=0.1, msg=name)
+            self.assertIn("Part slide:", prepared.stdout)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderUVCoverageTests(unittest.TestCase):
     def test_inspection_reports_uv_area_and_out_of_bounds_loops(self):
         with tempfile.TemporaryDirectory() as temporary:
