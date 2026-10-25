@@ -1175,7 +1175,6 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
-@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderSweepPenetrationTests(unittest.TestCase):
     def test_a_body_away_from_the_origin_is_swept_where_it_stands(self):
         # A weapon's body keeps its object location (the grip centre, 0.27 m from the origin on a hybrid pistol).
@@ -1205,6 +1204,44 @@ for location in ((0, 0, 0), (0.1, 0.3, 0.27)):
         self.assertGreater(sunk[1], 0.9)  # away from it
 
 
+    def test_a_part_moved_into_a_pocket_of_an_open_body_is_not_inside_it(self):
+        # Generated bodies are open: the hybrid pistol's kept 512 open edges after closing, and by ray parity half
+        # its slide sat inside the body at rest (2026-10-25). A slab with no underside and a block open to the front,
+        # and a box moved from in front of them into the pocket between, touching neither: rays up and back from the
+        # pocket each cross one face, odd, so parity read it inside. The winding number sees it outside.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+from mathutils import Vector
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(centre, size, drop=None):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    if drop:
+        bm = bmesh.new(); bm.from_mesh(o.data); bm.normal_update()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.dot(drop) > 0.9], context="FACES")
+        bm.to_mesh(o.data); bm.free()
+    return o
+slab = box((0, 0, 0.1), (0.05, 1.0, 0.2), drop=Vector((0, 0, -1)))  # no underside
+block = box((0, 0.4, -0.1), (0.05, 0.2, 0.2), drop=Vector((0, -1, 0)))  # under the slab's back (+Y), open to the front
+bpy.ops.object.select_all(action="DESELECT"); block.select_set(True); slab.select_set(True)
+bpy.context.view_layer.objects.active = slab; bpy.ops.object.join()  # one body, as a generated one is
+part = box((0, -0.8, -0.1), (0.02, 0.2, 0.1))  # in front of the body, below the slab
+part.parent = slab; part.matrix_parent_inverse = slab.matrix_world.inverted(); part["slopforge_part"] = "slide"
+bpy.context.view_layer.update()
+# Unity z (forward) is Blender -Y: 0.7 back ends the box at y -0.2..0, under the slab, in front of the block
+print("POCKET", sweep_penetration(part, [slab], "z", -0.7, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        pocket = [float(line.rsplit(" ", 1)[1]) for line in result.stdout.splitlines() if line.startswith("POCKET")]
+        self.assertEqual(len(pocket), 1, result.stdout[-2000:])
+        self.assertLessEqual(pocket[0], 0.02)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderCloseOpeningsTests(unittest.TestCase):
     def test_a_piece_split_from_a_surface_is_closed_outwards_in_one_colour_per_opening(self):
         # A hybrid split (docs/WEAPONS.md, Hybrid parts) leaves each piece of a generated surface open where it was

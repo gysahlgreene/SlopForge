@@ -331,51 +331,63 @@ HINGE_AXES = {"x": ((1, 0, 0), 1), "y": ((0, 0, 1), -1), "z": ((0, 1, 0), 1)}
 SLIDE_AXES = {"x": (-1, 0, 0), "y": (0, 0, 1), "z": (0, -1, 0)}
 
 
+def winding_numbers(points, triangles, chunk=16):
+    """The generalized winding number of each point (n, 3) about `triangles` (m, 3, 3): about 1 inside a closed
+    surface and 0 outside it, and still near that where the surface has holes, where a ray's parity is not (a hybrid
+    pistol's open body read half its slide inside by parity, 2026-10-25). The triangles' signed solid angles over
+    4 pi (Jacobson, Kavan and Sorkine-Hornung 2013); the sign follows the winding, so callers take its size."""
+    import numpy as np
+    points = np.asarray(points, float).reshape(-1, 3)
+    triangles = np.asarray(triangles, float).reshape(-1, 3, 3)
+    numbers = np.zeros(len(points))
+    dot = lambda x, y: np.einsum("nmi,nmi->nm", x, y)
+    for start in range(0, len(points), chunk):
+        corners = triangles[None] - points[start:start + chunk, None, None, :]
+        a, b, c = corners[..., 0, :], corners[..., 1, :], corners[..., 2, :]
+        la, lb, lc = (np.linalg.norm(corner, axis=-1) for corner in (a, b, c))
+        det = dot(a, np.cross(b, c))
+        den = la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb
+        numbers[start:start + chunk] = np.arctan2(det, den).sum(1) / (2 * np.pi)
+    return numbers
+
+
+def world_triangles(objects):
+    """The triangles (m, 3, 3) of the objects' evaluated meshes in world space."""
+    import bpy
+    import numpy as np
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    found = []
+    for obj in objects:
+        if obj.type != "MESH":
+            continue
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh()
+        mesh.calc_loop_triangles()
+        matrix = np.array(obj.matrix_world)
+        vertices = np.array([vertex.co[:] for vertex in mesh.vertices]).reshape(-1, 3) @ matrix[:3, :3].T + matrix[:3, 3]
+        indices = np.array([triangle.vertices[:] for triangle in mesh.loop_triangles], int).reshape(-1, 3)
+        found.append(vertices[indices])
+        evaluated.to_mesh_clear()
+    return np.concatenate(found) if found else np.zeros((0, 3, 3))
+
+
 def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
     """The share of `part`'s vertices inside `others` at the worst of `samples` points of its declared range, over
     the share at rest: a lid turned into its chest, a drawer through its housing. The part turns about its origin
-    (its pivot) or slides along its axis; a point is inside when rays along two of three axes cross a mesh an odd
-    number of times (generated meshes have holes, so one ray's parity lies). Unity repeats the check on the prefab."""
+    (its pivot) or slides along its axis; a point is inside where the others' winding number is over a half
+    (generated meshes are open, so a ray's parity lies). Everything is in world space: the body of a weapon stands
+    at its grip, away from the origin. Unity repeats the check on the prefab."""
     import math
-    import bpy
+    import numpy as np
     from mathutils import Matrix, Vector
-    from mathutils.bvhtree import BVHTree
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-
-    def world_tree(other):
-        # in world space, as the part's vertices are: FromObject keeps the object's own space, so a body away from
-        # the origin was missed by every ray (a hybrid pistol's slide read 0.000, 2026-10-25)
-        evaluated = other.evaluated_get(depsgraph)
-        mesh = evaluated.to_mesh()
-        tree = BVHTree.FromPolygons([other.matrix_world @ vertex.co for vertex in mesh.vertices],
-                                    [tuple(polygon.vertices) for polygon in mesh.polygons])
-        evaluated.to_mesh_clear()
-        return tree
-
-    trees = [world_tree(other) for other in others if other.type == "MESH"]
+    triangles = world_triangles(others)
     step = max(1, len(part.data.vertices) // limit)
     rest = [part.matrix_world @ vertex.co for index, vertex in enumerate(part.data.vertices) if index % step == 0]
-    if not trees or not rest:
+    if not len(triangles) or not rest:
         return 0.0
-
-    def inside(point):
-        for tree in trees:
-            odd = 0
-            for direction in (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))):
-                hits, origin = 0, point.copy()
-                for _ in range(64):
-                    location = tree.ray_cast(origin, direction)[0]
-                    if location is None:
-                        break
-                    hits += 1
-                    origin = location + direction * 1e-5
-                odd += hits % 2
-            if odd >= 2:
-                return True
-        return False
-
+    share = lambda points: float((np.abs(winding_numbers([tuple(p) for p in points], triangles)) > 0.5).mean())
     pivot = part.matrix_world.translation.copy()
-    rest_share = sum(inside(point) for point in rest) / len(rest)
+    rest_share = share(rest)
     far = low if abs(low) > abs(high) else high  # the range runs from rest to its far end
     worst = 0.0
     for sample in range(1, samples + 1):
@@ -386,8 +398,7 @@ def sweep_penetration(part, others, axis, low, high, samples=9, limit=400):
             direction, sign = HINGE_AXES[axis]
             move = (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(sign * amount), 4, Vector(direction))
                     @ Matrix.Translation(-pivot))
-        share = sum(inside(move @ point) for point in rest) / len(rest)
-        worst = max(worst, share - rest_share)
+        worst = max(worst, share([move @ point for point in rest]) - rest_share)
     return round(worst, 4)
 
 
@@ -830,25 +841,14 @@ def solid_component_count(mesh):
 
 
 def inside_test(bm):
-    """A point-in-object test for a mesh as it is now (the unsplit surface): rays along two of the three axes
-    crossing it an odd number of times (a generated surface has holes, so one ray's parity lies)."""
-    from mathutils import Vector
-    from mathutils.bvhtree import BVHTree
-    tree = BVHTree.FromBMesh(bm)
-    directions = (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
+    """A point-in-object test for a mesh as it is now (the unsplit surface): its winding number over a half. A
+    generated surface has holes and edges with three faces, through which a ray's parity lies: parity dropped 24 of a
+    hybrid slide's 26 fill faces as outside the pistol they were cut from (2026-10-25)."""
+    import numpy as np
+    triangles = np.array([[tuple(loop.vert.co) for loop in triangle] for triangle in bm.calc_loop_triangles()])
 
     def inside(point):
-        odd = 0
-        for direction in directions:
-            hits, origin = 0, point.copy()
-            for _ in range(64):
-                location = tree.ray_cast(origin, direction)[0]
-                if location is None:
-                    break
-                hits += 1
-                origin = location + direction * 1e-6
-            odd += hits % 2
-        return odd >= 2
+        return bool(abs(winding_numbers([tuple(point)], triangles)[0]) > 0.5)
     return inside
 
 
