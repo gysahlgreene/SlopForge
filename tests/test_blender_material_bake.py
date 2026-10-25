@@ -311,6 +311,47 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderConceptViewTests(unittest.TestCase):
+    """blender/concept_view.py renders a candidate from the concept's fitted view. A weapon generated as parts is
+    several mesh objects; the view must join them (2026-10-25: every parts candidate failed "Expected one mesh",
+    so metal lightness and colour transfer never ran on that route)."""
+
+    def test_a_candidate_of_several_meshes_renders_from_the_concept_view(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.py").write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for name, centre, size in (('body', (0, 0, 0), (1.0, 0.2, 0.2)), ('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.uv_layers[0].name = 'UVMap'
+    o.data.materials.append(bpy.data.materials.new(name))
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(root / "fixture.py"),
+                            "--", str(root / "parts.glb")], check=True, capture_output=True, text=True)
+            concept = Image.new("RGBA", (200, 80), (0, 0, 0, 0))
+            concept.paste((110, 110, 110, 255), (20, 30, 180, 50)); concept.paste((110, 110, 110, 255), (36, 22, 164, 30))
+            concept.save(root / "concept.png")
+            Image.new("RGB", (64, 64), (200, 40, 40)).save(root / "basecolor.png")
+            request = {"model": str(root / "parts.glb"), "basecolor": str(root / "basecolor.png"),
+                       "concept": str(root / "concept.png"), "prefix": str(root / "view"),
+                       "report": str(root / "view.json"), "min_iou": 0.3, "uv": False, "size": 256}
+            (root / "request.json").write_text(json.dumps(request))
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/concept_view.py"), "--",
+                            str(root / "request.json")], capture_output=True, text=True)
+            report = json.loads((root / "view.json").read_text())
+            self.assertEqual(report.get("status"), "rendered", report)
+            rendered = np.asarray(Image.open(root / "view_base.png").convert("RGBA"))
+            self.assertGreater((rendered[..., 3] > 0).mean(), 0.05)  # something of the joined weapon is in view
+            self.assertGreater(rendered[rendered[..., 3] > 0][..., 0].mean(), 150)  # in the base colour
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderPreparePartsTests(unittest.TestCase):
     """blender/prepare_parts.py: generated parts (one textured GLB node each) are reduced to shares of the budget,
     unwrapped into one base-colour atlas with a metallic atlas by part, and exported with their node names kept."""

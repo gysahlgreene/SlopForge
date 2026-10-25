@@ -570,6 +570,12 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
     return fidelity
 
 
+def _view_reason(fidelity):
+    """Why the concept view gave no render: a skipped fit says `reason`, a failed script says `error`."""
+    view = fidelity.get("concept_view") or {}
+    return view.get("reason") or view.get("error") or "not rendered"
+
+
 def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chroma_ratio=None,
                          max_darkened_share=None):
     """Fail a candidate whose base colour lost the concept's hue or saturation, or turned dark where the concept is
@@ -579,7 +585,7 @@ def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chro
     if max_darkened_share is not None and darkened is None:
         validation["warnings"] = [*validation.get("warnings", []),
             "darkening against the concept was not checked: no view from the concept's side "
-            f"({fidelity.get('concept_view', {}).get('reason', 'not rendered')})"]
+            f"({_view_reason(fidelity)})"]
         if validation.get("status") == "passed":
             validation["status"] = "passed_with_warnings"
     elif max_darkened_share is not None:
@@ -609,7 +615,7 @@ def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chro
         if code == "colour_desaturated" and fidelity.get("colour_source") != "concept_view":
             validation["warnings"] = [*validation.get("warnings", []),
                 "saturation against the concept was not checked: no view from the concept's side "
-                f"({fidelity.get('concept_view', {}).get('reason', 'not rendered')}), and the whole map includes hidden parts"]
+                f"({_view_reason(fidelity)}), and the whole map includes hidden parts"]
             if validation.get("status") == "passed":
                 validation["status"] = "passed_with_warnings"
             continue

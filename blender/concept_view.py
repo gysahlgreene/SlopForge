@@ -122,9 +122,17 @@ def run(request):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=request["model"])
     meshes = [obj for obj in bpy.data.objects if obj.type == "MESH"]
-    if len(meshes) != 1:
-        raise ValueError(f"Expected one mesh in {request['model']}, found {len(meshes)}")
-    obj = meshes[0]
+    if not meshes:
+        raise ValueError(f"Expected a mesh in {request['model']}, found none")
+    # A weapon generated as parts is one mesh object per part (2026-10-25); the view is of the whole weapon, and
+    # every part's UV layer is named UVMap, so the join keeps one map for the base colour.
+    bpy.ops.object.select_all(action="DESELECT")
+    for item in meshes:
+        item.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
     world, samples = surface_samples(obj)
     iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
     report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}

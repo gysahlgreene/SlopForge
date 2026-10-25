@@ -1035,6 +1035,17 @@ class PropComponentBudgetTests(unittest.TestCase):
             self.assertTrue(any("no textured pixels" in warning for warning in report["warnings"]))
             json.dumps(report, allow_nan=False)
 
+    def test_a_failed_concept_view_names_its_error_in_the_warning(self):
+        # The view script reports {"status": "failed", "error": ...}; the warning printed "(not rendered)" instead
+        from slopforge.validation import apply_concept_colour
+        fidelity = {"colour_source": "atlas", "concept_chroma": 30.0, "texture_chroma": 20.0,
+                    "concept_hue_difference": 1.0, "concept_chroma_ratio": 0.67, "concept_darkened_share": None,
+                    "concept_view": {"status": "failed", "error": "Expected one mesh in x.glb, found 4"}}
+        report = apply_concept_colour(_quality_report(component_count=1), fidelity, max_hue_difference=4,
+                                      min_chroma_ratio=0.6, max_darkened_share=0.4)
+        self.assertTrue(any("Expected one mesh" in warning for warning in report["warnings"]), report["warnings"])
+        self.assertFalse(any("not rendered" in warning for warning in report["warnings"]))
+
     def test_a_declared_moving_part_that_did_not_come_out_is_retried(self):
         from slopforge.validation import apply_moving_parts
         report = _quality_report(component_count=1)
