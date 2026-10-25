@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .unity_material import unity_cli
 
+PENETRATION_TOLERANCE = 0.02  # share of a part's vertices inside the body over its rest value, through its range
 PIVOT_TOLERANCE = 0.001  # metres a hinge's pivot may drift, and a slide's travel may miss its declared range by
 ANGLE_TOLERANCE = 0.5  # degrees a hinge may miss its declared limit by
 
@@ -35,6 +36,7 @@ def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, 
             "name": name, "fbx": inside(fbx), "prefab": inside(prefab), "clip_folder": inside(clip_folder),
             "report_path": str(report), "render_path": str(Path(render).resolve()),
             "pivot_tolerance": PIVOT_TOLERANCE, "angle_tolerance": ANGLE_TOLERANCE,
+            "penetration_tolerance": PENETRATION_TOLERANCE,
             "held": bool(held), "mass": float(mass), "layer": layer or "",
             "parts": [{"name": part["name"], "kind": part["kind"], "axis": part["axis"],
                        "limit": max((part["min"], part["max"]), key=abs)} for part in parts]}))
@@ -63,12 +65,12 @@ public static class CLASS_NAME
     [Serializable] public class Request
     {
         public string name, fbx, prefab, clip_folder, report_path, render_path, layer;
-        public float pivot_tolerance, angle_tolerance, mass; public bool held; public Part[] parts;
+        public float pivot_tolerance, angle_tolerance, penetration_tolerance, mass; public bool held; public Part[] parts;
     }
     [Serializable] public class Socket { public string name; public float[] position; }
     [Serializable] public class Motion
     {
-        public string part, kind, clip; public float pivot_drift, angle, travel; public float[] pivot;
+        public string part, kind, clip; public float pivot_drift, angle, travel, penetration; public float[] pivot;
     }
     [Serializable] public class Report
     {
@@ -232,6 +234,10 @@ public static class CLASS_NAME
         AnimationMode.StopAnimationMode();
         var motion = new Motion { part = declared.name, kind = declared.kind, clip = clipPath, pivot = Floats(restPosition) };
         var label = declared.kind + " " + declared.name;
+        motion.penetration = Penetration(root, part, clip, request);
+        if (motion.penetration > request.penetration_tolerance)
+            errors.Add(label + " penetrates the body through its range (" +
+                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices inside, over rest)");
         if (declared.kind == "slide")
         {
             var displacement = limitPosition - restPosition;
@@ -253,6 +259,50 @@ public static class CLASS_NAME
                            declared.axis + " (declared " + declared.limit.ToString("F2", CultureInfo.InvariantCulture) + ")");
         }
         return motion;
+    }
+
+    // The part's vertices inside the rest of the model, sampled through its clip: a lid swinging into its chest, a
+    // drawer travelling past its housing. A vertex is inside when a ray from it crosses the body's surface an odd
+    // number of times (temporary exact colliders, back faces counted). The share over the rest pose is reported.
+    static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request)
+    {
+        var names = new HashSet<string>(request.parts.Select(p => p.name));
+        var temporary = new List<MeshCollider>();
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (names.Contains(filter.name) || filter.transform.IsChildOf(part)) continue;
+            var collider = filter.gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = filter.sharedMesh;
+            collider.convex = false;
+            temporary.Add(collider);
+        }
+        var mesh = part.GetComponentInChildren<MeshFilter>()?.sharedMesh;
+        if (mesh == null || temporary.Count == 0) { foreach (var c in temporary) UnityEngine.Object.DestroyImmediate(c); return 0f; }
+        var step = Mathf.Max(1, mesh.vertexCount / 400);
+        var vertices = mesh.vertices.Where((v, i) => i % step == 0).ToArray();
+        var hadBackfaces = Physics.queriesHitBackfaces;
+        Physics.queriesHitBackfaces = true;
+        var shares = new List<float>();
+        AnimationMode.StartAnimationMode();
+        for (var sample = 0; sample <= 8; sample++)
+        {
+            AnimationMode.SampleAnimationClip(root, clip, 0.5f * sample / 8f);
+            Physics.SyncTransforms();
+            var filter = part.GetComponentInChildren<MeshFilter>();
+            var inside = 0;
+            foreach (var vertex in vertices)
+            {
+                var point = filter.transform.TransformPoint(vertex);
+                var hits = Physics.RaycastAll(point, Vector3.right, 1000f).Count(h => temporary.Contains(h.collider as MeshCollider));
+                if (hits % 2 == 1) inside++;
+            }
+            shares.Add((float)inside / vertices.Length);
+        }
+        AnimationMode.SampleAnimationClip(root, clip, 0f);
+        AnimationMode.StopAnimationMode();
+        Physics.queriesHitBackfaces = hadBackfaces;
+        foreach (var c in temporary) UnityEngine.Object.DestroyImmediate(c);
+        return Mathf.Max(0f, shares.Max() - shares[0]);
     }
 
     static Socket AddSocket(Transform parent, string name, Vector3 position)

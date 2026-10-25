@@ -244,10 +244,14 @@ prefab a game can pick up, drop and animate (`slopforge/unity_weapon.py`):
 - an **Animator** with a `Rest` default state and, per hinge or slide, a trigger `<part>` (one pulse rest → limit →
   rest, 1 s) and a bool `<part>_open` that holds the part at its limit while set (0.25 s blends);
 - the W9 checks: each pulse clip sampled at rest and limit (pivot drift ≤ 1 mm, angle ±0.5°, travel ±1 mm), and for
-  held assets the tip along +Z and the root inside the bounds. The report records the colliders, the mass, the
-  sockets with their positions, the parameters and the default state (`validation.measured.weapon_motion`).
+  held assets the tip along +Z and the root inside the bounds;
+- an **interpenetration check** through each part's range: the clip is sampled at nine points and the share of the
+  part's vertices inside the rest of the model (a ray from each crossing the body's surface an odd number of times)
+  must not rise more than 0.02 over its rest value — a lid swinging into its chest or a drawer travelling past its
+  housing fails the publication. The report records the colliders, the mass, the sockets with their positions,
+  the parameters, the default state and each motion's `penetration` (`validation.measured.weapon_motion`).
 
-Not checked yet: Play mode, interpenetration through the motion range, LODs and lightmap UVs.
+Not checked yet: Play mode, LODs and lightmap UVs.
 
 ## Known limits
 
