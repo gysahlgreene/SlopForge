@@ -502,10 +502,11 @@ def tag_parts(objects, table):
         attribute.data.foreach_set("value", [value] * len(obj.data.polygons))
 
 
-def separate_tagged(obj, table, contact):
+def separate_tagged(obj, table, contact, anchors=None):
     """Move each hinge or slide's tagged faces into a child of obj (see _attach). A slide pivots at its box centre;
     a hinge at the centroid of its vertices within `contact` of the rest of the weapon, or at its box centre when
-    it touches nothing. Returns the children."""
+    it touches nothing; a hinge with an anchor (faces of its own bounds: front -Y, back +Y, left -X, right +X,
+    bottom -Z, top +Z) pivots on that edge of its box. Returns the children."""
     import bpy
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
@@ -544,7 +545,13 @@ def separate_tagged(obj, table, contact):
         low = Vector([min(vert.co[axis] for vert in verts) for axis in range(3)])
         high = Vector([max(vert.co[axis] for vert in verts) for axis in range(3)])
         pivot = (low + high) / 2
-        if kind == "hinge":
+        if kind == "hinge" and (anchors or {}).get(name):
+            bound_of = {"front": (1, low), "back": (1, high), "left": (0, low), "right": (0, high),
+                        "bottom": (2, low), "top": (2, high)}
+            for word in anchors[name]:
+                axis, bound = bound_of[word]
+                pivot[axis] = bound[axis]
+        elif kind == "hinge":
             touching = [vert.co for vert in verts
                         if tree.find_nearest(vert.co)[3] is not None and tree.find_nearest(vert.co)[3] <= contact]
             if touching:

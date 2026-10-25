@@ -54,6 +54,22 @@ class PartSpecTests(unittest.TestCase):
             self.assertIn("trigger", str(caught.exception))
 
 
+class PartAnchorTests(unittest.TestCase):
+    def test_a_hinge_can_anchor_its_pivot_on_the_part_bounds(self):
+        # A chest's lid turns about its back-top edge, not its contact centroid (which sits in the lid's middle)
+        from slopforge.parts import parse_part_spec
+        part = parse_part_spec("lid=hinge:x:0..110@back-top: the domed lid")
+        self.assertEqual((part["name"], part["kind"], part["axis"], part["min"], part["max"]), ("lid", "hinge", "x", 0.0, 110.0))
+        self.assertEqual(part["anchor"], ["back", "top"])
+        self.assertEqual(part["text"], "the domed lid")
+        self.assertNotIn("anchor", parse_part_spec("trigger=hinge:x:-20..0: the trigger"))
+        self.assertEqual(parse_part_spec("door=hinge:y:0..90@left")["anchor"], ["left"])
+        for bad in ("lid=hinge:x:0..110@inside", "lid=hinge:x:0..110@back-top-left", "lid=hinge:x:0..110@top-bottom",
+                    "bolt=slide:z:-0.08..0@back"):
+            with self.assertRaises(ValueError, msg=bad):
+                parse_part_spec(bad)
+
+
 class PartMaskRunTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

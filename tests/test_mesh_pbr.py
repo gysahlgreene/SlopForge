@@ -637,7 +637,8 @@ class DeclaredMaterialTests(unittest.TestCase):
     def test_a_prop_with_a_hinge_is_framed_from_its_concept_without_a_grip(self):
         # Props with parts (a chest's lid): the split, the coverage and the frame key on the declared parts, not on
         # a grip; the weapon-only checks (full turn, tip alignment) stay off.
-        lid = {"name": "lid", "kind": "hinge", "axis": "x", "min": 0.0, "max": 110.0, "text": "the lid"}
+        lid = {"name": "lid", "kind": "hinge", "axis": "x", "min": 0.0, "max": 110.0, "text": "the lid",
+               "anchor": ["back", "top"]}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
@@ -661,6 +662,7 @@ class DeclaredMaterialTests(unittest.TestCase):
             self.assertEqual(options["concept"], root / "cutout.png")
             self.assertIsNone(options["grip_mask"])
             self.assertEqual(options["parts"], [("lid", "hinge", root / "parts_1/lid.png")])
+            self.assertEqual(options["anchors"], {"lid": ["back", "top"]})
             self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
             self.assertEqual([item.get("full_turn", False) for item in views], [False] * len(views))
             self.assertNotIn("weapon_orientation", candidate["validation"].get("failure_codes", []))

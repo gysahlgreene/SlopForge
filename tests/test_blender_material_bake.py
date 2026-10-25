@@ -1047,7 +1047,8 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
         masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
         measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
-                               extra=("--part", "lid", "hinge", "lid.png", "--parts-json", "parts.json"),
+                               extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
+                                      "--parts-json", "parts.json"),
                                fixture_script=self.CHEST_FIXTURE,
                                files={"parts.json": json.dumps({"parts": {"body": {"kind": "body", "id": 2},
                                                                          "lid": {"kind": "hinge", "id": 1}}})})
@@ -1057,6 +1058,11 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertGreaterEqual(measured["inspection"]["part_coverage"]["lid"], 0.5)
         height = objects["lid"]["max"][2] - objects[measured["body"]]["min"][2]
         self.assertAlmostEqual(height, 0.6, delta=0.02)  # the target size held over body and lid together
+        # anchored back-top: the pivot on the lid's back edge (+Y) at its top (+Z), centred along X
+        lid = objects["lid"]
+        self.assertAlmostEqual(lid["origin"][1], lid["max"][1], delta=0.005)
+        self.assertAlmostEqual(lid["origin"][2], lid["max"][2], delta=0.005)
+        self.assertAlmostEqual(lid["origin"][0], (lid["min"][0] + lid["max"][0]) / 2, delta=0.005)
 
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:

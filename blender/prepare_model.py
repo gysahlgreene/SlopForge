@@ -880,7 +880,9 @@ if "--pivot" in sys.argv:
 # -------------------------------------------------
 
 if not mesh_only and parts_table is not None:
-    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions)):
+    anchors = {value.split("=")[0]: value.split("=")[1].split("-") for index, value in enumerate(sys.argv)
+               if index and sys.argv[index - 1] == "--anchor"}
+    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors):
         print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
               f"pivot {[round(v, 4) for v in child.location]}")
 elif not mesh_only:

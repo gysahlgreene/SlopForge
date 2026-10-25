@@ -1255,7 +1255,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
-                  parts_json=parts_json)
+                  parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")})
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
