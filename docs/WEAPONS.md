@@ -281,7 +281,7 @@ props and other static assets get a uv2 set for baked lighting; held weapons nev
 player. LODs are not generated (the mesh budget is the one LOD).
 
 After the prefab, the publication **plays it**: a play-mode test assembly is written into the project
-(`Assets/SlopForgeTests/PlayMode`, `slopforge/unity_playmode.py`) and run with Unity's test runner. Each hinge or
+(`Assets/SlopForgeTests/PlayMode`, `slopforge/unity_playmode.py`), run with Unity's test runner and removed again. Each hinge or
 slide gets `PartPulses("<part>")`: the Animator's trigger is set, the part must have moved at mid-pulse and be back
 at rest within 2 mm and 0.5° after 2 s. `RestsOnTheGround` drops the prefab on a floor plane: after 3 s it must be
 above the floor and still. The NUnit results are kept beside the asset (`<name>_playmode.xml`) and summarised in

@@ -172,6 +172,7 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
         report = verify_play_mode(self.root, prefab, parts, results=self.folder / "playmode.xml")
         self.assertEqual(report["failed"], [])
         self.assertEqual(sorted(report["passed"]), ['PartPulses("lever")', 'PartPulses("slide")', "RestsOnTheGround"])
+        self.assertFalse((self.root / "Assets/SlopForgeTests").exists())  # the scaffolding leaves the project
 
     def test_a_hinge_that_swings_into_the_body_fails_the_penetration_check(self):
         fbx = self._export()

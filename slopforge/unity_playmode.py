@@ -6,6 +6,7 @@ part's trigger moves it and brings it back, and the Rigidbody settles on a floor
 """
 import json
 import os
+import shutil
 import subprocess
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
@@ -142,6 +143,12 @@ def verify_play_mode(project_root, prefab, parts, *, results):
     except subprocess.TimeoutExpired:
         raise StageFailure("environment", "Unity's play-mode test run did not finish in 20 minutes",
                            operation="play_mode_verification", remedy=f"read {log}") from None
+    finally:  # the test assembly is SlopForge's scaffolding, not the project's: it leaves with its .meta files
+        shutil.rmtree(folder, ignore_errors=True)
+        for parent in (folder.parent, folder):
+            Path(str(parent) + ".meta").unlink(missing_ok=True)
+        if folder.parent.is_dir() and not any(folder.parent.iterdir()):
+            folder.parent.rmdir()
     if not results.is_file():
         tail = log.read_text(errors="replace")[-3000:] if log.is_file() else ""
         raise StageFailure("environment", "Unity's play-mode test run wrote no results",
