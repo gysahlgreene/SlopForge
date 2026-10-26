@@ -419,8 +419,12 @@ def sweep_penetration(part, others, axis, low, high, samples=9, limit=400, depth
     (generated meshes are open, so a ray's parity lies) and counts when it is deeper than `depth` of the model's
     size: a hybrid slide and frame are one surface cut along a zigzag, and moved back the slide's edge dips a
     fraction of a millimetre under the frame's along the whole seam (6% of a pistol's slide newly inside, 0.14%
-    deeper than half a percent; a chest lid turned the wrong way 18% and 7.4%, 2026-10-25). Everything is in world
-    space: the body of a weapon stands at its grip, away from the origin. Unity repeats the check on the prefab."""
+    deeper than half a percent; a chest lid turned the wrong way 18% and 7.4%, 2026-10-25). A slide's point that
+    enters through its seat (the others' triangles within `depth` of the part at rest) is the part going into its
+    housing and does not count: a pistol's trigger cut from the frame it was fused to enters the solid frame there
+    by its whole travel (2026-10-26). A hinge has no housing: a lid rests on its chest's whole top, and turned the
+    wrong way it enters through that seat. Everything is in world space: the body of a weapon stands at its grip,
+    away from the origin. Unity repeats the check on the prefab."""
     import numpy as np
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
@@ -433,17 +437,38 @@ def sweep_penetration(part, others, axis, low, high, samples=9, limit=400, depth
     tree = BVHTree.FromPolygons([Vector(c) for c in corners], [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(len(triangles))])
     points = np.array([tuple(p) for p in rest])
     size = float(np.ptp(np.concatenate([corners, points]), 0).max())
+    own = world_triangles([part]).reshape(-1, 3)
+    part_tree = BVHTree.FromPolygons([Vector(c) for c in own], [(3 * i, 3 * i + 1, 3 * i + 2) for i in range(len(own) // 3)])
+    seat = np.array([part.get("slopforge_part") == "slide" and
+                     min(part_tree.find_nearest(Vector(p))[3] for p in (*triangle, triangle.mean(0))) <= depth * size
+                     for triangle in triangles])
     inside = lambda pts: np.abs(winding_numbers(pts, triangles)) > 0.5
     at_rest = inside(points)
     far = low if abs(low) > abs(high) else high  # the range runs from rest to its far end
+    path = [points]
     worst = 0.0
     for sample in range(1, samples + 1):
         move = np.array(motion_matrix(part, axis, far * sample / samples))
         moved = points @ move[:3, :3].T + move[:3, 3]
+        path.append(moved)
         entered = np.nonzero(inside(moved) & ~at_rest)[0]
-        deep = sum(1 for index in entered if tree.find_nearest(Vector(moved[index]))[3] > depth * size)
+        deep = sum(1 for index in entered if tree.find_nearest(Vector(moved[index]))[3] > depth * size
+                   and not _entered_through(tree, seat, [step[index] for step in path]))
         worst = max(worst, deep / len(points))
     return round(worst, 4)
+
+
+def _entered_through(tree, seat, positions):
+    """Whether a point's path (its positions in order) first crosses the others' surface at a seat triangle."""
+    from mathutils import Vector
+    for start, end in zip(positions, positions[1:]):
+        direction = Vector(end) - Vector(start)
+        if direction.length == 0:
+            continue
+        hit = tree.ray_cast(Vector(start), direction.normalized(), direction.length)
+        if hit[0] is not None:
+            return bool(seat[hit[2]])
+    return False
 
 
 def motion_matrix(part, axis, amount):

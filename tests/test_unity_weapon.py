@@ -262,3 +262,44 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'open.fbx')!r}, use_selecti
         self.assertGreater(report["motions"][0]["penetration"], 0.1)
         # the usual cause is the sign (docs/WEAPONS.md, Axes): the error names the range that clears the slab
         self.assertTrue(any("opposite sign, 150" in error for error in report["errors"]), report["errors"])
+
+    def test_a_slide_entering_its_seat_passes_and_one_entering_elsewhere_fails(self):
+        """A hybrid pistol's trigger was cut from the frame it was fused to; slid 5 mm back it enters the solid frame
+        through that cut, and Unity read 0.026 of the same model Blender read 0.005 (HP9, 2026-10-26). As the
+        Blender sweep: a slide entering through its seat (the body's surface it touches at rest) goes into its
+        housing; one entering elsewhere collides; a hinge resting on the body and turned into it still counts."""
+        script = f"""import bpy
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def cube(name, size, location, cuts, parent=None, kind=None, pivot=None):
+    bpy.ops.mesh.primitive_cube_add(size=size, location=location)
+    o = bpy.context.object; o.name = name
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.object.mode_set(mode='OBJECT')
+    if pivot:
+        bpy.context.scene.cursor.location = pivot; bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
+    if parent: o.parent = parent; o.matrix_parent_inverse = parent.matrix_world.inverted()
+    if kind: o['slopforge_part'] = kind
+    bpy.ops.mesh.uv_texture_add(); o.data.materials.append(bpy.data.materials.new(name))
+    return o
+body = cube('body', 0.4, (0, 0, 0), 15)
+cube('seated', 0.1, (-0.1, -0.25, 0), 3, body, 'slide')  # against the block's front (Blender -Y, Unity +Z)
+cube('apart', 0.1, (0.1, -0.27, 0), 3, body, 'slide')  # 0.02 clear of it
+cube('lid', 0.1, (0, 0, 0.25), 3, body, 'hinge', pivot=(0, -0.05, 0.2))  # resting on its top, hinged on its front edge
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.fbx(filepath={str(self.folder / 'seat.fbx')!r}, use_selection=True, object_types={{'MESH'}},
+    axis_forward='-Z', axis_up='Y', apply_unit_scale=True, bake_space_transform=False, add_leaf_bones=False,
+    use_custom_props=True)
+"""
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                       check=True, capture_output=True)
+        # back (Unity -z) into the block; the lid turned -90 about x swings its back half down into it
+        parts = [{"name": "seated", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0},
+                 {"name": "apart", "kind": "slide", "axis": "z", "min": -0.06, "max": 0.0},
+                 {"name": "lid", "kind": "hinge", "axis": "x", "min": -90.0, "max": 0.0}]
+        report = build_weapon_prefab(self.root, "seat", self.folder / "seat.fbx", parts,
+                                     prefab=self.folder / "seat.prefab", clip_folder=self.folder / "Animations",
+                                     render=self.folder / "seat.png", held=False, mass=1.0, layer=None)
+        penetration = {motion["part"]: motion["penetration"] for motion in report["motions"]}
+        self.assertLessEqual(penetration["seated"], 0.02, report["errors"])
+        self.assertGreater(penetration["apart"], 0.2, report["errors"])
+        self.assertGreater(penetration["lid"], 0.2, report["errors"])

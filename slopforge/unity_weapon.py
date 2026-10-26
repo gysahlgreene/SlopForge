@@ -240,13 +240,13 @@ public static class CLASS_NAME
         AnimationMode.StopAnimationMode();
         var motion = new Motion { part = declared.name, kind = declared.kind, clip = clipPath, pivot = Floats(restPosition) };
         var label = declared.kind + " " + declared.name;
-        motion.penetration = Penetration(root, part, clip, request);
+        motion.penetration = Penetration(root, part, clip, request, declared.kind == "slide");
         if (motion.penetration > request.penetration_tolerance)
         {
             // A hinge's usual cause is the range's sign (docs/WEAPONS.md, Axes): say so when the mirrored range clears.
             // A slide's opposite direction leaves the body almost always, which says nothing about the right one.
             var mirrored = declared.kind != "hinge" ? 1f : Penetration(root, part, Pulse(clip.name + "_mirrored", part,
-                AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request);
+                AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request, false);
             errors.Add(label + " penetrates the body through its range (" +
                        motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices deep inside the body" +
                        (mirrored <= request.penetration_tolerance ? "; the opposite sign, " +
@@ -280,7 +280,9 @@ public static class CLASS_NAME
     // chest, a drawer travelling past its housing. A vertex is inside where the body's winding number is over a half
     // (Winding) and counts when it was not inside at rest and lies deeper than penetration_depth of the model's size:
     // a slide cut from the same surface as its frame dips a fraction of a millimetre under it along the seam.
-    static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request)
+    // A slide's point that enters the body through its seat (the body's triangles within the depth of the part at
+    // rest) is the part going into its housing and does not count; a hinge has no housing (mesh_cleanup.py's sweep).
+    static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request, bool slide)
     {
         // The body's triangles in world space; it stays still while the part's clip is sampled.
         var names = new HashSet<string>(request.parts.Select(p => p.name));
@@ -302,6 +304,8 @@ public static class CLASS_NAME
         foreach (var vertex in vertices) bounds.Encapsulate(partFilter.transform.TransformPoint(vertex));
         var depth = request.penetration_depth * Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
         bool[] atRest = null;
+        var seat = new bool[body.Length / 3];
+        var path = new List<Vector3[]>();
         var worst = 0f;
         AnimationMode.StartAnimationMode();
         for (var sample = 0; sample <= 8; sample++)
@@ -309,15 +313,69 @@ public static class CLASS_NAME
             AnimationMode.SampleAnimationClip(root, clip, 0.5f * sample / 8f);
             var filter = part.GetComponentInChildren<MeshFilter>();
             var points = vertices.Select(vertex => filter.transform.TransformPoint(vertex)).ToArray();
+            path.Add(points);
             var inside = points.Select(point => Math.Abs(Winding(point, body)) > 0.5).ToArray();
-            if (atRest == null) { atRest = inside; continue; }
+            if (atRest == null)
+            {
+                atRest = inside;
+                if (slide) seat = Seat(body, filter, depth);
+                continue;
+            }
             var deep = Enumerable.Range(0, points.Length)
-                .Count(i => inside[i] && !atRest[i] && Distance(points[i], body) > depth);
+                .Count(i => inside[i] && !atRest[i] && Distance(points[i], body) > depth && !EnteredThrough(path, i, body, seat));
             worst = Mathf.Max(worst, (float)deep / points.Length);
         }
         AnimationMode.SampleAnimationClip(root, clip, 0f);
         AnimationMode.StopAnimationMode();
         return worst;
+    }
+
+    // The body's triangles within `depth` of the part's surface (a corner or the centre).
+    static bool[] Seat(Vector3[] body, MeshFilter filter, float depth)
+    {
+        var mesh = filter.sharedMesh; var points = mesh.vertices;
+        var own = mesh.triangles.Select(index => filter.transform.TransformPoint(points[index])).ToArray();
+        var near = new Bounds(own[0], Vector3.zero);
+        foreach (var corner in own) near.Encapsulate(corner);
+        near.Expand(2f * depth);
+        var seat = new bool[body.Length / 3];
+        for (var t = 0; t < seat.Length; t++)
+        {
+            var corners = new[] { body[3 * t], body[3 * t + 1], body[3 * t + 2], (body[3 * t] + body[3 * t + 1] + body[3 * t + 2]) / 3f };
+            seat[t] = corners.Any(near.Contains) && corners.Any(corner => Distance(corner, own) <= depth);
+        }
+        return seat;
+    }
+
+    // Whether point i's path (its positions sample by sample) first crosses the body at a seat triangle.
+    static bool EnteredThrough(List<Vector3[]> path, int i, Vector3[] body, bool[] seat)
+    {
+        for (var step = 1; step < path.Count; step++)
+        {
+            var start = path[step - 1][i]; var along = path[step][i] - start;
+            var nearest = float.MaxValue; var hit = -1;
+            for (var t = 0; t < seat.Length; t++)
+            {
+                var at = Crossing(start, along, body[3 * t], body[3 * t + 1], body[3 * t + 2]);
+                if (at >= 0f && at <= 1f && at < nearest) { nearest = at; hit = t; }
+            }
+            if (hit >= 0) return seat[hit];
+        }
+        return false;
+    }
+
+    // Where segment start + s * along crosses triangle abc (s in 0..1), or -1 (Moller and Trumbore).
+    static float Crossing(Vector3 start, Vector3 along, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 e1 = b - a, e2 = c - a, p = Vector3.Cross(along, e2);
+        var det = Vector3.Dot(e1, p);
+        if (Mathf.Abs(det) < 1e-12f) return -1f;
+        var inverse = 1f / det; var s = start - a;
+        var u = Vector3.Dot(s, p) * inverse;
+        if (u < 0f || u > 1f) return -1f;
+        var q = Vector3.Cross(s, e1); var v = Vector3.Dot(along, q) * inverse;
+        if (v < 0f || u + v > 1f) return -1f;
+        return Vector3.Dot(e2, q) * inverse;
     }
 
     // The generalized winding number of a point about triangles (three corners each): about 1 inside a closed

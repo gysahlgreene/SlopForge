@@ -1331,7 +1331,8 @@ class BlenderSweepPenetrationTests(unittest.TestCase):
         # A weapon's body keeps its object location (the grip centre, 0.27 m from the origin on a hybrid pistol).
         # The sweep built its trees from the objects, in their own space, and cast from the part's world-space
         # vertices: every ray missed the body and a slide read 0.000 where Unity's prefab read 0.025 (2026-10-25).
-        # A box above the body slid 0.3 down sinks wholly into it, wherever the body stands.
+        # A box clear above the body (not resting on it: that would be its seat) slid 0.3 down sinks wholly into it,
+        # wherever the body stands.
         script = f'''import bpy, sys
 sys.path.insert(0, {str(ROOT / "blender")!r})
 from mesh_cleanup import sweep_penetration
@@ -1340,7 +1341,7 @@ for location in ((0, 0, 0), (0.1, 0.3, 0.27)):
     for o in list(bpy.data.objects): bpy.data.objects.remove(o)
     bpy.ops.mesh.primitive_cube_add(size=0.4, location=location)
     body = bpy.context.object
-    bpy.ops.mesh.primitive_cube_add(size=0.2, location=(location[0], location[1], location[2] + 0.301))
+    bpy.ops.mesh.primitive_cube_add(size=0.2, location=(location[0], location[1], location[2] + 0.35))
     part = bpy.context.object
     part.parent = body; part.matrix_parent_inverse = body.matrix_world.inverted(); part["slopforge_part"] = "slide"
     bpy.context.view_layer.update()
@@ -1421,6 +1422,49 @@ print("POCKET", sweep_penetration(part, [slab], "z", -0.7, 0.0))
         pocket = [float(line.rsplit(" ", 1)[1]) for line in result.stdout.splitlines() if line.startswith("POCKET")]
         self.assertEqual(len(pocket), 1, result.stdout[-2000:])
         self.assertLessEqual(pocket[0], 0.02)
+
+    def test_a_part_slid_into_its_seat_is_not_inside_but_one_entering_elsewhere_is(self):
+        # A hybrid pistol's trigger was cut from the frame it was fused to; slid 5 mm back it enters the solid frame
+        # through that cut by its whole travel, which was the depth limit itself: Blender read 0.005 and Unity 0.026
+        # of the same model, and every travel past the limit fails (HP9, 2026-10-26). A part entering the body
+        # through its seat (the body's surface it touches at rest) goes into its housing; entering anywhere else is
+        # a collision. A box against a block's front slid 0.03 into it, and the same box 0.02 clear of it slid 0.06.
+        # A hinge has no housing: a lid rests on the whole top of its chest, and turned the wrong way it enters
+        # through that seat; a box resting on the block, turned about its front edge into it, still counts.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def cube(size, location, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=size, location=location)
+    o = bpy.context.object
+    bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.object.mode_set(mode="OBJECT")
+    return o
+body = cube(0.4, (0, 0, 0), 15)
+for name, y, travel in (("SEATED", -0.25, 0.03), ("APART", -0.27, 0.06)):
+    part = cube(0.1, (0, y, 0), 3)
+    part.parent = body; part["slopforge_part"] = "slide"
+    bpy.context.view_layer.update()
+    # Unity z (forward) is Blender -Y: a negative amount moves the box back, into the block
+    print(name, sweep_penetration(part, [body], "z", -travel, 0.0))
+    bpy.data.objects.remove(part)
+lid = cube(0.1, (0, 0, 0.25), 3)  # resting on the block's top
+bpy.context.scene.cursor.location = (0, -0.05, 0.2)  # its front-bottom edge
+bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+lid.parent = body; lid["slopforge_part"] = "hinge"
+bpy.context.view_layer.update()
+print("TURNED", sweep_penetration(lid, [body], "x", -90.0, 0.0))  # its back half down into the block
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        found = {line.split()[0]: float(line.split()[1]) for line in result.stdout.splitlines()
+                 if line.startswith(("SEATED", "APART", "TURNED"))}
+        self.assertEqual(set(found), {"SEATED", "APART", "TURNED"}, result.stdout[-2000:])
+        self.assertLessEqual(found["SEATED"], 0.02)
+        self.assertGreater(found["APART"], 0.2)
+        self.assertGreater(found["TURNED"], 0.2)
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")

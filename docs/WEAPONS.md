@@ -397,6 +397,16 @@ inside, 0.14% deeper than that; its trigger pulled 20° 22% and 3.3%; OmniPart's
 turned the wrong way 18% and 7.4%, the right way none. Penetration says nothing about the openings themselves: a
 piece left open shows holes when its part moves (see Hybrid parts).
 
+A **slide entering its seat** does not count: a slide's point whose path first crosses the body at the body's
+triangles within the depth limit of the part at rest is the part going into its housing (a trigger into its frame,
+a magazine into its grip, a drawer closing). A hybrid pistol's trigger was cut from the frame it was fused to, and
+slid 5 mm back it entered the solid frame through that cut by its whole travel, which was the depth limit itself:
+Blender read 0.005 and Unity 0.026 of the same model, float noise deciding, and any longer travel failed (HP9,
+2026-10-26). With the seat rule the same model reads 0.005 and 0.008, and 10 mm back 0.012 and 0.020, where the
+trigger's blade meets the frame away from its seat. A hinge has no housing: a lid rests on its chest's whole top,
+and turned the wrong way it would enter through that seat, so hinges count every point. The rule cannot tell a
+slide declared the wrong way into its housing from the right one; Play mode and the review show which way it moves.
+
 The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every asset that is not held at a grip:
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
 player. LODs are not generated (the mesh budget is the one LOD).
