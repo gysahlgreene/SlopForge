@@ -1171,6 +1171,59 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertAlmostEqual(lid["origin"][2], lid["max"][2], delta=0.005)
         self.assertAlmostEqual(lid["origin"][0], (lid["min"][0] + lid["max"][0]) / 2, delta=0.005)
 
+    LOCKED_CHEST = """import bpy, math, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.materials.append(bpy.data.materials.new(name))
+    return o
+body = box('body', (0, 0, 0.2), (0.6, 0.4, 0.4), 3)
+lock = box('lock', (-0.2, -0.22, 0.3), (0.08, 0.04, 0.08), 8)  # a dense hasp on the front, off centre
+bpy.ops.object.select_all(action='DESELECT'); body.select_set(True); lock.select_set(True)
+bpy.context.view_layer.objects.active = body; bpy.ops.object.join()
+box('lid', (0, 0, 0.45), (0.6, 0.4, 0.1), 3)
+for o in bpy.context.scene.objects:  # generated turned a little, as TRELLIS.2 may
+    o.rotation_euler = (0, 0, math.radians(9)); bpy.context.view_layer.objects.active = o
+    o.select_set(True); bpy.ops.object.transform_apply(rotation=True)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    def test_a_chest_generated_open_faces_away_from_its_hinge_and_stands_square(self):
+        # OPEN3 and OPEN4 (2026-10-26): the silhouette fit put the camera behind the chest (theta -140 for OPEN2's 45)
+        # and the lock went to the back, the lid hinged on it; principal axes of vertex-weighted samples leaned 6-9
+        # degrees, and the lid turning about X swung crooked. The hinge the lid closed on is the back; the horizontal
+        # axes are the footprint's smallest rectangle.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        turn = math.radians(9)
+        results = {}
+        for side, (x, y) in (("back", (0.0, 0.2)), ("front", (0.0, -0.2))):
+            hinge = [x * math.cos(turn) - y * math.sin(turn), x * math.sin(turn) + y * math.cos(turn), 0.4]
+            parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}},
+                                     "open_state": {"part": "lid", "hinge": hinge}})
+            results[side] = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks,
+                                        pivot="bottom_center",
+                                        extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-bottom",
+                                               "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                                        fixture_script=self.LOCKED_CHEST, files={"parts.json": parts_json})
+        for side, measured in results.items():
+            body, lid = measured["objects"][measured["body"]], measured["objects"]["lid"]
+            with self.subTest(hinge=side):
+                # square: the lid's footprint 0.72 x 0.48 (0.6 x 0.4 at 1.2 to stand 0.6 tall), not a turned one
+                self.assertAlmostEqual(lid["max"][0] - lid["min"][0], 0.72, delta=0.01)
+                self.assertAlmostEqual(lid["max"][1] - lid["min"][1], 0.48, delta=0.01)
+        # the lock stands out on the side away from the hinge, whichever that is: front (-Y) when hinged at the back
+        locked = results["back"]
+        self.assertLess(locked["objects"][locked["body"]]["min"][1], locked["objects"]["lid"]["min"][1] - 0.03)
+        reverse = results["front"]
+        self.assertGreater(reverse["objects"][reverse["body"]]["max"][1], reverse["objects"]["lid"]["max"][1] + 0.03)
+
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
