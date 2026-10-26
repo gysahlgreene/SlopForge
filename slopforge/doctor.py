@@ -52,6 +52,17 @@ def run_doctor(project_root=None):
             report("PASS", "Style pack", f"{style['name']} v{style['version']}")
             types = load_taxonomy(root)
             report("PASS", "Asset taxonomy", f"{len(types)} types")
+            # init copies the templates once: a project's type file keeps none of the settings added to the template
+            # since (a prop type without concept_colour_transfer left six chest runs uncorrected, 2026-10-26)
+            import yaml
+            for template in sorted((tool_root() / "templates/asset_types").glob("*.yaml")):
+                own = root / "ai/asset_types" / template.name
+                if own.is_file():
+                    missing = sorted(set(yaml.safe_load(template.read_text()) or {}) -
+                                     set(yaml.safe_load(own.read_text()) or {}))
+                    if missing:
+                        report("WARN", f"Asset type {template.stem}",
+                               f"lacks template settings {', '.join(missing)}; copy them from {template} if wanted")
             for role, key in (("Workflow", "image"), ("Character concept workflow", "character_image"),
                               ("Guided concept workflow", "guided_image"),
                               ("Model workflow", "model"), ("Character model workflow", "character_model"),
