@@ -481,3 +481,84 @@ def _typical_texel(loops, uv, basecolor):
     colours = _PIXELS[basecolor.name][rows, columns]
     nearest = int(np.argmin(np.abs(colours - np.median(colours, 0)).sum(1)))
     return loops[nearest][uv].uv.copy()
+
+
+# ---------------------------------------------------------------------------
+# Moving parts generated as separate meshes (OmniPart): tag by node name, separate after the join
+# ---------------------------------------------------------------------------
+
+def gltf_name(obj):
+    """The glTF node name an imported object was made from: Blender appends .001 to a clashing name."""
+    import re
+    return re.sub(r"\.\d{3}$", "", obj.name)
+
+
+def tag_parts(objects, table):
+    """A FACE int attribute `slopforge_part` on every object: its part's id from the table (0 when unknown), so the
+    parts survive the final pass's join and are separated again after orientation (separate_tagged)."""
+    for obj in objects:
+        attribute = obj.data.attributes.get("slopforge_part") or obj.data.attributes.new("slopforge_part", "INT", "FACE")
+        value = int(table.get(gltf_name(obj), {}).get("id", 0))
+        attribute.data.foreach_set("value", [value] * len(obj.data.polygons))
+
+
+def separate_tagged(obj, table, contact):
+    """Move each hinge or slide's tagged faces into a child of obj (see _attach). A slide pivots at its box centre;
+    a hinge at the centroid of its vertices within `contact` of the rest of the weapon, or at its box centre when
+    it touches nothing. Returns the children."""
+    import bpy
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    layer = bm.faces.layers.int.get("slopforge_part")
+    if layer is None:
+        bm.free()
+        return []
+    # The GLB split its vertices along UV seams; welded, each part is closed again and its seam edges are not open.
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=max(obj.dimensions) * 1e-6)
+    # Every part but the body becomes a child, static ones too (a grip, a slide's rear): the body stays one piece
+    # for the component budget, and the moving parts get their pivots.
+    parts = {entry["id"]: (name, entry["kind"]) for name, entry in table.items() if entry["kind"] != "body"}
+    moving = {part_id for part_id, (_name, kind) in parts.items() if kind in ("hinge", "slide")}
+    # Distance to the rest of the weapon's surface, not its vertices: a trigger under a flat underside has no
+    # body vertex near it.
+    rest = bm.copy()
+    rest_layer = rest.faces.layers.int.get("slopforge_part")
+    bmesh.ops.delete(rest, geom=[face for face in rest.faces if face[rest_layer] in moving], context="FACES")
+    tree = BVHTree.FromBMesh(rest)
+    rest.free()
+    children = []
+    for part_id, (name, kind) in parts.items():
+        faces = [face for face in bm.faces if face[layer] == part_id]
+        if not faces:
+            print(f"Part {name} ({kind}): no faces were generated for it")
+            continue
+        verts = {vert for face in faces for vert in face.verts}
+        low = Vector([min(vert.co[axis] for vert in verts) for axis in range(3)])
+        high = Vector([max(vert.co[axis] for vert in verts) for axis in range(3)])
+        pivot = (low + high) / 2
+        if kind == "hinge":
+            touching = [vert.co for vert in verts
+                        if tree.find_nearest(vert.co)[3] is not None and tree.find_nearest(vert.co)[3] <= contact]
+            if touching:
+                pivot = sum(touching, Vector()) / len(touching)
+        piece = bm.copy()
+        piece_layer = piece.faces.layers.int.get("slopforge_part")
+        bmesh.ops.delete(piece, geom=[face for face in piece.faces if face[piece_layer] != part_id], context="FACES")
+        # The join left the imported part's mesh as an orphan under this name; the child takes the exact name
+        for block in (bpy.data.meshes, bpy.data.objects):
+            taken = block.get(name)
+            if taken is not None and taken.users == 0:
+                block.remove(taken)
+        mesh = bpy.data.meshes.new(name)
+        piece.to_mesh(mesh)
+        piece.free()
+        child = _attach(obj, mesh, kind, pivot)
+        child.name = mesh.name = name
+        children.append(child)
+        bmesh.ops.delete(bm, geom=faces, context="FACES")
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    return children

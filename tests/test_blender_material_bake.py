@@ -311,6 +311,78 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderPreparePartsTests(unittest.TestCase):
+    """blender/prepare_parts.py: generated parts (one textured GLB node each) are reduced to shares of the budget,
+    unwrapped into one base-colour atlas with a metallic atlas by part, and exported with their node names kept."""
+
+    def test_parts_are_reduced_into_one_atlas_with_their_names_kept(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def part(name, size, colour, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    o = bpy.context.object; o.name = name; o.scale = size
+    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    image = bpy.data.images.new(name + '_tex', 16, 16); image.pixels = list(colour) * 256; image.pack()
+    m = bpy.data.materials.new(name); m.use_nodes = True
+    tex = m.node_tree.nodes.new('ShaderNodeTexImage'); tex.image = image
+    m.node_tree.links.new(tex.outputs['Color'], m.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
+    m.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 1.0  # glTF's default: a diffuse bake of a metal is black
+    o.data.materials.append(m)
+part('body', (2, 1, 1), (1, 0, 0, 1), 6)
+part('slide', (2, 0.3, 0.3), (0, 0, 1, 1), 6)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture), "--",
+                            str(root / "parts.glb")], check=True, capture_output=True, text=True)
+            (root / "parts.json").write_text(json.dumps({"parts": {"body": {"kind": "body"}, "slide": {"kind": "slide"}}}))
+            prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                       str(ROOT / "blender/prepare_parts.py"), "--", str(root / "parts.glb"),
+                                       str(root / "processed.glb"), str(root / "processed.blend"),
+                                       "--parts-json", str(root / "parts.json"), "--face-budget", "400",
+                                       "--basecolor-output", str(root / "atlas.png"), "--metallic-output",
+                                       str(root / "metal.png"), "--texture-size", "256",
+                                       "--metal", "body=1", "--metal", "slide=0"], capture_output=True, text=True)
+            self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
+            probe, result = root / "probe.py", root / "probe.json"
+            probe.write_text("""import bpy, json, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath=sys.argv[-2])
+report = {}
+for o in [o for o in bpy.data.objects if o.type == 'MESH']:
+    uv = o.data.uv_layers.active.data
+    report[o.name] = {"faces": len(o.data.polygons), "uv_layers": len(o.data.uv_layers),
+                      "uv_centre": [sum(uv[i].uv[k] for i in o.data.polygons[0].loop_indices) / len(o.data.polygons[0].loop_indices) for k in range(2)],
+                      "images": [n.image.name for m in o.data.materials if m for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image]}
+json.dump(report, open(sys.argv[-1], 'w'))
+""")
+            probed = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(probe), "--",
+                                     str(root / "processed.glb"), str(result)], capture_output=True, text=True)
+            self.assertEqual(probed.returncode, 0, (probed.stdout + probed.stderr)[-3000:])
+            report = json.loads(result.read_text())
+            self.assertEqual(sorted(report), ["body", "slide"])
+            self.assertLessEqual(sum(item["faces"] for item in report.values()), 400)
+            self.assertTrue(all(item["faces"] >= 8 for item in report.values()))
+            self.assertEqual([item["uv_layers"] for item in report.values()], [1, 1])
+            self.assertEqual([item["images"] for item in report.values()], [[], []])  # textures live in the atlas
+            atlas = np.asarray(Image.open(root / "atlas.png").convert("RGB"), dtype=int)
+            red = ((atlas[..., 0] > 150) & (atlas[..., 2] < 100)).mean()
+            blue = ((atlas[..., 2] > 150) & (atlas[..., 0] < 100)).mean()
+            self.assertGreater(red, 0.01); self.assertGreater(blue, 0.01)
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"), dtype=float) / 255
+            for name, expected in (("body", 1.0), ("slide", 0.0)):
+                u, v = report[name]["uv_centre"]
+                x, y = int(u * (metal.shape[1] - 1)), int((1 - v) * (metal.shape[0] - 1))
+                self.assertAlmostEqual(float(metal[y, x]), expected, delta=0.1, msg=name)
+            self.assertIn("Part slide:", prepared.stdout)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderUVCoverageTests(unittest.TestCase):
     def test_inspection_reports_uv_area_and_out_of_bounds_loops(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -715,7 +787,8 @@ class BlenderSurfaceSourceGuardTests(unittest.TestCase):
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderWeaponOrientationTests(unittest.TestCase):
-    def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=()):
+    def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=(),
+               fixture_script=None, files=None):
         """Box parts joined into one mesh (subdivided by cuts) and turned, then the final pass with --target-size and
         --pivot grip; masks are written beside the concept for extra arguments that name them. Returns the body's
         dimensions, extremes, grip centre and recorded concept view, and every mesh object's parent, origin, world
@@ -727,7 +800,9 @@ class BlenderWeaponOrientationTests(unittest.TestCase):
             for path in maps:
                 Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
             fixture = root / "fixture.py"
-            fixture.write_text(f"""import bpy, math, sys
+            for name, text in (files or {}).items():
+                (root / name).write_text(text)
+            fixture.write_text(fixture_script or f"""import bpy, math, sys
 bpy.ops.wm.read_factory_settings(use_empty=True)
 for location, scale in {list(parts.values())!r}:
     bpy.ops.mesh.primitive_cube_add(size=1, location=location)
@@ -757,7 +832,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                                        str(blend), *map(str, maps), "--face-budget", str(budget), "--surface-source",
                                        str(_swatch(maps[0])), "--target-size", target, "--pivot", "grip", "--concept",
                                        str(root / "concept.png"), "--grip-mask", str(root / "grip.png"),
-                                       *[str(root / value) if value.endswith(".png") else value for value in extra]],
+                                       *[str(root / value) if value.endswith((".png", ".json")) else value for value in extra]],
                                       capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
             probe, result = root / "probe.py", root / "probe.json"
@@ -830,6 +905,92 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         fit, theta, _phi, alignment = measured["view"]
         self.assertGreater(fit, 0.7)  # boxes against a drawn concept, as above
         self.assertGreaterEqual(abs(theta), 175)
+
+    PARTS_FIXTURE = """import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size  # meshes named like the parts, as the tool writes them
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=3); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.materials.append(bpy.data.materials.new(name))
+box('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))        # on top of the body, touching its top face; first on purpose
+box('body', (0, 0, 0), (1.0, 0.2, 0.2))              # (review 2026-10-25: the join must not steal a part's name)
+box('trigger', (0, 0, -0.15), (0.05, 0.02, 0.1))  # hangs below the body's middle, touching its underside
+box('floating', (-0.2, 0, -0.5), (0.05, 0.05, 0.05))  # a hinge that touches nothing
+box('grip', (0.4, 0, -0.1), (0.1, 0.22, 0.05))  # a static part: generated separately, keeps the body one piece
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+    PARTS_TABLE = json.dumps({"parts": {"body": {"kind": "body", "id": 4}, "slide": {"kind": "slide", "id": 1},
+                                        "trigger": {"kind": "hinge", "id": 2}, "floating": {"kind": "hinge", "id": 3},
+                                        "grip": {"kind": "grip", "id": 5}}})
+
+    def test_parts_from_a_glb_become_children_with_pivots_by_kind(self):
+        # A weapon generated as parts (OmniPart): the final pass tags each node's faces, joins, orients and scales
+        # as one, then separates the hinges and slides with pivots by kind: a slide at its box centre, a hinge at
+        # its contact with the body, or at its box centre when it touches nothing.
+        concept = Image.new("RGBA", (200, 80), (0, 0, 0, 0))
+        concept.paste((110, 110, 110, 255), (20, 30, 180, 50)); concept.paste((110, 110, 110, 255), (36, 22, 164, 30))
+        concept.paste((110, 110, 110, 255), (96, 50, 104, 58))  # the trigger below the body
+        grip = Image.new("L", (200, 80), 0); grip.paste(255, (150, 30, 180, 50))
+        masks = {}
+        for name, box in (("slide", (36, 22, 164, 30)), ("trigger", (96, 50, 104, 58)), ("floating", (0, 0, 16, 16))):
+            masks[name] = Image.new("L", (200, 80), 0); masks[name].paste(255, box)  # floating's mask is nowhere near it
+        measured = self.orient({}, [], concept, grip, budget=20000, target="-,1.0,-", masks=masks,
+                               extra=("--part", "slide", "slide", "slide.png", "--part", "trigger", "hinge", "trigger.png",
+                                      "--part", "floating", "hinge", "floating.png", "--parts-json", "parts.json"),
+                               fixture_script=self.PARTS_FIXTURE, files={"parts.json": self.PARTS_TABLE})
+        objects = measured["objects"]
+        coverage = measured["inspection"]["part_coverage"]  # the generated part projected onto its mask
+        self.assertGreaterEqual(coverage["slide"], 0.7)
+        self.assertGreaterEqual(coverage["trigger"], 0.5)
+        self.assertLessEqual(coverage["floating"], 0.2)
+        overflow = measured["inspection"]["part_overflow"]  # recorded, not yet enforced: cells outside the mask
+        self.assertGreaterEqual(overflow["floating"], 0.5)
+        self.assertLess(overflow["slide"], overflow["floating"])  # coarse on this fixture's crude concept
+        self.assertEqual(measured["inspection"]["part_components"]["slide"], 1)
+        body = objects[measured["body"]]
+        self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]},
+                         {"slide": "slide", "trigger": "hinge", "floating": "hinge", "grip": "grip"})  # exact names
+        self.assertEqual(measured["inspection"]["component_count"], 1)  # the body is one piece: every part is a child
+        for name in ("slide", "floating"):  # box centres
+            centre = [(objects[name]["min"][i] + objects[name]["max"][i]) / 2 for i in range(3)]
+            for axis in range(3):
+                self.assertAlmostEqual(objects[name]["origin"][axis], centre[axis], delta=0.005, msg=name)
+        trigger = objects["trigger"]
+        self.assertAlmostEqual(trigger["origin"][2], body["min"][2], delta=0.005)  # at the body's underside
+        self.assertAlmostEqual(trigger["origin"][1], (trigger["min"][1] + trigger["max"][1]) / 2, delta=0.02)
+        self.assertEqual(sorted(part["name"] for part in measured["fbx_inspection"]["parts"]),
+                         ["floating", "grip", "slide", "trigger"])
+        self.assertEqual(sum(1 for item in objects.values() if item["open_edges"]), 0)  # nothing was cut open
+
+    def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.py").write_text(self.PARTS_FIXTURE)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(root / "fixture.py"),
+                            "--", str(root / "parts.glb")], check=True, capture_output=True, text=True)
+            (root / "parts.json").write_text(self.PARTS_TABLE)
+            probe = root / "probe.py"
+            probe.write_text(f"""import bpy, json, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import tag_parts
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.import_scene.gltf(filepath={str(root / "parts.glb")!r})
+before = set(bpy.data.objects)
+bpy.ops.import_scene.gltf(filepath={str(root / "parts.glb")!r})
+second = [o for o in bpy.data.objects if o not in before and o.type == 'MESH']
+table = json.load(open({str(root / "parts.json")!r}))["parts"]
+tag_parts(second, table)
+print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes["slopforge_part"].data)) for o in second}}))
+""")
+            probed = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(probe)],
+                                    capture_output=True, text=True)
+            self.assertEqual(probed.returncode, 0, (probed.stdout + probed.stderr)[-3000:])
+            tags = json.loads(next(line for line in probed.stdout.splitlines() if line.startswith("TAGS "))[5:])
+            self.assertEqual(tags, {"body.001": [4], "slide.001": [1], "trigger.001": [2], "floating.001": [3], "grip.001": [5]})
 
     def test_moving_parts_are_split_from_the_body_with_pivots_by_kind(self):
         # W8: a slide and a hinged part are cut from one connected body along masks drawn on its concept, closed, and

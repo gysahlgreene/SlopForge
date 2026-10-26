@@ -13,6 +13,7 @@ from PIL import Image, ImageStat
 
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
+from ..backends.omnipart import generate_part_model
 from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
@@ -25,13 +26,14 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              make_metallic_gloss, match_concept_colours, match_metal_lightness, unity_cli,
-                              zero_metallic)
+                              finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
+                              unity_cli, zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
+                          apply_part_coverage,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1240,14 +1242,18 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
+    # The masks also go to the final pass of a weapon generated as parts: not to cut, but to measure how much of
+    # each mask the generated part covers (part_coverage).
     moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in asset.get("parts") or []
               if part["kind"] in ("hinge", "slide")] if held and masks else []
+    parts_json = mesh_path.parent / "parts/parts.json" if mesh_info.get("part_model") else None
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if held else None,
-                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving)
+                  grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
+                  parts_json=parts_json)
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1281,6 +1287,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_weapon_orientation(validation)
     if moving:
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
+    if mesh_info.get("part_model"):
+        validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
+                                         asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -2045,6 +2054,12 @@ def _published_artifacts(root, paths, candidate, execution_id):
     return published
 
 
+def part_backend(asset_type, asset):
+    """The part-level generator (asset type `part_model`) for a weapon that declares a hinge or slide, else None."""
+    moving = any(part.get("kind") in ("hinge", "slide") for part in asset.get("parts") or [])
+    return asset_type.get("part_model") if moving else None
+
+
 def model_route(config, asset_type):
     """Config whose model workflow is the asset type's own graph when the profile provides it.
 
@@ -2392,6 +2407,13 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            if part_backend(asset_type, asset):
+                # Only on the part route: a None here would change every existing asset's mesh settings (review
+                # 2026-10-25). A change of the part tools invalidates the stage.
+                mesh_settings["part_model"] = part_backend(asset_type, asset)
+                mesh_settings["part_tools_sha256"] = {
+                    "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
+                    "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")}
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
                 "settings": {key: value for key, value in mesh_settings.items() if key != "seed"},
@@ -2454,7 +2476,15 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             try:
                 if mesh_outputs is None:
                     config["_journal_context"] = journal_context
-                    if workflow:
+                    if part_backend(asset_type, asset) == "omnipart":
+                        # A weapon with moving parts: generated as parts (docs/WEAPONS.md, Moving parts)
+                        materials = asset.get("materials") or []
+                        generate_part_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
+                                            mesh_seed, asset["parts"], paths["part_masks"],
+                                            _reduction_budget(_face_budget(pipeline, asset_type, asset), asset),
+                                            materials, finish_word(materials),
+                                            texture_size=asset.get("texture_size") or pipeline.get("texture_size", 2048))
+                    elif workflow:
                         budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
@@ -2587,7 +2617,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                  if stage_record["attempt"] == attempt_number
                                  and artifact["type"].startswith("texture.")]
             upstream = [candidate_artifact, mesh_artifact]
-            material_inputs = texture_artifacts if mesh_info.get("textured") else upstream
+            # The part route derives its maps from the generated parts and records no texture artifacts, so its
+            # material stage descends from the mesh (review 2026-10-25: it had no parents at all).
+            material_inputs = texture_artifacts if mesh_info.get("textured") and texture_artifacts else upstream
             assembly_inputs = [prepared_artifact or mesh_artifact]
             lineage = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                        "execution_id": execution["id"], "attempt": attempt_number,

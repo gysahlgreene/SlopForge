@@ -544,3 +544,50 @@ def _import_record(root, report):
                            f"{', '.join(wrong) or 'assets'} or an asset has no GUID", operation="unity_import",
                            remedy="open the project in Unity, check the Console for import errors, and approve again")
     return {"unity_version": report["unity_version"], "assets": assets, "material_textures": textures}
+
+
+# ---------------------------------------------------------------------------
+# Maps for a weapon generated as parts (OmniPart gives base colour only)
+# ---------------------------------------------------------------------------
+
+FINISH_ROUGHNESS = {"matte": 0.7, "satin": 0.55, "polished": 0.25}  # a brief's finish word; satin is blued steel
+
+
+def finish_word(materials):
+    """The first finish word (polished, satin, matte) in a declared metal's description; satin when none."""
+    import re
+    for item in materials or []:
+        if item.get("class") == "metal":
+            found = re.search(r"\b(polished|satin|matte)\b", (item.get("description") or "").lower())
+            if found:
+                return found.group(1)
+    return "satin"
+
+
+def part_metal(parts, materials):
+    """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip"),
+    else 1 when the brief declares any metal, else 0."""
+    import re
+
+    def names(item):
+        return [word for word in re.findall(r"[a-z]+", (item.get("region") or "").lower()) if len(word) >= 3]
+    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in names(item)]
+    default = 1 if any(item.get("class") == "metal" for item in materials or []) else 0
+    return {part["name"]: 0 if any(word.startswith(part["name"]) or part["name"].startswith(word)
+                                   for word in nonmetal) else default for part in parts}
+
+
+def derive_part_maps(atlas, metal, finish, out_dir):
+    """basecolor (the atlas), a flat normal, a constant roughness from the finish word, and metallic from the
+    metallic atlas thresholded at 0.5; returns the four paths."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {key: out_dir / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
+    shutil.copy2(atlas, paths["basecolor"])
+    with Image.open(atlas) as image:
+        size = image.size
+    Image.new("RGB", size, (128, 128, 255)).save(paths["normal"])
+    Image.new("RGB", size, (round(FINISH_ROUGHNESS.get(finish, FINISH_ROUGHNESS["satin"]) * 255),) * 3).save(paths["roughness"])
+    with Image.open(metal) as image:
+        image.convert("L").point(lambda value: 255 if value >= 128 else 0).convert("RGB").save(paths["metallic"])
+    return paths

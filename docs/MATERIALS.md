@@ -182,6 +182,17 @@ result against that declaration before anyone reviews it.
    run `blender --background --python blender/render_turntable.py -- <name>_preview.blend <frames>`
    and `python3 scripts/turntable_gif.py <frames> <name>.gif`.
 
+## Maps for a weapon generated as parts
+
+OmniPart returns a base colour only (see [Weapons](WEAPONS.md#moving-parts-from-part-level-generation)). The backend
+derives the other maps before the material stage runs:
+- **normal:** flat (128, 128, 255);
+- **roughness:** a constant from the brief's finish word in a declared metal's description: `matte` 0.7, `satin`
+  0.55 (the default, blued steel), `polished` 0.25;
+- **metallic:** the metallic atlas baked by part from each part's declared class, thresholded at 0.5.
+
+Metal lightness, concept colour transfer and the declared non-metal zeroing then run as for any textured mesh.
+
 ## Checks before review
 
 Material-map checks run on every native candidate and are recorded in its validation:

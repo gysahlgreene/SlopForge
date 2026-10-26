@@ -377,6 +377,30 @@ def apply_weapon_orientation(validation, minimum=MIN_WEAPON_TIP_ALIGNMENT):
     return validation
 
 
+def apply_part_coverage(validation, coverage, declared, minimum):
+    """Fail a weapon generated as parts (OmniPart) when a declared hinge or slide's mesh, projected through the
+    concept's fitted view, covers too little of its mask, or was not generated at all (retryable part_missing:
+    another seed may place it). `coverage` is the final pass's measurement per part (inspection part_coverage)."""
+    moving = [part["name"] for part in declared if part["kind"] in ("hinge", "slide")]
+    coverage = {name: float(coverage[name]) for name in moving if coverage.get(name) is not None}
+    short = [name for name in moving if coverage.get(name) is None or coverage[name] < minimum]
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["part_coverage"] = coverage
+    limits["min_part_coverage"] = minimum
+    # part_missing's rejection metric (failures.py): how many moving parts are missing against a limit of 0
+    measured["moving_parts_missing"] = max(measured.get("moving_parts_missing", 0), len(short))
+    limits["max_moving_parts_missing"] = 0
+    if short:
+        detail = ", ".join(f"{name} {coverage[name]:.2f}" if coverage.get(name) is not None else f"{name} absent"
+                           for name in short)
+        validation["errors"] = [*validation.get("errors", []),
+            f"moving part(s) {', '.join(short)} came out with mask coverage below {minimum:g} ({detail}), so "
+            "another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_missing"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_moving_parts(validation, declared):
     """Fail a weapon whose declared moving part did not come out as its own piece (retryable quality code).
 
@@ -527,8 +551,15 @@ def concept_colour_fidelity(cutout_path, basecolor_path, view_path=None, view_re
             base = np.asarray(image.convert("RGB"), dtype=float)[::step, ::step].reshape(-1, 3)
         texture, source = base[base.sum(-1) > 15], "atlas"  # unused atlas texels are black
     concept = np.median(_lab(cut[..., :3][cut[..., 3] > 200])[:, 1:], 0)
+    c1 = float(np.hypot(*concept))
+    if not len(texture):
+        # An all-black map has no texel to measure (2026-10-25 live pistol); a NaN here would make the failure
+        # record unserialisable and a retryable failure final. The checks skip with a warning instead.
+        return {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": None,
+                "concept_hue_difference": None, "concept_chroma_ratio": None, "concept_darkened_share": darkened,
+                "reason": "no textured pixels"}
     texture = np.median(_lab(texture)[:, 1:], 0)
-    c1, c2 = float(np.hypot(*concept)), float(np.hypot(*texture))
+    c2 = float(np.hypot(*texture))
     hue = math.atan2(concept[1], concept[0]) - math.atan2(texture[1], texture[0])
     fidelity = {"colour_source": source, "concept_chroma": round(c1, 2), "texture_chroma": round(c2, 2),
                 "concept_hue_difference": round(abs(2 * math.sqrt(c1 * c2) * math.sin(hue / 2)), 2),
@@ -560,6 +591,12 @@ def apply_concept_colour(validation, fidelity, max_hue_difference=None, min_chro
             validation["failure_codes"] = [*validation.get("failure_codes", []), "colour_darkened"]
             validation["status"] = "failed"
     if fidelity["concept_chroma"] < MIN_CONCEPT_CHROMA:
+        return validation
+    if fidelity.get("texture_chroma") is None:
+        validation["warnings"] = [*validation.get("warnings", []),
+            f"colour against the concept was not checked: {fidelity.get('reason', 'no textured pixels')}"]
+        if validation.get("status") == "passed":
+            validation["status"] = "passed_with_warnings"
         return validation
     limits = validation.setdefault("limits", {})
     checks = (("colour_hue_shift", "concept_hue_difference", "max_concept_hue_difference", max_hue_difference,

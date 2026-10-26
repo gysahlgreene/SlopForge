@@ -28,3 +28,8 @@ requirements:
   - each moving part drawn as a distinct piece
   - complete object visible against a clean white background
 avoid: [hands, holsters, sheaths, scabbards, straps, mounts, multiple weapons, environment, cast shadow]
+# A weapon that declares a hinge or slide is generated as separate parts by OmniPart (docs/WEAPONS.md, Moving
+# parts); a part whose mesh covers less of its concept mask than this is part_missing and the next seed is tried.
+# Calibrated on the first live runs (2026-10-25): passing parts covered 0.61-0.96, rejected ones 0.18-0.38.
+part_model: omnipart
+min_part_coverage: 0.55

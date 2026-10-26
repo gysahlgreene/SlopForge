@@ -1,11 +1,12 @@
 import bpy
+import json
 import math
 import sys
 from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          separate_part)
+                          gltf_name, separate_part, separate_tagged, tag_parts)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -350,6 +351,14 @@ else:
 if not mesh_objects:
     raise SystemExit("No mesh objects found.")
 
+parts_table = None
+if "--parts-json" in sys.argv:
+    # A weapon generated as parts (OmniPart, prepare_parts.py): one node per part, tagged before the join below
+    # and separated again after orientation and scaling (MOVING PARTS).
+    parts_table = json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text())["parts"]
+    if not reuse_stage_mesh:
+        tag_parts(mesh_objects, parts_table)
+
 
 # -------------------------------------------------
 # JOIN MESHES
@@ -361,7 +370,10 @@ if not reuse_stage_mesh:
     for obj in mesh_objects:
         obj.select_set(True)
 
-    bpy.context.view_layer.objects.active = mesh_objects[0]
+    # The join keeps the active object's name; on the parts route that must be the body, or a moving part listed
+    # first would lose its name to the root (review 2026-10-25).
+    bpy.context.view_layer.objects.active = next(
+        (item for item in mesh_objects if parts_table is not None and gltf_name(item) == "body"), mesh_objects[0])
 
     if len(mesh_objects) > 1:
         bpy.ops.object.join()
@@ -413,8 +425,32 @@ if oriented:
         group = obj.vertex_groups.new(name="slopforge_grip")
         group.add([int(index) for index in np.flatnonzero(held)], 1.0, "REPLACE")
         print(f"Grip: {int(held.sum())} of {len(world)} vertices under the grip mask")
+    part_coverage, part_overflow = {}, {}
     for name, kind, mask_path in part_specs():
         mask = image_mask(mask_path, channel=0)
+        if parts_table is not None and name in parts_table:
+            # A generated part against its mask: the share of the mask's cells (32 across its longer side) that one
+            # of the part's vertices projects into. The gate (part_coverage) retries a seed that misplaced a part.
+            values = [0] * len(obj.data.polygons)
+            obj.data.attributes["slopforge_part"].data.foreach_get("value", values)
+            part_id = int(parts_table[name]["id"])
+            rows, cols = np.nonzero(mask)
+            cell = max(1, int(math.ceil(max(rows.max() - rows.min() + 1, cols.max() - cols.min() + 1) / 32)))
+            wanted = set(zip((rows // cell).tolist(), (cols // cell).tolist()))
+            hit = set()
+            for polygon, value in zip(obj.data.polygons, values):  # each face fills the cells its projection spans
+                if value != part_id:
+                    continue
+                corners = pixels[list(polygon.vertices)]
+                (c0, r0), (c1, r1) = corners.min(0) // cell, corners.max(0) // cell
+                hit.update((row, col) for row in range(int(r0), int(r1) + 1) for col in range(int(c0), int(c1) + 1))
+            part_coverage[name] = round(len(wanted & hit) / len(wanted), 4) if wanted else 0.0
+            # Recorded, not enforced (review 2026-10-25): how much of the part lies outside its mask (one cell of
+            # slack), and how many pieces it is in, for calibration before a gate.
+            slack = {(row + dr, col + dc) for row, col in wanted for dr in (-1, 0, 1) for dc in (-1, 0, 1)}
+            part_overflow[name] = round(len(hit - slack) / len(hit), 4) if hit else 0.0
+            print(f"Part {name} ({kind}): covers {part_coverage[name]:.2f} of its mask, "
+                  f"{part_overflow[name]:.2f} of it outside")
         if kind == "hinge":
             # Widened by 1% of the concept: SAM masked a pistol trigger's blade alone, and the cut left its root in
             # the frame (2026-10-24). A slide's mask is not widened; its cut is snapped to a plane when separated.
@@ -452,6 +488,9 @@ if oriented:
     obj.data.transform((target @ source.inverted()).to_4x4())
     obj.data.update()
     obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
+    if part_coverage:
+        obj["slopforge_part_coverage"] = json.dumps(part_coverage)  # a string survives the FBX round trip
+        obj["slopforge_part_overflow"] = json.dumps(part_overflow)
     print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
 
 
@@ -840,7 +879,11 @@ if "--pivot" in sys.argv:
 # MOVING PARTS (weapons)
 # -------------------------------------------------
 
-if not mesh_only:
+if not mesh_only and parts_table is not None:
+    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions)):
+        print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
+              f"pivot {[round(v, 4) for v in child.location]}")
+elif not mesh_only:
     for name, kind, _mask in part_specs():
         part = separate_part(obj, name, kind, basecolor=next(
             (image for image in bpy.data.images if basecolor_path and Path(bpy.path.abspath(image.filepath)).resolve()

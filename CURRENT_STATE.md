@@ -1001,3 +1001,28 @@ Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-mov
 - **Tests:** an opt-in Unity test (a slab with a slide and a hinged lever from Blender, checked in Unity); the request
   built from the declared parts; publication records the checks and fails on an error; `make verify`.
 - **Not verified:** Play mode; any weapon other than this pistol.
+
+Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WEAPONS.md#moving-parts-from-part-level-generation)).
+- **Why:** the owner rejected the cut-one-mesh moving parts three times (hollow parts, flat caps, lumpy small
+  mechanisms). A spike on the H100 showed OmniPart (MIT) generates each declared part as its own solid textured
+  mesh from the concept and our SAM masks, with an assembly that looked better than the cut pistol.
+- **Change:** a weapon type with `part_model: omnipart` and a declared hinge or slide is generated as parts:
+  `processing/part_model.py` on the part-mask host (boxes from the masks mapped onto OmniPart's voxels, so its
+  non-commercial PartField layout model is never used), `blender/prepare_parts.py` (per-part reduction, one
+  base-colour atlas, a metallic atlas by declared class), derived maps, then the existing final pass with
+  `--parts-json` (tag by node name, join, orient, separate with pivots by kind: slide at its box centre, hinge at
+  its contact with the body). A part below `min_part_coverage` (0.55, calibrated on the first live runs) is the retryable `part_missing`.
+  The backend and tool hashes are in the mesh stage's identity.
+- **Tests:** boxes, ids, coverage and the tool's GLB naming (unit); the backend's request, Blender call and
+  generation.json (unit); `prepare_parts` on two textured parts and the final pass on a slab with a touching slide,
+  a touching trigger and a floating hinge (opt-in Blender); the route, settings identity and the coverage gate
+  (unit); `make verify` (844 passed).
+- **Live (2026-10-25, [evidence](docs/media/weapon-parts-2026-10/README.md)):** pistol passed on one seed (slide
+  0.61 of its mask, trigger 0.96); rifle passed on its second seed (bolt 0.93, trigger 0.81; seed 1 `part_missing`);
+  crossbow rejected on three seeds (its long thin trigger lever comes out as a short blob, 0.18–0.38). The runs
+  found nine faults, each fixed with a test (nested upload names, OmniPart's `world` node, `.001` child names,
+  static parts as children, a black atlas from glTF's metallic default, NaN colour metrics making a retry final, a
+  rear-part rule that duplicated the slide, the grid axis along y, a voxel coverage that missed thin levers).
+- **Not verified:** any seed-to-seed consistency beyond these runs; the pistol's slide coverage sat at the limit;
+  OmniPart's VRAM peak beside ComfyUI. Both passing weapons published through Unity with every motion check
+  passing (pistol slide −0.0300 m, trigger −20.00°; rifle bolt −0.0800 m, trigger −20.00°; no pivot drift).
