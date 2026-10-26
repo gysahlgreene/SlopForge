@@ -2321,7 +2321,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     try:
         context = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                    "execution_id": execution["id"], "reuse_execution": prior}
-        conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
+        # The background model is named in processing/background.py; a cut-out another model made is not reused
+        # (rembg's default, BRIA RMBG-2.0, is non-commercial and made every cut-out until 2026-10-26)
+        conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py",
+                                 "background_sha256": file_sha256(tool_root() / "processing/background.py")}
         if view_slots:
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
         if asset.get("parts"):

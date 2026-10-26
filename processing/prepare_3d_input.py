@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 
 from PIL import Image
-from rembg import remove
+
+from background import remove_background
 
 
 def main():
@@ -30,7 +31,7 @@ def main():
     print(f"Removing background: {src}")
 
     image = Image.open(src).convert("RGBA")
-    cutout = remove(image).convert("RGBA")
+    cutout = remove_background(image)
 
     cutout.save(cutout_path)
 

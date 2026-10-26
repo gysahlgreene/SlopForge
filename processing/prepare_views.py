@@ -58,14 +58,14 @@ def main():
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--size", type=int, default=1024)
     args = parser.parse_args()
-    from rembg import remove
+    from background import remove_background
 
     cutouts = {}
     for spec in args.view:
         name, separator, path = spec.partition("=")
         if not separator or not Path(path).is_file():
             raise SystemExit(f"--view must be NAME=PATH of an existing image, got {spec!r}")
-        cutouts[name] = remove(Image.open(path).convert("RGBA")).convert("RGBA")
+        cutouts[name] = remove_background(Image.open(path).convert("RGBA"))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     framed = frame_views(cutouts, args.size)
     for name, image in framed.items():
