@@ -563,6 +563,7 @@ class DeclaredMaterialTests(unittest.TestCase):
         # Weapons: Blender turns the tip forward from the concept's view and sets the origin at the grip mask.
         # Its concept views search the full turn: TRELLIS.2 rebuilt side-profile swords facing the other way.
         grip = {"name": "handle", "kind": "grip", "text": "the grip"}
+        trigger = {"name": "trigger", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0, "text": "the trigger"}
         for pivot, expected in (("grip", True), ("bottom_center", False)):
             with self.subTest(pivot=pivot), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -572,17 +573,21 @@ class DeclaredMaterialTests(unittest.TestCase):
                     views.append(options)
                     return {"status": "skipped", "silhouette_iou": 0.95}
                 with patch("slopforge.pipelines.model._concept_view", side_effect=view):
-                    self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)), cutout=root / "cutout.png",
-                                    asset_extra={"pivot": pivot, "parts": [grip]}, limits={"min_concept_fit": 0.8},
-                                    lineage_extra={"part_masks": root / "parts_1"})
+                    candidate = self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)),
+                                                cutout=root / "cutout.png", limits={"min_concept_fit": 0.8},
+                                                asset_extra={"pivot": pivot, "parts": [grip, trigger]},
+                                                lineage_extra={"part_masks": root / "parts_1"})
                 options = self.process_options
                 self.assertEqual(options["pivot"], pivot)
                 self.assertEqual([view.get("full_turn", False) for view in views], [expected])
                 if expected:
                     self.assertEqual((options["concept"], options["grip_mask"]),
                                      (root / "cutout.png", root / "parts_1/handle.png"))
+                    self.assertEqual(options["parts"], [("trigger", "hinge", root / "parts_1/trigger.png")])
+                    # the fake pass split nothing, so the declared trigger is missing and the next seed is tried
+                    self.assertIn("part_missing", candidate["validation"]["failure_codes"])
                 else:
-                    self.assertEqual((options["concept"], options["grip_mask"]), (None, None))
+                    self.assertEqual((options["concept"], options["grip_mask"], options["parts"]), (None, None, []))
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the

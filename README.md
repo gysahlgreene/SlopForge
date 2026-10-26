@@ -27,7 +27,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
 | [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
-| [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). Moving parts and the protocol come next | Three weapons as lit turntables beside their concepts |
+| [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). The pistol's slide and trigger are split off as moving parts with pivots. Unity motion and the protocol come next | Three weapons as lit turntables beside their concepts |
 | Mechanical assets with moving parts, creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
@@ -228,8 +228,14 @@ Concepts (top) and the generated weapons (bottom), from one run each on the H100
   are shifted to the concept's colours.
 - **Orientation:** each weapon is turned tip forward and held at the grip drawn on its concept.
 
+<img src="docs/media/weapon-moving-parts-2026-10/pistol_motion.gif" width="240" align="right" alt="The pistol's slide travelling back and its trigger pulling">
+
+**Moving parts:** a hinge or slide declared in the brief, and boxed on the approved concept, is cut from the one
+generated mesh, closed, and parented to the body with its pivot. The pistol's slide and trigger move as its own
+pieces ([evidence](docs/media/weapon-moving-parts-2026-10/README.md)); motion in Unity is not yet checked.
+
 **Experimental:** no weapon has been through a protocol. Small mechanisms stay soft, and generated metal is glossier
-than drawn. Moving parts (a trigger that hinges, a slide that moves) come next.
+than drawn.
 [How they were made, evidence and limits →](docs/media/weapon-pipeline-2026-10/README.md) ·
 [Weapons guide →](docs/WEAPONS.md)
 

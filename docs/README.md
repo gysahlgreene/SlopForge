@@ -28,6 +28,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Weapon mesh graphs](media/weapon-graph-2026-10/README.md): three mesh graphs on three weapon concepts, and orientation
 - [Mesh reduction](media/mesh-reduction-2026-10/README.md): Blender reduces the full-detail shape instead of the graph's midpoint decimation
 - [Weapons through the pipeline](media/weapon-pipeline-2026-10/README.md): a pistol, longsword and crossbow on TRELLIS.2 and Pixal3D, with the fixes they needed
+- [Weapon moving parts](media/weapon-moving-parts-2026-10/README.md): a pistol's slide and trigger split from its one mesh, with pivots
 - [Weapons](WEAPONS.md): the `weapon` type, its side-profile concepts and shape rule (M3, Experimental)
 - [Natural environments](NATURAL-ENVIRONMENTS.md): rocks, tiling ground and bark, foliage cut-outs, trees and shrubs, and `scene-render`
 - [Character readiness and rigging](CHARACTER-RIGGING.md)

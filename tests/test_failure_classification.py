@@ -998,6 +998,17 @@ class PropComponentBudgetTests(unittest.TestCase):
         report["measured"]["arm_taper"] = [1.002, 1.007]
         self.assertEqual(apply_module_footprint(report, [0.31, 0.55, 0.37, 0.0], "corner").get("failure_codes", []), [])
 
+    def test_a_declared_moving_part_that_did_not_come_out_is_retried(self):
+        from slopforge.validation import apply_moving_parts
+        report = _quality_report(component_count=1)
+        report["measured"]["parts"] = [{"name": "slide", "kind": "slide"}]
+        missing = apply_moving_parts(report, ["slide", "trigger"])
+        self.assertEqual(missing["failure_codes"], ["part_missing"])
+        self.assertTrue(candidate_quality_rejection(missing))
+        report = _quality_report(component_count=1)
+        report["measured"]["parts"] = [{"name": "slide", "kind": "slide"}, {"name": "trigger", "kind": "hinge"}]
+        self.assertEqual(apply_moving_parts(report, ["slide", "trigger"]).get("failure_codes", []), [])
+
     def test_a_weapon_whose_length_runs_across_the_concept_view_is_retried(self):
         # Two crossed swords reconstructed at alignment 0.0 and stopped approval as a Blender crash (2026-10-24); it
         # is a quality rejection, so the next seed is tried. A three-quarter crossbow at 0.45 is oriented.

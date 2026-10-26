@@ -303,7 +303,12 @@ def inspect(source, face_budget, real_scale=False):
     scales_applied = all(rotation.angle < 1e-4 and all(abs(value - 1.0) < 1e-4 for value in scale)
                          for _, rotation, scale in (obj.matrix_world.decompose() for obj in objects))
     component_sizes = [connected_components(obj.data) for obj in objects]
-    components = sum(len(sizes) for sizes in component_sizes)
+    # A weapon's moving parts are separate pieces by design; the component budget counts the rest.
+    components = sum(len(sizes) for obj, sizes in zip(objects, component_sizes) if "slopforge_part" not in obj)
+    parts = [{"name": obj.name, "kind": obj["slopforge_part"], "faces": len(obj.data.polygons),
+              "components": len(sizes), "parent": obj.parent.name if obj.parent else None,
+              "pivot": [float(value) for value in obj.matrix_world.translation]}
+             for obj, sizes in zip(objects, component_sizes) if "slopforge_part" in obj]
     component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
@@ -341,7 +346,7 @@ def inspect(source, face_budget, real_scale=False):
                 "component_count": components, "boundary_edge_count": boundary_edges,
                 "nonmanifold_edge_count": nonmanifold_edges, "component_details": component_records,
                 "topology_diagnostics": topology_records, "face_budget": face_budget,
-                "footprint_quadrants": footprint_quadrants(objects, minimum, maximum)}
+                "footprint_quadrants": footprint_quadrants(objects, minimum, maximum), "parts": parts}
     points = [obj.matrix_world @ vertex.co for obj in objects for vertex in obj.data.vertices]
     corner = corner_profile(points, measured["footprint_quadrants"], minimum, maximum)
     measured["arm_thickness"] = corner[1] if corner else None

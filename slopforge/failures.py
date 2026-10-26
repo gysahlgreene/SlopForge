@@ -28,6 +28,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "module_footprint",
     "module_taper",
     "weapon_orientation",
+    "part_missing",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -391,6 +392,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "module_footprint": ("open_quadrant", "max_open_quadrant"),
         "module_taper": ("corner_taper", "max_arm_taper"),
         "weapon_orientation": ("weapon_tip_alignment", "min_weapon_tip_alignment"),
+        "part_missing": ("moving_parts_missing", "max_moving_parts_missing"),
     }
 
     for code in codes:

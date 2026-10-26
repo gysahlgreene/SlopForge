@@ -11,9 +11,10 @@ for now (2026-10-24, [evidence](media/weapon-pipeline-2026-10/README.md)).
 - part masks;
 - orientation and the grip pivot;
 - the thin-part measure;
-- coloured non-metals, metal brightened to the concept, and concept colours for small parts.
+- coloured non-metals, metal brightened to the concept, and concept colours for small parts;
+- moving parts split from the mesh, with pivots and a hierarchy in the FBX.
 
-**Still planned** (listed in the epic): splitting moving parts from the mesh, Unity motion, and the W-v1 protocol. The
+**Still planned** (listed in the epic): Unity motion clips and their checks, and the W-v1 protocol. The
 bowstring feature is deferred: every crossbow so far kept its string.
 
 ## The `weapon` type
@@ -75,7 +76,7 @@ slopforge --project ~/UnityProjects/MyGame generate weapon longsword "A medieval
 
 ## Parts
 
-Declare each part that a later step will split from the mesh, as `--part`:
+Declare each moving part, and the grip, as `--part`. The final Blender pass splits each hinge or slide from the mesh:
 
 ```sh
 --part "grip=grip: the leather-wrapped grip" --part "trigger=hinge:x:-20..0: the curved trigger inside the guard"
@@ -129,7 +130,22 @@ asset_pipeline:
 ```
 
 On a lantern concept, the models masked the glass globe, the crossed wire guard and the carrying ring precisely.
-Splitting parts from the mesh along these masks is the next step (epic #107).
+
+**How a part is split** (`blender/mesh_cleanup.py`, `separate_part`, in the final pass after texturing):
+- Vertices are welded by position, since the textured GLB splits them along UV seams.
+- A face belongs to the part when most of its corners project onto its mask from the concept's fitted view; each face
+  then takes the majority of itself and its neighbours for four rounds.
+- An island of either side that touches the cut joins the side around it (a live pistol's body had come out in 12–19
+  slivers).
+- Each side's opening is closed with flat caps, coloured by the texel nearest the median colour along the cut.
+- The part becomes a child of the body. A slide pivots at its bounding box centre, a hinge at the centre of its cut.
+- The FBX carries the hierarchy and each part's kind (`slopforge_part`). Inspection records `parts` and leaves them
+  out of the component count.
+- A part with fewer than eight faces under its mask is not separated, and the candidate fails as the retryable
+  `part_missing`, so the next seed is tried.
+
+A pistol's slide and trigger were split this way on three live runs
+([evidence](media/weapon-moving-parts-2026-10/README.md)).
 
 ## Known limits
 
@@ -147,5 +163,9 @@ Splitting parts from the mesh along these masks is the next step (epic #107).
   - a small coloured region such as wooden grips can drift in colour, which the whole-object colour checks miss; the
     weapon type shifts non-metal colours towards the concept's (`concept_colour_transfer`, see Materials);
   - generated steel is glossy where a concept shows it satin.
-- **Single mesh.** Every weapon is still one mesh. Moving parts are planned: each part split from the one generated
-  mesh along a mask drawn on the concept.
+- **Moving parts** (pistol, 2026-10-24):
+  - masks project straight through the concept's view, so a part must be separate in that view;
+  - the caps closing a cut are flat, so a hollow slide shows a flat slab where it comes off;
+  - a small part can leave too few faces under its mask on some seeds (one in two for a trigger of 0.6% of the
+    concept), which costs a retry;
+  - the parts reach Unity as child objects with pivots, but there is no prefab, clip or playback check yet.
