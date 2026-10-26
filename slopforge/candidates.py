@@ -44,11 +44,14 @@ def reject_candidate(manifest, asset_selector, number, reason=None):
 
 
 def generate_candidates(project_root, config, asset_type, style, name, description, count, manifest, key, backend_generate,
-                        *, semantic_description=None, variations=None, identity_inputs=None):
+                        *, semantic_description=None, variations=None, identity_inputs=None, stage_inputs=None,
+                        record_fields=None):
     root = Path(project_root).resolve()
     final_path = output_path(root, config, asset_type, name)
     candidate_dir = root / config["asset_pipeline"]["candidate_root"] / asset_type["name"] / name
     existing = manifest["assets"][key].setdefault("candidates", {"items": [], "selected": None})["items"]
+    # an edit of another candidate (an open picture) derives from that candidate's image
+    derived = [{"artifact_id": item["id"], "sha256": item["sha256"]} for item in stage_inputs or []]
     if variations is not None and len(variations) != count:
         raise ValueError("Candidate count must match the number of deliberate variations")
     start = max((int(item["number"]) for item in existing), default=0) + 1
@@ -78,11 +81,12 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             record["variation"] = dict(variation)
         record["description"] = description if semantic_description is None else semantic_description
         record["style"] = style_identity(style)
+        record.update(record_fields or {})
         stage = None
         failure = None
         interrupted = None
         if execution:
-            stage = start_stage(execution, "concept_generation", number, [],
+            stage = start_stage(execution, "concept_generation", number, list(stage_inputs or []),
                                 {"prompt": prompt, "variation": variation, "seed": seed}, {})
             save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
             begin_stage(stage)
@@ -108,7 +112,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             if execution and candidate_path.is_file() and not record.get("error"):
                 artifact = {"id": f"concept-candidate:{number}", "type": "image.concept",
                             "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),
-                            "stage": "concept_generation", "attempt": number, "derived_from": []}
+                            "stage": "concept_generation", "attempt": number, "derived_from": derived}
                 record.update({"execution_id": execution["id"], "stage_attempt": number, "artifact": artifact})
                 if failure:
                     finish_stage(stage, "failed", [artifact], error="Concept image failed validation",
@@ -120,7 +124,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                              outputs=([{"id": f"concept-candidate:{number}", "type": "image.concept",
                                 "path": candidate_path.relative_to(root).as_posix(),
                                 "sha256": file_sha256(candidate_path), "stage": "concept_generation",
-                                "attempt": number, "derived_from": []}] if candidate_path.is_file() else []),
+                                "attempt": number, "derived_from": derived}] if candidate_path.is_file() else []),
                              failure=failure)
         except (Exception, KeyboardInterrupt) as exc:
             record["error"] = str(exc)
@@ -134,7 +138,7 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
             if stage and stage["status"] == "running":
                 outputs = ([{"id": f"concept-candidate:{number}", "type": "image.concept",
                     "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),
-                    "stage": "concept_generation", "attempt": number, "derived_from": []}]
+                    "stage": "concept_generation", "attempt": number, "derived_from": derived}]
                     if candidate_path.is_file() else [])
                 finish_stage(stage, "failed", outputs, error=record["error"] or type(exc).__name__,
                              failure=failure)

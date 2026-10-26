@@ -102,7 +102,9 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
             validation = candidate.get("validation", {})
             code = f"slopforge --project {project_arg}"
             exploring = asset.get("generation_mode") == "explore"
-            approve = f"{code} approve {shlex.quote(name)} {shlex.quote(str(number))}"
+            opens = candidate.get("open_of")  # an open picture is approved with the concept it opens
+            approve = (f"{code} approve {shlex.quote(name)} {shlex.quote(str(opens))} --open {shlex.quote(str(number))}"
+                       if opens is not None else f"{code} approve {shlex.quote(name)} {shlex.quote(str(number))}")
             promote = (f"{code} promote {shlex.quote(name)} {shlex.quote(str(number))} "
                        f"--name {shlex.quote(name + '_asset')}")
             reject = f"{code} reject {shlex.quote(name)} {shlex.quote(str(number))} --reason 'Not selected'"
@@ -117,7 +119,7 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
                 if exploring:
                     actions.append(_action(promote, "Promote to production"))
                 else:
-                    actions.append(_action(approve, "Approve"))
+                    actions.append(_action(approve, f"Approve with candidate {opens}" if opens is not None else "Approve"))
                 actions.append(_action(reject, "Reject"))
             if not exploring:
                 actions.append(_action(regenerate, "Regenerate"))
@@ -131,6 +133,7 @@ def generate_review_board(project_root, manifest, destination="slopforge-review.
             sections.append(
                 f'<article class="candidate" id="{candidate_anchor}"><div class="preview">{media}</div>'
                 f'<h3>Candidate {html.escape(str(number))}{" · selected" if selected else ""}</h3>'
+                f'{f"<p>Open picture of candidate {html.escape(str(opens))}</p>" if opens is not None else ""}'
                 f'<p><span class="status {html.escape(str(status), quote=True)}">{html.escape(str(status))}</span>'
                 f' · Seed {html.escape(str(seed))}</p><p class="prompt">{html.escape(str(prompt))}</p>'
                 f'{variation_html}'

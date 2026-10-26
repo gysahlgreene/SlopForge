@@ -84,14 +84,15 @@ def parse_part_box(spec):
     return name.strip(), box
 
 
-def set_part_boxes(parts, boxes):
-    """Copy approval-time boxes onto the declared parts; an unknown part name is an error."""
+def set_part_boxes(parts, boxes, key="box"):
+    """Copy approval-time boxes onto the declared parts; an unknown part name is an error. key: "box" for the
+    concept, "open_box" for its open picture (approve --open-part-box), where the part lies elsewhere."""
     names = {part["name"] for part in parts}
     unknown = sorted(name for name, _ in boxes if name not in names)
     if unknown:
         raise ValueError(f"--part-box names undeclared part(s) {', '.join(unknown)}; declared: {', '.join(sorted(names))}")
     given = dict(boxes)
-    return [{**part, "box": given[part["name"]]} if part["name"] in given else part for part in parts]
+    return [{**part, key: given[part["name"]]} if part["name"] in given else part for part in parts]
 
 
 def validate_parts(parts):

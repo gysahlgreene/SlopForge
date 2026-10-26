@@ -15,13 +15,14 @@ from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
+from .open_state import generate_open_candidates
 from .parts import parse_part_box, parse_part_spec, set_part_boxes, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation", "scene-render"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "open", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation", "scene-render"}
 
 
 def parser():
@@ -96,6 +97,17 @@ def parser():
     approve.add_argument("--part-box", action="append", default=[], dest="part_boxes",
                          help="Where a declared part lies on the approved concept: 'name=x0,y0,x1,y1' as fractions of "
                               "its width and height from the top left (repeatable; docs/WEAPONS.md)")
+    approve.add_argument("--open", type=int, dest="open_number",
+                         help="Also approve this open picture of the candidate (from `open`): the mesh is generated "
+                              "open from it and its hinged part closed (docs/WEAPONS.md, Props generated open)")
+    approve.add_argument("--open-part-box", action="append", default=[], dest="open_part_boxes",
+                         help="Where a declared part lies on the open picture: 'name=x0,y0,x1,y1' as for --part-box")
+    open_parser = sub.add_parser("open", help="Edit a concept candidate to show its hinged part open, for approval")
+    open_parser.add_argument("name")
+    open_parser.add_argument("candidate", type=int, help="The concept candidate to open")
+    open_parser.add_argument("--count", type=int, default=3)
+    open_parser.add_argument("--inside", help="What the inside looks like, e.g. 'plain plank walls and a plank floor'")
+    open_parser.add_argument("--prompt", help="Send this agent-authored edit instruction unchanged")
     reject = sub.add_parser("reject", help="Reject an unapproved candidate and record the reason")
     reject.add_argument("name")
     reject.add_argument("candidate", type=int)
@@ -856,6 +868,19 @@ def _run(args):
     if args.command == "candidates":
         _list_candidates(manifest, args.name)
         return 0
+    if args.command == "open":
+        record = find_asset(manifest, args.name)
+        if args.count < 1:
+            raise ValueError("--count must be at least 1")
+        recipe = types[canonical_type("prop" if record.get("type") == "model" else record["type"], types)]
+        key = next(key for key, item in manifest["assets"].items() if item is record)
+        made = generate_open_candidates(root, config, recipe, style, manifest, key, args.candidate, args.count,
+                                        inside=args.inside, prompt=args.prompt)
+        save_manifest(manifest_path, manifest)
+        for item in made:
+            print(f"  {item['number']}: {item['path']} ({item['status']}) — approve {record['name']} "
+                  f"{args.candidate} --open {item['number']}")
+        return 0
     if args.command == "reject":
         from .candidates import reject_candidate
         reject_candidate(manifest, args.name, args.candidate, args.reason)
@@ -909,14 +934,16 @@ def _run(args):
                 print(json.dumps(result, indent=2))
         elif recipe["pipeline"] == "model":
             boxes = [parse_part_box(spec) for spec in getattr(args, "part_boxes", [])]
-            if boxes:  # saved first: approval reloads the manifest from disk
-                record["parts"] = set_part_boxes(record.get("parts") or [], boxes)
+            open_boxes = [parse_part_box(spec) for spec in getattr(args, "open_part_boxes", [])]
+            if boxes or open_boxes:  # saved first: approval reloads the manifest from disk
+                record["parts"] = set_part_boxes(set_part_boxes(record.get("parts") or [], boxes), open_boxes,
+                                                 key="open_box")
                 save_manifest(manifest_path, manifest)
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),
                           quality_tier=getattr(args, "quality_tier", None),
-                          resume=getattr(args, "resume", False))
+                          resume=getattr(args, "resume", False), open_number=getattr(args, "open_number", None))
         save_manifest(manifest_path, manifest)
         return 0
 

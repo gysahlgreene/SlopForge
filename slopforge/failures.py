@@ -33,6 +33,7 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "part_open",
     "colour_lost",
     "mesh_folded",
+    "part_fit",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -401,6 +402,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "part_penetrates": ("moving_parts_penetrating", "max_moving_parts_penetrating"),
         "part_open": ("moving_parts_open", "max_moving_parts_open"),
         "mesh_folded": ("max_folded_edge_share", "max_folded_edge_share"),
+        "part_fit": ("open_part_stretch", "max_open_part_stretch"),
     }
 
     for code in codes:

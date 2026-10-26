@@ -661,3 +661,48 @@ class HybridBackendTests(unittest.TestCase):
             from slopforge.provenance import file_sha256
             self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))
             self.assertEqual(info["outputs"][-1]["kind"], "mesh.whole")
+
+    def test_an_open_picture_is_split_by_its_masks_alone_then_closed(self):
+        # The open picture's lid stands clear of the body, so its mask alone splits it cleanly (OPEN1: the cut ran
+        # only along the hinge line); OmniPart is not run. The part is then closed before the final pass.
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from slopforge.backends import hybrid
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            surface = root / "mesh_01/chest.glb"
+            surface.parent.mkdir()
+            surface.write_bytes(b"whole")
+            metadata = root / "mesh_01/generation.json"
+            metadata.write_text(json.dumps({"workflow": "trellis2", "outputs": [{"path": "chest.glb", "sha256": "old"}]}))
+            lid = {"name": "lid", "kind": "hinge", "axis": "x", "min": -100.0, "max": 0.0, "anchor": ["back", "bottom"]}
+            seen = {}
+
+            def split(root_, config, surface_, parts_glb, cutout, masks_, parts_, work_dir, rim_part=None):
+                seen["split"] = (parts_glb, sorted(masks_), rim_part)
+                surface_.with_name("chest_whole.glb").write_bytes(b"whole")
+                surface_.write_bytes(b"nodes")
+                return {"alignment_error": 0.0, "shares": {"body": 0.6, "lid": 0.4}, "cut_length": 1.9,
+                        "masks_dropped": [], "parts": {"body": {"kind": "body", "id": 1}, "lid": {"kind": "hinge", "id": 2}},
+                        "tools": {"hybrid_graph.py": "abc"}, "view": {"fit": 0.97}, "rim": {"moved_faces": 12}}
+
+            def close(root_, config, surface_, part, work_dir, **options):
+                seen["close"] = (surface_.name, part["name"], options)
+                surface_.write_bytes(b"closed nodes")
+                return {"turn_degrees": 58.0, "stretch": 1.08}
+            with patch.object(hybrid, "run_omnipart", side_effect=lambda *a, **k: self.fail("OmniPart is not run")), \
+                    patch.object(hybrid, "split_surface", side_effect=split), \
+                    patch.object(hybrid, "close_open_part", side_effect=close):
+                hybrid.generate_hybrid_parts(root, {}, root / "open_cutout.png", surface, metadata, 7, [lid],
+                                             root / "masks", open_part=lid)
+            self.assertEqual(seen["split"], (None, ["lid"], "lid"))
+            self.assertEqual(seen["close"][:2], ("chest.glb", "lid"))
+            info = json.loads(metadata.read_text())
+            self.assertEqual(info["open_state"]["close"], {"turn_degrees": 58.0, "stretch": 1.08})
+            self.assertEqual(info["hybrid"]["rim"], {"moved_faces": 12})
+            self.assertNotIn("part_generator", info)
+            table = json.loads((surface.parent / "parts/parts.json").read_text())
+            self.assertIsNone(table["omnipart"])
+            from slopforge.provenance import file_sha256
+            self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))  # the closed surface's hash

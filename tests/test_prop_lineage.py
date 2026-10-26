@@ -70,7 +70,8 @@ avoid: [environment]
             generate_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 2,
                               self.manifest, "prop:relay", generation_prompt="A copper relay")
 
-    def _approve(self, generator, materializer=None, native_materializer=None, force=False, resume=False, material_count=1):
+    def _approve(self, generator, materializer=None, native_materializer=None, force=False, resume=False, material_count=1,
+                 open_number=None):
         def commands(command, check):
             if "prepare_3d_input.py" in command[1]:
                 Image.new("RGBA", (32, 32), (120, 120, 120, 255)).save(command[command.index("--cutout") + 1])
@@ -84,7 +85,8 @@ avoid: [environment]
                 patch("slopforge.pipelines.model._native_material_candidate", side_effect=native_materializer), \
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=commands):
             return approve_model(self.root, self.config, self.asset_type, self.style, self.manifest,
-                                 "prop:relay", 2, force=force, material_count=material_count, resume=resume)
+                                 "prop:relay", 2, force=force, material_count=material_count, resume=resume,
+                                 open_number=open_number)
 
     def _materializer(self, root, config, asset_type, asset, number, prompt, _stage_mesh, lineage=None, seed=None):
         from slopforge.pipelines.model import material_candidate_paths
@@ -510,6 +512,140 @@ avoid: [environment]
         self.assertNotIn("part_model", stage["settings"])
         self.assertNotIn("part_tools_sha256", stage["settings"])
         self.assertNotIn("preparation_tool_sha256", stage["settings"])
+
+    LID = {"name": "lid", "kind": "hinge", "axis": "x", "min": -100.0, "max": 0.0, "anchor": ["back", "bottom"],
+           "text": "the domed lid"}
+
+    def _open_candidates(self, number=2, count=2, **options):
+        from slopforge.open_state import generate_open_candidates
+        calls = []
+
+        def backend(_root, _config, workflow, prompt, destination, _prefix, seed, metadata, **kwargs):
+            calls.append({"workflow": workflow, "prompt": prompt, "conditioning": kwargs.get("conditioning")})
+            Image.new("RGB", (512, 512), (200, 10, 20)).save(destination)
+            metadata.write_text(json.dumps({"workflow": "image_edit_qwen_api.json", "seed": seed,
+                                            "workflow_sha256": "b" * 64}))
+        with patch("slopforge.open_state.generate_image", side_effect=backend):
+            made = generate_open_candidates(self.root, self.config, self.asset_type, self.style, self.manifest,
+                                            "prop:relay", number, count, **options)
+        return made, calls
+
+    def test_open_candidates_are_edits_of_the_chosen_concept_with_its_lid_open(self):
+        # A chest generated closed has no inside to copy (HC5, HC6): the owner approves a picture of it open as a
+        # second concept (2026-10-26, docs/superpowers/specs/2026-10-26-open-state-hinged-parts-design.md).
+        self._concept_candidates()
+        self.record["parts"] = [dict(self.LID)]
+        self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
+        made, calls = self._open_candidates(inside="plain plank walls and floor")
+        parent = next(item for item in self.record["candidates"]["items"] if item["number"] == 2)
+        self.assertEqual([(item["number"], item["open_of"], item["status"]) for item in made],
+                         [(3, 2, "candidate"), (4, 2, "candidate")])
+        for call in calls:
+            self.assertEqual(Path(call["workflow"]).name, "image_edit_qwen_api.json")
+            self.assertEqual(call["conditioning"]["references"][0]["path"], parent["path"])
+            for words in ("the domed lid", "100 degrees", "back edge", "plain plank walls and floor"):
+                self.assertIn(words, call["prompt"])
+        self.assertEqual(made[0]["artifact"]["derived_from"],
+                         [{"artifact_id": parent["artifact"]["id"], "sha256": parent["artifact"]["sha256"]}])
+        execution = next(item for item in self.record["executions"] if item["id"] == made[0]["execution_id"])
+        self.assertEqual([item["sha256"] for item in execution["stages"][0]["inputs"]], [parent["artifact"]["sha256"]])
+
+    def test_open_candidates_need_a_hinged_part_an_edit_workflow_and_a_closed_concept(self):
+        self._concept_candidates()
+        self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
+        with self.assertRaisesRegex(ValueError, "hinge"):
+            self._open_candidates()
+        self.record["parts"] = [dict(self.LID)]
+        del self.config["asset_pipeline"]["workflows"]["edit"]
+        with self.assertRaisesRegex(ValueError, "workflows.edit"):
+            self._open_candidates()
+        self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
+        with self.assertRaisesRegex(ValueError, "Candidate 9"):
+            self._open_candidates(number=9)
+        self._open_candidates(count=1)
+        with self.assertRaisesRegex(ValueError, "open picture"):  # an open picture is not opened again
+            self._open_candidates(number=3)
+
+    def test_an_open_picture_is_approved_only_with_the_concept_it_opens(self):
+        self._concept_candidates()
+        self.record["parts"] = [dict(self.LID)]
+        self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
+        self._open_candidates(count=1)
+        generator = lambda *_args: self.fail("no mesh is generated for a refused approval")
+        with self.assertRaisesRegex(ValueError, "open picture of candidate 2"):
+            approve_model(self.root, self.config, self.asset_type, self.style, self.manifest, "prop:relay", 3)
+        with self.assertRaisesRegex(ValueError, "not an open picture of candidate 1"):
+            approve_model(self.root, self.config, self.asset_type, self.style, self.manifest, "prop:relay", 1,
+                          open_number=3)
+        del generator
+
+    def test_an_open_picture_makes_the_mesh_and_the_closed_concept_checks_it(self):
+        # The mesh and its split come from the open picture; colour transfer and lid coverage still compare with
+        # the closed concept the owner approved (docs/superpowers/specs/2026-10-26-open-state-hinged-parts-design.md).
+        self._concept_candidates()
+        self.asset_type["part_model"] = "hybrid"
+        self.record["parts"] = [dict(self.LID)]
+        self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
+        self._open_candidates(count=1)  # candidate 3 opens candidate 2
+        # where the lid lies differs between the pictures: the open one has its own box (OPEN1: SAM needed one)
+        self.record["parts"][0].update({"box": [0.05, 0.14, 0.96, 0.5], "open_box": [0.17, 0.0, 0.99, 0.56]})
+        save_manifest(self.root / self.config["asset_pipeline"]["manifest"], self.manifest)
+        masked, meshed, splits, seen, boxes = [], [], [], {}, {}
+
+        def masks(_config, cutout, parts, out_dir):
+            masked.append(Path(cutout).name)
+            boxes[Path(cutout).name] = parts[0].get("box")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            Image.new("L", (32, 32), 255).save(out_dir / "lid.png")
+            (out_dir / "masks.json").write_text(json.dumps({"parts": {"lid": {"share": 0.3}}}))
+            Image.new("RGB", (32, 32)).save(out_dir / "parts_overlay.png")
+
+        def surface(_root, _config, image, _name, dest, metadata, seed):
+            meshed.append(Path(image).name)
+            dest.write_bytes(b"mesh")
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "textured": True}))
+
+        def split(root, config, cutout, surface_path, metadata, seed, parts, masks_dir, **options):
+            splits.append((Path(cutout).name, masks_dir.name, options.get("open_part", {}).get("name")))
+            info = json.loads(metadata.read_text())
+            info.update({"part_model": "hybrid", "parts": {}})
+            metadata.write_text(json.dumps(info))
+
+        def native(root, config, context, asset_type, asset, number, mesh_info, lineage=None):
+            seen["lineage"] = lineage
+            return self._materializer(root, config, asset_type, asset, number, "parts", None, lineage=lineage,
+                                      seed=mesh_info.get("seed"))
+        with patch("slopforge.pipelines.model.make_part_masks", side_effect=masks), \
+                patch("slopforge.open_state.make_part_masks", side_effect=masks), \
+                patch("slopforge.pipelines.model.generate_hybrid_parts", side_effect=split):
+            self._approve(surface, native_materializer=native, open_number=3)
+        self.assertEqual(meshed, ["open_3d_input.png"])
+        self.assertEqual(sorted(masked), ["concept_cutout.png", "open_cutout.png"])
+        self.assertEqual(boxes, {"concept_cutout.png": [0.05, 0.14, 0.96, 0.5], "open_cutout.png": [0.17, 0.0, 0.99, 0.56]})
+        self.assertEqual(splits[0][0], "open_cutout.png")
+        self.assertTrue(splits[0][1].startswith("parts_open_"))
+        self.assertEqual(splits[0][2], "lid")
+        self.assertEqual(Path(seen["lineage"]["concept_cutout"]).name, "concept_cutout.png")
+        self.assertTrue(Path(seen["lineage"]["part_masks"]).name.startswith("parts_"))
+        self.assertFalse(Path(seen["lineage"]["part_masks"]).name.startswith("parts_open_"))
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        opened = next(item for item in asset["candidates"]["items"] if item["number"] == 3)
+        self.assertEqual(asset["source"]["open_concept_artifact"]["derived_from"],
+                         [{"artifact_id": opened["artifact"]["id"], "sha256": opened["artifact"]["sha256"]}])
+        self.assertEqual(opened["approval"], "approved")
+        stages = {item["name"]: item for item in asset["executions"][-1]["stages"]}
+        conditioning = stages["conditioning_preparation"]
+        self.assertIn(asset["source"]["open_concept_artifact"]["sha256"],
+                      [item["sha256"] for item in conditioning["inputs"]])
+        types = {item["type"] for item in conditioning["outputs"]}
+        self.assertLessEqual({"image.cutout.open", "image.3d_input.open", "data.part_masks.open"}, types)
+        open_cutout = next(item for item in conditioning["outputs"] if item["type"] == "image.cutout.open")
+        self.assertIn(open_cutout["sha256"], [item["sha256"] for item in stages["mesh_workflow_execution"]["inputs"]])
+        from slopforge.paths import tool_root
+        from slopforge.provenance import tool_sha256
+        self.assertEqual(stages["mesh_workflow_execution"]["settings"]["open_state"],
+                         {"part": "lid", "max_stretch": 1.15,
+                          "close_tool_sha256": tool_sha256(tool_root() / "blender/close_part.py")})
 
     def test_a_type_that_removes_hidden_faces_records_the_mesh_preparation_tools(self):
         # The mesh stage removes hidden faces with prepare_model.py and mesh_cleanup.py: a change to either must
