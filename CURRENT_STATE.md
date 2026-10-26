@@ -1081,18 +1081,26 @@ Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](
   decide. Unity's ray count and the Blender sweep's coordinate spaces were wrong and are fixed.
 - **Tests:** unit (votes, cut, alignment rule, gates, colours, plumbing), opt-in Blender (interfaces on a hollow
   shell, chest and drawer fixtures, holes, sweep, hidden faces, view fit), opt-in Unity live (open and closed
-  pockets, flap), `make verify` (915 passed).
+  pockets, flap, a slide into its seat), `make verify` (917 passed).
 - **Live (2026-10-25, private runs HP2-HP7, HC2-HC6):** the pistol (P4's concept) passed every gate and published
   with Unity's motion checks and Play mode passing on HP4, HP5 and HP7; on HP7, with hidden faces removed and the
   trigger declared as the 1911's slide (5 mm), slide 0.89 and trigger 0.96 of their masks, penetration 0.002 and
   0.000, backs of faces 0.0022 at most, 95% of the surface visible (9% before), crisper hammer, grip panels and
-  slide step at the same budget. Its colours are not right yet: the grips are streaked and the barrel and trigger
-  pink (the non-metal colour rule took grey steel and a grey cluster borrowed the walnut's tint; both fixed after
-  the run, not yet verified live). No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
+  slide step at the same budget. HP7's grips were streaked and its barrel and trigger pink (the non-metal colour
+  rule took grey steel and a grey cluster borrowed the walnut's tint). Three more faults showed on reruns and are
+  fixed: the stray-face cleanup recomputed face orientation on the open surface hidden-face removal leaves and
+  turned half of HP8's first seed inside out; and the trigger, cut from the frame it was fused to, entered the
+  solid frame by its whole 5 mm travel, the depth limit itself, so Blender read 0.005 and Unity 0.026 of HP9's model
+  (a slide entering its seat now does not count; hinges still count every point). HP10, on those fixes, published
+  its second seed: grips wood-coloured (coloured in the concept but grey in the map 0.004 of the object), barrel and
+  trigger steel, Unity's motion checks (slide and trigger 0.0) and Play mode passed; its first seed failed on 9
+  components. Of the 7 seeds tried across HP7-HP10, 2 published (HP7, HP10) and 1 more passes the fixed checks
+  when re-measured (HP9's); HP8's first two were not re-measured, and its third was a poor reconstruction (TRELLIS.2
+  gives a different mesh for the same seed number run to run). No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
   and opened onto a cavity, but hidden strips under the dome failed `part_open` (0.12-0.27). With them removed (HC6)
   the rest view reads 0.002, but on two of three seeds the lid's arched ends stayed with the body: no cavity, and the
   interface closing the wide opening crumpled (0.022-0.028 with the lid open). The cut wanders along plank grooves
   and trims, about twice a clean seam's length. The cavity's inside is invented: nothing shows what it looks like.
-- **Not verified / open:** a chest that passes, and a reference for its inside; colour after the grey fixes; grips decided per face rather than
-  per texel; any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
+- **Not verified / open:** a chest that passes, and a reference for its inside (a spike generating the chest open is
+  proposed, not built); dark flecks on HP10's left grip panel; any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
   Status Experimental.
