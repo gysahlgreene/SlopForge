@@ -1081,7 +1081,7 @@ Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](
   decide. Unity's ray count and the Blender sweep's coordinate spaces were wrong and are fixed.
 - **Tests:** unit (votes, cut, alignment rule, gates, colours, plumbing), opt-in Blender (interfaces on a hollow
   shell, chest and drawer fixtures, holes, sweep, hidden faces, view fit), opt-in Unity live (open and closed
-  pockets, flap, a slide into its seat), `make verify` (917 passed).
+  pockets, flap, a slide into its seat), `make verify` (919 passed).
 - **Live (2026-10-25, private runs HP2-HP7, HC2-HC6):** the pistol (P4's concept) passed every gate and published
   with Unity's motion checks and Play mode passing on HP4, HP5 and HP7; on HP7, with hidden faces removed and the
   trigger declared as the 1911's slide (5 mm), slide 0.89 and trigger 0.96 of their masks, penetration 0.002 and
@@ -1096,11 +1096,16 @@ Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](
   trigger steel, Unity's motion checks (slide and trigger 0.0) and Play mode passed; its first seed failed on 9
   components. Of the 7 seeds tried across HP7-HP10, 2 published (HP7, HP10) and 1 more passes the fixed checks
   when re-measured (HP9's); HP8's first two were not re-measured, and its third was a poor reconstruction (TRELLIS.2
-  gives a different mesh for the same seed number run to run). No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
+  gives a different mesh for the same seed number run to run). Two more faults and fixes: the wood's dark grain fell
+  outside the non-metal colour window and stayed metal as grey flecks (a coloured non-metal now matches by hue at
+  any lightness: the grips' metal share 9.8% to 3.9%, the screws among it); hidden-face removal cut seen patches
+  loose (1 piece became 71, failing the component budget; the hidden faces joining them now stay: 1 piece, 1.4% more
+  faces). HP11 and HP12 then published on their first seeds (clean grips with the concept's checkering; HP12's
+  surface 2 pieces), so 3 of the 4 seeds since the seat fix published. No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
   and opened onto a cavity, but hidden strips under the dome failed `part_open` (0.12-0.27). With them removed (HC6)
   the rest view reads 0.002, but on two of three seeds the lid's arched ends stayed with the body: no cavity, and the
   interface closing the wide opening crumpled (0.022-0.028 with the lid open). The cut wanders along plank grooves
   and trims, about twice a clean seam's length. The cavity's inside is invented: nothing shows what it looks like.
 - **Not verified / open:** a chest that passes, and a reference for its inside (a spike generating the chest open is
-  proposed, not built); dark flecks on HP10's left grip panel; any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
+  proposed, not built); the chroma ratio on a black weapon (2.2 on HP12, its concept's chroma near grey); any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
   Status Experimental.
