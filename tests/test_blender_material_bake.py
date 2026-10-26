@@ -1814,6 +1814,9 @@ class BlenderClosePartTests(unittest.TestCase):
         self.assertLessEqual(report["stretch"], 1.15)
         self.assertEqual(report["hinge"]["axis"], [1, 0, 0])
         self.assertAlmostEqual(abs(report["face_match"]["turn_degrees"]), 70, delta=4)
+        # and not tipped on into the hollow, which seals as well (it closed 74 degrees, its front edge 6% low)
+        self.assertAlmostEqual(abs(report["turn_degrees"]), 70, delta=3)
+        self.assertLess(report["seal"]["sunk"], 0.01)
         # the seal: no ray from the cavity escapes, no lid point sits in the walls
         self.assertGreater(report["cavity_points"], 0)
         self.assertLess(report["seal"]["escape"], 0.01)

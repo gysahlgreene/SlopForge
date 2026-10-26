@@ -203,14 +203,19 @@ def merge_islands(labels, pairs, areas, min_share=0.1):
 
 
 def lift_above_rim(labels, centres, span, part):
-    """Body faces standing clear above the body's rim, given to the open `part`: an open lid's mask misses its hinge
-    knuckles and band ends on its back edge, and left with the body they stop it closing (OPEN1, 2026-10-25). The rim
-    is the most populated height in the top tenth of the body's faces (z up). Returns (labels, report)."""
+    """Body faces standing clear above the body's rim next to the open `part`, given to it: an open lid's mask misses
+    its hinge knuckles and band ends on its back edge, and left with the body they stop it closing (OPEN1,
+    2026-10-25). Only faces within 3% of the object's size of the part: a hasp's top on the front also stands above
+    the rim, and the closed lid swung it down to hang below the chest (OPEN2, 2026-10-26). The rim is the most
+    populated height in the top tenth of the body's faces (z up). Returns (labels, report)."""
+    from scipy.spatial import cKDTree
     labels = np.array(labels, copy=True)
     body = labels == "body"
     z = centres[body, 2]
     heights = np.linspace(np.percentile(z, 90), np.percentile(z, 99.5), 200)
     rim = max(heights, key=lambda h: int((np.abs(z - h) < 0.005 * span).sum()))
-    above = body & (centres[:, 2] > rim + 0.015 * span)
+    near = (cKDTree(centres[labels == part]).query(centres)[0] < 0.03 * span if (labels == part).any()
+            else np.zeros(len(labels), bool))
+    above = body & near & (centres[:, 2] > rim + 0.015 * span)
     labels[above] = part
     return labels, {"rim_height": round(float(rim), 4), "moved_faces": int(above.sum())}
