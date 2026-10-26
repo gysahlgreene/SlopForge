@@ -364,12 +364,71 @@ def remove_hidden_faces(mesh, size, directions=32):
                 for other in edge.link_faces:
                     if not seen[other.index] and face.normal.dot(other.normal) >= 0.5:
                         keep[other.index] = True
+    keep = bridge_hidden_paths(bm, keep)
     hidden = [face for face in bm.faces if not keep[face.index]]
     bmesh.ops.delete(bm, geom=hidden, context="FACES")
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
     return len(hidden)
+
+
+def bridge_hidden_paths(bm, keep, rings=128):
+    """`keep` (one flag per face, by index) with the hidden faces on the shortest path from each kept piece to the
+    largest, through at most `rings` hidden faces, kept too. Seen patches joined to the rest only through hidden faces
+    (a crevice's walls, under the skin) became pieces of their own: a pistol's surface went from 1 piece to 71, its
+    body failed the component budget, and a patch at the muzzle stayed with the body while the slide around it moved
+    (HP10 seed 1, 2026-10-26). A piece reached joins the sources, so pieces can join through each other. On that
+    pistol's 1.3 million-face detail mesh, faces under a millimetre: 8 rings left 50 pieces, 32 left 32, 128 one,
+    keeping 1.4% more faces, all hidden."""
+    from collections import deque
+    keep = list(keep)
+    piece = [-1] * len(keep)
+    sizes = []
+    for face in bm.faces:
+        if keep[face.index] and piece[face.index] < 0:
+            piece[face.index], stack, count = len(sizes), [face], 0
+            while stack:
+                current = stack.pop()
+                count += 1
+                for edge in current.edges:
+                    for other in edge.link_faces:
+                        if keep[other.index] and piece[other.index] < 0:
+                            piece[other.index] = len(sizes)
+                            stack.append(other)
+            sizes.append(count)
+    if len(sizes) < 2:
+        return keep
+    members = [[] for _ in sizes]
+    for face in bm.faces:
+        if piece[face.index] >= 0:
+            members[piece[face.index]].append(face)
+    depth, came, queue, joined = {}, {}, deque(), set()
+
+    def join(label):
+        joined.add(label)
+        for face in members[label]:
+            depth[face.index] = 0
+            queue.append(face)
+    join(max(range(len(sizes)), key=sizes.__getitem__))
+    while queue:
+        current = queue.popleft()
+        for edge in current.edges:
+            for other in edge.link_faces:
+                if other.index in depth:
+                    continue
+                if keep[other.index]:
+                    if piece[other.index] not in joined:
+                        step = current.index
+                        while depth[step] > 0:
+                            keep[step] = True
+                            step = came[step]
+                        join(piece[other.index])
+                elif depth[current.index] < rings:
+                    depth[other.index] = depth[current.index] + 1
+                    came[other.index] = current.index
+                    queue.append(other)
+    return keep
 
 
 def winding_numbers(points, triangles, chunk=16):

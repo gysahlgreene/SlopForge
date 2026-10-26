@@ -58,7 +58,11 @@ result against that declaration before anyone reviews it.
    recompute which way its faces point: the stray-face cleanup did, whenever it found a stray face,
    and turned half of a pistol inside out (2026-10-26: backs of faces on 0.36 of what was seen, the
    grip's panels gone; 8 stray faces on that seed, none on the seed that had passed). It no longer
-   does; a Blender test keeps an open bowl facing in.
+   does; a Blender test keeps an open bowl facing in. Seen patches joined to the rest only through
+   hidden faces (a crevice's walls) were cut loose: one pistol went from 1 piece to 71, failed the
+   component budget, and a patch at its muzzle stayed with the body while the slide moved. The hidden
+   faces on the shortest path from each seen piece to the largest now stay (within 128 faces of it:
+   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden).
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto

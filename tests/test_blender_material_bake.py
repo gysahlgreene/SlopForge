@@ -1301,6 +1301,31 @@ print("FACES", before, removed, len(mesh.polygons))
         self.assertEqual(removed, 12)  # the inner skin and the block
         self.assertEqual(after, 6 + 4)  # the outer skin and the plate
 
+    def test_a_seen_patch_joined_only_through_hidden_faces_stays_joined(self):
+        # Seen patches joined to the rest only through hidden faces (a crevice's walls, under the skin) became pieces
+        # of their own: a pistol's surface went from 1 piece to 71, its body failed the component budget (9 of 5),
+        # and a patch at the muzzle stayed with the body while the slide around it moved (HP10 seed 1, 2026-10-26).
+        # The hidden faces on the shortest path from each seen piece to the largest, within a few rings, stay. A
+        # strip of 30 faces: seen 0-4, 9-10 and 25-29; the 4 hidden faces between the first two pieces stay, the 14
+        # before the far one (more than the rings allowed) do not.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import bridge_hidden_paths
+bm = bmesh.new()
+top = [bm.verts.new((x, 0, 0)) for x in range(31)]
+bottom = [bm.verts.new((x, 1, 0)) for x in range(31)]
+faces = [bm.faces.new((top[i], top[i + 1], bottom[i + 1], bottom[i])) for i in range(30)]
+bm.faces.index_update()
+seen = [i < 5 or 9 <= i <= 10 or i >= 25 for i in range(30)]
+keep = bridge_hidden_paths(bm, seen, rings=6)
+print("KEEP", "".join("1" if k else "0" for k in keep))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        keep = next(line.split()[1] for line in result.stdout.splitlines() if line.startswith("KEEP"))
+        self.assertEqual(keep, "1" * 11 + "0" * 14 + "1" * 5)
+
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderViewFitTests(unittest.TestCase):
