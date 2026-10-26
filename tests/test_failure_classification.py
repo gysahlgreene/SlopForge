@@ -1013,6 +1013,100 @@ class PropComponentBudgetTests(unittest.TestCase):
         absent = apply_part_coverage(_quality_report(component_count=1), {}, declared, 0.6)
         self.assertEqual(absent["failure_codes"], ["part_missing"])
 
+    def test_a_part_that_swings_into_its_body_is_retried_before_materials(self):
+        # The C3 chest's lid (0.169 of its vertices inside the body over rest) reached Unity before it failed; the
+        # final pass now sweeps each part through its declared range in Blender, so a seed is retried early.
+        from slopforge.validation import apply_part_penetration
+        declared = [{"name": "lid", "kind": "hinge"}, {"name": "drawer", "kind": "slide"}]
+        report = apply_part_penetration(_quality_report(component_count=1), {"lid": 0.169, "drawer": 0.004}, declared, 0.02)
+        self.assertEqual(report["failure_codes"], ["part_penetrates"])
+        self.assertIn("lid 0.17", report["errors"][-1])
+        self.assertEqual(report["measured"]["part_penetration"], {"lid": 0.169, "drawer": 0.004})
+        self.assertEqual((report["measured"]["moving_parts_penetrating"], report["limits"]["max_part_penetration"]), (1, 0.02))
+        self.assertTrue(candidate_quality_rejection(report))
+        passing = apply_part_penetration(_quality_report(component_count=1), {"lid": 0.01, "drawer": 0.0}, declared, 0.02)
+        self.assertEqual(passing.get("failure_codes", []), [])
+        unmeasured = apply_part_penetration(_quality_report(component_count=1), {}, declared, 0.02)
+        self.assertEqual(unmeasured.get("failure_codes", []), [])  # the cut route measures nothing: no verdict
+
+    def test_a_model_that_shows_holes_when_a_part_moves_is_retried(self):
+        # The final pass looks at the model at rest and with each part at the end of its range: the share of what it
+        # sees that is the back of a face. Hybrid pieces left open read 0.022 with the pistol's slide back, the old
+        # closing 0.023, the interfaces 0.004; the chest whose lid was only its bands 0.168 (2026-10-25).
+        from slopforge.validation import apply_visible_backfaces
+        report = apply_visible_backfaces(_quality_report(component_count=1),
+                                         {"rest": 0.0003, "slide": 0.0227, "trigger": 0.0123}, 0.01)
+        self.assertEqual(report["failure_codes"], ["part_open"])
+        self.assertIn("slide 0.023", report["errors"][-1])
+        self.assertIn("trigger 0.012", report["errors"][-1])
+        self.assertEqual((report["measured"]["moving_parts_open"], report["limits"]["max_visible_backfaces"]), (2, 0.01))
+        self.assertTrue(candidate_quality_rejection(report))
+        closed = apply_visible_backfaces(_quality_report(component_count=1),
+                                         {"rest": 0.0005, "slide": 0.0038, "trigger": 0.0016}, 0.01)
+        self.assertEqual(closed.get("failure_codes", []), [])
+        unmeasured = apply_visible_backfaces(_quality_report(component_count=1), None, 0.01)
+        self.assertEqual(unmeasured.get("failure_codes", []), [])  # nothing moves: no verdict
+
+    def test_a_hybrid_split_whose_parts_missed_the_surface_is_retried(self):
+        # The hybrid route aligns OmniPart's parts on TRELLIS.2's surface; two generators that made different shapes
+        # leave the parts beside the surface, and their votes mean nothing: another seed (part_missing).
+        from slopforge.validation import apply_hybrid_alignment
+        report = apply_hybrid_alignment(_quality_report(component_count=1), 0.051, 0.03)
+        self.assertEqual(report["failure_codes"], ["part_missing"])
+        self.assertIn("0.051", report["errors"][-1])
+        self.assertEqual((report["measured"]["hybrid_alignment_error"], report["limits"]["max_hybrid_alignment_error"]),
+                         (0.051, 0.03))
+        self.assertTrue(candidate_quality_rejection(report))
+        self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), 0.014, 0.03).get("failure_codes", []), [])
+        self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), None, 0.03).get("failure_codes", []), [])
+
+    def test_a_hybrid_split_the_mask_decided_is_not_retried_for_omniparts_alignment(self):
+        # Seen from the side, every face votes and the mask decides; OmniPart only leans where a mask edge fades. A
+        # pistol seed whose slide covered its mask 1.00 and trigger 0.95, clear of the body and closed, failed only
+        # on OmniPart landing 0.048 off the surface (2026-10-25). The error is recorded; it decides only where
+        # OmniPart does: a view that does not vote through the thickness, or a part whose mask was dropped.
+        from slopforge.validation import apply_hybrid_alignment
+        decided = apply_hybrid_alignment(_quality_report(component_count=1), 0.048, 0.03, decisive=False)
+        self.assertEqual(decided.get("failure_codes", []), [])
+        self.assertEqual(decided["measured"]["hybrid_alignment_error"], 0.048)
+        self.assertFalse(decided["measured"]["hybrid_alignment_decisive"])
+        guided = apply_hybrid_alignment(_quality_report(component_count=1), 0.048, 0.03, decisive=True)
+        self.assertEqual(guided["failure_codes"], ["part_missing"])
+
+    def test_a_coloured_region_that_came_out_grey_is_retried(self):
+        # A black pistol with red-brown walnut grips: the concept's median colour is the steel's, near grey, so the
+        # chroma check never ran, and grips the metal steps had greyed passed (2026-10-25). Per cell seen from the
+        # concept's side: grey-gripped seeds 0.246-0.258 of the object lost the concept's colour, wood-gripped ones
+        # 0.00-0.04, hybrid chests 0.02.
+        import numpy as np
+        from slopforge.validation import apply_concept_colour, concept_desaturated_share
+        concept = np.zeros((96, 96, 4)); concept[8:88, 8:88] = (20, 20, 22, 255)
+        concept[50:88, 8:40] = (98, 37, 19, 255)  # the grips: a fifth of the object
+        grey = concept.copy(); grey[50:88, 8:40] = (60, 60, 60, 255)
+        wood = concept.copy(); wood[50:88, 8:40] = (67, 43, 28, 255)  # darker, still wood
+        lost, kept = concept_desaturated_share(concept, grey), concept_desaturated_share(concept, wood)
+        self.assertGreater(lost, 0.1)
+        self.assertLess(kept, 0.05)
+        fidelity = {"colour_source": "concept_view", "concept_chroma": 0.6, "texture_chroma": 0.0,
+                    "concept_hue_difference": 0.1, "concept_chroma_ratio": 0.0, "concept_darkened_share": 0.0,
+                    "concept_desaturated_share": lost}
+        report = apply_concept_colour(_quality_report(component_count=1), fidelity, 25.0, 0.6, 0.4, 0.1)
+        self.assertEqual(report["failure_codes"], ["colour_lost"])
+        self.assertTrue(candidate_quality_rejection(report))
+
+    def test_a_mesh_whose_faces_fold_against_each_other_is_retried(self):
+        # The C4 chest (2026-10-25): the collapse decimation crumpled a thin-walled box, 47% of its adjacent faces
+        # came out with opposed normals, and Unity shaded it in facets (Blender's custom normals hid it).
+        from slopforge.validation import apply_mesh_folds
+        report = apply_mesh_folds(_quality_report(component_count=1), {"body": 0.472, "lid": 0.01}, 0.1)
+        self.assertEqual(report["failure_codes"], ["mesh_folded"])
+        self.assertIn("body 0.47", report["errors"][-1])
+        self.assertEqual(report["measured"]["folded_edge_share"], {"body": 0.472, "lid": 0.01})
+        self.assertEqual((report["measured"]["max_folded_edge_share"], report["limits"]["max_folded_edge_share"]), (0.472, 0.1))
+        self.assertTrue(candidate_quality_rejection(report))
+        self.assertEqual(apply_mesh_folds(_quality_report(component_count=1), {"body": 0.026}, 0.1).get("failure_codes", []), [])
+        self.assertEqual(apply_mesh_folds(_quality_report(component_count=1), None, 0.1).get("failure_codes", []), [])
+
     def test_a_base_colour_without_textured_pixels_records_no_metric_and_stays_retryable(self):
         # 2026-10-25 live pistol: an all-black atlas left no texels to measure, the chroma metrics became NaN, the
         # failure record could not carry its evidence, and a retryable part_missing was reported as final.
@@ -1034,6 +1128,17 @@ class PropComponentBudgetTests(unittest.TestCase):
             self.assertEqual(report["status"], "passed_with_warnings")
             self.assertTrue(any("no textured pixels" in warning for warning in report["warnings"]))
             json.dumps(report, allow_nan=False)
+
+    def test_a_failed_concept_view_names_its_error_in_the_warning(self):
+        # The view script reports {"status": "failed", "error": ...}; the warning printed "(not rendered)" instead
+        from slopforge.validation import apply_concept_colour
+        fidelity = {"colour_source": "atlas", "concept_chroma": 30.0, "texture_chroma": 20.0,
+                    "concept_hue_difference": 1.0, "concept_chroma_ratio": 0.67, "concept_darkened_share": None,
+                    "concept_view": {"status": "failed", "error": "Expected one mesh in x.glb, found 4"}}
+        report = apply_concept_colour(_quality_report(component_count=1), fidelity, max_hue_difference=4,
+                                      min_chroma_ratio=0.6, max_darkened_share=0.4)
+        self.assertTrue(any("Expected one mesh" in warning for warning in report["warnings"]), report["warnings"])
+        self.assertFalse(any("not rendered" in warning for warning in report["warnings"]))
 
     def test_a_declared_moving_part_that_did_not_come_out_is_retried(self):
         from slopforge.validation import apply_moving_parts

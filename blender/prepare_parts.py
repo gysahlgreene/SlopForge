@@ -12,6 +12,7 @@ from pathlib import Path
 
 import bmesh
 import bpy
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import remove_isolated_single_faces  # noqa: E402
@@ -23,7 +24,7 @@ def get_args():
     argv = sys.argv[sys.argv.index("--") + 1:]
     if len(argv) < 3:
         raise SystemExit("Expected: parts.glb processed.glb processed.blend --parts-json ... --face-budget ...")
-    options = {"--texture-size": "2048"}
+    options = {"--texture-size": "2048", "--normal-output": None}
     metal = {}
     index = 3
     while index < len(argv):
@@ -38,7 +39,8 @@ def get_args():
             raise SystemExit(f"{key} is required")
     return (Path(argv[0]).resolve(), Path(argv[1]).resolve(), Path(argv[2]).resolve(), Path(options["--parts-json"]),
             int(options["--face-budget"]), Path(options["--basecolor-output"]), Path(options["--metallic-output"]),
-            int(options["--texture-size"]), metal)
+            int(options["--texture-size"]), metal,
+            Path(options["--normal-output"]) if options["--normal-output"] else None)
 
 
 def reduce_part(obj, target):
@@ -80,7 +82,7 @@ def bake_atlases(objects, texture_size, basecolor_output, metallic_output, metal
     for obj in objects:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = objects[0]
-    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.object.mode_set(mode="EDIT")  # multi-object edit mode: the selected parts only
     bpy.ops.mesh.select_all(action="SELECT")
     margin = 4 / texture_size
     bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
@@ -131,8 +133,41 @@ def bake_atlases(objects, texture_size, basecolor_output, metallic_output, metal
         obj.data.materials.clear()
 
 
+def bake_normals(objects, sources, texture_size, output):
+    """Tangent normals of each part's full-detail copy (taken before its reduction) baked onto the reduced part's
+    atlas UVs, into one map: the generator's bumps, panels and checkering survive the reduction (as the TRELLIS
+    route's full-detail normal bake, prepare_model.py)."""
+    scene = bpy.context.scene
+    target = bpy.data.images.new("atlas_normal", width=texture_size, height=texture_size, alpha=False)
+    target.colorspace_settings.name = "Non-Color"
+    # Flat where no island lands. Written into the buffer: changing generated_color after the bake regenerates it.
+    flat = np.tile(np.array([0.5, 0.5, 1.0, 1.0], np.float32), texture_size * texture_size)
+    target.pixels.foreach_set(flat)
+    for obj in objects:
+        material = bpy.data.materials.new(f"NormalBake_{obj.name}")
+        material.use_nodes = True
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.image = target
+        material.node_tree.nodes.active = node
+        obj.data.materials.append(material)
+        source = sources[obj.name]
+        bpy.ops.object.select_all(action="DESELECT")
+        source.select_set(True)
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        # use_clear=False: each part bakes into the one map; a clearing bake wiped the parts before it
+        bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_selected_to_active=True,
+                            cage_extrusion=max(obj.dimensions) * 0.01, margin=4, use_clear=False)
+        obj.data.materials.clear()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    target.filepath_raw, target.file_format = str(output), "PNG"
+    target.save()
+    for source in sources.values():
+        bpy.data.objects.remove(source, do_unlink=True)
+
+
 (parts_glb, processed_glb, processed_blend, parts_json, face_budget, basecolor_output, metallic_output, texture_size,
- metal) = get_args()
+ metal, normal_output) = get_args()
 table = json.loads(parts_json.read_text())["parts"]
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=str(parts_glb))
@@ -148,12 +183,25 @@ areas = {obj.name: surface_area(obj) for obj in objects}
 total = sum(areas.values()) or 1.0
 shares = {name: max(area / total, MIN_SHARE) for name, area in areas.items()}
 scale = sum(shares.values())
+sources = {}
 for obj in objects:
+    if normal_output:  # the full-detail copy the normal bake reads, kept out of the scene's selection until then
+        source = obj.copy()
+        source.data = obj.data.copy()
+        source.name = f"{obj.name}_detail"
+        bpy.context.scene.collection.objects.link(source)
+        sources[obj.name] = source
     target = max(8, int(face_budget * shares[obj.name] / scale))
     faces = reduce_part(obj, target)
     print(f"Part {obj.name}: {faces} faces (target {target})")
+if normal_output:
+    for source in sources.values():  # not part of the atlas layout
+        source.select_set(False)
 bake_atlases(objects, texture_size, basecolor_output, metallic_output, metal)
 print(f"Atlas: {basecolor_output}")
+if normal_output:
+    bake_normals(objects, sources, texture_size, normal_output)
+    print(f"Normal: {normal_output}")
 bpy.ops.object.select_all(action="DESELECT")
 for obj in objects:
     obj.select_set(True)

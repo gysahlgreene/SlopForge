@@ -23,12 +23,12 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 | Asset type | Status | Evidence |
 | --- | --- | --- |
-| [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
+| [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified. A chest with a hinged lid works through a spike | Ten props as lit turntables, each with concept, Blender and Unity URP views; the chest's lid in motion |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
 | [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
-| [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). The pistol's slide and trigger are split off as moving parts, with a Unity prefab and checked motion clips. The protocol comes next | Three weapons as lit turntables beside their concepts |
-| Mechanical assets with moving parts, creatures | Planned on the [roadmap](ROADMAP.md) | — |
+| [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). The pistol's slide and trigger publish as a Unity prefab whose parts move as declared, checked in Play mode. The protocol comes next | The pistol in motion; three weapons as lit turntables beside their concepts |
+| Creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
@@ -76,6 +76,14 @@ That makes static props on this tier **Provisional**. The owner reviewed the run
 - **Not covered by the checks:** the colour of small parts. Unity is checked in editor batch renders, not in Play mode.
 
 [Protocol evidence →](docs/media/props-provisional-2026-10-v5/README.md) · [New prop kinds →](docs/media/props-coverage-2026-10/README.md) · [Earlier showcase (2026-10-18) →](docs/media/material-showcase-2026-10/README.md)
+
+**Props with moving parts** (2026-10-26):
+
+<p align="center"><img src="docs/media/moving-parts-2026-10/chest_lid.gif" width="600" alt="A domed wooden chest with iron bands: the lid opens 100 degrees on its back edge onto a plank interior, then closes"></p>
+
+A chest's lid on its hinge. The chest was generated open from an edit of its concept, so its inside comes from a
+picture, and its lid was fitted shut before the final pass. It passed the final pass's checks and is a spike, not yet
+published. [Evidence and limits →](docs/media/moving-parts-2026-10/README.md)
 
 The brass lantern above was made from this brief:
 
@@ -214,6 +222,12 @@ slopforge --project ~/UnityProjects/MyGame scene-render moor
 
 ## Weapons
 
+<p align="center"><img src="docs/media/moving-parts-2026-10/pistol_moving_parts.gif" width="600" alt="A black pistol with rosewood grips: the trigger pulls back, the slide racks back and returns, the trigger releases"></p>
+
+**Moving parts** (2026-10-26): the pistol's slide and trigger move as their own pieces, as declared in the brief. It
+is published to Unity as a prefab with colliders, a Rigidbody, sockets and an Animator, and checked in Play mode.
+[Evidence and limits →](docs/media/moving-parts-2026-10/README.md)
+
 | Pistol | Longsword | Crossbow |
 | :---: | :---: | :---: |
 | <img src="docs/media/weapon-pipeline-2026-10/pistol_concept.jpg" width="240" alt="Pistol concept: black steel slide and frame with rosewood grips, side profile"> | <img src="docs/media/weapon-pipeline-2026-10/longsword_concept.jpg" width="240" alt="Longsword concept: steel blade with a fuller, crossguard, leather grip and wheel pommel"> | <img src="docs/media/weapon-pipeline-2026-10/crossbow_concept.jpg" width="240" alt="Crossbow concept from above: walnut stock, dark steel bow and a hemp string"> |
@@ -227,13 +241,6 @@ Concepts (top) and the generated weapons (bottom), from one run each on the H100
 - **Materials:** metal decoded darker than drawn is brightened to the concept, and small non-metal parts such as grips
   are shifted to the concept's colours.
 - **Orientation:** each weapon is turned tip forward and held at the grip drawn on its concept.
-
-<img src="docs/media/weapon-moving-parts-2026-10/pistol_motion.gif" width="240" align="right" alt="The pistol's slide travelling back and its trigger pulling">
-
-**Moving parts:** a hinge or slide declared in the brief, and boxed on the approved concept, is cut from the one
-generated mesh, closed, and parented to the body with its pivot. The pistol's slide and trigger move as its own
-pieces ([evidence](docs/media/weapon-moving-parts-2026-10/README.md)). Publishing builds a Unity prefab with a clip
-per part, and checks in Unity that each part moves as declared.
 
 **Experimental:** no weapon has been through a protocol. Small mechanisms stay soft, and generated metal is glossier
 than drawn.
@@ -282,6 +289,33 @@ flowchart LR
 - **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
 - **Deliver:** export models/materials, assemble kit layouts into Unity scenes, render whole scenes with `scene-render`, and prepare character animation tooling for Unity.
 
+## Built with
+
+No model weights are bundled; each is downloaded from its publisher. The default `h100` profiles use:
+
+| Stage | Model or tool | Licence |
+| --- | --- | --- |
+| Concept images | [Z-Image Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) with the [Qwen3 4B](https://huggingface.co/Qwen/Qwen3-4B) text encoder ([ComfyUI files](https://huggingface.co/Comfy-Org/z_image_turbo)) | Apache-2.0 |
+| Character poses, shape guides | [Z-Image-Turbo Fun ControlNet Union 2.1](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) | Apache-2.0 |
+| Background removal | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) general, through [rembg](https://github.com/danielgatis/rembg) | MIT |
+| Image to 3D mesh and PBR maps | [TRELLIS.2](https://huggingface.co/microsoft/TRELLIS.2-4B) ([ComfyUI files](https://huggingface.co/Comfy-Org/TRELLIS.2)), conditioned by [DINOv3 ViT-L](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m) | MIT; DINOv3 License |
+| Multi-view 3D (experimental) | [Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D) by TencentARC; views by [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) and the [multiple-angles LoRA](https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA) | MIT; Apache-2.0 |
+| Part masks | [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) and [SAM 2.1 Hiera large](https://huggingface.co/facebook/sam2.1-hiera-large) | MIT; Apache-2.0 |
+| Part layout for moving parts | [OmniPart](https://github.com/HKU-MMLab/OmniPart), built on [TRELLIS](https://github.com/microsoft/TRELLIS) | MIT |
+| Tiling material upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) x4plus | BSD-3-Clause |
+| Character rigging | [SkinTokens](https://github.com/VAST-AI-Research/SkinTokens), or Blender's Rigify | MIT; GPL-2.0+ |
+| Character motion | [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu/) | Free for any use, not resold |
+| Inference server | [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your machine or a remote GPU | GPL-3.0 |
+| Mesh processing, UVs, normal bakes, review renders | [Blender](https://www.blender.org/) 5.1 | GPL-2.0+ |
+| Engine delivery, prefabs, Play-mode checks | [Unity](https://unity.com/) 6000.6.3f1, URP 17.6.0, Unity Test Framework | Unity's terms |
+
+**Built with DINOv3.** Its licence allows commercial use, but it is Meta's own licence, not MIT or Apache: it
+requires this attribution and excludes military uses. Until 2026-10-26 the cut-outs used rembg's default model, BRIA
+RMBG-2.0, which is licensed for non-commercial use only. They now use BiRefNet, with near-identical cut-outs (alpha
+IoU 0.995–0.998). The legacy Hunyuan3D 2.0 route, used only when no model workflow is configured, is under Tencent's
+community licence; nothing shown here used it. Full model files, hashes and graphs:
+[workflow inventory](docs/WORKFLOWS.md) · [ComfyUI setup](docs/COMFYUI.md) · [third-party notices](THIRD_PARTY_NOTICES.md)
+
 ## Quick start
 
 Requires **Python 3.10–3.14**, Blender, a compatible ComfyUI service, and an existing Unity project. Model weights and custom nodes are installed separately.
@@ -306,7 +340,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Static props | **Provisional** for `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import. Three briefs × two independent runs passed every stage and owner-accepted threshold ([criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md)). Four more prop kinds passed end to end in single exploratory runs; the stump passed only after a UV fix prompted by its failed first run. Not Qualified: six runs cannot measure a failure rate. Since 2026-10-24 meshes are reduced from the full-detail shape ([evidence](docs/media/mesh-reduction-2026-10/README.md)); two protocol props re-approved after it passed, with no protocol rerun. |
 | Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096² by default (2048² for kit modules). Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. Metal decoded darker than its concept is brightened to it; weapons also have small parts' colours shifted to the concept, other types do not. |
 | Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. The stone kit's material step changed after that commit (#101) and has no protocol run. Standalone structures are generated at real size, one run each. The 2026-10-24 mesh-reduction change also applies to kits, with no protocol rerun. |
-| Weapons | **Experimental**: a pistol, a longsword and a crossbow, one run each through Blender on the H100 `final` tier ([evidence](docs/media/weapon-pipeline-2026-10/README.md)); the owner accepted the look for now. One pistol with a slide and trigger split off, published to Unity with motion clips that pass their checks ([evidence](docs/media/weapon-moving-parts-2026-10/README.md)). No protocol; the sword and crossbow have no Unity render. |
+| Weapons | **Experimental**: a pistol, a longsword and a crossbow, one run each through Blender on the H100 `final` tier ([evidence](docs/media/weapon-pipeline-2026-10/README.md)); the owner accepted the look for now. A pistol with a slide and trigger publishes to Unity as a prefab whose parts move as declared, with motion checks and Play mode passing on 4 of the last 5 seeds ([evidence](docs/media/moving-parts-2026-10/README.md)). No protocol; the sword and crossbow have no Unity render. |
 | Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe rebuilt it once from a blank project ([live run](docs/media/natural-live-2026-10/README.md)). Rendering only: no Play mode or performance check. |
 | Mesh/material preparation and Unity delivery | 28 of the 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode (two stopped earlier). Every M2-v3 kit module and every moorland model was published with `approve-texture`; kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps. Play mode is not run. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |

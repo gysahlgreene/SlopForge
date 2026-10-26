@@ -143,9 +143,9 @@ class BoxOrderTests(unittest.TestCase):
         from processing.part_model import check_box_order, part_ids
         alpha, masks, parts = fixture()
         ids, table = part_ids(alpha, masks, parts)
-        # OmniPart's ordered mask: our ids renumbered bottom-up on a coarse grid, as load_bottom_up_mask does
-        from PIL import Image
-        coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize((37, 37), Image.NEAREST)).astype(int)
+        # OmniPart's ordered mask: our ids renumbered bottom-up on its coarse grid, as load_bottom_up_mask does
+        from processing.part_model import coarse_ids
+        coarse = coarse_ids(ids)
         order = sorted(np.unique(coarse[coarse > 0]), key=lambda i: -np.where(coarse == i)[0].max())
         renumbered = np.zeros_like(coarse)
         for new, old in enumerate(order, 1):
@@ -154,6 +154,63 @@ class BoxOrderTests(unittest.TestCase):
         swapped = renumbered.copy(); swapped[renumbered == 1] = 2; swapped[renumbered == 2] = 1
         with self.assertRaisesRegex(RuntimeError, "order"):
             check_box_order(ids, table, swapped)
+
+
+def omnipart_coarse(ids):
+    """OmniPart's own reading of a mask (inference_utils.load_img_mask + smart_downsample_mask), ported as the oracle:
+    a square crop 1.2x the object's larger side, zero-padded, then the most common non-zero id per 37x37 cell."""
+    ys, xs = np.nonzero(ids > 0)
+    bbox = [xs.min(), ys.min(), xs.max(), ys.max()]
+    center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+    hsize = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / 2 * 1.2
+    aug = [int(center[0] - hsize), int(center[1] - hsize), int(center[0] + hsize), int(center[1] + hsize)]
+    height, width = ids.shape
+    pad = (max(0, -aug[1]), max(0, aug[3] - height)), (max(0, -aug[0]), max(0, aug[2] - width))
+    mask = np.pad(ids, pad)
+    aug = [aug[0] + pad[1][0], aug[1] + pad[0][0], aug[2] + pad[1][0], aug[3] + pad[0][0]]
+    mask = mask[aug[1]:aug[3], aug[0]:aug[2]]
+    h, w = mask.shape
+    out = np.zeros((37, 37), int)
+    for i in range(37):
+        for j in range(37):
+            region = mask[int(i * (h / 37)):min(int((i + 1) * (h / 37)), h), int(j * (w / 37)):min(int((j + 1) * (w / 37)), w)]
+            values, counts = np.unique(region.flatten(), return_counts=True)
+            nonzero = values > 0
+            if nonzero.any():
+                out[i, j] = values[nonzero][counts[nonzero].argmax()]
+    return out
+
+
+class CoarseGridTests(unittest.TestCase):
+    def test_the_coarse_grid_is_omniparts_own_crop_of_the_object(self):
+        from processing.part_model import coarse_ids
+        ids = np.zeros((1024, 1024), np.int32)
+        ids[300:700, 100:900] = 3  # a wide object: OmniPart's square crop reaches past the image
+        ids[640:700, 100:260] = 1  # a grip at the bottom left
+        ids[300:330, 500:620] = 2  # a bolt along the top
+        self.assertTrue((coarse_ids(ids) == omnipart_coarse(ids)).all())
+        tall = np.zeros((1024, 1024), np.int32)
+        tall[50:1000, 400:560] = 2; tall[900:1000, 400:470] = 1
+        self.assertTrue((coarse_ids(tall) == omnipart_coarse(tall)).all())
+
+    def test_a_thin_part_keeps_a_cell_at_omniparts_resolution(self):
+        from processing.part_model import coarse_ids
+        alpha = np.ones((896, 1152), bool)
+        trigger = np.zeros_like(alpha); trigger[487:523, 411:420] = True  # 324 px: the R2 rifle's trigger
+        self.assertNotIn(1, coarse_ids(np.where(trigger, 1, 2)))  # the body outnumbers it in every 31x24 cell
+        ids, table = part_ids(alpha, {"trigger": trigger}, [{"name": "trigger", "kind": "hinge"}])
+        self.assertIn(1, coarse_ids(ids))  # so it is given the cell it fills most, or OmniPart drops it
+        self.assertIn(1, omnipart_coarse(ids))
+        self.assertLess(((ids == 1) & ~trigger).sum(), 38 * 38)  # one cell's object pixels, no more
+        self.assertTrue((ids[trigger] == 1).all())
+
+    def test_parts_whose_bottoms_share_a_coarse_row_order_by_id_like_omnipart(self):
+        from processing.part_model import _ordered
+        alpha = np.ones((370, 370), bool)  # ten pixels per coarse cell
+        a = np.zeros_like(alpha); a[100:118, 50:150] = True  # bottom row 117: coarse row 11
+        b = np.zeros_like(alpha); b[100:115, 200:300] = True  # bottom row 114: coarse row 11 too
+        ids, table = part_ids(alpha, {"b": b, "a": a}, [{"name": "b", "kind": "hinge"}, {"name": "a", "kind": "hinge"}])
+        self.assertEqual([e["name"] for e in _ordered(ids, table)], ["body", "b", "a"])
 
 
 class CoverageTests(unittest.TestCase):
@@ -188,7 +245,8 @@ class MainTests(unittest.TestCase):
             (root / "request.json").write_text(json.dumps(request))
             coords = block_coords(2, 62, 10, 46)
 
-            def omnipart(_request, out_dir, boxes_for, _mask_path):
+            def omnipart(request_, out_dir, boxes_for, _mask_path):
+                self.assertEqual(request_.get("texture_size", 2048), 2048)  # the tool's default when absent
                 _frame, boxes = boxes_for(coords)
                 self.assertEqual(boxes.shape, (2, 2, 3))
                 # OmniPart's merged GLB: geometry_0 is its box visualisation, then one node per box in order
@@ -241,12 +299,182 @@ class DerivedMapTests(unittest.TestCase):
             metallic = Image.open(maps["metallic"]).convert("L")
             self.assertEqual((metallic.getpixel((1, 1)), metallic.getpixel((6, 6))), (255, 0))
 
+    def test_derive_part_maps_uses_a_baked_normal_when_given(self):
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.unity_material import derive_part_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (8, 8), (200, 30, 30)).save(root / "atlas.png")
+            Image.new("L", (8, 8), 255).save(root / "metal.png")
+            Image.new("RGB", (8, 8), (140, 120, 250)).save(root / "baked.png")
+            maps = derive_part_maps(root / "atlas.png", root / "metal.png", "satin", root / "maps", normal=root / "baked.png")
+            self.assertEqual(Image.open(maps["normal"]).convert("RGB").getpixel((3, 3)), (140, 120, 250))
+
+    def test_derive_part_maps_fills_unused_texels_with_the_median_used_colour(self):
+        # Unused atlas texels are exact black; at the smaller mips they darken every island's edge
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import derive_part_maps
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            atlas = Image.new("RGB", (16, 16), (0, 0, 0)); atlas.paste((180, 60, 40), (2, 2, 10, 10)); atlas.save(root / "atlas.png")
+            Image.new("L", (16, 16), 255).save(root / "metal.png")
+            maps = derive_part_maps(root / "atlas.png", root / "metal.png", "satin", root / "maps")
+            base = np.asarray(Image.open(maps["basecolor"]).convert("RGB"))
+            self.assertEqual(int((base.sum(-1) == 0).sum()), 0)
+            self.assertEqual(tuple(base[5, 5]), (180, 60, 40))
+            self.assertEqual(tuple(base[14, 14]), (180, 60, 40))
+
     def test_finish_word(self):
         from slopforge.unity_material import finish_word
         self.assertEqual(finish_word([{"region": "blade", "class": "metal", "description": "polished steel"}]), "polished")
         self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "blued steel"}]), "satin")
         self.assertEqual(finish_word([{"region": "frame", "class": "metal", "description": "matte black steel"},
                                       {"region": "grip", "class": "nonmetal", "description": "polished walnut"}]), "matte")
+
+    def test_a_non_metal_declared_without_a_colour_takes_its_parts_colour_in_the_concept(self):
+        # A pistol's grips were declared "nonmetal: checkered walnut wood" with no colour; the generated metallic map
+        # called the whole pistol metal and the metal steps greyed the grips (2026-10-25). The colour the rule needs
+        # is in the concept under the grip's mask: the median of its coloured pixels (the frame's steel under the
+        # same mask is left out). A declared colour is kept; a region that names no masked part gets none.
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from slopforge.unity_material import concept_part_colours
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            concept = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+            concept.paste((20, 20, 22, 255), (10, 10, 90, 50))  # black steel
+            concept.paste((98, 37, 19, 255), (20, 50, 45, 95))  # walnut grip panel
+            concept.paste((20, 20, 22, 255), (45, 50, 55, 95))  # steel beside it, under the grip's mask
+            concept.save(root / "concept.png")
+            mask = Image.new("L", (100, 100), 0); mask.paste(255, (15, 45, 55, 95)); mask.save(root / "grip.png")
+            materials = [{"region": "slide and frame", "class": "metal", "description": "blued steel"},
+                         {"region": "grips", "class": "nonmetal", "description": "walnut"},
+                         {"region": "lanyard", "class": "nonmetal", "description": "cord"},
+                         {"region": "sights", "class": "nonmetal", "color": "#ffffff", "description": "paint"}]
+            parts = [{"name": "grip", "kind": "grip", "text": "the walnut grip panels"},
+                     {"name": "slide", "kind": "slide", "text": "the slide"}]
+            coloured = concept_part_colours(materials, parts, root, root / "concept.png")
+        by_region = {item["region"]: item for item in coloured}
+        self.assertEqual(by_region["grips"]["color"], "#622513")
+        self.assertEqual(by_region["grips"]["color_source"], "concept under the grip mask")
+        self.assertNotIn("color", by_region["lanyard"])  # names no part
+        self.assertEqual(by_region["sights"]["color"], "#ffffff")  # declared
+        self.assertNotIn("color", by_region["slide and frame"])  # metal
+
+    def test_part_metal_by_region_text(self):
+        # The rifle's declared non-metal "stock" named no part, so its walnut grip came out metal (2026-10-25);
+        # a region word in the part's own description counts too
+        from slopforge.unity_material import part_metal
+        materials = [{"region": "stock", "class": "nonmetal", "description": "oiled walnut"},
+                     {"region": "barrel, receiver and bolt", "class": "metal", "description": "blued steel"}]
+        parts = [{"name": "grip", "kind": "grip", "text": "the chequered pistol grip of the stock"},
+                 {"name": "bolt", "kind": "slide", "text": "the bolt handle and bolt on the receiver"},
+                 {"name": "trigger", "kind": "hinge", "text": "the curved trigger inside the guard"}]
+        self.assertEqual(part_metal(parts, materials), {"grip": 0, "bolt": 1, "trigger": 1})
+
+    def test_colour_matching_on_the_parts_route(self):
+        # OmniPart's textures are darker and duller than the concept all over (chest 2026-10-25: darkened 0.45-0.69,
+        # chroma ratio 0.25-0.29). On that route the lightness moves the whole way to the concept's (within the cap)
+        # and metal texels keep no more chroma than the concept's metal shows (the pink serrations).
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours, match_metal_lightness
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (184, 132, 78)  # lit oak
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (70, 58, 48)  # dark, dull
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255  # no metal
+            Image.new("RGB", (32, 32), (70, 58, 48)).save(root / "base.png")
+            Image.new("L", (32, 32), 0).save(root / "metal.png")
+            report = match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal, lightness_share=1.0)
+            lab = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float).reshape(-1, 3))
+            self.assertGreater(float(np.median(lab[:, 0])), 55.0)  # from L* 26 towards the oak's 59
+            self.assertGreater(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 20.0)  # chroma restored
+            self.assertTrue(any(entry.get("lightness", 1) > 1.4 for entry in report.values()))
+            # metal: a grey concept, a dark base with a purplish patch; brightened, and the patch loses its tint
+            cutout[..., :3] = (120, 120, 120)
+            view[..., :3] = (35, 35, 36)
+            metal[..., :3] = 255
+            base = Image.new("RGB", (32, 32), (35, 35, 36)); base.paste((80, 50, 80), (8, 8, 16, 16)); base.save(root / "base2.png")
+            Image.new("L", (32, 32), 255).save(root / "metal2.png")
+            gain = match_metal_lightness(root / "base2.png", root / "metal2.png", cutout, view, metal)
+            self.assertGreater(gain, 2.0)
+            lab = _lab(np.asarray(Image.open(root / "base2.png").convert("RGB"), dtype=float)[8:16, 8:16].reshape(-1, 3))
+            self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 6.0)
+
+    def test_a_dark_brown_non_metal_does_not_take_the_grey_steel_beside_it(self):
+        # Walnut grips declared #622513: the colour rule (every channel within 48) also took dark grey steel (51, 51,
+        # 51) as walnut, 6.8% of a pistol's texels; set to non-metal, the colour transfer then tinted them like the
+        # wood and the barrel and trigger came out pink (2026-10-25). A coloured declaration takes only texels with
+        # at least a quarter of its saturation (the generated walnut is duller than the concept's).
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import zero_metallic
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (64, 32), (51, 51, 51)); base.paste((67, 43, 28), (32, 0, 64, 32)); base.save(root / "base.png")
+            Image.new("L", (64, 32), 255).save(root / "metal.png")
+            zero_metallic(root / "base.png", root / "metal.png", [(98, 37, 19)])
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"))
+        self.assertEqual(int(metal[16, 8]), 255)  # grey steel stays metal
+        self.assertEqual(int(metal[16, 48]), 0)  # the walnut does not
+
+    def test_a_coloured_non_metal_takes_its_darker_grain_but_not_a_screw(self):
+        # The generated walnut on HP10's grips was (65, 45, 34) and its dark grain (49, 34, 24): 49 from #622513 in red,
+        # outside the per-channel window, so the grain stayed metal and rendered as grey flecks across the grips, 9-11%
+        # of each grip's texels (2026-10-26). Wood grain changes lightness, not hue. Stripes of wood and grain, a grey
+        # screw head inside the grip, and grey steel beside it.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import zero_metallic
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 128), (51, 51, 51))  # steel on the left half
+            for x in range(128, 256, 8):
+                base.paste((65, 45, 34), (x, 0, x + 5, 128))  # wood
+                base.paste((49, 34, 24), (x + 5, 0, x + 8, 128))  # dark grain
+            base.paste((53, 52, 51), (176, 48, 208, 80))  # a screw head in the grip
+            base.save(root / "base.png")
+            Image.new("L", (256, 128), 255).save(root / "metal.png")
+            zero_metallic(root / "base.png", root / "metal.png", [(98, 37, 19)])
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"))
+        self.assertEqual(int(metal[64, 40]), 255)  # steel stays metal
+        self.assertEqual(int(metal[64, 192]), 255)  # the screw head stays metal
+        grip = np.concatenate([metal[:, 128:176], metal[:, 216:]], axis=1)[8:120]
+        self.assertLessEqual(float((grip > 127).mean()), 0.01, "the grain stayed metal")
+
+    def test_a_grey_colour_does_not_borrow_a_coloured_ones_shift(self):
+        # A grey cluster within 20 CIELAB of the walnut's borrowed the walnut's a*b* shift (+19.6, +10.8) and steel
+        # set to non-metal came out pink (2026-10-25). A colour borrows a shift only from one about as saturated.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (98, 37, 19)  # walnut, seen
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (60, 42, 32)  # duller walnut
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255
+            base = Image.new("RGB", (64, 64), (60, 42, 32)); base.paste((52, 52, 52), (0, 0, 8, 8)); base.save(root / "base.png")
+            Image.new("L", (64, 64), 0).save(root / "metal.png")
+            match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal)
+            grey = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float)[0:8, 0:8].reshape(-1, 3))
+        self.assertLess(float(np.median(np.hypot(grey[:, 1], grey[:, 2]))), 4.0)
 
     def test_part_metal_by_region_name(self):
         from slopforge.unity_material import part_metal
@@ -258,7 +486,42 @@ class DerivedMapTests(unittest.TestCase):
                          {"grip": 0, "slide": 0, "trigger": 0})
 
 
+def fixture_masks(root):
+    """A 100x60 object cutout with a grip (30x40 px) and a slide (90x20 px) mask; returns the masks directory."""
+    from PIL import Image
+    cutout = Image.new("RGBA", (120, 80), (0, 0, 0, 0)); cutout.paste((90, 90, 90, 255), (10, 10, 110, 70))
+    cutout.save(root / "cutout.png")
+    masks = root / "masks"; masks.mkdir()
+    grip = Image.new("L", (120, 80), 0); grip.paste(255, (20, 30, 50, 70)); grip.save(masks / "grip.png")
+    slide = Image.new("L", (120, 80), 0); slide.paste(255, (20, 10, 110, 30)); slide.save(masks / "slide.png")
+    return masks
+
+
 class OmniPartBackendTests(unittest.TestCase):
+    def test_a_part_under_three_cells_of_omniparts_grid_stops_before_the_run(self):
+        # OmniPart's structure is 64 cells across its 1.2x crop of the object: a 100 px object has 1.9 px cells, and
+        # the R2 rifle's 3.6x1.7-cell bolt and 2.8x2.2-cell trigger never came out (2026-10-25, three seeds each).
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from PIL import Image
+        from slopforge.backends import omnipart
+        from slopforge.failures import StageFailure
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            masks = fixture_masks(root)
+            trigger = Image.new("L", (120, 80), 0); trigger.paste(255, (60, 40, 66, 45)); trigger.save(masks / "trigger.png")
+            parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}, {"name": "trigger", "kind": "hinge"}]
+            with patch.object(omnipart, "run_remote_tool") as remote, self.assertRaises(StageFailure) as caught:
+                omnipart.generate_part_model(root, self._config({"omnipart_python": "/opt/env/bin/python",
+                                                                 "omnipart_checkout": "/opt/OmniPart"}),
+                                             root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
+                                             root / "mesh_01/generation.json", 5, parts, masks, 27000, [], "matte")
+            self.assertFalse(remote.called)
+            self.assertIn("trigger", str(caught.exception))
+            self.assertIn("3 cells", str(caught.exception))
+            self.assertEqual(caught.exception.category, "configuration")  # the brief must change; no seed fixes it
+
     def _config(self, tools):
         return {"asset_pipeline": {"tools": {"parts_host": "gpu", "blender": "/usr/bin/blender", **tools}}}
 
@@ -284,10 +547,7 @@ class OmniPartBackendTests(unittest.TestCase):
         from slopforge.backends import omnipart
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "cutout.png").write_bytes(b"png")
-            masks = root / "masks"; masks.mkdir()
-            for name in ("grip", "slide"):
-                (masks / f"{name}.png").write_bytes(b"png")
+            masks = fixture_masks(root)  # the real images: generate_part_model measures the parts before the run
             seen = {}
 
             def remote(host, python, script, request, uploads, downloads, **options):
@@ -305,7 +565,8 @@ class OmniPartBackendTests(unittest.TestCase):
             def blender(command, **kwargs):
                 seen["blender"] = command
                 for flag, writer in (("--basecolor-output", lambda p: Image.new("RGB", (4, 4), (90, 90, 90)).save(p)),
-                                     ("--metallic-output", lambda p: Image.new("L", (4, 4), 255).save(p))):
+                                     ("--metallic-output", lambda p: Image.new("L", (4, 4), 255).save(p)),
+                                     ("--normal-output", lambda p: Image.new("RGB", (4, 4), (128, 128, 255)).save(p))):
                     writer(command[command.index(flag) + 1])
                 Path(command[command.index("--") + 2]).write_bytes(b"processed")
                 Path(command[command.index("--") + 3]).write_bytes(b"blend")
@@ -318,18 +579,21 @@ class OmniPartBackendTests(unittest.TestCase):
                                                                  "omnipart_checkout": "/opt/OmniPart"}),
                                              root / "cutout.png", "pistol", root / "mesh_01/pistol.glb",
                                              root / "mesh_01/generation.json", 5, parts, masks, 27000, materials,
-                                             "matte")
+                                             "matte", texture_size=4096, steps=40, cfg=5.0)
             request = seen["remote"]["request"]
+            self.assertEqual((request["steps"], request["cfg"]), (40, 5.0))  # OmniPart's samplers, from the type
             self.assertEqual(request["image"], "concept.png")
             self.assertEqual(request["masks"], {"grip": "grip.png", "slide": "slide.png"})
             self.assertEqual(request["parts"], [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}])
             self.assertEqual((request["seed"], seen["remote"]["cwd"], seen["remote"]["env"]["SPCONV_ALGO"]),
                              (5, "/opt/OmniPart", "native"))
+            self.assertEqual(request["texture_size"], 4096)  # OmniPart's per-part bake, not its 1024 default
             self.assertEqual(set(seen["remote"]["uploads"]), {"concept.png", "grip.png", "slide.png"})
             self.assertEqual(seen["remote"]["label"], "omnipart")
             command = seen["blender"]
             self.assertIn("--metal", command)
             self.assertEqual(command[command.index("--face-budget") + 1], "27000")  # the caller's reduction budget
+            self.assertEqual(command[command.index("--texture-size") + 1], "4096")
             metal = {command[i + 1] for i, value in enumerate(command) if value == "--metal"}
             self.assertEqual(metal, {"grip=0", "slide=1", "body=1"})
             self.assertTrue((root / "mesh_01/pistol.glb").is_file())
@@ -345,3 +609,55 @@ class OmniPartBackendTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HybridBackendTests(unittest.TestCase):
+    def test_the_split_is_recorded_for_the_final_pass_and_the_stage(self):
+        # generate_hybrid_parts writes parts.json (the final pass's part table, with close_openings) and records the
+        # route, the split's quality and OmniPart's provenance in generation.json; the surface's recorded hash follows
+        # its rewrite as nodes and the unsplit surface is kept as an output.
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from slopforge.backends import hybrid
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            surface = root / "mesh_01/pistol.glb"
+            surface.parent.mkdir()
+            surface.write_bytes(b"whole")
+            metadata = root / "mesh_01/generation.json"
+            metadata.write_text(json.dumps({"workflow": "trellis2", "outputs": [{"path": "pistol.glb", "sha256": "old"}]}))
+            masks = root / "masks"
+            masks.mkdir()
+            parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}]
+            seen = {}
+
+            def omnipart(config, cutout, parts_, masks_dir, out, seed, *args):
+                seen["omnipart"] = (out.name, seed)
+                out.mkdir(parents=True, exist_ok=True)
+                return {"backend": {"provider": "omnipart"}, "model_weights": {"omnipart/OmniPart": "rev"}}
+
+            def split(root_, config, surface_, parts_glb, cutout, masks_, parts_, work_dir):
+                seen["split"] = (parts_glb.name, sorted(masks_))
+                surface_.with_name("pistol_whole.glb").write_bytes(b"whole")
+                surface_.write_bytes(b"nodes")
+                return {"alignment_error": 0.014, "shares": {"body": 0.7, "slide": 0.3}, "cut_length": 8.1, "masks_dropped": [],
+                        "parts": {"body": {"kind": "body", "id": 1}, "slide": {"kind": "slide", "id": 2}},
+                        "tools": {"hybrid_graph.py": "abc"},
+                        "view": {"theta": -90, "phi": 0, "fit": 0.96, "seen": 0.13, "through": True}}
+            with patch.object(hybrid, "run_omnipart", side_effect=omnipart), \
+                    patch.object(hybrid, "split_surface", side_effect=split):
+                hybrid.generate_hybrid_parts(root, {}, root / "cutout.png", surface, metadata, 7, parts, masks)
+            self.assertEqual(seen["omnipart"], ("parts", 7))
+            self.assertEqual(seen["split"], ("parts.glb", ["slide"]))  # moving parts vote with their masks
+            table = json.loads((surface.parent / "parts/parts.json").read_text())
+            self.assertTrue(table["close_openings"])
+            self.assertEqual(table["parts"]["slide"], {"kind": "slide", "id": 2})
+            info = json.loads(metadata.read_text())
+            self.assertEqual(info["part_model"], "hybrid")
+            self.assertEqual(info["hybrid"]["alignment_error"], 0.014)
+            self.assertTrue(info["hybrid"]["view"]["through"])  # whether the mask voted on every face
+            self.assertEqual(info["part_generator"]["model_weights"], {"omnipart/OmniPart": "rev"})
+            from slopforge.provenance import file_sha256
+            self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))
+            self.assertEqual(info["outputs"][-1]["kind"], "mesh.whole")

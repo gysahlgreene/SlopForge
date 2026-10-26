@@ -121,6 +121,36 @@ assert len(mesh.polygons) == 2, len(mesh.polygons)
 ''')
             subprocess.run([BLENDER, "--background", "--python", str(script)], check=True, capture_output=True)
 
+    def test_removing_a_stray_face_leaves_the_others_facing_as_they_were(self):
+        # Deleting a face reorients nothing. The cleanup recomputed every face's orientation, which on the open
+        # surface hidden-face removal leaves turned half of a pistol inside out (HP8 seed 1, 2026-10-26: backs of
+        # faces 0.36 of what was seen). An open bowl facing into itself, an open chest's inside, with a stray
+        # triangle: every face of the bowl still faces in.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "check_orientation.py"
+            script.write_text(f'''import bpy, bmesh, runpy
+from mathutils import Vector
+prepare = runpy.run_path({str(ROOT / "blender/mesh_cleanup.py")!r})
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new()
+bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=8, radius=1.0)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.calc_center_median().z > 0], context="FACES")
+bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
+bm.normal_update()
+assert all(f.normal.dot(-f.calc_center_median()) > 0 for f in bm.faces)
+stray = [bm.verts.new(p) for p in ((5, 0, 0), (6, 0, 0), (5, 1, 0))]
+bm.faces.new(stray)
+mesh = bpy.data.meshes.new("bowl")
+bm.to_mesh(mesh)
+bm.free()
+assert prepare["remove_isolated_single_faces"](mesh) == 1
+outward = [p.index for p in mesh.polygons if p.normal.dot(-Vector(p.center)) <= 0]
+assert not outward, f"{{len(outward)}} of {{len(mesh.polygons)}} faces turned out of the bowl"
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr[-1500:])
+
     def test_native_maps_keep_uvs_and_seams_are_connected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -311,6 +341,47 @@ if __name__ == "__main__":
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderConceptViewTests(unittest.TestCase):
+    """blender/concept_view.py renders a candidate from the concept's fitted view. A weapon generated as parts is
+    several mesh objects; the view must join them (2026-10-25: every parts candidate failed "Expected one mesh",
+    so metal lightness and colour transfer never ran on that route)."""
+
+    def test_a_candidate_of_several_meshes_renders_from_the_concept_view(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.py").write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for name, centre, size in (('body', (0, 0, 0), (1.0, 0.2, 0.2)), ('slide', (0, 0, 0.15), (0.8, 0.1, 0.1))):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.uv_layers[0].name = 'UVMap'
+    o.data.materials.append(bpy.data.materials.new(name))
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(root / "fixture.py"),
+                            "--", str(root / "parts.glb")], check=True, capture_output=True, text=True)
+            concept = Image.new("RGBA", (200, 80), (0, 0, 0, 0))
+            concept.paste((110, 110, 110, 255), (20, 30, 180, 50)); concept.paste((110, 110, 110, 255), (36, 22, 164, 30))
+            concept.save(root / "concept.png")
+            Image.new("RGB", (64, 64), (200, 40, 40)).save(root / "basecolor.png")
+            request = {"model": str(root / "parts.glb"), "basecolor": str(root / "basecolor.png"),
+                       "concept": str(root / "concept.png"), "prefix": str(root / "view"),
+                       "report": str(root / "view.json"), "min_iou": 0.3, "uv": False, "size": 256}
+            (root / "request.json").write_text(json.dumps(request))
+            subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/concept_view.py"), "--",
+                            str(root / "request.json")], capture_output=True, text=True)
+            report = json.loads((root / "view.json").read_text())
+            self.assertEqual(report.get("status"), "rendered", report)
+            rendered = np.asarray(Image.open(root / "view_base.png").convert("RGBA"))
+            self.assertGreater((rendered[..., 3] > 0).mean(), 0.05)  # something of the joined weapon is in view
+            self.assertGreater(rendered[rendered[..., 3] > 0][..., 0].mean(), 150)  # in the base colour
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderPreparePartsTests(unittest.TestCase):
     """blender/prepare_parts.py: generated parts (one textured GLB node each) are reduced to shares of the budget,
     unwrapped into one base-colour atlas with a metallic atlas by part, and exported with their node names kept."""
@@ -333,7 +404,12 @@ def part(name, size, colour, cuts):
     m.node_tree.links.new(tex.outputs['Color'], m.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
     m.node_tree.nodes['Principled BSDF'].inputs['Metallic'].default_value = 1.0  # glTF's default: a diffuse bake of a metal is black
     o.data.materials.append(m)
-part('body', (2, 1, 1), (1, 0, 0, 1), 6)
+part('body', (2, 1, 1), (1, 0, 0, 1), 24)
+import mathutils, random
+random.seed(1)
+body = bpy.data.objects['body']
+for v in body.data.vertices:  # bumps the reduced mesh loses and the normal bake must keep
+    v.co += v.normal * 0.02 * mathutils.noise.noise(v.co * 6.0)
 part('slide', (2, 0.3, 0.3), (0, 0, 1, 1), 6)
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
@@ -347,6 +423,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
                                        "--parts-json", str(root / "parts.json"), "--face-budget", "400",
                                        "--basecolor-output", str(root / "atlas.png"), "--metallic-output",
                                        str(root / "metal.png"), "--texture-size", "256",
+                                       "--normal-output", str(root / "normal.png"),
                                        "--metal", "body=1", "--metal", "slide=0"], capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
             probe, result = root / "probe.py", root / "probe.json"
@@ -380,6 +457,13 @@ json.dump(report, open(sys.argv[-1], 'w'))
                 x, y = int(u * (metal.shape[1] - 1)), int((1 - v) * (metal.shape[0] - 1))
                 self.assertAlmostEqual(float(metal[y, x]), expected, delta=0.1, msg=name)
             self.assertIn("Part slide:", prepared.stdout)
+            # the tangent normal baked from the part before its reduction: bumps on the body, flat on the slide
+            normal = np.asarray(Image.open(root / "normal.png").convert("RGB"), dtype=float)
+            body_island = (atlas[..., 0] > 150) & (atlas[..., 2] < 100)
+            slide_island = (atlas[..., 2] > 150) & (atlas[..., 0] < 100)
+            self.assertGreater(normal[body_island][:, :2].std(), 4.0)
+            self.assertLess(normal[slide_island][:, :2].std(), 2.0)
+            self.assertTrue((np.abs(normal[~(body_island | slide_island)] - (128, 128, 255)).mean() < 8))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
@@ -788,7 +872,7 @@ class BlenderSurfaceSourceGuardTests(unittest.TestCase):
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderWeaponOrientationTests(unittest.TestCase):
     def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=(),
-               fixture_script=None, files=None):
+               fixture_script=None, files=None, pivot="grip"):
         """Box parts joined into one mesh (subdivided by cuts) and turned, then the final pass with --target-size and
         --pivot grip; masks are written beside the concept for extra arguments that name them. Returns the body's
         dimensions, extremes, grip centre and recorded concept view, and every mesh object's parent, origin, world
@@ -824,33 +908,42 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
                            check=True, capture_output=True, text=True)
             concept.save(root / "concept.png")
-            grip.save(root / "grip.png")
+            if grip is not None:
+                grip.save(root / "grip.png")
             for name, mask in (masks or {}).items():
                 mask.save(root / f"{name}.png")
             prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                                        str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
                                        str(blend), *map(str, maps), "--face-budget", str(budget), "--surface-source",
-                                       str(_swatch(maps[0])), "--target-size", target, "--pivot", "grip", "--concept",
-                                       str(root / "concept.png"), "--grip-mask", str(root / "grip.png"),
+                                       str(_swatch(maps[0])), "--target-size", target, "--pivot", pivot, "--concept",
+                                       str(root / "concept.png"),
+                                       *(["--grip-mask", str(root / "grip.png")] if grip is not None else []),
                                        *[str(root / value) if value.endswith((".png", ".json")) else value for value in extra]],
                                       capture_output=True, text=True)
             self.assertEqual(prepared.returncode, 0, (prepared.stdout + prepared.stderr)[-3000:])
+            (root / "prepare.log").write_text(prepared.stdout + prepared.stderr)  # for a look when a probe fails
             probe, result = root / "probe.py", root / "probe.json"
             probe.write_text("""import bpy, json, sys
 meshes = [o for o in bpy.data.objects if o.type == 'MESH']
 obj = next(o for o in meshes if o.parent is None)
-group = obj.vertex_groups["slopforge_grip"].index
-held = [v.co for v in obj.data.vertices if any(g.group == group for g in v.groups)]
+group = obj.vertex_groups["slopforge_grip"].index if "slopforge_grip" in obj.vertex_groups else None
+held = [v.co for v in obj.data.vertices if group is not None and any(g.group == group for g in v.groups)] or [obj.location]
 ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices]
 def record(o):
     points = [o.matrix_world @ v.co for v in o.data.vertices]
-    open_edges = sum(1 for e in o.data.edges if sum(e.key in p.edge_keys for p in o.data.polygons) == 1)
+    uses = {}
+    for p in o.data.polygons:
+        for key in p.edge_keys:
+            uses[key] = uses.get(key, 0) + 1
+    open_edges = sum(1 for e in o.data.edges if uses.get(e.key, 0) == 1)
     cap = [(o.matrix_world @ o.data.vertices[i].co).z for p in o.data.polygons if not p.use_smooth for i in p.vertices]
     return {"parent": o.parent.name if o.parent else None, "origin": list(o.matrix_world.translation),
+            "sharp": sum(1 for e in o.data.edges if e.use_edge_sharp),
             "cap_spread": (max(cap) - min(cap)) if cap else None,
             "min": [min(p[i] for p in points) for i in range(3)] if points else None,
             "max": [max(p[i] for p in points) for i in range(3)] if points else None,
-            "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part")}
+            "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part"),
+            "fills": sum(a.value for a in o.data.attributes["slopforge_fill"].data) if "slopforge_fill" in o.data.attributes else 0}
 json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(held) for i in range(3)],
            "min_y": min(ys), "max_y": max(ys), "min_z": min(zs), "max_z": max(zs),
            "view": list(obj["slopforge_concept_view"]), "body": obj.name,
@@ -965,6 +1058,118 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertEqual(sorted(part["name"] for part in measured["fbx_inspection"]["parts"]),
                          ["floating", "grip", "slide", "trigger"])
         self.assertEqual(sum(1 for item in objects.values() if item["open_edges"]), 0)  # nothing was cut open
+        self.assertGreater(objects[measured["body"]]["sharp"], 0)  # hard edges stay hard: sharp by angle on this route
+
+    CHEST_FIXTURE = """import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=3); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.materials.append(bpy.data.materials.new(name))
+box('body', (0, 0, 0.2), (0.6, 0.4, 0.4))
+box('lid', (0, 0, 0.45), (0.6, 0.4, 0.1))  # on the body, touching along its whole rim
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    HYBRID_FIXTURE = """import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+# one closed surface, as TRELLIS.2 makes it, cut into the glTF nodes hybrid_apply.py writes: open where they were cut
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.25))
+whole = bpy.context.object; whole.scale = (0.6, 0.4, 0.5)
+bpy.ops.object.transform_apply(location=True, scale=True)
+bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+bpy.ops.mesh.subdivide(number_cuts=9); bpy.ops.mesh.quads_convert_to_tris(); bpy.ops.uv.smart_project()
+bpy.ops.object.mode_set(mode='OBJECT')
+whole.data.materials.append(bpy.data.materials.new('surface'))
+def piece(name, keep):
+    copy = whole.copy(); copy.data = whole.data.copy(); copy.name = copy.data.name = name
+    bpy.context.collection.objects.link(copy)
+    bm = bmesh.new(); bm.from_mesh(copy.data)
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if not keep(f.calc_center_median())], context="FACES")
+    bm.to_mesh(copy.data); bm.free()
+PART_PIECES
+bpy.data.objects.remove(whole)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    def _hybrid(self, pieces, kind, motion):
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        name = "lid" if kind == "hinge" else "drawer"
+        masks = {name: Image.new("L", (120, 120), 0)}
+        masks[name].paste(255, (20, 28, 100, 40) if kind == "hinge" else (30, 60, 90, 90))
+        table = json.dumps({"parts": {"body": {"kind": "body", "id": 1}, name: {"kind": kind, "id": 2}},
+                            "close_openings": True})
+        return self.orient({}, [], concept, None, budget=20000, target="-,-,0.5", masks=masks, pivot="bottom_center",
+                           extra=("--part", name, kind, f"{name}.png", *(("--anchor", "lid=back-bottom")
+                                  if kind == "hinge" else ()), "--parts-json", "parts.json", "--motion", motion),
+                           fixture_script=self.HYBRID_FIXTURE.replace("PART_PIECES", pieces),
+                           files={"parts.json": table})
+
+    def test_a_lid_cut_from_one_surface_is_closed_across_and_its_chest_hollowed(self):
+        # Hybrid parts are pieces of one generated surface, open where they were cut apart (docs/WEAPONS.md, Hybrid
+        # parts). The lid is closed by the interface between it and the body; the body's opening under the lid is a
+        # container's and becomes a cavity. Neither piece of closing counts as a piece of its own.
+        measured = self._hybrid("piece('body', lambda c: c.z < 0.4)\npiece('lid', lambda c: c.z >= 0.4)", "hinge",
+                                "lid=x:-100..0")
+        lid, body = measured["objects"]["lid"], measured["objects"][measured["body"]]
+        self.assertGreater(lid["fills"], 0)  # its underside
+        self.assertGreater(body["fills"], 0)  # the cavity
+        self.assertEqual(measured["inspection"]["component_count"], 1)
+        self.assertLessEqual(measured["inspection"]["part_penetration"]["lid"], 0.02)
+
+    def test_a_drawer_cut_from_one_surface_closes_both_pieces(self):
+        # A slide is not a container's lid: the body takes the interface too, flipped, where the drawer was cut out.
+        measured = self._hybrid("piece('body', lambda c: not (c.y < -0.15 and 0.1 < c.z < 0.3))\n"
+                                "piece('drawer', lambda c: c.y < -0.15 and 0.1 < c.z < 0.3)", "slide",
+                                "drawer=z:0..0.2")
+        drawer, body = measured["objects"]["drawer"], measured["objects"][measured["body"]]
+        self.assertGreater(drawer["fills"], 0)
+        self.assertGreater(body["fills"], 0)
+        self.assertEqual(measured["inspection"]["component_count"], 1)
+
+    def test_a_prop_with_a_lid_is_split_without_a_grip(self):
+        # A chest: a hinge declared on a prop with a bottom-centre pivot. No grip mask, no full turn, no tip
+        # check; the lid becomes a child with coverage measured, and the body stays one piece.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}}})
+        measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
+                               extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
+                                      "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                               fixture_script=self.CHEST_FIXTURE, files={"parts.json": parts_json})
+        objects = measured["objects"]
+        # swept through its declared range (Unity's sense: a negative turn about x lifts a back-hinged lid): the
+        # share of the lid's vertices inside the body over rest; the gate retries a seed that sweeps into the body
+        self.assertLessEqual(measured["inspection"]["part_penetration"]["lid"], 0.02)
+        # the faces of a box and its lid agree with their neighbours: a crumpled reduction would read ~0.5
+        self.assertLess(max(measured["inspection"]["folded_edge_share"].values()), 0.05)
+        sunk = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks, pivot="bottom_center",
+                           extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-top",
+                                  "--parts-json", "parts.json", "--motion", "lid=x:0..100"),
+                           fixture_script=self.CHEST_FIXTURE, files={"parts.json": parts_json})
+        self.assertGreater(sunk["inspection"]["part_penetration"]["lid"], 0.1)  # a positive turn sinks it
+        self.assertEqual({name: item["kind"] for name, item in objects.items() if item["parent"]}, {"lid": "hinge"})
+        self.assertEqual(measured["inspection"]["component_count"], 1)
+        self.assertGreaterEqual(measured["inspection"]["part_coverage"]["lid"], 0.5)
+        height = objects["lid"]["max"][2] - objects[measured["body"]]["min"][2]
+        self.assertAlmostEqual(height, 0.6, delta=0.02)  # the target size held over body and lid together
+        # a prop's frame: its width (the longer horizontal axis) along X, its depth along Y, front towards -Y; the
+        # weapon rule (length to -Y) would turn the chest on its side and put the lid's "back" edge at an end
+        body = objects[measured["body"]]
+        self.assertAlmostEqual(body["max"][0] - body["min"][0], 0.72, delta=0.02)
+        self.assertAlmostEqual(body["max"][1] - body["min"][1], 0.48, delta=0.02)
+        # anchored back-top: the pivot on the lid's back edge (+Y) at its top (+Z), centred along X
+        lid = objects["lid"]
+        self.assertAlmostEqual(lid["origin"][1], lid["max"][1], delta=0.005)
+        self.assertAlmostEqual(lid["origin"][2], lid["max"][2], delta=0.005)
+        self.assertAlmostEqual(lid["origin"][0], (lid["min"][0] + lid["max"][0]) / 2, delta=0.005)
 
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1060,3 +1265,467 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
         self.assertAlmostEqual(measured["dims"][2], 0.176, delta=0.03)
         self.assertLess(measured["min_y"], -0.7)  # the tip, 0.75 ahead of the grip at 1.1 scale, is forward
         self.assertGreater(measured["max_z"], -measured["min_z"])  # the stock sits above the grip
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderHiddenFacesTests(unittest.TestCase):
+    def test_faces_no_ray_from_outside_reaches_are_removed(self):
+        # TRELLIS.2 surfaces are a double skin with shells inside: of a delivered pistol's 26,000 faces 9% could be
+        # seen from outside, and the reduction spent the budget on the rest (2026-10-25). A box skinned twice (the
+        # inner skin facing in) with a block inside, beside a thin plate: the inner skin and the block go, the outer
+        # skin and both sides of the plate stay.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import remove_hidden_faces
+bpy.ops.wm.read_factory_settings(use_empty=True)
+import bmesh
+bm = bmesh.new()
+for size, centre, flip in ((1.0, (0, 0, 0), False), (0.9, (0, 0, 0), True), (0.2, (0, 0, 0), False)):
+    made = bmesh.ops.create_cube(bm, size=size)
+    bmesh.ops.translate(bm, verts=made["verts"], vec=centre)
+    if flip:
+        bmesh.ops.reverse_faces(bm, faces=list({{f for v in made["verts"] for f in v.link_faces}}))
+plate = bmesh.ops.create_grid(bm, x_segments=2, y_segments=2, size=0.3)
+bmesh.ops.translate(bm, verts=plate["verts"], vec=(1.2, 0, 0))
+mesh = bpy.data.meshes.new("double"); bm.to_mesh(mesh); bm.free()
+before = len(mesh.polygons)
+removed = remove_hidden_faces(mesh, 1.5)
+print("FACES", before, removed, len(mesh.polygons))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        before, removed, after = map(int, next(line for line in result.stdout.splitlines()
+                                               if line.startswith("FACES")).split()[1:])
+        self.assertEqual(before, 6 + 6 + 6 + 4)
+        self.assertEqual(removed, 12)  # the inner skin and the block
+        self.assertEqual(after, 6 + 4)  # the outer skin and the plate
+
+    def test_a_seen_patch_joined_only_through_hidden_faces_stays_joined(self):
+        # Seen patches joined to the rest only through hidden faces (a crevice's walls, under the skin) became pieces
+        # of their own: a pistol's surface went from 1 piece to 71, its body failed the component budget (9 of 5),
+        # and a patch at the muzzle stayed with the body while the slide around it moved (HP10 seed 1, 2026-10-26).
+        # The hidden faces on the shortest path from each seen piece to the largest, within a few rings, stay. A
+        # strip of 30 faces: seen 0-4, 9-10 and 25-29; the 4 hidden faces between the first two pieces stay, the 14
+        # before the far one (more than the rings allowed) do not.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import bridge_hidden_paths
+bm = bmesh.new()
+top = [bm.verts.new((x, 0, 0)) for x in range(31)]
+bottom = [bm.verts.new((x, 1, 0)) for x in range(31)]
+faces = [bm.faces.new((top[i], top[i + 1], bottom[i + 1], bottom[i])) for i in range(30)]
+bm.faces.index_update()
+seen = [i < 5 or 9 <= i <= 10 or i >= 25 for i in range(30)]
+keep = bridge_hidden_paths(bm, seen, rings=6)
+print("KEEP", "".join("1" if k else "0" for k in keep))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        keep = next(line.split()[1] for line in result.stdout.splitlines() if line.startswith("KEEP"))
+        self.assertEqual(keep, "1" * 11 + "0" * 14 + "1" * 5)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderViewFitTests(unittest.TestCase):
+    def test_an_elevation_is_taken_only_when_it_fits_clearly_better(self):
+        # A side-profile pistol's silhouette barely changes when seen from a little above: three seeds fitted best at
+        # 20, 15 and 5 degrees by under 0.01 of overlap over the flat side, and at 20 its far side stopped voting and a
+        # trigger's mask was dropped (2026-10-25: the first seed's fits below). Within 0.01 of the best, the least
+        # elevated view wins; a longsword whose flat mesh fitted 0.92 at 30 degrees and 0.83 at 0 keeps its 30.
+        script = f'''import sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from concept_view import least_elevated
+pistol = [(0.9491, -95, 0), (0.948, -95, 5), (0.9512, -85, 10), (0.9488, -90, 15), (0.9558, -90, 20), (0.9291, -95, 25)]
+sword = [(0.83, 0, 0), (0.86, 0, 10), (0.90, 0, 20), (0.92, 0, 30), (0.91, 0, 35)]
+print("PISTOL", least_elevated(pistol)); print("SWORD", least_elevated(sword))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        out = {line.split()[0]: line[len(line.split()[0]) + 1:] for line in result.stdout.splitlines()
+               if line.startswith(("PISTOL", "SWORD"))}
+        self.assertEqual(eval(out["PISTOL"]), (0.9558, -95, 0))  # the best fit, from the flat side
+        self.assertEqual(eval(out["SWORD"]), (0.92, 0, 30))
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderSweepPenetrationTests(unittest.TestCase):
+    def test_a_body_away_from_the_origin_is_swept_where_it_stands(self):
+        # A weapon's body keeps its object location (the grip centre, 0.27 m from the origin on a hybrid pistol).
+        # The sweep built its trees from the objects, in their own space, and cast from the part's world-space
+        # vertices: every ray missed the body and a slide read 0.000 where Unity's prefab read 0.025 (2026-10-25).
+        # A box clear above the body (not resting on it: that would be its seat) slid 0.3 down sinks wholly into it,
+        # wherever the body stands.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+for location in ((0, 0, 0), (0.1, 0.3, 0.27)):
+    for o in list(bpy.data.objects): bpy.data.objects.remove(o)
+    bpy.ops.mesh.primitive_cube_add(size=0.4, location=location)
+    body = bpy.context.object
+    bpy.ops.mesh.primitive_cube_add(size=0.2, location=(location[0], location[1], location[2] + 0.35))
+    part = bpy.context.object
+    part.parent = body; part.matrix_parent_inverse = body.matrix_world.inverted(); part["slopforge_part"] = "slide"
+    bpy.context.view_layer.update()
+    print("SUNK", location, sweep_penetration(part, [body], "y", -0.3, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        sunk = [float(line.rsplit(" ", 1)[1]) for line in result.stdout.splitlines() if line.startswith("SUNK")]
+        self.assertEqual(len(sunk), 2, result.stdout[-2000:])
+        self.assertGreater(sunk[0], 0.9)  # at the origin
+        self.assertGreater(sunk[1], 0.9)  # away from it
+
+
+    def test_a_slide_moved_along_the_cut_it_was_made_from_is_not_inside(self):
+        # A hybrid slide and frame are one surface cut along a line that zigzags; moved back, the slide's lower edge
+        # dips a fraction of a millimetre under the frame's along the whole seam: 6% of a live pistol's slide newly
+        # inside, 0.14% deeper than half a percent of the pistol (2026-10-25). Only points that go deeper count. A
+        # box cut by a wavy line, its top part slid along the cut.
+        script = f'''import bpy, bmesh, math, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+box = bpy.context.object
+bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.mesh.subdivide(number_cuts=19); bpy.ops.object.mode_set(mode="OBJECT")
+cut = lambda c: c.z > 0.2 + 0.01 * math.sin(40 * c.y)  # a cut that wavers by 1% of the box
+bm = bmesh.new(); bm.from_mesh(box.data)
+top = bm.copy()
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if cut(f.calc_center_median())], context="FACES")
+bmesh.ops.delete(top, geom=[f for f in top.faces if not cut(f.calc_center_median())], context="FACES")
+bm.to_mesh(box.data); bm.free()
+mesh = bpy.data.meshes.new("slide"); top.to_mesh(mesh); top.free()
+slide = bpy.data.objects.new("slide", mesh); bpy.context.collection.objects.link(slide)
+slide.parent = box; slide["slopforge_part"] = "slide"
+bpy.context.view_layer.update()
+print("SEAM", sweep_penetration(slide, [box], "z", -0.3, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        seam = float(next(line for line in result.stdout.splitlines() if line.startswith("SEAM")).split()[1])
+        self.assertLessEqual(seam, 0.02)
+
+    def test_a_part_moved_into_a_pocket_of_an_open_body_is_not_inside_it(self):
+        # Generated bodies are open: the hybrid pistol's kept 512 open edges after closing, and by ray parity half
+        # its slide sat inside the body at rest (2026-10-25). A slab with no underside and a block open to the front,
+        # and a box moved from in front of them into the pocket between, touching neither: rays up and back from the
+        # pocket each cross one face, odd, so parity read it inside. The winding number sees it outside.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+from mathutils import Vector
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(centre, size, drop=None):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    if drop:
+        bm = bmesh.new(); bm.from_mesh(o.data); bm.normal_update()
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.dot(drop) > 0.9], context="FACES")
+        bm.to_mesh(o.data); bm.free()
+    return o
+slab = box((0, 0, 0.1), (0.05, 1.0, 0.2), drop=Vector((0, 0, -1)))  # no underside
+block = box((0, 0.4, -0.1), (0.05, 0.2, 0.2), drop=Vector((0, -1, 0)))  # under the slab's back (+Y), open to the front
+bpy.ops.object.select_all(action="DESELECT"); block.select_set(True); slab.select_set(True)
+bpy.context.view_layer.objects.active = slab; bpy.ops.object.join()  # one body, as a generated one is
+part = box((0, -0.8, -0.1), (0.02, 0.2, 0.1))  # in front of the body, below the slab
+part.parent = slab; part.matrix_parent_inverse = slab.matrix_world.inverted(); part["slopforge_part"] = "slide"
+bpy.context.view_layer.update()
+# Unity z (forward) is Blender -Y: 0.7 back ends the box at y -0.2..0, under the slab, in front of the block
+print("POCKET", sweep_penetration(part, [slab], "z", -0.7, 0.0))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        pocket = [float(line.rsplit(" ", 1)[1]) for line in result.stdout.splitlines() if line.startswith("POCKET")]
+        self.assertEqual(len(pocket), 1, result.stdout[-2000:])
+        self.assertLessEqual(pocket[0], 0.02)
+
+    def test_a_part_slid_into_its_seat_is_not_inside_but_one_entering_elsewhere_is(self):
+        # A hybrid pistol's trigger was cut from the frame it was fused to; slid 5 mm back it enters the solid frame
+        # through that cut by its whole travel, which was the depth limit itself: Blender read 0.005 and Unity 0.026
+        # of the same model, and every travel past the limit fails (HP9, 2026-10-26). A part entering the body
+        # through its seat (the body's surface it touches at rest) goes into its housing; entering anywhere else is
+        # a collision. A box against a block's front slid 0.03 into it, and the same box 0.02 clear of it slid 0.06.
+        # A hinge has no housing: a lid rests on the whole top of its chest, and turned the wrong way it enters
+        # through that seat; a box resting on the block, turned about its front edge into it, still counts.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import sweep_penetration
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def cube(size, location, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=size, location=location)
+    o = bpy.context.object
+    bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.object.mode_set(mode="OBJECT")
+    return o
+body = cube(0.4, (0, 0, 0), 15)
+for name, y, travel in (("SEATED", -0.25, 0.03), ("APART", -0.27, 0.06)):
+    part = cube(0.1, (0, y, 0), 3)
+    part.parent = body; part["slopforge_part"] = "slide"
+    bpy.context.view_layer.update()
+    # Unity z (forward) is Blender -Y: a negative amount moves the box back, into the block
+    print(name, sweep_penetration(part, [body], "z", -travel, 0.0))
+    bpy.data.objects.remove(part)
+lid = cube(0.1, (0, 0, 0.25), 3)  # resting on the block's top
+bpy.context.scene.cursor.location = (0, -0.05, 0.2)  # its front-bottom edge
+bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+lid.parent = body; lid["slopforge_part"] = "hinge"
+bpy.context.view_layer.update()
+print("TURNED", sweep_penetration(lid, [body], "x", -90.0, 0.0))  # its back half down into the block
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        found = {line.split()[0]: float(line.split()[1]) for line in result.stdout.splitlines()
+                 if line.startswith(("SEATED", "APART", "TURNED"))}
+        self.assertEqual(set(found), {"SEATED", "APART", "TURNED"}, result.stdout[-2000:])
+        self.assertLessEqual(found["SEATED"], 0.02)
+        self.assertGreater(found["APART"], 0.2)
+        self.assertGreater(found["TURNED"], 0.2)
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderCutRefinementTests(unittest.TestCase):
+    def test_a_cut_stepping_along_large_triangles_is_cut_straight_through_them(self):
+        # Labels are per face, so on a reduced mesh's large triangles a cut can only step along their edges: HP12's
+        # slide/frame cut ran in triangle-sized teeth, flush at rest, and racked back they parted and showed the
+        # closing faces between them as grey shards (2026-10-26). The faces are split along where the labels'
+        # smoothed shares are equal instead. A strip of cells each split on its diagonal, the top row the part and,
+        # in the row below, each cell's upper triangle: the cut zigzags a whole cell; straight, it runs at 2.5.
+        script = f'''import bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from hybrid_apply import refine_cut
+bm = bmesh.new()
+grid = [[bm.verts.new((x, y, 0)) for y in range(5)] for x in range(11)]
+labels = []
+for x in range(10):
+    for y in range(4):
+        a, b, c, d = grid[x][y], grid[x + 1][y], grid[x + 1][y + 1], grid[x][y + 1]
+        bm.faces.new((a, b, c)); bm.faces.new((a, c, d))  # lower-right, upper-left
+        labels += ["part" if y >= 3 else "body", "part" if y >= 2 else "body"]
+uv = bm.loops.layers.uv.new()
+for f in bm.faces:
+    for loop in f.loops:
+        loop[uv].uv = (loop.vert.co.x / 10, loop.vert.co.y / 4)
+bm.faces.index_update()
+labels = refine_cut(bm, labels)
+cut = {{v for e in bm.edges if len(e.link_faces) == 2 and len({{labels[f.index] for f in e.link_faces}}) == 2 for v in e.verts}}
+inner = [v.co.y for v in cut if 1.5 < v.co.x < 8.5]  # the strip's open ends smooth with fewer neighbours
+print("CUT", round(min(inner), 3), round(max(inner), 3))
+print("UV", max(abs(l[uv].uv.y - l.vert.co.y / 4) for f in bm.faces for l in f.loops))
+print("FAR", sum(1 for f in bm.faces if f.calc_center_median().y > 3.2 and labels[f.index] != "part"),
+      sum(1 for f in bm.faces if f.calc_center_median().y < 1.8 and labels[f.index] != "body"))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        lines = {line.split()[0]: line.split()[1:] for line in result.stdout.splitlines()
+                 if line.startswith(("CUT", "UV", "FAR"))}
+        low, high = map(float, lines["CUT"])
+        self.assertGreater(low, 2.2, lines)  # the cut stays near 2.5 instead of stepping between 2 and 3
+        self.assertLess(high, 2.8, lines)
+        self.assertLess(float(lines["UV"][0]), 1e-4)  # new corners keep their texture coordinates
+        self.assertEqual(lines["FAR"], ["0", "0"])  # away from the cut nothing changes side
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderInterfaceTests(unittest.TestCase):
+    def test_a_face_seen_edge_on_at_the_outline_votes_for_the_part_there(self):
+        # From a side view a slide's top is seen edge-on, on the outline, and the margin kept along every mask edge
+        # gave it no vote: with the mask deciding, the top and the band above the frame line went to the body
+        # (2026-10-25). The margin is for where a part meets another part; at the object's outline the part is the
+        # only candidate. An object rows 20-79, its top band rows 20-44 the part's mask, a margin of 5.
+        script = f'''import sys
+import numpy as np
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from hybrid_graph import pixel_votes
+alpha = np.zeros((100, 200), bool); alpha[20:80, 20:180] = True
+mask = np.zeros_like(alpha); mask[20:45, 20:180] = True
+grid = pixel_votes(mask, alpha, 5)
+print("VOTES", [round(float(grid[row, 100]), 2) for row in (22, 30, 43, 46, 60, 78, 18, 82)])
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        votes = eval(next(line for line in result.stdout.splitlines() if line.startswith("VOTES"))[6:])
+        # just inside the top outline, inside, near the boundary with the rest (fading to nothing at it: a crease
+        # within the margin still decides, and without one the mask's lean holds the cut at the mask's edge, where
+        # an empty margin left the band above a slide's frame line with the body), the rest, just inside the bottom
+        # outline, just above the object, just below it
+        self.assertEqual(votes, [1, 1, 0.4, -0.4, -1, -1, 1, -1])
+
+    def test_a_hollow_shell_cut_in_two_is_closed_across_its_inside(self):
+        # TRELLIS.2 makes thin hollow shells: an inner wall a few millimetres inside the outer (a 2026-10-25 pistol).
+        # A part cut from one is closed by the surface inside the solid where a point is as far from the part as
+        # from the rest: across the hollow, not just the wall's thickness, facing away from the part, its rim on
+        # the cut. A box with a wall 0.05 thick, its top above z 0.25 labelled a lid.
+        script = f'''import bpy, bmesh, sys
+import numpy as np
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bm = bmesh.new()
+for size, flip in ((1.0, False), (0.9, True)):
+    made = bmesh.ops.create_cube(bm, size=size)
+    faces = list({{f for v in made["verts"] for f in v.link_faces}})
+    bmesh.ops.subdivide_edges(bm, edges=list({{e for f in faces for e in f.edges}}), cuts=7, use_grid_fill=True)
+    if flip:
+        inner = [f for f in bm.faces if max(abs(c) for c in f.calc_center_median()) < 0.46]
+        bmesh.ops.reverse_faces(bm, faces=inner)
+bmesh.ops.triangulate(bm, faces=bm.faces)
+layer = bm.faces.layers.int.new("slopforge_part")
+for f in bm.faces:
+    f[layer] = 2 if f.calc_center_median().z > 0.25 else 1
+solid = mesh_cleanup.solid_grid(bm, cells=60)
+occupied, low, h = solid
+centre = tuple(np.floor((np.zeros(3) - low) / h).astype(int))
+print("CENTRE", bool(occupied[centre]))
+vertices, polygons = mesh_cleanup.part_interface(bm, layer, 2, solid)
+v = np.array(vertices)
+normals = []
+for poly in polygons:
+    a, b, c = v[poly[0]], v[poly[1]], v[poly[2]]
+    normals.append(np.cross(b - a, c - a))
+normal = np.sum(normals, 0); normal /= np.linalg.norm(normal)
+print("SPAN", float(np.ptp(v[:, 0])), float(np.ptp(v[:, 1])))
+print("HEIGHT", float(np.median(v[:, 2])))
+print("NORMAL", float(normal[2]))
+rim = mesh_cleanup._rim(polygons)
+print("RIM", float(np.max(np.abs(np.abs(v[list(rim)][:, :2]).max(1) - 0.5))) if rim else -1)
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+        out = {line.split()[0]: line.split()[1:] for line in result.stdout.splitlines()
+               if line.split() and line.split()[0] in ("CENTRE", "SPAN", "HEIGHT", "NORMAL", "RIM")}
+        self.assertEqual(out["CENTRE"], ["True"])  # the hollow counts as solid
+        self.assertGreater(float(out["SPAN"][0]), 0.85)  # across the inside, wall to wall
+        self.assertGreater(float(out["SPAN"][1]), 0.85)
+        self.assertAlmostEqual(float(out["HEIGHT"][0]), 0.25, delta=0.06)  # between the lid and the rest
+        self.assertLess(float(out["NORMAL"][0]), -0.9)  # facing away from the lid, down into the body
+        self.assertLess(float(out["RIM"][0]), 0.03)  # the rim on the outer wall, where the cut is
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderClosingTests(unittest.TestCase):
+    def test_a_container_under_its_lid_gets_a_cavity_not_a_cap(self):
+        # A chest under its lid: the opening becomes a cavity (a rim, inner walls, a floor) a player sees into when
+        # the lid opens, not a flat panel at the rim (2026-10-25).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "cavity.py"
+            script.write_text(f'''import bpy, bmesh, sys
+from mathutils import Vector
+from mathutils.bvhtree import BVHTree
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import hollow_opening, _boundary_groups
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.5))
+bpy.ops.object.transform_apply(location=True)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+group = _boundary_groups(bm)[0]
+faces = hollow_opening(bm, group, wall=0.05, depth=0.8)
+bm.normal_update()
+tree = BVHTree.FromBMesh(bm)
+for x in (-0.3, 0.0, 0.3):
+    for y in (-0.3, 0.0, 0.3):  # looking down into the opening: the floor, facing up, at 80% of the height
+        hit = tree.ray_cast(Vector((x, y, 2)), Vector((0, 0, -1)))
+        assert hit[0] is not None and abs(hit[0].z - 0.2) < 0.02 and hit[1].z > 0.9, (x, y, hit[0], hit[1])
+hit = tree.ray_cast(Vector((0.48, 0.0, 2)), Vector((0, 0, -1)))  # on the rim: its top, facing up
+assert hit[0] is not None and hit[0].z > 0.97 and hit[1].z > 0.9, hit
+hit = tree.ray_cast(Vector((0.0, 0.0, 0.6)), Vector((1, 0, 0)))  # inside the cavity, looking at a wall: it faces in
+assert hit[0] is not None and abs(hit[0].x - 0.45) < 0.02 and hit[1].x < -0.9, hit
+print("CAVITY", len(faces))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("CAVITY", result.stdout)
+
+    def test_a_hole_shows_as_the_backs_of_faces(self):
+        # A piece left open where it was cut shows the backs of its far faces through the hole when its part moves:
+        # 3.6% of a moved hybrid pistol's pixels, 0.4% once closed (2026-10-25). Seen along the axes and diagonals, a
+        # closed box shows none; the same box without its top shows the inside of its walls and floor.
+        script = f'''import bpy, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0.3, 0.2, 0.5))
+box = bpy.context.object
+print("CLOSED", mesh_cleanup.visible_backfaces([box]))
+import bmesh
+bm = bmesh.new(); bm.from_mesh(box.data); bm.normal_update()
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+bm.to_mesh(box.data); bm.free(); box.data.update()
+print("OPEN", mesh_cleanup.visible_backfaces([box]))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        out = {line.split()[0]: float(line.split()[1]) for line in result.stdout.splitlines()
+               if line.startswith(("CLOSED", "OPEN"))}
+        self.assertLess(out["CLOSED"], 0.001)
+        self.assertGreater(out["OPEN"], 0.05)
+
+    def test_a_hinged_part_inside_another_parts_cut_does_not_make_a_container(self):
+        # A pistol's trigger cut touches the slide's: the body's opening along both read as the trigger's container
+        # (its middle in the trigger's bounds, half the body's outline), and a cavity's walls hung under the pistol,
+        # 0.37 of the model seen as the backs of faces (2026-10-25). An opening is a container only along its own
+        # hinged part's cut. A box's top cut away as a slide, a small hinged part in the middle of that top.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+box = bpy.context.object
+bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+bpy.ops.mesh.subdivide(number_cuts=9); bpy.ops.mesh.quads_convert_to_tris(); bpy.ops.object.mode_set(mode="OBJECT")
+attribute = box.data.attributes.new("slopforge_part", "INT", "FACE")
+for polygon in box.data.polygons:
+    x, y, z = polygon.center
+    attribute.data[polygon.index].value = (3 if abs(x) < 0.12 and abs(y) < 0.12 else 2) if z > 0.45 else 1
+table = {{"body": {{"kind": "body", "id": 1}}, "slide": {{"kind": "slide", "id": 2}}, "flap": {{"kind": "hinge", "id": 3}}}}
+mesh_cleanup.separate_tagged(box, table, contact=0.01, close=True)
+values = [0] * len(box.data.polygons); box.data.attributes["slopforge_fill"].data.foreach_get("value", values)
+fills = [polygon for polygon, value in zip(box.data.polygons, values) if value]
+print("FILLS", len(fills), "LOWEST", min(polygon.center.z for polygon in fills))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        line = next(line for line in result.stdout.splitlines() if line.startswith("FILLS")).split()
+        self.assertGreater(int(line[1]), 0)
+        self.assertGreater(float(line[3]), 0.3)  # the slide's interface near the top, no cavity floor deep inside
+
+    def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
+        # Interfaces and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds
+        # over the component budget (2026-10-25). They carry slopforge_fill; a piece made only of them is not counted.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "fill_count.py"
+            script.write_text(f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+bm = bmesh.new(); bm.from_mesh(bpy.context.object.data)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES_ONLY")
+square = [(-0.45, -0.45, 0.45), (0.45, -0.45, 0.45), (0.45, 0.45, 0.45), (-0.45, 0.45, 0.45)]
+fills = mesh_cleanup.add_interface(bm, square, [[0, 1, 2, 3]])  # under the open top, not stitched to it
+mesh = bpy.data.meshes.new("closed"); bm.to_mesh(mesh)
+assert mesh.attributes.get("slopforge_fill") is not None
+values = [0] * len(mesh.polygons); mesh.attributes["slopforge_fill"].data.foreach_get("value", values)
+assert sum(values) == len(fills) == 2, (sum(values), len(fills))
+assert mesh_cleanup.solid_component_count(mesh) == 1, mesh_cleanup.solid_component_count(mesh)
+print("FILL COUNT", sum(values))
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("FILL COUNT", result.stdout)

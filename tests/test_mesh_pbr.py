@@ -80,6 +80,15 @@ class MeshPBRTests(unittest.TestCase):
         self.assertEqual(_reduction_budget(30000, {"parts": [{"name": "handle", "kind": "grip"}]}), 30000)
         self.assertEqual(_reduction_budget(30000, {}), 30000)
 
+    def test_a_hybrid_split_leaves_room_for_the_interfaces_that_close_it(self):
+        # The final pass closes hybrid pieces with the interface between them, about four triangles per cut edge,
+        # twice (2026-10-25 pistol: 3,000 faces each way for a slide and a trigger on a 25,700-face surface).
+        from slopforge.pipelines.model import _reduction_budget
+        slide = {"name": "slide", "kind": "slide"}
+        self.assertEqual(_reduction_budget(30000, {"parts": [slide]}, {"part_model": "hybrid"}), 25500)
+        self.assertEqual(_reduction_budget(30000, {"parts": [slide]}, {"part_model": "omnipart"}), 27000)
+        self.assertEqual(_reduction_budget(30000, {}, {"part_model": "hybrid"}), 30000)  # nothing moves
+
     def test_material_identity_binds_prepared_mesh_content_of_bundled_graph(self):
         graph = json.loads((Path(__file__).resolve().parents[1] / "workflows" /
                             "trellis2_image_to_model_h100_api.json").read_text())
@@ -600,7 +609,9 @@ class DeclaredMaterialTests(unittest.TestCase):
                     # the fake pass split nothing, so the declared trigger is missing and the next seed is tried
                     self.assertIn("part_missing", candidate["validation"]["failure_codes"])
                 else:
-                    self.assertEqual((options["concept"], options["grip_mask"], options["parts"]), (None, None, []))
+                    # not held, but a hinge is declared: framed from the concept for its parts, no grip, no full turn
+                    self.assertEqual((options["concept"], options["grip_mask"], options["parts"]),
+                                     (root / "cutout.png", None, [("trigger", "hinge", root / "parts_1/trigger.png")]))
 
     def test_a_weapon_generated_as_parts_is_separated_by_node_names_and_gated_on_coverage(self):
         # The OmniPart route: the final pass gets parts.json instead of masks, and a part whose mesh covers too
@@ -631,6 +642,52 @@ class DeclaredMaterialTests(unittest.TestCase):
                 codes = [code for code in candidate["validation"].get("failure_codes", []) if code == "part_missing"]
                 self.assertEqual(codes, expected)
                 self.assertEqual(candidate["validation"]["measured"]["part_coverage"], {"slide": coverage})
+
+    def test_a_prop_with_a_hinge_is_framed_from_its_concept_without_a_grip(self):
+        # Props with parts (a chest's lid): the split, the coverage and the frame key on the declared parts, not on
+        # a grip; the weapon-only checks (full turn, tip alignment) stay off.
+        lid = {"name": "lid", "kind": "hinge", "axis": "x", "min": 0.0, "max": 110.0, "text": "the lid",
+               "anchor": ["back", "top"]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGBA", (32, 32), (90, 90, 90, 255)).save(root / "cutout.png")
+            (root / "source/parts").mkdir(parents=True)
+            (root / "source/parts/parts.json").write_text("{}")
+            views, transfers = [], []
+
+            def view(_root, _config, _cutout, _mesh, paths, name, **options):
+                views.append(options)
+                Image.new("RGBA", (64, 64), (90, 90, 90, 255)).save(paths["directory"] / f"{name}_base.png")
+                return {"status": "rendered", "silhouette_iou": 0.95}
+
+            def transfer(_base, _metal, *_arrays, lightness_share=0.5):
+                transfers.append(lightness_share)
+                return {}
+            with patch("slopforge.pipelines.model._concept_view", side_effect=view), \
+                    patch("slopforge.pipelines.model.match_concept_colours", side_effect=transfer):
+                candidate = self._candidate(root, [], 0, Image.new("RGB", (64, 64), (90, 90, 90)),
+                                            cutout=root / "cutout.png",
+                                            limits={"min_part_coverage": 0.55, "concept_colour_transfer": True},
+                                            asset_extra={"pivot": "bottom_center", "parts": [lid]},
+                                            lineage_extra={"part_masks": root / "parts_1"},
+                                            mesh_extra={"part_model": "omnipart",
+                                                        "parts": {"lid": {"kind": "hinge"}, "body": {"kind": "body"}}},
+                                            inspection_extra={"part_coverage": {"lid": 0.9}, "part_penetration": {"lid": 0.005},
+                                                              "parts": [{"name": "lid", "kind": "hinge"}]})
+            options = self.process_options
+            self.assertEqual(options["concept"], root / "cutout.png")
+            self.assertIsNone(options["grip_mask"])
+            self.assertEqual(options["parts"], [("lid", "hinge", root / "parts_1/lid.png")])
+            self.assertEqual(options["anchors"], {"lid": ["back", "top"]})
+            # the final pass sweeps each part through its declared range (Blender) and the gate reads the result
+            self.assertEqual(options["motions"], {"lid": ("x", 0.0, 110.0)})
+            self.assertEqual(candidate["validation"]["measured"]["part_penetration"], {"lid": 0.005})
+            self.assertEqual(candidate["validation"]["limits"]["max_part_penetration"], 0.02)
+            self.assertEqual(transfers, [1.0])  # the parts route moves lightness the whole way to the concept's
+            self.assertEqual(options["parts_json"], root / "source/parts/parts.json")
+            self.assertEqual([item.get("full_turn", False) for item in views], [False] * len(views))
+            self.assertNotIn("weapon_orientation", candidate["validation"].get("failure_codes", []))
+            self.assertNotIn("part_missing", candidate["validation"].get("failure_codes", []))
 
     def test_base_colour_that_drifts_from_the_concept_retries_the_next_seed(self):
         # 2026-10-21 protocol jug B2: a cobalt concept baked a teal glaze (hue difference 9.9), and the

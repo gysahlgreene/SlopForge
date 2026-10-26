@@ -627,7 +627,7 @@ def _build_failure_from_report(report_path, default_category="unknown"):
 
 def generate_model(project_root, config, image, name, destination, metadata, seed, face_budget=30000,
                   voxel_resolution=None, journal_context=None, require_manifold=False, project_concept=False,
-                  views=None):
+                  views=None, remove_hidden_faces=False):
     root = Path(project_root).resolve()
     script = tool_root() / "processing/comfy_generate_3d.py"
     report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
@@ -649,6 +649,8 @@ def generate_model(project_root, config, image, name, destination, metadata, see
             command.extend(["--voxel-resolution", str(voxel_resolution)])
         if require_manifold:
             command.append("--require-manifold")
+        if remove_hidden_faces:
+            command.append("--remove-hidden-faces")
         if project_concept:
             command.append("--project-concept")
         for slot, path in (views or {}).items():

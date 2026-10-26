@@ -77,15 +77,30 @@ def fit_view(samples, concept, full_turn=False):
     if not len(rows):
         raise ValueError("Concept cutout has no opaque pixels")
     target = silhouette(np.stack([columns, rows], 1).astype(float))
-    best = (-1.0, 0, 0)
+    fits = []
     for phi in range(0, 46, 5):
         for theta in (sorted(range(-180, 180, 5), key=abs) if full_turn else range(-90, 91, 5)):
             _, right, up = view_axes(math.radians(theta), math.radians(phi))
             fitted = silhouette(np.stack([samples @ np.array(right), samples @ np.array(up)], 1))
-            iou = float((fitted & target).sum() / max((fitted | target).sum(), 1))
-            if iou > best[0]:
-                best = (iou, theta, phi)
-    return best
+            fits.append((float((fitted & target).sum() / max((fitted | target).sum(), 1)), theta, phi))
+    return least_elevated(fits)
+
+
+VIEW_MARGIN = 0.01  # silhouette overlap an elevation must add before it is taken
+
+
+def least_elevated(fits, margin=VIEW_MARGIN):
+    """Of (iou, theta, phi) fits in search order: the best fit, seen from the least elevated view within `margin` of
+    it (the best of those, the first among equals). The fit says how well the shape matches the concept, which
+    callers gate on; the view is where to look from. A side-profile pistol's silhouette barely changes from a little
+    above: three seeds fitted best at 20, 15 and 5 degrees by under 0.01 over the flat side, and at 20 its far side
+    stopped voting and its trigger's mask was dropped (2026-10-25); a longsword whose flat mesh fitted 0.92 at 30
+    degrees against 0.83 at 0 keeps its 30."""
+    best = max(fit[0] for fit in fits)
+    close = [fit for fit in fits if fit[0] >= best - margin]
+    lowest = min(fit[2] for fit in close)
+    _iou, theta, phi = max((fit for fit in close if fit[2] == lowest), key=lambda fit: fit[0])
+    return best, theta, phi
 
 
 def to_concept_pixels(points, concept):
@@ -122,9 +137,17 @@ def run(request):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=request["model"])
     meshes = [obj for obj in bpy.data.objects if obj.type == "MESH"]
-    if len(meshes) != 1:
-        raise ValueError(f"Expected one mesh in {request['model']}, found {len(meshes)}")
-    obj = meshes[0]
+    if not meshes:
+        raise ValueError(f"Expected a mesh in {request['model']}, found none")
+    # A weapon generated as parts is one mesh object per part (2026-10-25); the view is of the whole weapon, and
+    # every part's UV layer is named UVMap, so the join keeps one map for the base colour.
+    bpy.ops.object.select_all(action="DESELECT")
+    for item in meshes:
+        item.select_set(True)
+    bpy.context.view_layer.objects.active = meshes[0]
+    if len(meshes) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
     world, samples = surface_samples(obj)
     iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
     report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}

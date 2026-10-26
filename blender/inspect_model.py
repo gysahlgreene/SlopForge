@@ -14,6 +14,8 @@ from mathutils.kdtree import KDTree
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.character_readiness import classify_character_readiness
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from mesh_cleanup import solid_component_count  # noqa: E402
 
 
 def write_result(path, result):
@@ -24,6 +26,17 @@ def write_result(path, result):
         json.dump(result, handle, indent=2)
         handle.write("\n")
     os.replace(temporary, path)
+
+
+def folded_edges(mesh):
+    """The share of a mesh's edges whose two faces point opposite ways: a surface crumpled into a sheet (a collapse
+    decimation on a thin-walled part, 2026-10-25) shades in facets in an engine while custom normals hide it here."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    pairs = [edge for edge in bm.edges if len(edge.link_faces) == 2]
+    folded = sum(1 for edge in pairs if edge.link_faces[0].normal.dot(edge.link_faces[1].normal) < -0.5)
+    bm.free()
+    return round(folded / len(pairs), 4) if pairs else 0.0
 
 
 def connected_components(mesh):
@@ -304,7 +317,9 @@ def inspect(source, face_budget, real_scale=False):
                          for _, rotation, scale in (obj.matrix_world.decompose() for obj in objects))
     component_sizes = [connected_components(obj.data) for obj in objects]
     # A weapon's moving parts are separate pieces by design; the component budget counts the rest.
-    components = sum(len(sizes) for obj, sizes in zip(objects, component_sizes) if "slopforge_part" not in obj)
+    # Caps and cavities closing a hybrid split's openings are separate pieces by design (slopforge_fill): not counted
+    components = sum(solid_component_count(obj.data) if obj.data.attributes.get("slopforge_fill") else len(sizes)
+                     for obj, sizes in zip(objects, component_sizes) if "slopforge_part" not in obj)
     parts = [{"name": obj.name, "kind": obj["slopforge_part"], "faces": len(obj.data.polygons),
               "components": len(sizes), "parent": obj.parent.name if obj.parent else None,
               "pivot": [float(value) for value in obj.matrix_world.translation]}
@@ -313,6 +328,11 @@ def inspect(source, face_budget, real_scale=False):
                           for obj in objects if isinstance(obj.get("slopforge_part_coverage"), str)), None)
     part_overflow = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_overflow"]).items()}
                           for obj in objects if isinstance(obj.get("slopforge_part_overflow"), str)), None)
+    part_penetration = next(({name: float(value) for name, value in json.loads(obj["slopforge_part_penetration"]).items()}
+                             for obj in objects if isinstance(obj.get("slopforge_part_penetration"), str)), None)
+    visible_backfaces = next(({name: float(value) for name, value in json.loads(obj["slopforge_visible_backfaces"]).items()}
+                              for obj in objects if isinstance(obj.get("slopforge_visible_backfaces"), str)), None)
+    folded_edge_share = {obj.name: folded_edges(obj.data) for obj in objects}
     component_records = [part for obj in objects for part in component_details(obj)]
     weld_distance = max(dimensions) * 1e-5
     topology_edges = [topology_edge_counts(obj.data, weld_distance) for obj in objects]
@@ -337,6 +357,9 @@ def inspect(source, face_budget, real_scale=False):
     measured = {"mesh_objects": len(objects), "vertex_count": vertices, "face_count": faces,
                 **({"part_coverage": part_coverage} if part_coverage is not None else {}),
                 **({"part_overflow": part_overflow} if part_overflow is not None else {}),
+                **({"part_penetration": part_penetration} if part_penetration is not None else {}),
+                **({"visible_backfaces": visible_backfaces} if visible_backfaces is not None else {}),
+                "folded_edge_share": folded_edge_share,
                 **({"part_components": {part["name"]: part["components"] for part in parts}} if parts else {}),
                 "bounds_min": minimum, "bounds_max": maximum, "dimensions": dimensions, "origins": origins,
                 "objects": object_bounds,

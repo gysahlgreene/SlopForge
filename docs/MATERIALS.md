@@ -44,6 +44,26 @@ result against that declaration before anyone reviews it.
    whose own reduction is crease-preserving QEM (the character graph), still hands Blender its `save_raw`.
    The final tier uses a 1536 shape upsample and 4096² maps.
 
+   The remeshed shape is a double skin: an outer face and an inner one about half a percent of the
+   object inside it, with more shells inside, all connected, so the enclosed-shell removal keeps them.
+   Of the faces of delivered weapons and props only 9–24% could be seen from outside (2026-10-25: a
+   pistol 9% and 24%, a chest 20%), and the reduction and the texture went mostly to the rest. A type
+   with `remove_hidden_faces: true` (weapon and prop) has Blender delete the faces no ray from
+   outside reaches before it reduces (`mesh_cleanup.remove_hidden_faces`: 32 evenly spread rays per
+   face, a face beside a seen one and facing within 60° of it kept): on a pistol's 1.26
+   million-face detail mesh 28% were seen, in 40 s, and at the same 24,000-face budget its slide's
+   step, hammer and grip panels came out crisp where they had been lumpy, with backs of faces on
+   0.09% of what is seen (0.01% before). Not behind declared glass, which is seen through, nor on
+   types that need a closed body (characters). The surface left is open, so nothing after it may
+   recompute which way its faces point: the stray-face cleanup did, whenever it found a stray face,
+   and turned half of a pistol inside out (2026-10-26: backs of faces on 0.36 of what was seen, the
+   grip's panels gone; 8 stray faces on that seed, none on the seed that had passed). It no longer
+   does; a Blender test keeps an open bowl facing in. Seen patches joined to the rest only through
+   hidden faces (a crevice's walls) were cut loose: one pistol went from 1 piece to 71, failed the
+   component budget, and a patch at its muzzle stayed with the body while the slide moved. The hidden
+   faces on the shortest path from each seen piece to the largest now stay (within 128 faces of it:
+   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden).
+
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto
    the repaired, UV-mapped mesh (`normal_source: blender_mikktspace_bake`). Blender and Unity
@@ -186,12 +206,19 @@ result against that declaration before anyone reviews it.
 
 OmniPart returns a base colour only (see [Weapons](WEAPONS.md#moving-parts-from-part-level-generation)). The backend
 derives the other maps before the material stage runs:
-- **normal:** flat (128, 128, 255);
+- **normal:** tangent normals baked in Blender from each part's full-detail copy onto the reduced part (flat where
+  no island lands);
 - **roughness:** a constant from the brief's finish word in a declared metal's description: `matte` 0.7, `satin`
   0.55 (the default, blued steel), `polished` 0.25;
 - **metallic:** the metallic atlas baked by part from each part's declared class, thresholded at 0.5.
 
-Metal lightness, concept colour transfer and the declared non-metal zeroing then run as for any textured mesh.
+Metal lightness, concept colour transfer and the declared non-metal zeroing then run as for any textured mesh, with
+two differences for this route (2026-10-25 chest and pistol): the colour transfer moves non-metal lightness the
+whole way to the concept's (cap 3×; other routes move half way), since generated parts come out darker and duller
+all over, and brightened metal keeps no more chroma than the concept's lit metal shows (brightening had exposed a
+pink tint the decoder left in a pistol's serrations). The `prop` type opts into the transfer for its parts.
+Which parts are metal follows the brief's material regions: a declared non-metal region names a part by the part's
+name or a word of its description (the rifle's "stock" and its "pistol grip of the stock").
 
 ## Checks before review
 
@@ -240,7 +267,12 @@ and none are declared yet.
   metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
   declares metal keeps the generator's values everywhere, so give its non-metal regions their
   concept colour, as in `grip=nonmetal#5a3a22: dark leather`. The metallic map is then zeroed
-  where the base colour matches it, with the same colour rule as emitters. A coloured
+  where the base colour matches it. A coloured declaration matches its hue within 30° at any
+  lightness, with at least a quarter of its saturation, closed over a few texels so dark crevices
+  go with it: HP10's walnut grips (65, 45, 34) had dark grain (49, 34, 24) outside the emitters'
+  per-channel window of 48, which left 9.8% of the grips metal as grey flecks; by hue 3.9%, the
+  screws among it (2026-10-26). Greys stay metal (dark steel within that window had turned pink
+  as walnut). Grey and pale declarations keep the emitters' rule. A coloured
   non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
   An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including

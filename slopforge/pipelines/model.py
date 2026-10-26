@@ -14,6 +14,7 @@ from PIL import Image, ImageStat
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
 from ..backends.omnipart import generate_part_model
+from ..backends.hybrid import generate_hybrid_parts
 from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
@@ -24,16 +25,18 @@ from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
-from ..taxonomy import output_path
+from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
-                              unity_cli, zero_metallic)
+                              unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
+from ..unity_playmode import verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_part_coverage,
+                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_penetration,
+                          apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1101,7 +1104,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
                 shutil.copy2(tiles[key], paths[key])
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
-                      _reduction_budget(face_budget, asset), surface_source=paths["surface"],
+                      _reduction_budget(face_budget, asset, asset_type), surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
@@ -1175,7 +1178,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if asset.get("texture_size"):
         _fit_texture_size({key: paths[key] for key in ("basecolor", "normal", "roughness", "metallic")},
                           asset["texture_size"])
-    declared = asset.get("materials") or []
+    declared = concept_part_colours(asset.get("materials") or [], asset.get("parts") or [],
+                                    (lineage or {}).get("part_masks"), (lineage or {}).get("concept_cutout"))
     declares_metal = any(item.get("class") == "metal" for item in declared)
     generator_metallic = None
     if declared and not declares_metal:
@@ -1215,7 +1219,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
             if declares_metal:
                 metal_gain = round(match_metal_lightness(paths["basecolor"], paths["metallic"], *arrays), 3)
             if transfer:
-                colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays)
+                # the parts route's textures are dark all over, so lightness moves the whole way to the concept's
+                colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays,
+                                                        **({"lightness_share": 1.0} if mesh_info.get("part_model") == "omnipart" else {}))
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1242,18 +1248,22 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
-    # The masks also go to the final pass of a weapon generated as parts: not to cut, but to measure how much of
-    # each mask the generated part covers (part_coverage).
-    moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in asset.get("parts") or []
-              if part["kind"] in ("hinge", "slide")] if held and masks else []
+    declared = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
+    # A held weapon, or any asset with a moving part (a chest's lid), is framed from its concept: the masks go to the
+    # final pass to split a cut weapon's parts, or to measure how much of each mask a generated part covers
+    # (part_coverage). The grip mask and the full-turn search are the held weapon's alone.
+    framed = held or bool(declared)
+    moving = [(part["name"], part["kind"], Path(masks) / f"{part['name']}.png") for part in declared] if framed and masks else []
     parts_json = mesh_path.parent / "parts/parts.json" if mesh_info.get("part_model") else None
     process_model(root, config, mesh_path, paths["fbx"], paths["blend"], textures, budget,
                   preview_dir=paths["preview_front"].parent, preserve_uvs=True,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
-                  concept=(lineage or {}).get("concept_cutout") if held else None,
+                  concept=(lineage or {}).get("concept_cutout") if framed else None,
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
-                  parts_json=parts_json)
+                  parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
+                  motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared
+                           if part.get("axis") is not None})
     inspection = inspect_model(root, config, paths["blend"], paths["validation"], budget,
                                real_scale=bool(asset.get("target_size")))
     keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
@@ -1287,9 +1297,20 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation = apply_weapon_orientation(validation)
     if moving:
         validation = apply_moving_parts(validation, [name for name, _kind, _mask in moving])
+    validation = apply_mesh_folds(validation, validation.get("measured", {}).get("folded_edge_share"),
+                                  float(asset_type.get("max_folded_edge_share", 0.1)))
+    hybrid_info = mesh_info.get("hybrid") or {}
+    # OmniPart decides labels where the mask did not vote: faces the concept's view did not see, or a dropped mask
+    decisive = not ((hybrid_info.get("view") or {}).get("through") and not hybrid_info.get("masks_dropped"))
+    validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
+                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
+        validation = apply_part_penetration(validation, validation.get("measured", {}).get("part_penetration") or {},
+                                            asset.get("parts") or [], float(asset_type.get("max_part_penetration", 0.02)))
+        validation = apply_visible_backfaces(validation, validation.get("measured", {}).get("visible_backfaces"),
+                                             float(asset_type.get("max_visible_backfaces", 0.01)))
     validation = apply_module_footprint(validation, validation.get("measured", {}).get("footprint_quadrants"),
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
@@ -1297,7 +1318,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     with Image.open(paths["basecolor"]) as image:
         validation.setdefault("measured", {})["texture_size"] = list(image.size)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"),
-                     asset_type.get("max_concept_darkened_share"))
+                     asset_type.get("max_concept_darkened_share"), asset_type.get("max_concept_desaturated_share"))
     min_fit = asset_type.get("min_concept_fit")
     cutout = (lineage or {}).get("concept_cutout")
     if (any(limit is not None for limit in colour_limits) or min_fit is not None) and cutout and Path(cutout).is_file():
@@ -1424,13 +1445,25 @@ def _face_budget(pipeline, asset_type, asset, default=30000):
     return int(budget) if budget is not None else None
 
 
-def _reduction_budget(face_budget, asset):
+def _removes_hidden_faces(asset_type, asset):
+    """Whether the mesh stage deletes the faces no ray from outside reaches before it reduces (the type's
+    remove_hidden_faces): not behind declared glass, which is seen through, nor on a type that needs a closed body."""
+    if not asset_type.get("remove_hidden_faces") or asset_type.get("max_nonmanifold_edges") == 0:
+        return False
+    return not any(item.get("class") == "glass" for item in asset.get("materials") or [])
+
+
+def _reduction_budget(face_budget, asset, asset_type=None):
     """The face count to reduce a mesh to. The final pass cuts a weapon's moving parts from the reduced mesh, and
     the cut adds faces (the bisect's splits, the caps, a barrel): 1,901 on a 30,000-face pistol (2026-10-24 run B2),
-    so the reduction leaves room for them."""
-    # shortcut: a fixed 10% margin, measured on one pistol; make it a per-type setting if another weapon overruns
+    so the reduction leaves room for them. A hybrid split (part_model: hybrid) is closed by the interfaces between
+    its pieces instead, about four triangles per edge of each cut, added to both sides: 6,000 on the 2026-10-25
+    pistol, so it leaves 15%."""
+    # shortcut: fixed margins, measured on one pistol each; make them per-type settings if another asset overruns
     cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
-    return int(face_budget * 0.9) if cut_later else face_budget
+    if not cut_later:
+        return face_budget
+    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") == "hybrid" else 0.9))
 
 
 def _fit_texture_size(maps, size):
@@ -1897,27 +1930,35 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 shutil.copy2(root / mesh_source, paths["glb"])
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
-                                                {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")})
+                                                {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")},
+                                                lightmap_uvs=asset.get("pivot") != "grip")
             _require_stable_unity_identity(asset.get("unity_import"), unity_import)
             validation = dict(candidate["validation"])
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
-            if moving:
-                # A weapon with moving parts also gets a prefab, a clip per part and a motion check (unity_weapon).
+            type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
+            if moving or type_record.get("unity_prefab"):
+                # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a
+                # motion check (unity_weapon). Types that opt in get one for static assets too.
                 motion = build_weapon_prefab(root, asset["name"], paths["fbx"], moving,
                                              prefab=paths["directory"] / f"{asset['name']}.prefab",
                                              clip_folder=paths["directory"] / "Animations",
-                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png")
+                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png",
+                                             held=asset.get("pivot") == "grip", mass=float(type_record.get("mass", 1.0)),
+                                             layer=type_record.get("unity_layer"))
                 if motion["errors"]:
                     raise StageFailure("processing_validation",
                                        "weapon motion checks failed: " + "; ".join(motion["errors"]),
                                        operation="weapon_motion",
-                                       remedy="check the part's declared axis and range against the published model")
-                validation["measured"]["weapon_motion"] = {key: motion[key] for key in
-                                                           ("prefab", "controller", "motions", "tip_forward",
-                                                            "root_inside")}
+                                       remedy="check the part's declared axis, range and anchor against the published "
+                                              "model: a hinge turns about the edge it is anchored on (a lid: @back-bottom, its seam)")
+                validation["measured"]["weapon_motion"] = {key: value for key, value in motion.items()
+                                                           if key != "errors"}
+                # then the prefab is played: the Animator pulses each part and the Rigidbody settles on a floor
+                validation["measured"]["play_mode"] = verify_play_mode(
+                    root, motion["prefab"], moving, results=paths["directory"] / f"{asset['name']}_playmode.xml")
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])
@@ -2052,6 +2093,11 @@ def _published_artifacts(root, paths, candidate, execution_id):
             published.append(_artifact_ref(root, path, f"{execution_id}:published:{key_name}", kind,
                                            "final_publication", 1, parents))
     return published
+
+
+def _part_sampler(asset_type):
+    """OmniPart's sampler settings from the type (part_steps, part_cfg); part of the mesh identity on that route."""
+    return {"steps": int(asset_type.get("part_steps", 25)), "cfg": float(asset_type.get("part_cfg", 7.5))}
 
 
 def part_backend(asset_type, asset):
@@ -2275,7 +2321,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     try:
         context = {"root": root, "pipeline": pipeline, "manifest": manifest, "key": key,
                    "execution_id": execution["id"], "reuse_execution": prior}
-        conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py"}
+        # The background model is named in processing/background.py; a cut-out another model made is not reused
+        # (rembg's default, BRIA RMBG-2.0, is non-commercial and made every cut-out until 2026-10-26)
+        conditioning_settings = {"strategy": conditioning["strategy"], "tool": "prepare_3d_input.py",
+                                 "background_sha256": file_sha256(tool_root() / "processing/background.py")}
         if view_slots:
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
         if asset.get("parts"):
@@ -2407,13 +2456,21 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
+            if _removes_hidden_faces(asset_type, asset):  # only when set: existing assets keep their settings
+                mesh_settings["remove_hidden_faces"] = True
             if part_backend(asset_type, asset):
                 # Only on the part route: a None here would change every existing asset's mesh settings (review
                 # 2026-10-25). A change of the part tools invalidates the stage.
                 mesh_settings["part_model"] = part_backend(asset_type, asset)
                 mesh_settings["part_tools_sha256"] = {
                     "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
-                    "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")}
+                    **({"hybrid_graph.py": file_sha256(tool_root() / "blender/hybrid_graph.py"),
+                        "hybrid_apply.py": file_sha256(tool_root() / "blender/hybrid_apply.py"),
+                        "part_split.py": file_sha256(tool_root() / "slopforge/part_split.py"),
+                        "hybrid.py": file_sha256(tool_root() / "slopforge/backends/hybrid.py")}
+                       if part_backend(asset_type, asset) == "hybrid" else
+                       {"prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")})}
+                mesh_settings["part_sampler"] = _part_sampler(asset_type)
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
                 "settings": {key: value for key, value in mesh_settings.items() if key != "seed"},
@@ -2481,20 +2538,28 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         materials = asset.get("materials") or []
                         generate_part_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                             mesh_seed, asset["parts"], paths["part_masks"],
-                                            _reduction_budget(_face_budget(pipeline, asset_type, asset), asset),
+                                            _reduction_budget(_face_budget(pipeline, asset_type, asset), asset, asset_type),
                                             materials, finish_word(materials),
-                                            texture_size=asset.get("texture_size") or pipeline.get("texture_size", 2048))
+                                            texture_size=asset.get("texture_size") or asset_type.get("texture_size")
+                                            or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
                     elif workflow:
-                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
+                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset, asset_type)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
                                        require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
+                                       remove_hidden_faces=_removes_hidden_faces(asset_type, asset),
                                        project_concept=asset_type.get("concept_projection") == "front",
                                        **({"views": views} if views else {}))
                     else:
                         generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                    if part_backend(asset_type, asset) == "hybrid":
+                        # The generated surface, split by OmniPart's parts (docs/WEAPONS.md, Hybrid parts)
+                        generate_hybrid_parts(root, config, paths["cutout"], source_mesh, model_metadata, mesh_seed,
+                                              asset["parts"], paths["part_masks"],
+                                              texture_size=asset.get("texture_size") or asset_type.get("texture_size")
+                                              or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]

@@ -12,6 +12,17 @@ from slopforge.parts import (check_part_masks, make_part_masks, parse_part_box, 
                              validate_parts)
 
 
+class PartSettingsTests(unittest.TestCase):
+    def test_the_mask_tool_hash_is_in_the_conditioning_identity(self):
+        # A change to processing/part_masks.py (2026-10-25: SAM's three candidates instead of its first) must re-mask;
+        # recording only the tool's name reused masks cut by the old code.
+        from slopforge.parts import part_settings
+        from slopforge.paths import tool_root
+        from slopforge.provenance import file_sha256
+        settings = part_settings({"asset_pipeline": {"tools": {}}}, [{"name": "lid", "kind": "hinge"}])
+        self.assertEqual(settings["tool_sha256"], file_sha256(tool_root() / "processing/part_masks.py"))
+
+
 class PartSpecTests(unittest.TestCase):
     def test_parts_parse_with_kind_axis_range_and_description(self):
         self.assertEqual(parse_part_spec("grip=grip: leather-wrapped grip"),
@@ -52,6 +63,22 @@ class PartSpecTests(unittest.TestCase):
             self.assertEqual((caught.exception.category, caught.exception.operation),
                              ("configuration", "part_mask_preflight"))
             self.assertIn("trigger", str(caught.exception))
+
+
+class PartAnchorTests(unittest.TestCase):
+    def test_a_hinge_can_anchor_its_pivot_on_the_part_bounds(self):
+        # A chest's lid turns about its back-top edge, not its contact centroid (which sits in the lid's middle)
+        from slopforge.parts import parse_part_spec
+        part = parse_part_spec("lid=hinge:x:0..110@back-top: the domed lid")
+        self.assertEqual((part["name"], part["kind"], part["axis"], part["min"], part["max"]), ("lid", "hinge", "x", 0.0, 110.0))
+        self.assertEqual(part["anchor"], ["back", "top"])
+        self.assertEqual(part["text"], "the domed lid")
+        self.assertNotIn("anchor", parse_part_spec("trigger=hinge:x:-20..0: the trigger"))
+        self.assertEqual(parse_part_spec("door=hinge:y:0..90@left")["anchor"], ["left"])
+        for bad in ("lid=hinge:x:0..110@inside", "lid=hinge:x:0..110@back-top-left", "lid=hinge:x:0..110@top-bottom",
+                    "bolt=slide:z:-0.08..0@back"):
+            with self.assertRaises(ValueError, msg=bad):
+                parse_part_spec(bad)
 
 
 class PartMaskRunTests(unittest.TestCase):

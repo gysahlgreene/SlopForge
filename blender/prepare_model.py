@@ -6,7 +6,8 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
-                          gltf_name, separate_part, separate_tagged, tag_parts)
+                          gltf_name, motion_matrix, remove_hidden_faces, separate_part, separate_tagged,
+                          sweep_penetration, tag_parts, visible_backfaces)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
 
 
@@ -482,16 +483,28 @@ if oriented:
     # How far the length runs along the concept's right; near 0 the view looks along it and the tip's end is a guess,
     # which validation rejects (weapon_orientation) so another seed is tried.
     towards_tip = float(length @ np.array(right))
-    forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
-    source = Matrix((forward, top, forward.cross(top))).transposed()
-    target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
-    obj.data.transform((target @ source.inverted()).to_4x4())
+    if held is None:
+        # A prop with parts (a chest): its width (the longer horizontal axis) along X, its depth along Y with the
+        # front, the side the concept's camera sees, towards -Y, so a lid's "back" edge is away from the viewer.
+        towards, _right, _up = view_axes(math.radians(theta), math.radians(phi))
+        depth = axes[1] * (-1.0 if float(axes[1] @ np.array(towards)) > 0 else 1.0)  # +Y points away from the camera
+        depth, top = Vector(depth), Vector(top)
+        source = Matrix((depth.cross(top), depth, top)).transposed()
+        obj.data.transform(source.inverted().to_4x4())
+        towards_tip = 1.0
+        frame = "width to X, front to -Y, top to +Z"
+    else:
+        forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
+        source = Matrix((forward, top, forward.cross(top))).transposed()
+        target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
+        obj.data.transform((target @ source.inverted()).to_4x4())
+        frame = "tip to -Y, top to +Z"
     obj.data.update()
     obj["slopforge_concept_view"] = [round(fit, 4), theta, phi, round(abs(towards_tip), 4)]
     if part_coverage:
         obj["slopforge_part_coverage"] = json.dumps(part_coverage)  # a string survives the FBX round trip
         obj["slopforge_part_overflow"] = json.dumps(part_overflow)
-    print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): tip to -Y, top to +Z")
+    print(f"Oriented from the concept view theta {theta} phi {phi} (fit {fit:.3f}): {frame}")
 
 
 # -------------------------------------------------
@@ -621,6 +634,10 @@ if mesh_only:
         modifier.use_smooth_shade = True
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.modifier_apply(modifier=modifier.name)
+    # After any repair, which an opening would set off: the double skin and the shells inside it take most of the
+    # faces and of the texture otherwise (mesh_cleanup.remove_hidden_faces)
+    if "--remove-hidden-faces" in sys.argv:
+        print(f"Removed hidden faces: {remove_hidden_faces(obj.data, float(max(maximum - minimum)))}")
 
 # Exports use triangles; counting remeshed quads underestimates the budget.
 if any(len(polygon.vertices) > 3 for polygon in obj.data.polygons):
@@ -880,9 +897,46 @@ if "--pivot" in sys.argv:
 # -------------------------------------------------
 
 if not mesh_only and parts_table is not None:
-    for child in separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions)):
+    anchors = {value.split("=")[0]: value.split("=")[1].split("-") for index, value in enumerate(sys.argv)
+               if index and sys.argv[index - 1] == "--anchor"}
+    # Hybrid parts are pieces of one generated surface: the separation leaves them open where they were cut apart,
+    # closed here by the interface between them within what the face budget leaves (separate_tagged)
+    close = bool(json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text()).get("close_openings"))
+    basecolor_image = next((image for image in bpy.data.images if basecolor_path and
+                            Path(bpy.path.abspath(image.filepath)).resolve() == Path(basecolor_path).resolve()), None)
+    children = separate_tagged(obj, parts_table, contact=0.01 * max(obj.dimensions), anchors=anchors, close=close,
+                               basecolor=basecolor_image, face_budget=target_faces)
+    for child in children:
         print(f"Part {child.name} ({child['slopforge_part']}): {len(child.data.polygons)} faces, "
               f"pivot {[round(v, 4) for v in child.location]}")
+    # --motion name=axis:low..high: each part swept through its declared range against the rest of the model; the
+    # gate (part_penetration) retries a seed whose part turns or slides into the body (docs/WEAPONS.md, Axes).
+    motions = {value.split("=")[0]: value.split("=")[1] for index, value in enumerate(sys.argv)
+               if index and sys.argv[index - 1] == "--motion"}
+    penetration = {}
+    for child in children:
+        if child.name in motions:
+            axis, span = motions[child.name].split(":")
+            low, high = (float(bound) for bound in span.split(".."))
+            others = [obj, *[other for other in children if other is not child]]
+            penetration[child.name] = sweep_penetration(child, others, axis, low, high)
+            print(f"Part {child.name} ({child['slopforge_part']}): {penetration[child.name]:.3f} of its vertices "
+                  f"deep inside the body through {axis} {low:g}..{high:g}")
+    if penetration:
+        obj["slopforge_part_penetration"] = json.dumps(penetration)
+    # The model seen from 14 directions, at rest and with each part at the far end of its range: the share of what
+    # is seen that is the back of a face, a hole a moved part uncovers (gate part_open; docs/WEAPONS.md)
+    if motions:
+        model = [obj, *children]
+        holes = {"rest": visible_backfaces(model)}
+        for child in children:
+            if child.name in motions:
+                axis, span = motions[child.name].split(":")
+                low, high = (float(bound) for bound in span.split(".."))
+                far = low if abs(low) > abs(high) else high
+                holes[child.name] = visible_backfaces(model, {child.name: motion_matrix(child, axis, far)})
+        print(f"Backs of faces seen: {holes}")
+        obj["slopforge_visible_backfaces"] = json.dumps(holes)
 elif not mesh_only:
     for name, kind, _mask in part_specs():
         part = separate_part(obj, name, kind, basecolor=next(

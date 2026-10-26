@@ -1026,3 +1026,92 @@ Weapon moving parts generated as parts (2026-10-25, M3 step W8b, [guide](docs/WE
 - **Not verified:** any seed-to-seed consistency beyond these runs; the pistol's slide coverage sat at the limit;
   OmniPart's VRAM peak beside ComfyUI. Both passing weapons published through Unity with every motion check
   passing (pistol slide −0.0300 m, trigger −20.00°; rifle bolt −0.0800 m, trigger −20.00°; no pivot drift).
+
+Multi-part weapons and props: quality and in-game function (2026-10-25, M3, [guide](docs/WEAPONS.md#the-prefab-a-game-uses), [evidence](docs/media/weapon-parts-functional-2026-10/README.md)).
+- **Why:** the owner asked for multi-part weapons and props that look right close up and work in a game (sockets,
+  colliders and physics, animations verified in Play mode), a chest with a lid first.
+- **Change:** on the parts route the concept-side view joins the parts (so the metal-lightness match and the colour
+  transfer run at last), a tangent normal map is baked per part with sharp edges over 30°, textures and the atlas
+  at the type's `texture_size` (4096 for weapons; Unity imports at it), metallic by part text, colours move to the
+  concept's the whole way with metal keeping the concept's chroma, OmniPart's sampler settings come from the type.
+  Every weapon and every `unity_prefab: true` type publishes a prefab: convex colliders, Rigidbody, layer, sockets,
+  Animator (`Rest`, trigger and hold bool per part), the W9 checks, an interpenetration check through each range,
+  lightmap UVs on static assets, and a Play-mode run through Unity's test runner (each part pulses and returns, the
+  body settles on a floor; the editor is launched directly, see [Unity](docs/UNITY.md)). Props with a declared part
+  are framed from the concept; `@face[-face]` anchors a hinge on an edge of its bounds. Guards from the runs: a part
+  under 3 cells of OmniPart's structure stops before the run; thin parts keep a cell of OmniPart's 37×37 mask grid
+  (its crop and downsample are ported as the test oracle); the final pass sweeps each part through its declared
+  range in Blender and retries a seed whose part turns or slides into the body (`part_penetrates`, type key
+  `max_part_penetration` 0.02) before materials and Unity; a Unity penetration failure on a hinge names the sign
+  that clears. Ranges are in Unity's sense (a positive turn about x takes +y towards +z), written in the guide.
+- **Tests:** unit (request, maps, colour matching, coarse grid against OmniPart's own reading, preflight, Play-mode
+  script and results, publication wiring), opt-in Blender (normal bake, chest fixture with a prop frame and anchor),
+  opt-in Unity live (colliders, sockets, Animator, penetration with the mirrored hint, Play mode), `make verify`.
+- **Live (2026-10-25):** pistol P2 published and played (slide −0.0300 m, trigger −20.00°, penetration ≤ 0.002;
+  its trigger declared the wrong way, forward); P3, the same brief with the trigger pulling (`0..20`), passed the
+  mesh and colour gates but Unity rejected its slide (0.040 inside the frame drawn back, by a single ray that
+  reads 0.03–0.08 on clear parts), which led to the Blender sweep and to both checks counting inside by two of
+  three rays; P4, re-approved through the sweep, published and played (slide −0.030 m, trigger 20.00°, penetration
+  0.015 and 0.006; Play mode passed). Rifle R2 rejected: the bolt handle
+  (1.7 cells) and trigger (2.2 cells) are below OmniPart's grid, three seeds each; the preflight now stops such
+  briefs. Chest: lid geometry passed on every seed (0.77–0.91 of its mask); C2 rejected in Unity (`@back-top` is a
+  domed lid's apex), C3 rejected with the hint (`-100` clears), C4 with the right declaration failed the colour
+  gates on five seeds (chroma ratio 0.07–0.55: OmniPart paints the chest's sides dark) and published and played on
+  the sixth (lid −100.00°, penetration 0.000, `Socket_lid` at the seam, Play mode passed), but Unity shades that
+  mesh in facets: the collapse decimation crumpled the thin-walled box (0.47 of its shared edges between opposed
+  faces; sound meshes 0.00–0.02), hidden in Blender by custom normals. Inspection now records `folded_edge_share`
+  and the retryable `mesh_folded` gate (0.1) rejects such a seed. No chest is published as a usable asset yet.
+- **Not verified / open:** the chest's colour consistency (3 of 12 seeds passed the colour gates) and a reduction
+  that keeps thin walls; seed variance of
+  the pistol's trigger coverage and overflow; Play mode checks motion and settling only; no LODs; the crossbow.
+  Status Experimental: one brief per kind, no repeatability claim.
+
+Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](docs/WEAPONS.md#hybrid-parts-trellis2s-surface-split-by-omniparts-parts)).
+- **Why:** the owner rejected OmniPart's own parts on looks (TRELLIS v1 at 64 cells). The hybrid route keeps
+  TRELLIS.2's surface and uses OmniPart and the concept masks only to say where the parts are.
+- **Change:** `part_model: hybrid` (weapon and prop templates): TRELLIS.2 surface; OmniPart run geometry-only;
+  faces labelled by graph cuts on mask votes (25 units, over OmniPart's cap of 20, fading at part edges, none at the
+  outline) and OmniPart's distances, along creases; the fitted view the least elevated within 0.01 of the best;
+  pieces closed by the interface between them (zero set of the part/rest distance difference inside the solid, rim
+  on the cut), a container's opening a cavity; weapons and props delete the faces no ray from outside reaches before
+  the reduction (`remove_hidden_faces`: 76-91% of delivered faces had been hidden). Masks: SAM asked with the box
+  and with nine points in it. Gates added: `part_open` (backs of faces seen at rest and with each part moved, 0.01),
+  `colour_lost` (coloured in the concept, grey in the map, 0.1), penetration counting only points newly inside and
+  deeper than 0.5% of the size (Blender and Unity, by winding number), OmniPart's alignment only where its votes
+  decide. Unity's ray count and the Blender sweep's coordinate spaces were wrong and are fixed.
+- **Tests:** unit (votes, cut, alignment rule, gates, colours, plumbing), opt-in Blender (interfaces on a hollow
+  shell, chest and drawer fixtures, holes, sweep, hidden faces, view fit), opt-in Unity live (open and closed
+  pockets, flap, a slide into its seat), `make verify` (920 passed).
+- **Live (2026-10-25, private runs HP2-HP7, HC2-HC6):** the pistol (P4's concept) passed every gate and published
+  with Unity's motion checks and Play mode passing on HP4, HP5 and HP7; on HP7, with hidden faces removed and the
+  trigger declared as the 1911's slide (5 mm), slide 0.89 and trigger 0.96 of their masks, penetration 0.002 and
+  0.000, backs of faces 0.0022 at most, 95% of the surface visible (9% before), crisper hammer, grip panels and
+  slide step at the same budget. HP7's grips were streaked and its barrel and trigger pink (the non-metal colour
+  rule took grey steel and a grey cluster borrowed the walnut's tint). Three more faults showed on reruns and are
+  fixed: the stray-face cleanup recomputed face orientation on the open surface hidden-face removal leaves and
+  turned half of HP8's first seed inside out; and the trigger, cut from the frame it was fused to, entered the
+  solid frame by its whole 5 mm travel, the depth limit itself, so Blender read 0.005 and Unity 0.026 of HP9's model
+  (a slide entering its seat now does not count; hinges still count every point). HP10, on those fixes, published
+  its second seed: grips wood-coloured (coloured in the concept but grey in the map 0.004 of the object), barrel and
+  trigger steel, Unity's motion checks (slide and trigger 0.0) and Play mode passed; its first seed failed on 9
+  components. Of the 7 seeds tried across HP7-HP10, 2 published (HP7, HP10) and 1 more passes the fixed checks
+  when re-measured (HP9's); HP8's first two were not re-measured, and its third was a poor reconstruction (TRELLIS.2
+  gives a different mesh for the same seed number run to run). Two more faults and fixes: the wood's dark grain fell
+  outside the non-metal colour window and stayed metal as grey flecks (a coloured non-metal now matches by hue at
+  any lightness: the grips' metal share 9.8% to 3.9%, the screws among it); hidden-face removal cut seen patches
+  loose (1 piece became 71, failing the component budget; the hidden faces joining them now stay: 1 piece, 1.4% more
+  faces). HP11 and HP12 then published on their first seeds (clean grips with the concept's checkering; HP12's
+  surface 2 pieces), so 3 of the 4 seeds since the seat fix published. After the cut refinement (67043b4) HP13 published
+  on its first seed: 4 of 5. No chest has passed on the route. A spike chest generated open from an edit of its
+  concept, its lid fitted shut by scratch tools, passed the final pass's checks: its lid covers 1.00 of the closed
+  concept's lid mask, nothing penetrates through -100..0, and backs of faces read 0.004 at rest and 0.0059 open; it
+  was not published to Unity ([evidence](docs/media/moving-parts-2026-10/README.md)). Before hidden-face removal (HC5) its lid was the whole dome
+  and opened onto a cavity, but hidden strips under the dome failed `part_open` (0.12-0.27). With them removed (HC6)
+  the rest view reads 0.002, but on two of three seeds the lid's arched ends stayed with the body: no cavity, and the
+  interface closing the wide opening crumpled (0.022-0.028 with the lid open). The cut wanders along plank grooves
+  and trims, about twice a clean seam's length. The cavity's inside is invented: nothing shows what it looks like.
+- **Not verified / open:** a chest that passes, and a reference for its inside (a spike generating the chest open is
+  proposed, not built); the chroma ratio on a black weapon (2.2 on HP12, its concept's chroma near grey); any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
+  Status Experimental.
+
+Model licences audited (2026-10-26). Writing the README's model list found that rembg's default background model had become BRIA RMBG-2.0 (CC BY-NC 4.0, non-commercial): every concept and view cut-out on this machine used it (the only background model cached). Both cut-out scripts now name BiRefNet general (MIT) through `processing/background.py`; on the pistol, chest and open-chest concepts its alpha matches RMBG-2.0's at IoU 0.995-0.998. The conditioning stage records that file's hash, so a resume cuts concepts out again rather than reuse an RMBG-2.0 cut-out (mutation test). TRELLIS.2's DINOv3 encoder is under Meta's DINOv3 License (commercial use allowed, attribution and trade-control conditions), not MIT or Apache: an owner decision. The legacy Hunyuan3D 2.0 route (Tencent community licence) is unused by the evidence. The README lists every model, its source and licence.

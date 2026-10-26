@@ -133,8 +133,27 @@ def zero_metallic(basecolor_path, metallic_path, matches):
     with Image.open(basecolor_path) as image:
         base = image.convert("RGB")
     mask = Image.new("L", base.size, 0)
+    red, green, blue = base.split()
+    saturation = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(red, green), blue),
+                                     ImageChops.darker(ImageChops.darker(red, green), blue))
+    hue = base.convert("HSV").split()[0]
+    closing = max(3, round(5 * base.width / 2048) | 1)
     for match in matches:
-        mask = ImageChops.lighter(mask, emitter_colour_mask(base, match))
+        if match is not None and max(match) - min(match) > 40:
+            # A coloured declaration takes its hue at any lightness and no greys. Wood grain changes lightness, not
+            # hue: HP10's walnut (65, 45, 34) had dark grain (49, 34, 24), 49 from #622513 in red, which a per-channel
+            # window left metal, grey flecks on the grips (2026-10-26). Dark steel (51, 51, 51) is within that window
+            # too and came out pink as non-metal (2026-10-25); the generated walnut is duller than the concept's
+            # (saturation 30 against 79), so a quarter of the declared saturation is the floor. Closed, not opened:
+            # the darkest crevices inside the wood go with it, a screw head does not.
+            target = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))[0]
+            floor = 0.25 * (max(match) - min(match))
+            near = hue.point(lambda value, target=target: 255 if min(abs(value - target), 256 - abs(value - target)) <= 21 else 0)
+            found = ImageChops.multiply(near, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+            found = found.filter(ImageFilter.MaxFilter(closing)).filter(ImageFilter.MinFilter(closing))
+        else:
+            found = emitter_colour_mask(base, match)
+        mask = ImageChops.lighter(mask, found)
     with Image.open(metallic_path) as image:
         mode, channel = image.mode, image.convert("L")
     channel.paste(0, mask=mask)
@@ -176,6 +195,17 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
     linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
     linear[metallic > 0.5] = np.clip(linear[metallic > 0.5] * gain, 0, 1)
     pixels[..., :3] = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
+    # Brightening reveals tints the decoder left in dark metal (a pistol's serrations came up pink, 2026-10-25):
+    # metal keeps no more chroma than the concept's lit metal shows
+    concept_lab, _cover, _box = _lab_cells(cutout, METAL_LIGHTNESS_GRID)
+    chroma_limit = float(np.median(np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2]))) + 2.0
+    metal_texels = metallic > 0.5
+    lab = _lab(pixels[..., :3][metal_texels] * 255)
+    chroma = np.hypot(lab[:, 1], lab[:, 2])
+    over = chroma > chroma_limit
+    if over.any():
+        lab[over, 1:] *= (chroma_limit / chroma[over])[:, None]
+        pixels[..., :3][metal_texels] = _srgb_from_lab(lab) / 255
     Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
     return gain
 
@@ -185,6 +215,7 @@ MIN_CLUSTER_CELLS = 4  # concept-side cells a colour needs before its shift is m
 MAX_CHROMA_SHIFT = 25.0  # CIELAB a*b* units; a larger drift is not a tint
 BORROW_DISTANCE = 20.0  # a colour too small to measure takes a measured colour's shift only if this close in CIELAB
 LIGHTNESS_SHARE = 0.5  # a lit concept is brighter than albedo, so lightness moves half way to it, and never down
+MAX_LIGHTNESS_RATIO = 3.0  # a texture decoded darker than a third of the concept's lightness is not a tint
 
 
 def _srgb_from_lab(lab):
@@ -197,8 +228,10 @@ def _srgb_from_lab(lab):
     return np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055) * 255
 
 
-def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, metal_view):
+def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, metal_view, lightness_share=LIGHTNESS_SHARE):
     """Shift each non-metal colour of the base colour map towards the concept's; returns a report per colour.
+    lightness_share: how far lightness moves to the concept's (the parts route, whose textures are dark all over,
+    moves the whole way).
 
     TRELLIS.2 decoded a pistol's rosewood grips more orange and darker than drawn on every seed (CIELAB hue angle 43
     against 37, 2026-10-24), and the whole-object colour checks, dominated by the black steel, passed them. Non-metal
@@ -242,20 +275,23 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
         if cells.sum() >= MIN_CLUSTER_CELLS:
             shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
             shift *= min(1.0, MAX_CHROMA_SHIFT / max(float(np.hypot(*shift)), 1e-6))
-            ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, 2))
+            ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, MAX_LIGHTNESS_RATIO))
             shifts[k] = (shift, ratio)
     labels = nearest(lab)
     for k in report:
+        # A colour borrows a shift only from one about as saturated: a grey within 20 of a pistol's walnut took its
+        # +19.6 a*, +10.8 b* and came out pink (2026-10-25)
         source = k if k in shifts else min(
-            (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE),
+            (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE
+             and np.hypot(*centres[k][1:]) >= 0.5 * np.hypot(*centres[j][1:])),
             key=lambda j: np.linalg.norm(centres[j] - centres[k]), default=None)
         if source is None:
             continue
         shift, ratio = shifts[source]
         lab[labels == k, 1:] += shift
-        lab[labels == k, 0] = np.clip(lab[labels == k, 0] * (1 + LIGHTNESS_SHARE * (ratio - 1)), 0, 100)
+        lab[labels == k, 0] = np.clip(lab[labels == k, 0] * (1 + lightness_share * (ratio - 1)), 0, 100)
         report[k].update({"shift_ab": [round(float(value), 1) for value in shift],
-                          "lightness": round(1 + LIGHTNESS_SHARE * (ratio - 1), 3), "from": source})
+                          "lightness": round(1 + lightness_share * (ratio - 1), 3), "from": source})
     if any("shift_ab" in entry for entry in report.values()):
         pixels[..., :3][nonmetal] = _srgb_from_lab(lab)
         Image.fromarray(pixels.round().clip(0, 255).astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
@@ -268,8 +304,10 @@ def glass_material_path(material):
     return material.with_name(material.stem + "_Glass.mat")
 
 
-def build_unity_material(project_root, fbx, material, maps, render=None):
+def build_unity_material(project_root, fbx, material, maps, render=None, lightmap_uvs=False):
     """Import the FBX with a generated Lit material; with render, also save four URP views to that PNG.
+
+    lightmap_uvs asks Unity to generate the lightmap UV set (uv2): static props are lightmapped, held weapons never.
 
     Returns Unity's import record: per role (fbx, material, each map) its path, GUID, importer type, a hash
     of the importer settings and the file hash, plus the GUID of each texture the material references.
@@ -279,6 +317,7 @@ def build_unity_material(project_root, fbx, material, maps, render=None):
     with Image.open(maps["basecolor"]) as image:
         # Declared glass is the only source of base colour alpha (apply_glass).
         transparent = "A" in image.getbands() and image.getchannel("A").getextrema()[0] < 255
+        max_size = max(32, *image.size)  # the importer's ceiling: Unity's default of 2048 would halve a 4096 map
 
     fbx = Path(fbx).resolve()
     material = Path(material).resolve()
@@ -331,10 +370,10 @@ public static class {class_name}
         if (shader == null)
             throw new Exception("Lit shader '" + shaderName + "' was not found for the active render pipeline");
 
-        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true, {str(transparent).lower()});
-        SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false);
-        SetImport({quote(map_assets["metallic_gloss"])}, TextureImporterType.Default, false);
-        SetImport({quote(map_assets["emission"])}, TextureImporterType.Default, true);
+        SetImport({quote(map_assets["basecolor"])}, TextureImporterType.Default, true, {max_size}, {str(transparent).lower()});
+        SetImport({quote(map_assets["normal"])}, TextureImporterType.NormalMap, false, {max_size});
+        SetImport({quote(map_assets["metallic_gloss"])}, TextureImporterType.Default, false, {max_size});
+        SetImport({quote(map_assets["emission"])}, TextureImporterType.Default, true, {max_size});
         var mat = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
         if (mat == null)
         {{
@@ -383,6 +422,7 @@ public static class {class_name}
         var importer = (ModelImporter)AssetImporter.GetAtPath(fbxPath);
         importer.materialImportMode = ModelImporterMaterialImportMode.ImportStandard;
         importer.materialSearch = ModelImporterMaterialSearch.Everywhere;
+        importer.generateSecondaryUV = {'true' if lightmap_uvs else 'false'};
         importer.AddRemap(sourceId, mat);
         if (glass != null)
             importer.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), glassSource.name), glass);
@@ -473,13 +513,14 @@ public static class {class_name}
             if (current.FullName == "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset") return true;
         return false;
     }}
-    static void SetImport(string path, TextureImporterType type, bool srgb, bool alpha = false)
+    static void SetImport(string path, TextureImporterType type, bool srgb, int maxSize, bool alpha = false)
     {{
         var importer = (TextureImporter)AssetImporter.GetAtPath(path);
         if (importer == null) throw new Exception("Texture did not import: " + path);
         importer.textureType = type;
         importer.sRGBTexture = srgb;
         importer.alphaIsTransparency = alpha;
+        importer.maxTextureSize = maxSize;  // Unity's default of 2048 would halve a 4096 map
         importer.SaveAndReimport();
     }}
     static void SetTransparent(Material mat)
@@ -564,29 +605,75 @@ def finish_word(materials):
     return "satin"
 
 
-def part_metal(parts, materials):
-    """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip"),
-    else 1 when the brief declares any metal, else 0."""
+def _words(text):
     import re
+    return [word for word in re.findall(r"[a-z]+", (text or "").lower()) if len(word) >= 3]
 
-    def names(item):
-        return [word for word in re.findall(r"[a-z]+", (item.get("region") or "").lower()) if len(word) >= 3]
-    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in names(item)]
+
+def _names_part(region_words, part):
+    """Whether a declared region's words name a part: its "grips" for a "grip", or "stock" in "the pistol grip of the
+    stock"."""
+    own = {part["name"].lower(), *_words(part.get("text"))}
+    return any(word.startswith(part["name"].lower()) or part["name"].lower().startswith(word) or word in own
+               for word in region_words)
+
+
+def concept_part_colours(materials, parts, masks_dir, cutout):
+    """The declared materials, a non-metal without a colour given the median colour of the concept's coloured pixels
+    under the mask of the part its region names. Declared non-metals are kept off metal by their colour
+    (zero_metallic); a pistol's grips declared as plain "walnut wood" had none, the generated metallic map called the
+    whole pistol metal, and the metal steps greyed the grips (2026-10-25)."""
+    if not masks_dir or not cutout or not Path(cutout).is_file():
+        return list(materials or [])
+    with Image.open(cutout) as image:
+        concept = np.asarray(image.convert("RGBA"), dtype=float)
+    coloured = []
+    for item in materials or []:
+        item = dict(item)
+        if item.get("class") == "nonmetal" and not item.get("color"):
+            for part in parts or []:
+                mask_path = Path(masks_dir) / f"{part['name']}.png"
+                if not _names_part(_words(item.get("region")), part) or not mask_path.is_file():
+                    continue
+                with Image.open(mask_path) as image:
+                    mask = np.asarray(image.convert("L").resize(concept.shape[1::-1]), dtype=float) > 127
+                pixels = concept[mask & (concept[..., 3] > 200)][:, :3]
+                pixels = pixels[(pixels.max(1) - pixels.min(1)) > 40]  # its colour, not the steel under the mask
+                if len(pixels):
+                    item["color"] = "#%02x%02x%02x" % tuple(int(v) for v in np.median(pixels, 0))
+                    item["color_source"] = f"concept under the {part['name']} mask"
+                    break
+        coloured.append(item)
+    return coloured
+
+
+def part_metal(parts, materials):
+    """Each part's metallic value: 0 when a declared non-metal's region names it (its "grips" for a "grip", or
+    "stock" in "the pistol grip of the stock"), else 1 when the brief declares any metal, else 0."""
+    nonmetal = [word for item in materials or [] if item.get("class") == "nonmetal" for word in _words(item.get("region"))]
     default = 1 if any(item.get("class") == "metal" for item in materials or []) else 0
-    return {part["name"]: 0 if any(word.startswith(part["name"]) or part["name"].startswith(word)
-                                   for word in nonmetal) else default for part in parts}
+    return {part["name"]: 0 if _names_part(nonmetal, part) else default for part in parts}
 
 
-def derive_part_maps(atlas, metal, finish, out_dir):
-    """basecolor (the atlas), a flat normal, a constant roughness from the finish word, and metallic from the
-    metallic atlas thresholded at 0.5; returns the four paths."""
+def derive_part_maps(atlas, metal, finish, out_dir, normal=None):
+    """basecolor (the atlas), the baked tangent normal (flat when none), a constant roughness from the finish
+    word, and metallic from the metallic atlas thresholded at 0.5; returns the four paths."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = {key: out_dir / f"{key}.png" for key in ("basecolor", "normal", "roughness", "metallic")}
-    shutil.copy2(atlas, paths["basecolor"])
     with Image.open(atlas) as image:
         size = image.size
-    Image.new("RGB", size, (128, 128, 255)).save(paths["normal"])
+        pixels = np.asarray(image.convert("RGB")).copy()
+    # Unused atlas texels are exact black and darken every island's edge at the smaller mips: the median used
+    # colour instead (a generated texel is never exactly black)
+    unused = pixels.sum(-1) == 0
+    if unused.any() and not unused.all():
+        pixels[unused] = np.median(pixels[~unused], axis=0).astype(np.uint8)
+    Image.fromarray(pixels).save(paths["basecolor"])
+    if normal is not None:
+        shutil.copy2(normal, paths["normal"])
+    else:
+        Image.new("RGB", size, (128, 128, 255)).save(paths["normal"])
     Image.new("RGB", size, (round(FINISH_ROUGHNESS.get(finish, FINISH_ROUGHNESS["satin"]) * 255),) * 3).save(paths["roughness"])
     with Image.open(metal) as image:
         image.convert("L").point(lambda value: 255 if value >= 128 else 0).convert("RGB").save(paths["metallic"])

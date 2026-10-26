@@ -28,8 +28,40 @@ requirements:
   - each moving part drawn as a distinct piece
   - complete object visible against a clean white background
 avoid: [hands, holsters, sheaths, scabbards, straps, mounts, multiple weapons, environment, cast shadow]
-# A weapon that declares a hinge or slide is generated as separate parts by OmniPart (docs/WEAPONS.md, Moving
-# parts); a part whose mesh covers less of its concept mask than this is part_missing and the next seed is tried.
+# A weapon that declares a hinge or slide has its moving parts generated (docs/WEAPONS.md, Moving parts). hybrid:
+# TRELLIS.2's surface, split along OmniPart's parts and the concept masks, every opening closed (the default: the
+# owner rejected OmniPart's own soft parts, 2026-10-25); omnipart: OmniPart's parts as they are. A part whose mesh
+# covers less of its concept mask than this is part_missing and the next seed is tried.
 # Calibrated on the first live runs (2026-10-25): passing parts covered 0.61-0.96, rejected ones 0.18-0.38.
-part_model: omnipart
+part_model: hybrid
 min_part_coverage: 0.55
+# OmniPart's sampler (sparse structure and parts): its defaults; more steps or a lower guidance can be tried per
+# type, and a change regenerates the parts.
+part_steps: 25
+part_cfg: 7.5
+# A hinge or slide swept through its declared range in the final pass: over this share of its vertices going inside
+# the rest of the model, deeper than half a percent of the model's size, the seed is retried (part_penetrates); Unity
+# repeats the check on the prefab.
+max_part_penetration: 0.02
+# The model seen from 14 directions, at rest and with each part at the end of its range: a share of what is
+# seen above this is the backs of faces, holes a player sees, and the seed is retried (part_open). Hybrid
+# pieces left open read 0.022 with a pistol's slide back, closed by their interfaces 0.004 (2026-10-25).
+max_visible_backfaces: 0.01
+# A share of the object above this that is clearly coloured in the concept but grey in the base colour, seen from
+# the concept's side, is retried (colour_lost): a black pistol's greyed walnut grips read 0.25, wood-gripped seeds
+# 0.00-0.04 (2026-10-25).
+max_concept_desaturated_share: 0.1
+# The share of a mesh's edges whose faces point opposite ways: a thin surface crumpled by the reduction (sound
+# meshes read 0.00-0.02); over this the seed is retried (mesh_folded).
+max_folded_edge_share: 0.1
+# Weapons are seen at arm's length: the generated parts' textures and the atlas are baked at this size, and Unity
+# imports the maps at it (its default ceiling of 2048 would halve them).
+texture_size: 4096
+# Published with a prefab a game can use: convex colliders, a Rigidbody of this mass, sockets (grip, muzzle, each
+# part), and an Animator with Rest, a trigger and a hold bool per part. The layer is set when the project has it.
+unity_prefab: true
+mass: 1.0
+unity_layer: Weapons
+# The mesh stage deletes the faces no ray from outside reaches before it reduces: TRELLIS.2's double skin and the
+# shells inside it took 76-91% of delivered weapons' and props' faces (2026-10-25). Not behind declared glass.
+remove_hidden_faces: true

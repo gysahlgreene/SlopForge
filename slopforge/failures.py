@@ -29,6 +29,10 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "module_taper",
     "weapon_orientation",
     "part_missing",
+    "part_penetrates",
+    "part_open",
+    "colour_lost",
+    "mesh_folded",
 })
 
 # ── Retryable categories (subset of all categories) ───────────────────
@@ -384,6 +388,7 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "colour_hue_shift": ("concept_hue_difference", "max_concept_hue_difference"),
         "colour_desaturated": ("concept_chroma_ratio", "min_concept_chroma_ratio"),
         "colour_darkened": ("concept_darkened_share", "max_concept_darkened_share"),
+        "colour_lost": ("concept_desaturated_share", "max_concept_desaturated_share"),
         "thin_feature_missing": ("concept_thin_recall", "min_concept_thin_recall"),
         "glass_missing": ("glass_fraction", "min_glass_fraction"),
         "nonmetal_missing": ("nonmetal_fraction", "min_nonmetal_fraction"),
@@ -393,6 +398,9 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "module_taper": ("corner_taper", "max_arm_taper"),
         "weapon_orientation": ("weapon_tip_alignment", "min_weapon_tip_alignment"),
         "part_missing": ("moving_parts_missing", "max_moving_parts_missing"),
+        "part_penetrates": ("moving_parts_penetrating", "max_moving_parts_penetrating"),
+        "part_open": ("moving_parts_open", "max_moving_parts_open"),
+        "mesh_folded": ("max_folded_edge_share", "max_folded_edge_share"),
     }
 
     for code in codes:

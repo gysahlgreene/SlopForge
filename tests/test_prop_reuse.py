@@ -1509,12 +1509,29 @@ avoid: [environment]
                 pipeline["workflows"]["views"] = "views.json"
 
     def test_single_view_model_keeps_its_conditioning_identity(self):
+        from slopforge.paths import tool_root
         self._approve()
         execution = self.asset["executions"][-1]
         stage = next(item for item in execution["stages"] if item["name"] == "conditioning_preparation")
         self.assertNotIn("views", execution["identity_inputs"])
-        self.assertEqual(stage["settings"], {"strategy": "text_only", "tool": "prepare_3d_input.py"})
+        self.assertEqual(stage["settings"], {"strategy": "text_only", "tool": "prepare_3d_input.py",
+                                             "background_sha256": file_sha256(tool_root() / "processing/background.py")})
         self.assertIsNone(self.mesh_views)
+
+    def test_a_changed_background_model_cuts_the_concept_out_again(self):
+        # rembg's default became BRIA RMBG-2.0 (CC BY-NC 4.0, non-commercial) and every cut-out used it until
+        # 2026-10-26: a cut-out made by another background model must not be reused. An unchanged resume reuses it.
+        import slopforge.pipelines.model as model
+        real = model.file_sha256
+        self._approve()
+        self._mark_interrupted()
+        self._approve(resume=True)
+        self.assertEqual(self.calls["prepare"], 1)
+        self._mark_interrupted()
+        with patch.object(model, "file_sha256",
+                          side_effect=lambda path: "another model" if Path(path).name == "background.py" else real(path)):
+            self._approve(resume=True)
+        self.assertEqual(self.calls["prepare"], 2)
 
     def test_multiview_model_conditions_on_hashed_views_of_the_approved_concept(self):
         from slopforge.pipelines.model import VIEW_PROMPTS

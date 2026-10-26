@@ -396,6 +396,8 @@ def main():
     parser.add_argument("--blender", type=Path)
     parser.add_argument("--project-concept", action="store_true",
                         help="Project the front concept onto camera-facing base color (character concepts)")
+    parser.add_argument("--remove-hidden-faces", action="store_true",
+                        help="delete the faces no ray from outside reaches before the reduction (blender/mesh_cleanup.py)")
     parser.add_argument("--require-manifold", action="store_true",
                         help="Make the mesh manifold (characters must be closed to rig): local repair, voxel repair as fallback")
     parser.add_argument("--view", action="append", default=[], metavar="SLOT=PATH",
@@ -520,7 +522,8 @@ def main():
         source_kind, source_path = ("mesh.detail", detail_path) if detail and midpoint else ("mesh.raw", raw_path)
         with _journal_stage(journal, "mesh_preparation", journal_attempt,
                             {"face_budget": args.face_budget, "voxel_resolution": args.voxel_resolution,
-                             "source": source_kind},
+                             "source": source_kind,
+                             **({"remove_hidden_faces": True} if args.remove_hidden_faces else {})},
                             inputs=None if raw_refs is None else [ref for ref in raw_refs if ref["type"] == source_kind]):
             subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(source_path),
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
@@ -529,6 +532,8 @@ def main():
                             *(["--no-voxel-repair"] if "shape_remesh" in workflow and not args.require_manifold else []),
                             # Manifold types try a local repair first; voxel repair only runs if it fails.
                             *(["--local-repair"] if args.require_manifold else []),
+                            # The budget and the texture go to what a player can see (docs/MATERIALS.md, Geometry and maps)
+                            *(["--remove-hidden-faces"] if args.remove_hidden_faces else []),
                             # Normals are baked in Blender (MikkTSpace, as Blender and Unity shade) from the
                             # full-detail remesh; ComfyUI's bake uses Lengyel tangents and speckles when shaded.
                             *(["--detail-mesh", str(detail_path), "--normal-output", str(baked_normal),

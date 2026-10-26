@@ -50,7 +50,66 @@ def part_ids(alpha, masks, parts):
         run_top = np.where(resting.any(axis=0), resting.argmax(axis=0), -1)
         keep = (run_top == top_row) & (run <= 0.5 * slide.sum(axis=0))
         ids[resting & keep[None, :]] = part["id"]
-    return ids, table
+    return claim_cells(ids, table), table
+
+
+COARSE = (37, 37)  # OmniPart's image-feature grid: its mask is read at this resolution (smart_downsample_mask)
+
+
+def _cell_edges(ids, size=COARSE):
+    """OmniPart crops the image and mask to a square 1.2x the object's larger side (load_img_mask) before the
+    downsample; returns each coarse cell's row and column edges in full-image pixels (outside pixels are padding)."""
+    rows, cols = np.nonzero(ids > 0)
+    x0, y0, x1, y1 = cols.min(), rows.min(), cols.max(), rows.max()
+    center, half = ((x0 + x1) / 2, (y0 + y1) / 2), max(x1 - x0, y1 - y0) / 2 * 1.2
+    left, top, right, bottom = int(center[0] - half), int(center[1] - half), int(center[0] + half), int(center[1] + half)
+    height, width = bottom - top, right - left
+    return ([top + min(int(i * (height / size[0])), height) for i in range(size[0] + 1)],
+            [left + min(int(j * (width / size[1])), width) for j in range(size[1] + 1)])
+
+
+def _cell(ids, edges, i, j):
+    rows, cols = edges
+    return ids[max(rows[i], 0):max(rows[i + 1], 0), max(cols[j], 0):max(cols[j + 1], 0)]
+
+
+def coarse_ids(ids, size=COARSE):
+    """OmniPart's reading of our mask (smart_downsample_mask on its crop): each cell takes its most common non-zero id."""
+    edges = _cell_edges(ids, size)
+    out = np.zeros(size, int)
+    for i in range(size[0]):
+        for j in range(size[1]):
+            block = _cell(ids, edges, i, j)
+            values, counts = np.unique(block[block > 0], return_counts=True)
+            if len(values):
+                out[i, j] = values[counts.argmax()]
+    return out
+
+
+def claim_cells(ids, table, size=COARSE):
+    """OmniPart pairs part k with mask id k on its coarse grid, so a part too thin to be the majority of any cell
+    vanishes from the mask and every part after it takes another part's image features (R2 rifle, 2026-10-25:
+    the bolt took the trigger's). Such a part is given the cell it fills most: that cell's object pixels become
+    its own. The cost is a few body pixels in its box and features, well inside OmniPart's box padding."""
+    ids = ids.copy()
+    edges = _cell_edges(ids, size)  # claiming never changes the object's silhouette, so the crop stays
+    for entry in table:
+        if entry["id"] in coarse_ids(ids, size):
+            continue
+        best = None
+        for i in range(size[0]):
+            for j in range(size[1]):
+                count = int((_cell(ids, edges, i, j) == entry["id"]).sum())
+                if count and (best is None or count > best[0]):
+                    best = (count, i, j)
+        if best is None:
+            raise RuntimeError(f"part {entry['name']!r} has no pixels on the concept; draw it or drop the part")
+        block = _cell(ids, edges, best[1], best[2])
+        block[block > 0] = entry["id"]
+    missing = [entry["name"] for entry in table if entry["id"] not in coarse_ids(ids, size)]
+    if missing:
+        raise RuntimeError(f"parts {missing} share one cell of OmniPart's {size[0]}x{size[1]} grid; move a box")
+    return ids
 
 
 def check_box_order(ids, table, ordered_mask):
@@ -58,9 +117,8 @@ def check_box_order(ids, table, ordered_mask):
     follow our bottom-up order on the full mask. The two must agree, or a part would get another part's box and
     name. Raises RuntimeError naming both orders when they differ."""
     ordered = _ordered(ids, table)
-    coarse = np.asarray(Image.fromarray(ids.astype(np.uint8)).resize(np.asarray(ordered_mask).shape[::-1],
-                                                                     Image.NEAREST)).astype(int)
     ordered_mask = np.asarray(ordered_mask)
+    coarse = coarse_ids(ids, ordered_mask.shape)
     theirs = []
     for new_id in range(1, int(ordered_mask.max()) + 1):
         cells = coarse[ordered_mask == new_id]
@@ -70,7 +128,7 @@ def check_box_order(ids, table, ordered_mask):
     if theirs != ours:
         names = {entry["id"]: entry["name"] for entry in table}
         raise RuntimeError(f"OmniPart's part order {[names.get(i) for i in theirs]} differs from the box order "
-                           f"{[names.get(i) for i in ours]}: the masks tie at its resolution; move a box")
+                           f"{[names.get(i) for i in ours]}: the masks differ at its resolution; move a box")
 
 
 Frame = namedtuple("Frame", "sign bbox lo hi axis")
@@ -104,8 +162,10 @@ def object_frame(alpha, coords):
 
 
 def _ordered(ids, table):
-    """OmniPart orders part ids bottom-up (load_bottom_up_mask): the part reaching the lowest image row first."""
-    return sorted(table, key=lambda entry: -np.flatnonzero((ids == entry["id"]).any(axis=1)).max())
+    """OmniPart orders part ids bottom-up on its coarse grid (load_bottom_up_mask): the part reaching the lowest
+    row first, ties in id order."""
+    coarse = coarse_ids(ids)
+    return sorted(table, key=lambda entry: -np.flatnonzero((coarse == entry["id"]).any(axis=1)).max())
 
 
 def _grid_span(ids, entry, frame):
@@ -217,7 +277,6 @@ def _omnipart(request, out_dir, boxes_for, mask_path):
     sys.path.insert(0, os.getcwd())
     from modules.inference_utils import gen_mesh_from_bounds, load_img_mask, merge_parts, prepare_part_synthesis_input
     from modules.part_synthesis.pipelines import OmniPartImageTo3DPipeline
-    from modules.part_synthesis.process_utils import save_parts_outputs
     seed, steps, cfg = int(request["seed"]), int(request.get("steps", 25)), float(request.get("cfg", 7.5))
     pipe = OmniPartImageTo3DPipeline.from_pretrained("omnipart/OmniPart")
     pipe.to("cuda")
@@ -235,8 +294,14 @@ def _omnipart(request, out_dir, boxes_for, mask_path):
     result = pipe.get_slat(black, inputs["coords"], [inputs["part_layouts"]], inputs["masks"], seed=seed,
                            slat_sampler_params={"steps": steps, "cfg_strength": cfg},
                            formats=["mesh", "gaussian", "radiance_field"], preprocess_image=False)
-    save_parts_outputs(result, output_dir=str(out_dir), simplify_ratio=0.3, save_video=False, save_glb=True,
-                       textured=True)
+    # save_parts_outputs bakes every part at 1024; the same calls with the requested size (part 0 is the whole)
+    from modules.part_synthesis.utils import postprocessing_utils
+    texture_size = int(request.get("texture_size", 2048))
+    for index in range(1, min(len(result["gaussian"]), len(result["mesh"]))):
+        glb = postprocessing_utils.to_glb(result["gaussian"][index], result["mesh"][index], simplify=0.3,
+                                          texture_size=texture_size, textured=True)
+        if glb is not None:
+            glb.export(str(out_dir / f"part{index}.glb"))
     merge_parts(str(out_dir))
     all_coords = inputs["coords"]
     all_coords = all_coords.cpu().numpy() if hasattr(all_coords, "cpu") else np.asarray(all_coords)

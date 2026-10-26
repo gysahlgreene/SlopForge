@@ -20,6 +20,7 @@ from .remote_tool import run_remote_tool
 
 PART_KINDS = ("grip", "hinge", "slide")
 PART_AXES = ("x", "y", "z")
+ANCHOR_FACES = ("front", "back", "left", "right", "top", "bottom")  # a hinge's pivot on its own bounds
 _NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 DEFAULT_MODELS = {"florence": "florence-community/Florence-2-large", "sam": "facebook/sam2.1-hiera-large"}
 # A mask under this share of the object found nothing usable; the lantern's carrying ring was 0.0034 (2026-10-24).
@@ -35,7 +36,7 @@ def parse_part_spec(spec):
     name, separator, rest = spec.partition("=")
     fields = rest.split(":")
     kind = fields[0].strip().lower()
-    usage = ("--part must be 'name=grip[: description]' or 'name=hinge|slide:x|y|z:min..max[: description]', "
+    usage = ("--part must be 'name=grip[: description]' or 'name=hinge|slide:x|y|z:min..max[@face[-face]][: description]', "
              f"got {spec!r}")
     if not separator or not _NAME.match(name.strip()) or kind not in PART_KINDS:
         raise ValueError(usage)
@@ -45,7 +46,17 @@ def parse_part_spec(spec):
     else:
         if len(fields) < 3 or fields[1].strip().lower() not in PART_AXES:
             raise ValueError(usage)
-        low, dots, high = fields[2].strip().partition("..")
+        span, at, anchor = fields[2].strip().partition("@")
+        if at:
+            # A hinge's pivot on its own bounds, e.g. @back-top for a chest's lid: a trigger's contact centroid is
+            # the wrong pivot for a part that touches the body along a whole edge.
+            words = anchor.strip().lower().split("-")
+            opposed = ({"front", "back"}, {"left", "right"}, {"top", "bottom"})
+            if (kind != "hinge" or not 1 <= len(words) <= 2 or any(word not in ANCHOR_FACES for word in words)
+                    or any(set(words) == pair for pair in opposed)):
+                raise ValueError(usage + "; a hinge may add @face[-face] from front, back, left, right, top, bottom")
+            part["anchor"] = words
+        low, dots, high = span.partition("..")
         try:
             low, high = float(low), float(high)
         except ValueError:
@@ -94,8 +105,11 @@ def validate_parts(parts):
 
 
 def part_settings(config, parts):
-    """What the conditioning stage's identity records for declared parts: changing a part or a model re-masks."""
-    return {"parts": parts, "models": _tools(config)[2], "tool": "part_masks.py"}
+    """What the conditioning stage's identity records for declared parts: changing a part, a model or the mask
+    tool's code re-masks (the tool's name alone reused masks cut by older code, 2026-10-25)."""
+    from .provenance import file_sha256
+    return {"parts": parts, "models": _tools(config)[2], "tool": "part_masks.py",
+            "tool_sha256": file_sha256(tool_root() / "processing/part_masks.py")}
 
 
 def _tools(config):

@@ -14,7 +14,23 @@ from slopforge.initializer import init_project
 from slopforge.pipelines import model
 
 
-class TextureApprovalRollbackTests(unittest.TestCase):
+class PublicationTestCase(unittest.TestCase):
+    """These tests exercise publication's rollback and identity rules; the prefab a prop type publishes (unity_weapon,
+    a separate Unity run) is stood in by a clean report."""
+
+    def setUp(self):
+        super().setUp()
+        stub = patch("slopforge.pipelines.model.build_weapon_prefab",
+                     return_value={"errors": [], "prefab": "Assets/stub.prefab", "controller": "Assets/stub.controller",
+                                   "motions": [], "tip_forward": True, "root_inside": True})
+        stub.start()
+        self.addCleanup(stub.stop)
+        played = patch("slopforge.pipelines.model.verify_play_mode", return_value={"passed": [], "failed": []})
+        played.start()
+        self.addCleanup(played.stop)
+
+
+class TextureApprovalRollbackTests(PublicationTestCase):
     def test_publication_preflight_failure_is_persisted_without_execution(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -73,7 +89,7 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                     final['surface'].write_bytes(b'orphan prior output')
                 originals = {path: path.read_bytes() for path in destinations + metadata if path.exists()}
 
-                def fail_material(*args):
+                def fail_material(*args, **_options):
                     final['unity_material'].write_bytes(b'partly replaced material')
                     for path in metadata:
                         path.write_bytes(b'Unity changed importer metadata')
@@ -186,7 +202,7 @@ class TextureApprovalRollbackTests(unittest.TestCase):
 
             with patch('slopforge.pipelines.model.unity_cli', return_value='unity'), \
                  patch('slopforge.pipelines.model.build_unity_material',
-                       side_effect=lambda _r, _f, out, _m: (_ for _ in ()).throw(RuntimeError("Unity failed"))), \
+                       side_effect=lambda _r, _f, out, _m, **_o: (_ for _ in ()).throw(RuntimeError("Unity failed"))), \
                  patch('slopforge.pipelines.model.shutil.copy2', side_effect=selective_fail):
                 with self.assertRaises(RuntimeError):
                     model.approve_texture(root, config, manifest, 'prop:relic', 1, force=True)
@@ -210,7 +226,7 @@ class TextureApprovalRollbackTests(unittest.TestCase):
                               saved_publication['failure']['evidence']['rollback_failure'])
 
 
-class PlaceholderNormalGateTests(unittest.TestCase):
+class PlaceholderNormalGateTests(PublicationTestCase):
     def _setup(self, root):
         from PIL import Image
         (root / "Assets").mkdir()
@@ -239,7 +255,7 @@ class PlaceholderNormalGateTests(unittest.TestCase):
             self.assertEqual(manifest["assets"]["prop:relic"].get("executions", []), [])
 
 
-class UnityPreviewTests(unittest.TestCase):
+class UnityPreviewTests(PublicationTestCase):
     def _candidate(self, root, config):
         from PIL import Image
         paths = model.material_candidate_paths(root, config, "relic", 1)
@@ -334,7 +350,7 @@ class UnityPreviewTests(unittest.TestCase):
                 model.unity_preview(root, config, manifest, "prop:relic", 1)
 
 
-class UnityIdentityTests(unittest.TestCase):
+class UnityIdentityTests(PublicationTestCase):
     KEYS = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss",
             "emission", "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
 
@@ -357,7 +373,7 @@ class UnityIdentityTests(unittest.TestCase):
         return config, {"assets": {"prop:relic": asset}}
 
     def _unity(self, guids):
-        def build(project_root, fbx, material, maps, render=None):
+        def build(project_root, fbx, material, maps, render=None, lightmap_uvs=False):
             Path(material).write_bytes(b"material")
             paths = {"fbx": fbx, "material": material, **maps}
             return {"unity_version": "6000.6.3f1",

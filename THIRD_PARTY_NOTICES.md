@@ -6,6 +6,10 @@ The image workflow is a local ComfyUI API-format graph using ComfyUI core node n
 
 Python dependencies are installed from their upstream packages and remain under their respective licenses. Model weights and ComfyUI custom nodes installed separately are not covered by SlopForge's license; review their publishers' terms before use or redistribution.
 
+Concept and view cut-outs remove the background with [rembg](https://github.com/danielgatis/rembg) (MIT), naming [BiRefNet](https://github.com/ZhengPeng7/BiRefNet)'s general model (MIT) in `processing/background.py`; its weights (about 1 GB) download from their publisher on first use. Until 2026-10-26 the cut-outs used rembg's default model, BRIA [RMBG-2.0](https://huggingface.co/briaai/RMBG-2.0), which is licensed CC BY-NC 4.0 (non-commercial use only); the conditioning stage records the background tool's hash, so cut-outs made with it are not reused.
+
+TRELLIS.2 graphs condition on Meta's [DINOv3](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m) ViT-L, licensed under the DINOv3 License: royalty-free, including commercial use, with conditions that include displaying "Built with DINOv3" and excluding end uses prohibited by trade controls, such as military ones. Built with DINOv3.
+
 The optional `slopforge character rig` command invokes Blender's bundled Rigify add-on through the installed Blender executable. The provider records GPL-2.0-or-later provenance and Blender version in the character manifest. Blender/Rigify is not bundled by SlopForge; consult the installed Blender distribution's license notices. No UniRig/SkinTokens code or weights are bundled or installed.
 
 Declared weapon parts (`--part`) are masked by `processing/part_masks.py`, which loads two models in a separately installed environment (`scripts/install-part-masks.sh`): [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) (MIT) and [SAM 2.1 Hiera large](https://huggingface.co/facebook/sam2.1-hiera-large) (Apache-2.0), through Hugging Face `transformers` (Apache-2.0) and PyTorch (BSD-3-Clause). No weights are bundled; they download from their publishers.

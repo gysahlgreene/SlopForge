@@ -8,16 +8,21 @@ from pathlib import Path
 
 from .unity_material import unity_cli
 
+PENETRATION_TOLERANCE = 0.02  # share of a part's vertices that go inside the body through its range
+PENETRATION_DEPTH = 0.005  # ...deeper than this share of the model's size: contact along a cut seam is shallower
 PIVOT_TOLERANCE = 0.001  # metres a hinge's pivot may drift, and a slide's travel may miss its declared range by
 ANGLE_TOLERANCE = 0.5  # degrees a hinge may miss its declared limit by
 
 
-def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, render):
+def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, render, held=True, mass=1.0,
+                        layer=None):
     """Build the prefab and clips; returns Unity's report, whose errors list every failed motion check.
 
     parts: the declared hinge and slide parts (name, kind, axis, min, max) in the weapon's frame as Unity shows it:
-    x right, y up, z forward. The limit is the bound farther from rest (0). fbx, prefab, clip_folder and render are
-    paths inside the Unity project.
+    x right, y up, z forward. The limit is the bound farther from rest (0); parts may be empty for a static asset.
+    fbx, prefab, clip_folder and render are paths inside the Unity project. The prefab gets a convex collider per
+    mesh, a Rigidbody of `mass`, the named layer when the project has it (a warning otherwise), sockets, and an
+    Animator with a Rest state, a trigger and a hold bool per part. The tip and root checks are for held assets.
     """
     root = Path(project_root).resolve()
     cli = unity_cli(root)
@@ -32,6 +37,8 @@ def build_weapon_prefab(project_root, name, fbx, parts, *, prefab, clip_folder, 
             "name": name, "fbx": inside(fbx), "prefab": inside(prefab), "clip_folder": inside(clip_folder),
             "report_path": str(report), "render_path": str(Path(render).resolve()),
             "pivot_tolerance": PIVOT_TOLERANCE, "angle_tolerance": ANGLE_TOLERANCE,
+            "penetration_tolerance": PENETRATION_TOLERANCE, "penetration_depth": PENETRATION_DEPTH,
+            "held": bool(held), "mass": float(mass), "layer": layer or "",
             "parts": [{"name": part["name"], "kind": part["kind"], "axis": part["axis"],
                        "limit": max((part["min"], part["max"]), key=abs)} for part in parts]}))
         script.write_text(_SCRIPT.replace("CLASS_NAME", class_name).replace("REQUEST_PATH", json.dumps(str(request))))
@@ -58,17 +65,20 @@ public static class CLASS_NAME
     [Serializable] public class Part { public string name, kind, axis; public float limit; }
     [Serializable] public class Request
     {
-        public string name, fbx, prefab, clip_folder, report_path, render_path;
-        public float pivot_tolerance, angle_tolerance; public Part[] parts;
+        public string name, fbx, prefab, clip_folder, report_path, render_path, layer;
+        public float pivot_tolerance, angle_tolerance, penetration_tolerance, penetration_depth, mass; public bool held;
+        public Part[] parts;
     }
+    [Serializable] public class Socket { public string name; public float[] position; }
     [Serializable] public class Motion
     {
-        public string part, kind, clip; public float pivot_drift, angle, travel; public float[] pivot;
+        public string part, kind, clip; public float pivot_drift, angle, travel, penetration; public float[] pivot;
     }
     [Serializable] public class Report
     {
-        public string unity_version, prefab, controller, render; public Motion[] motions;
-        public float[] bounds_min, bounds_max; public bool tip_forward, root_inside; public string[] errors;
+        public string unity_version, prefab, controller, render, default_state; public Motion[] motions;
+        public float[] bounds_min, bounds_max; public bool tip_forward, root_inside; public string[] errors, warnings;
+        public int colliders; public float rigidbody_mass; public Socket[] sockets; public string[] parameters;
     }
 
     public static void Build()
@@ -89,9 +99,17 @@ public static class CLASS_NAME
         child.transform.SetParent(root.transform, false);
         child.transform.localPosition = Vector3.zero;
         var errors = new List<string>();
+        var warnings = new List<string>();
         var controllerPath = request.clip_folder + "/" + request.name + ".controller";
         var controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
+        // A game script drives the parts: Rest by default, a trigger "<part>" pulses rest -> limit -> rest, a bool
+        // "<part>_open" holds the part at its limit while set.
+        var machine = controller.layers[0].stateMachine;
+        var rest = machine.AddState("Rest");
+        machine.defaultState = rest;
+        var parameters = new List<string>();
         var motions = new List<Motion>();
+        var sockets = new List<Socket>();
         foreach (var part in request.parts)
         {
             var transform = root.GetComponentsInChildren<Transform>().FirstOrDefault(t => t.name == part.name);
@@ -100,31 +118,65 @@ public static class CLASS_NAME
             // The root's axis in the part's space. The imported FBX root is scaled (100 with the importer's 0.01
             // file scale), so a slide's travel goes through the parent's scale too: 0.03 m once moved 3 m.
             var local = transform.parent.InverseTransformDirection(axis);
-            var clip = new AnimationClip { name = request.name + "_" + part.name };
             var path = AnimationUtility.CalculateTransformPath(transform, root.transform);
             var restPosition = transform.localPosition;
             var restRotation = transform.localRotation;
-            if (part.kind == "slide")
-            {
-                var limitPosition = restPosition + transform.parent.InverseTransformVector(axis * part.limit);
-                Curve(clip, path, "m_LocalPosition", new[] { restPosition, limitPosition, restPosition });
-            }
-            else
-            {
-                var limitRotation = restRotation * Quaternion.AngleAxis(part.limit, local);
-                Curve(clip, path, "m_LocalRotation", new[] { restRotation, limitRotation, restRotation });
-            }
+            var clip = Pulse(request.name + "_" + part.name, transform, path, axis, part.kind, part.limit);
             var clipPath = request.clip_folder + "/" + clip.name + ".anim";
             AssetDatabase.CreateAsset(clip, clipPath);
-            controller.AddMotion(clip);
+            // the hold: one key at the limit, so the part stays there while "<part>_open" is set
+            var hold = new AnimationClip { name = request.name + "_" + part.name + "_open" };
+            if (part.kind == "slide")
+                Curve(hold, path, "m_LocalPosition", new[] { restPosition + transform.parent.InverseTransformVector(axis * part.limit) });
+            else
+                Curve(hold, path, "m_LocalRotation", new[] { restRotation * Quaternion.AngleAxis(part.limit, local) });
+            var holdPath = request.clip_folder + "/" + hold.name + ".anim";
+            AssetDatabase.CreateAsset(hold, holdPath);
+            controller.AddParameter(part.name, AnimatorControllerParameterType.Trigger);
+            controller.AddParameter(part.name + "_open", AnimatorControllerParameterType.Bool);
+            parameters.Add(part.name); parameters.Add(part.name + "_open");
+            var pulse = machine.AddState(part.name); pulse.motion = clip;
+            var pulseIn = rest.AddTransition(pulse); pulseIn.AddCondition(AnimatorConditionMode.If, 0, part.name);
+            pulseIn.hasExitTime = false; pulseIn.duration = 0f;
+            var pulseOut = pulse.AddTransition(rest); pulseOut.hasExitTime = true; pulseOut.exitTime = 1f; pulseOut.duration = 0f;
+            var open = machine.AddState(part.name + "_open"); open.motion = hold;
+            var openIn = rest.AddTransition(open); openIn.AddCondition(AnimatorConditionMode.If, 0, part.name + "_open");
+            openIn.hasExitTime = false; openIn.duration = 0.25f;
+            var openOut = open.AddTransition(rest); openOut.AddCondition(AnimatorConditionMode.IfNot, 0, part.name + "_open");
+            openOut.hasExitTime = false; openOut.duration = 0.25f;
             motions.Add(Check(root, transform, clip, clipPath, part, axis, request, errors));
+            // a socket at the part's pivot, parented to the part so it follows it
+            sockets.Add(AddSocket(transform, "Socket_" + part.name, transform.position));
         }
         root.AddComponent<Animator>().runtimeAnimatorController = controller;
+        // Physics: a convex collider per mesh (a part's collider moves with it), a Rigidbody on the root
+        var colliders = 0;
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            var collider = filter.gameObject.AddComponent<MeshCollider>();
+            collider.sharedMesh = filter.sharedMesh;
+            collider.convex = true;
+            colliders++;
+        }
+        var body = root.AddComponent<Rigidbody>();
+        body.mass = request.mass;
+        if (!string.IsNullOrEmpty(request.layer))
+        {
+            var layer = LayerMask.NameToLayer(request.layer);
+            if (layer < 0) warnings.Add("the project has no layer named " + request.layer + "; the prefab stays on Default");
+            else foreach (var t in root.GetComponentsInChildren<Transform>()) t.gameObject.layer = layer;
+        }
         var box = WorldBounds(root);
         var tipForward = box.max.z > -box.min.z;
         var rootInside = box.Contains(root.transform.position);
-        if (!tipForward) errors.Add("the weapon does not point along +Z from its root");
-        if (!rootInside) errors.Add("the root (grip) lies outside the weapon's bounds");
+        if (request.held)
+        {
+            if (!tipForward) errors.Add("the weapon does not point along +Z from its root");
+            if (!rootInside) errors.Add("the root (grip) lies outside the weapon's bounds");
+            // Sockets a character holds and fires from: the grip at the root, the muzzle at the body's +Z end
+            sockets.Add(AddSocket(root.transform, "Socket_Grip", root.transform.position));
+            sockets.Add(AddSocket(root.transform, "Socket_Muzzle", MuzzlePoint(root, request)));
+        }
         Render(root, request, request.render_path);
         var prefab = PrefabUtility.SaveAsPrefabAsset(root, request.prefab);
         UnityEngine.Object.DestroyImmediate(root);
@@ -134,9 +186,25 @@ public static class CLASS_NAME
             unity_version = Application.unityVersion, prefab = AssetDatabase.GetAssetPath(prefab),
             controller = controllerPath, render = request.render_path, motions = motions.ToArray(),
             bounds_min = Floats(box.min), bounds_max = Floats(box.max), tip_forward = tipForward,
-            root_inside = rootInside, errors = errors.ToArray()
+            root_inside = rootInside, errors = errors.ToArray(), warnings = warnings.ToArray(),
+            colliders = colliders, rigidbody_mass = request.mass, sockets = sockets.ToArray(),
+            parameters = parameters.ToArray(), default_state = "Rest"
         }));
         Debug.Log("SLOPFORGE_WEAPON_PREFAB " + request.prefab);
+    }
+
+    // One pulse rest -> limit -> rest (1 s). The root's axis is taken into the part's space: the imported FBX root
+    // is scaled (100 with the importer's 0.01 file scale), so a slide's travel goes through the parent's scale too.
+    static AnimationClip Pulse(string name, Transform transform, string path, Vector3 axis, string kind, float limit)
+    {
+        var clip = new AnimationClip { name = name };
+        var rest = transform.localPosition; var restRotation = transform.localRotation;
+        if (kind == "slide")
+            Curve(clip, path, "m_LocalPosition", new[] { rest, rest + transform.parent.InverseTransformVector(axis * limit), rest });
+        else
+            Curve(clip, path, "m_LocalRotation", new[] { restRotation,
+                restRotation * Quaternion.AngleAxis(limit, transform.parent.InverseTransformDirection(axis)), restRotation });
+        return clip;
     }
 
     static void Curve(AnimationClip clip, string path, string property, Vector3[] keys)
@@ -172,6 +240,19 @@ public static class CLASS_NAME
         AnimationMode.StopAnimationMode();
         var motion = new Motion { part = declared.name, kind = declared.kind, clip = clipPath, pivot = Floats(restPosition) };
         var label = declared.kind + " " + declared.name;
+        motion.penetration = Penetration(root, part, clip, request, declared.kind == "slide");
+        if (motion.penetration > request.penetration_tolerance)
+        {
+            // A hinge's usual cause is the range's sign (docs/WEAPONS.md, Axes): say so when the mirrored range clears.
+            // A slide's opposite direction leaves the body almost always, which says nothing about the right one.
+            var mirrored = declared.kind != "hinge" ? 1f : Penetration(root, part, Pulse(clip.name + "_mirrored", part,
+                AnimationUtility.CalculateTransformPath(part, root.transform), axis, declared.kind, -declared.limit), request, false);
+            errors.Add(label + " penetrates the body through its range (" +
+                       motion.penetration.ToString("F3", CultureInfo.InvariantCulture) + " of its vertices deep inside the body" +
+                       (mirrored <= request.penetration_tolerance ? "; the opposite sign, " +
+                        (-declared.limit).ToString("G", CultureInfo.InvariantCulture) + ", clears the body at " +
+                        mirrored.ToString("F3", CultureInfo.InvariantCulture) : "") + ")");
+        }
         if (declared.kind == "slide")
         {
             var displacement = limitPosition - restPosition;
@@ -193,6 +274,180 @@ public static class CLASS_NAME
                            declared.axis + " (declared " + declared.limit.ToString("F2", CultureInfo.InvariantCulture) + ")");
         }
         return motion;
+    }
+
+    // The part's vertices that go inside the rest of the model, sampled through its clip: a lid swinging into its
+    // chest, a drawer travelling past its housing. A vertex is inside where the body's winding number is over a half
+    // (Winding) and counts when it was not inside at rest and lies deeper than penetration_depth of the model's size:
+    // a slide cut from the same surface as its frame dips a fraction of a millimetre under it along the seam.
+    // A slide's point that enters the body through its seat (the body's triangles within the depth of the part at
+    // rest) is the part going into its housing and does not count; a hinge has no housing (mesh_cleanup.py's sweep).
+    static float Penetration(GameObject root, Transform part, AnimationClip clip, Request request, bool slide)
+    {
+        // The body's triangles in world space; it stays still while the part's clip is sampled.
+        var names = new HashSet<string>(request.parts.Select(p => p.name));
+        var corners = new List<Vector3>();
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (names.Contains(filter.name) || filter.transform.IsChildOf(part)) continue;
+            var points = filter.sharedMesh.vertices;
+            foreach (var index in filter.sharedMesh.triangles) corners.Add(filter.transform.TransformPoint(points[index]));
+        }
+        var mesh = part.GetComponentInChildren<MeshFilter>()?.sharedMesh;
+        if (mesh == null || corners.Count == 0) return 0f;
+        var body = corners.ToArray();
+        var step = Mathf.Max(1, mesh.vertexCount / 400);
+        var vertices = mesh.vertices.Where((v, i) => i % step == 0).ToArray();
+        var bounds = new Bounds(body[0], Vector3.zero);
+        foreach (var corner in body) bounds.Encapsulate(corner);
+        var partFilter = part.GetComponentInChildren<MeshFilter>();
+        foreach (var vertex in vertices) bounds.Encapsulate(partFilter.transform.TransformPoint(vertex));
+        var depth = request.penetration_depth * Mathf.Max(bounds.size.x, bounds.size.y, bounds.size.z);
+        bool[] atRest = null;
+        var seat = new bool[body.Length / 3];
+        var path = new List<Vector3[]>();
+        var worst = 0f;
+        AnimationMode.StartAnimationMode();
+        for (var sample = 0; sample <= 8; sample++)
+        {
+            AnimationMode.SampleAnimationClip(root, clip, 0.5f * sample / 8f);
+            var filter = part.GetComponentInChildren<MeshFilter>();
+            var points = vertices.Select(vertex => filter.transform.TransformPoint(vertex)).ToArray();
+            path.Add(points);
+            var inside = points.Select(point => Math.Abs(Winding(point, body)) > 0.5).ToArray();
+            if (atRest == null)
+            {
+                atRest = inside;
+                if (slide) seat = Seat(body, filter, depth);
+                continue;
+            }
+            var deep = Enumerable.Range(0, points.Length)
+                .Count(i => inside[i] && !atRest[i] && Distance(points[i], body) > depth && !EnteredThrough(path, i, body, seat));
+            worst = Mathf.Max(worst, (float)deep / points.Length);
+        }
+        AnimationMode.SampleAnimationClip(root, clip, 0f);
+        AnimationMode.StopAnimationMode();
+        return worst;
+    }
+
+    // The body's triangles within `depth` of the part's surface (a corner or the centre).
+    static bool[] Seat(Vector3[] body, MeshFilter filter, float depth)
+    {
+        var mesh = filter.sharedMesh; var points = mesh.vertices;
+        var own = mesh.triangles.Select(index => filter.transform.TransformPoint(points[index])).ToArray();
+        var near = new Bounds(own[0], Vector3.zero);
+        foreach (var corner in own) near.Encapsulate(corner);
+        near.Expand(2f * depth);
+        var seat = new bool[body.Length / 3];
+        for (var t = 0; t < seat.Length; t++)
+        {
+            var corners = new[] { body[3 * t], body[3 * t + 1], body[3 * t + 2], (body[3 * t] + body[3 * t + 1] + body[3 * t + 2]) / 3f };
+            seat[t] = corners.Any(near.Contains) && corners.Any(corner => Distance(corner, own) <= depth);
+        }
+        return seat;
+    }
+
+    // Whether point i's path (its positions sample by sample) first crosses the body at a seat triangle.
+    static bool EnteredThrough(List<Vector3[]> path, int i, Vector3[] body, bool[] seat)
+    {
+        for (var step = 1; step < path.Count; step++)
+        {
+            var start = path[step - 1][i]; var along = path[step][i] - start;
+            var nearest = float.MaxValue; var hit = -1;
+            for (var t = 0; t < seat.Length; t++)
+            {
+                var at = Crossing(start, along, body[3 * t], body[3 * t + 1], body[3 * t + 2]);
+                if (at >= 0f && at <= 1f && at < nearest) { nearest = at; hit = t; }
+            }
+            if (hit >= 0) return seat[hit];
+        }
+        return false;
+    }
+
+    // Where segment start + s * along crosses triangle abc (s in 0..1), or -1 (Moller and Trumbore).
+    static float Crossing(Vector3 start, Vector3 along, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 e1 = b - a, e2 = c - a, p = Vector3.Cross(along, e2);
+        var det = Vector3.Dot(e1, p);
+        if (Mathf.Abs(det) < 1e-12f) return -1f;
+        var inverse = 1f / det; var s = start - a;
+        var u = Vector3.Dot(s, p) * inverse;
+        if (u < 0f || u > 1f) return -1f;
+        var q = Vector3.Cross(s, e1); var v = Vector3.Dot(along, q) * inverse;
+        if (v < 0f || u + v > 1f) return -1f;
+        return Vector3.Dot(e2, q) * inverse;
+    }
+
+    // The generalized winding number of a point about triangles (three corners each): about 1 inside a closed
+    // surface and 0 outside, and near that where it has holes. Generated bodies are open, so a ray's parity lied
+    // (a hybrid pistol's open body held half its slide by parity, 2026-10-25); the Blender sweep
+    // (mesh_cleanup.sweep_penetration) measures the same way.
+    static double Winding(Vector3 point, Vector3[] corners)
+    {
+        double total = 0;
+        for (var i = 0; i + 2 < corners.Length; i += 3)
+        {
+            Vector3 a = corners[i] - point, b = corners[i + 1] - point, c = corners[i + 2] - point;
+            double la = a.magnitude, lb = b.magnitude, lc = c.magnitude;
+            total += Math.Atan2(Vector3.Dot(a, Vector3.Cross(b, c)),
+                                la * lb * lc + Vector3.Dot(a, b) * lc + Vector3.Dot(b, c) * la + Vector3.Dot(c, a) * lb);
+        }
+        return total / (2 * Math.PI);
+    }
+
+    // The distance from a point to the nearest of the triangles.
+    static float Distance(Vector3 point, Vector3[] corners)
+    {
+        var nearest = float.MaxValue;
+        for (var i = 0; i + 2 < corners.Length; i += 3)
+            nearest = Mathf.Min(nearest, (point - Closest(point, corners[i], corners[i + 1], corners[i + 2])).sqrMagnitude);
+        return Mathf.Sqrt(nearest);
+    }
+
+    // The point of triangle abc nearest p (Ericson, Real-Time Collision Detection, 5.1.5).
+    static Vector3 Closest(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0f && d2 <= 0f) return a;
+        Vector3 bp = p - b;
+        float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0f && d4 <= d3) return b;
+        float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0f && d1 >= 0f && d3 <= 0f) return a + ab * (d1 / (d1 - d3));
+        Vector3 cp = p - c;
+        float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0f && d5 <= d6) return c;
+        float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0f && d2 >= 0f && d6 <= 0f) return a + ac * (d2 / (d2 - d6));
+        float va = d3 * d6 - d5 * d4;
+        if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f) return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+        float denominator = 1f / (va + vb + vc);
+        return a + ab * (vb * denominator) + ac * (vc * denominator);
+    }
+
+    static Socket AddSocket(Transform parent, string name, Vector3 position)
+    {
+        var socket = new GameObject(name);
+        socket.transform.SetParent(parent, false);
+        socket.transform.position = position;
+        return new Socket { name = name, position = Floats(position) };
+    }
+
+    // The centroid of the body's vertices within 1% of its +Z extreme: where a held weapon fires from.
+    static Vector3 MuzzlePoint(GameObject root, Request request)
+    {
+        var parts = new HashSet<string>(request.parts.Select(p => p.name));
+        var points = new List<Vector3>();
+        foreach (var filter in root.GetComponentsInChildren<MeshFilter>())
+        {
+            if (parts.Contains(filter.name)) continue;
+            foreach (var vertex in filter.sharedMesh.vertices) points.Add(filter.transform.TransformPoint(vertex));
+        }
+        if (points.Count == 0) return WorldBounds(root).max;
+        var maxZ = points.Max(p => p.z); var minZ = points.Min(p => p.z);
+        var front = points.Where(p => p.z >= maxZ - 0.01f * (maxZ - minZ)).ToList();
+        return new Vector3(front.Average(p => p.x), front.Average(p => p.y), front.Average(p => p.z));
     }
 
     static Bounds WorldBounds(GameObject go)
