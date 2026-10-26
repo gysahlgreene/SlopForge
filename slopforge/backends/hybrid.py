@@ -15,7 +15,7 @@ from PIL import Image
 
 from ..part_split import align, label_faces, merge_islands, part_distances
 from ..paths import blender_executable, tool_root
-from ..provenance import file_sha256
+from ..provenance import file_sha256, tool_sha256
 from .blender import blender_environment
 from .omnipart import run_omnipart
 
@@ -88,7 +88,7 @@ def split_surface(project_root, config, surface, parts_glb, concept, masks, part
               "cut_length": round(float(data["lengths"][cut].sum() / span), 3),
               "parts": {name: {"kind": next((p["kind"] for p in parts if p["name"] == name), "body"),
                                "id": index + 1} for index, name in enumerate(["body", *moving])},
-              "tools": {script: file_sha256(tool_root() / "blender" / script)
+              "tools": {script: tool_sha256(tool_root() / "blender" / script)
                         for script in ("hybrid_graph.py", "hybrid_apply.py")}}
     report["parts"]["body"]["kind"] = "body"
     # the concept's fitted view: whether its masks voted on every face (through the thickness) or on the seen ones

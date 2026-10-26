@@ -492,6 +492,11 @@ avoid: [environment]
         self.assertEqual(stage["settings"]["part_model"], "hybrid")
         self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]),
                          ["hybrid.py", "hybrid_apply.py", "hybrid_graph.py", "part_model.py", "part_split.py"])
+        # hybrid_graph.py imports mesh_cleanup.py and concept_view.py: their changes invalidate the stage too
+        from slopforge.paths import tool_root
+        from slopforge.provenance import tool_sha256
+        self.assertEqual(stage["settings"]["part_tools_sha256"]["hybrid_graph.py"],
+                         tool_sha256(tool_root() / "blender/hybrid_graph.py"))
 
     def test_an_asset_without_a_part_backend_records_no_part_model_in_its_mesh_settings(self):
         # Adding a key with value None to every mesh stage would make every existing asset's mesh stage a
@@ -504,6 +509,23 @@ avoid: [environment]
         stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
         self.assertNotIn("part_model", stage["settings"])
         self.assertNotIn("part_tools_sha256", stage["settings"])
+        self.assertNotIn("preparation_tool_sha256", stage["settings"])
+
+    def test_a_type_that_removes_hidden_faces_records_the_mesh_preparation_tools(self):
+        # The mesh stage removes hidden faces with prepare_model.py and mesh_cleanup.py: a change to either must
+        # generate the mesh again (2026-10-26). Other types keep their settings, so their meshes stay valid.
+        from slopforge.paths import tool_root
+        from slopforge.provenance import tool_sha256
+        self.asset_type["remove_hidden_faces"] = True
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
+        self.assertTrue(stage["settings"]["remove_hidden_faces"])
+        self.assertEqual(stage["settings"]["preparation_tool_sha256"],
+                         tool_sha256(tool_root() / "blender/prepare_model.py"))
 
     def test_a_static_asset_of_a_prefab_type_is_published_with_a_prefab(self):
         self._concept_candidates()

@@ -22,7 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
-from ..provenance import generator_provenance, file_sha256
+from ..provenance import generator_provenance, file_sha256, tool_sha256
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import load_taxonomy, output_path
@@ -1041,7 +1041,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         python = python_executable(root, config)
         surface_ref = [item for item in material_refs if item["type"] == "surface.swatch"]
         map_settings = {"map_prompt": prompt,
-                        "tool_sha256": file_sha256(tool_root() / "processing/make_pbr_maps.py")}
+                        "tool_sha256": tool_sha256(tool_root() / "processing/make_pbr_maps.py")}
         map_attempt = previous_attempts.get("material_map_acquisition", previous["number"]) if previous else number
         map_keys = ("basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission")
         # The swatch bake overwrites the maps it is given, so the map stage's tiles live apart from them.
@@ -1075,7 +1075,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         assembly_inputs = [*map_refs, *(lineage or {}).get("assembly_inputs", [])]
         assembly_settings = {"material_scale": float(pipeline.get("material_scale", 3.0)),
                              "face_budget": face_budget,
-                             "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py"),
+                             "processing_tool_sha256": tool_sha256(tool_root() / "blender/prepare_model.py"),
                              **_placement(asset)}
         assembly_attempt = previous_attempts.get("material_assembly_export", previous["number"]) if previous else number
         assembly_refs = _adopt_stage(lineage, "material_assembly_export", assembly_attempt,
@@ -1779,7 +1779,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
                      if artifact["type"] in {"mesh.glb", "mesh.raw", "mesh.final"}), None)
     processing_settings = {"face_budget": _face_budget(pipeline, asset_type, asset),
                            "material_scale": float(pipeline.get("material_scale", 3.0)),
-                           "processing_tool_sha256": file_sha256(tool_root() / "blender/prepare_model.py")}
+                           "processing_tool_sha256": tool_sha256(tool_root() / "blender/prepare_model.py")}
     processed_reuse = processed_mesh_reuse_decision(root, asset, mesh_ref, processing_settings) \
         if mesh_ref else {"reusable": False, "reasons": ["source mesh lineage is unknown"]}
     concept_ref = asset.get("source", {}).get("concept_artifact")
@@ -2458,18 +2458,20 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
             if _removes_hidden_faces(asset_type, asset):  # only when set: existing assets keep their settings
                 mesh_settings["remove_hidden_faces"] = True
+                # prepare_model.py removes them in the mesh stage with mesh_cleanup.py (tool_sha256 covers both)
+                mesh_settings["preparation_tool_sha256"] = tool_sha256(tool_root() / "blender/prepare_model.py")
             if part_backend(asset_type, asset):
                 # Only on the part route: a None here would change every existing asset's mesh settings (review
                 # 2026-10-25). A change of the part tools invalidates the stage.
                 mesh_settings["part_model"] = part_backend(asset_type, asset)
                 mesh_settings["part_tools_sha256"] = {
-                    "part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
-                    **({"hybrid_graph.py": file_sha256(tool_root() / "blender/hybrid_graph.py"),
-                        "hybrid_apply.py": file_sha256(tool_root() / "blender/hybrid_apply.py"),
+                    "part_model.py": tool_sha256(tool_root() / "processing/part_model.py"),
+                    **({"hybrid_graph.py": tool_sha256(tool_root() / "blender/hybrid_graph.py"),
+                        "hybrid_apply.py": tool_sha256(tool_root() / "blender/hybrid_apply.py"),
                         "part_split.py": file_sha256(tool_root() / "slopforge/part_split.py"),
                         "hybrid.py": file_sha256(tool_root() / "slopforge/backends/hybrid.py")}
                        if part_backend(asset_type, asset) == "hybrid" else
-                       {"prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")})}
+                       {"prepare_parts.py": tool_sha256(tool_root() / "blender/prepare_parts.py")})}
                 mesh_settings["part_sampler"] = _part_sampler(asset_type)
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
