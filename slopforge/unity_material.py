@@ -136,14 +136,23 @@ def zero_metallic(basecolor_path, metallic_path, matches):
     red, green, blue = base.split()
     saturation = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(red, green), blue),
                                      ImageChops.darker(ImageChops.darker(red, green), blue))
+    hue = base.convert("HSV").split()[0]
+    closing = max(3, round(5 * base.width / 2048) | 1)
     for match in matches:
-        found = emitter_colour_mask(base, match)
         if match is not None and max(match) - min(match) > 40:
-            # A coloured declaration takes no greys: every channel of dark steel (51, 51, 51) is within the rule's 48
-            # of walnut #622513, and 6.8% of a pistol's texels, set to non-metal, came out pink (2026-10-25). The
-            # generated walnut is duller than the concept's (saturation 30 against 79), so a quarter is the floor.
+            # A coloured declaration takes its hue at any lightness and no greys. Wood grain changes lightness, not
+            # hue: HP10's walnut (65, 45, 34) had dark grain (49, 34, 24), 49 from #622513 in red, which a per-channel
+            # window left metal, grey flecks on the grips (2026-10-26). Dark steel (51, 51, 51) is within that window
+            # too and came out pink as non-metal (2026-10-25); the generated walnut is duller than the concept's
+            # (saturation 30 against 79), so a quarter of the declared saturation is the floor. Closed, not opened:
+            # the darkest crevices inside the wood go with it, a screw head does not.
+            target = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))[0]
             floor = 0.25 * (max(match) - min(match))
-            found = ImageChops.multiply(found, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+            near = hue.point(lambda value, target=target: 255 if min(abs(value - target), 256 - abs(value - target)) <= 21 else 0)
+            found = ImageChops.multiply(near, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+            found = found.filter(ImageFilter.MaxFilter(closing)).filter(ImageFilter.MinFilter(closing))
+        else:
+            found = emitter_colour_mask(base, match)
         mask = ImageChops.lighter(mask, found)
     with Image.open(metallic_path) as image:
         mode, channel = image.mode, image.convert("L")

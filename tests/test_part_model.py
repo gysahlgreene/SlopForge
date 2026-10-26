@@ -430,6 +430,32 @@ class DerivedMapTests(unittest.TestCase):
         self.assertEqual(int(metal[16, 8]), 255)  # grey steel stays metal
         self.assertEqual(int(metal[16, 48]), 0)  # the walnut does not
 
+    def test_a_coloured_non_metal_takes_its_darker_grain_but_not_a_screw(self):
+        # The generated walnut on HP10's grips was (65, 45, 34) and its dark grain (49, 34, 24): 49 from #622513 in red,
+        # outside the per-channel window, so the grain stayed metal and rendered as grey flecks across the grips, 9-11%
+        # of each grip's texels (2026-10-26). Wood grain changes lightness, not hue. Stripes of wood and grain, a grey
+        # screw head inside the grip, and grey steel beside it.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import zero_metallic
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 128), (51, 51, 51))  # steel on the left half
+            for x in range(128, 256, 8):
+                base.paste((65, 45, 34), (x, 0, x + 5, 128))  # wood
+                base.paste((49, 34, 24), (x + 5, 0, x + 8, 128))  # dark grain
+            base.paste((53, 52, 51), (176, 48, 208, 80))  # a screw head in the grip
+            base.save(root / "base.png")
+            Image.new("L", (256, 128), 255).save(root / "metal.png")
+            zero_metallic(root / "base.png", root / "metal.png", [(98, 37, 19)])
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"))
+        self.assertEqual(int(metal[64, 40]), 255)  # steel stays metal
+        self.assertEqual(int(metal[64, 192]), 255)  # the screw head stays metal
+        grip = np.concatenate([metal[:, 128:176], metal[:, 216:]], axis=1)[8:120]
+        self.assertLessEqual(float((grip > 127).mean()), 0.01, "the grain stayed metal")
+
     def test_a_grey_colour_does_not_borrow_a_coloured_ones_shift(self):
         # A grey cluster within 20 CIELAB of the walnut's borrowed the walnut's a*b* shift (+19.6, +10.8) and steel
         # set to non-metal came out pink (2026-10-25). A colour borrows a shift only from one about as saturated.

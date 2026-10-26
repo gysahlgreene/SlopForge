@@ -263,7 +263,12 @@ and none are declared yet.
   metallic. Declaring every region non-metal zeroes the map (step 7). A brief that also
   declares metal keeps the generator's values everywhere, so give its non-metal regions their
   concept colour, as in `grip=nonmetal#5a3a22: dark leather`. The metallic map is then zeroed
-  where the base colour matches it, with the same colour rule as emitters. A coloured
+  where the base colour matches it. A coloured declaration matches its hue within 30° at any
+  lightness, with at least a quarter of its saturation, closed over a few texels so dark crevices
+  go with it: HP10's walnut grips (65, 45, 34) had dark grain (49, 34, 24) outside the emitters'
+  per-channel window of 48, which left 9.8% of the grips metal as grey flecks; by hue 3.9%, the
+  screws among it (2026-10-26). Greys stay metal (dark steel within that window had turned pink
+  as walnut). Grey and pale declarations keep the emitters' rule. A coloured
   non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
   An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including
