@@ -1,8 +1,7 @@
 # Moving parts: a pistol and a chest (2026-10-26)
 
-Two assets whose parts move as declared. The pistol is a pipeline publication. The chest is a spike of a route that
-is not built yet. Both use the `h100` profile; the private run folders are `private/weapons-parts-2026-10-25/HP13`
-and `.../OPEN1` (commit of each run in its `commit.txt`).
+Two assets whose parts move as declared, both pipeline publications on the `h100` profile. The private run folders
+are `private/weapons-parts-2026-10-25/HP13` and `.../OPEN7` (commit of each run in its `commit.txt`).
 
 ## Pistol: slide and trigger (Experimental)
 
@@ -48,36 +47,39 @@ gives a different mesh for the same seed number from run to run. This is one bri
 - **Grip texture varies by seed:** some seeds carry the concept's checkering, this one is plain wood.
 - **The chroma check is unreliable on a black weapon:** its concept's median chroma is near grey.
 
-## Chest: lid on a hinge (spike, not a pipeline route yet)
+## Chest: lid on a hinge (Experimental)
 
 <img src="chest_lid.gif" width="600" alt="A domed wooden chest with iron bands: the lid opens 100 degrees on its back edge onto a plank interior, then closes">
 
-On the normal route a chest is generated closed and cut apart. No seed passed: its inside is invented, and the cut
-wandered along plank grooves. This chest was generated **open** so that its inside comes from a picture:
+<img src="chest_views.jpg" width="900" alt="The chest from the front with its lock, from the back with its hinges, from above, beside its concept, and its lid swinging open">
 
-1. **Open concept.** Qwen-Image-Edit-2511 edited the approved closed concept to open the lid onto a plank interior
-   (seed 2 of 3).
-2. **Mesh.** TRELLIS.2 built it open, with the interior, from that image.
-3. **Split.** SAM masked the open lid. Labels from that mask alone split the lid off along its hinge line, and faces
-   above the body's rim went to the lid.
-4. **Closing fit.** The lid was turned shut about the line where it touches the body, matching the two pieces' flat
-   open faces. A search then sealed the box: turned 58°, stretched 1.13 across its depth, no lid point in the walls.
-5. **Finish.** The wood's roughness was raised to 0.7, matte: its 0.37 threw streaky highlights.
-6. **The pipeline's final pass** ran with the chest's declarations: lid hinge `x -100..0` anchored `@back-bottom`,
-   0.6 m tall.
+Generated closed and cut apart, a chest's inside is invented and its cut wanders along plank grooves: no seed passed.
+This chest is generated **open** (`slopforge open`, then `approve chest 2 --open 8`; [guide](../../WEAPONS.md#props-generated-open)):
 
-Steps 1 to 5 are scratch tools for now. The final pass's results:
-- the closed lid covers 1.00 of the approved closed concept's lid mask;
-- 0.000 of its vertices go deep into the body through the swing;
-- backs of faces are 0.004 at rest and 0.0059 open.
+1. **Open picture.** Qwen-Image-Edit-2511 edits the approved closed concept to show the lid open on a plank inside;
+   the open picture is approved as a second concept (2 of 3 edits were usable; one opened the chest like a cabinet).
+2. **Mesh.** TRELLIS.2 builds the chest open, inside and all. No hidden faces are removed on this route.
+3. **Split.** The open picture's lid mask alone splits the lid off along its hinge.
+4. **Closing.** `blender/close_part.py` turns the lid shut about the line where it touches the body, then a search
+   over the turn and an offset seals the box. This seed's lid needed a 6% stretch to fit.
+5. **Final pass.** The side the lid touched is the back; the frame is the footprint's rectangle; the lid hinges on
+   its back edge's seam; colours move to the closed concept's.
 
-It has not been published to Unity.
+**Results (run on `aefecb5`, first seed):**
+- the lid covers 0.99 of the closed concept's lid mask; 0.0025 of its vertices go deep into the body through its
+  swing (limit 0.02);
+- backs of faces 0.0014 at rest and 0.0005 open (limit 0.01); hue 0.17 from the concept (limit 4);
+- Unity: the lid turns -100° about a fixed pivot, penetration 0.0025; Play mode 2/2 (the lid pulses and returns, the
+  chest rests on the ground).
+
+**Fixed on the way** (2026-10-26, each with a regression test): a hasp's top lifted into the lid and swung below the
+closed chest; a seal search that stopped short (a slit) or drooped the lid over the front; a lid pivoting under a
+latch at its front, so it lifted off; holes inside from hidden-face removal on the half-open mesh; the lock at the
+back and a crooked swing (the silhouette fit could not tell front from back; vertex-weighted axes leaned 6-9°); a
+chest as deep as it is tall standing pitched; colour transfer off in stale project type files (doctor now warns).
 
 **Known limits:**
-- **The lid was stretched 13% to fit.** From one view TRELLIS.2 makes a tilted lid short front to back.
-- **The edit model changes details.** The hasp moved, and one seed dropped the lid's bands.
-- **The dome's outside is invented** where the open image cannot see it.
-- **One light sliver** shows by the right-hand hinge.
-
-Building this route needs two decisions from the owner: whether the open image is a second approved concept, and
-whether a lid may be stretched to fit its opening.
+- **One run, one seed.** Repeatability of the open route is not shown; earlier runs' seeds failed on a torn lid end,
+  a broken mesh and a misread lid shape (not yet diagnosed).
+- **The edit model changes details**, and the dome's outside is invented where the open picture cannot see it.
+- **Hidden faces are kept** on this route, so part of the face budget pays for faces inside the walls.
