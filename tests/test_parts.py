@@ -40,6 +40,16 @@ class PartSpecTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "one grip"):
             validate_parts([parse_part_spec("a=grip"), parse_part_spec("b=grip")])
 
+    def test_a_slide_needs_the_models_real_size(self):
+        # A slide's travel is in metres. Without a real size the model is one unit long: HP13's pistol slide moved
+        # 30 mm, 3% of its length, where a real 1911's moves about 14% (2026-10-26).
+        from slopforge.parts import check_slide_scale
+        slide = parse_part_spec("slide=slide:z:-0.03..0")
+        with self.assertRaisesRegex(ValueError, "--target-size=-,0.22,-"):
+            check_slide_scale([slide], None)
+        check_slide_scale([slide], [None, 0.22, None])
+        check_slide_scale([parse_part_spec("lid=hinge:x:-100..0")], None)  # a turn is in degrees: any size
+
     def test_approval_boxes_locate_declared_parts_on_the_concept(self):
         # Text detection swapped a pistol's slide and grip; a box given on the approved concept found each part.
         self.assertEqual(parse_part_box("slide=0.17,0.23,0.93,0.39"), ("slide", [0.17, 0.23, 0.93, 0.39]))

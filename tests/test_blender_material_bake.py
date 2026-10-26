@@ -1729,3 +1729,106 @@ print("FILL COUNT", sum(values))
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
             self.assertIn("FILL COUNT", result.stdout)
+
+
+OPEN_CHEST = r"""
+import math, sys
+import bpy, bmesh
+out, depth = sys.argv[sys.argv.index("--") + 1], float(sys.argv[-1])
+bpy.ops.wm.read_factory_settings(use_empty=True)
+# the body: an open-topped box 1.0 x 0.6 x 0.5 (x right, y back, z up), its top at z 0.5
+bpy.ops.mesh.primitive_cube_add(size=2)
+body = bpy.context.object
+body.name = "body"
+body.scale = (0.5, 0.3, 0.25)
+body.location = (0, 0, 0.25)
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+bm = bmesh.new(); bm.from_mesh(body.data)
+bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=8, use_grid_fill=True)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.normal.z > 0.9], context="FACES")
+bm.to_mesh(body.data); bm.free()
+
+def thicken(obj):  # walls with an inside and an outside, as TRELLIS.2 makes them
+    bpy.context.view_layer.objects.active = obj
+    modifier = obj.modifiers.new("thickness", "SOLIDIFY")
+    modifier.thickness, modifier.offset = 0.03, -1
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+thicken(body)
+# the lid: a half-cylinder shell open underneath, `depth` of the opening's 0.6 front to back, generated open
+bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=0.3, depth=1.0, end_fill_type="NGON", rotation=(0, math.pi / 2, 0))
+lid = bpy.context.object
+lid.name = "lid"
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+bm = bmesh.new(); bm.from_mesh(lid.data)
+bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], plane_co=(0, 0, 0), plane_no=(0, 0, 1),
+                       clear_inner=True)
+bmesh.ops.subdivide_edges(bm, edges=[e for e in bm.edges if e.calc_length() > 0.05], cuts=4)
+bm.to_mesh(lid.data); bm.free()
+lid.scale = (1, depth, 0.5)
+lid.location = (0, 0.3 - 0.3 * depth, 0.5)
+bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+thicken(lid)
+# opened 70 degrees about its back edge (y 0.3, z 0.5): the front swings up and back
+bpy.context.scene.cursor.location = (0, 0.3, 0.5)
+bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+lid.rotation_euler = (math.radians(-70), 0, 0)
+bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+bpy.ops.object.select_all(action="SELECT")
+bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_yup=True)
+"""
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderClosePartTests(unittest.TestCase):
+    def _close(self, root, depth):
+        script, opened = root / "open_chest.py", root / "open.glb"
+        script.write_text(OPEN_CHEST)
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script), "--", str(opened),
+                        str(depth)], check=True, capture_output=True)
+        request = root / "close.json"
+        request.write_text(json.dumps({"surface": str(opened), "part": "lid", "out": str(root / "closed.glb"),
+                                       "report": str(root / "report.json"), "max_stretch": 1.15}))
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                        str(ROOT / "blender/close_part.py"), "--", str(request)], check=True, capture_output=True)
+        probe = root / "bounds.py"
+        probe.write_text("import bpy, json, sys\n"
+                         "bpy.ops.wm.read_factory_settings(use_empty=True)\n"
+                         "bpy.ops.import_scene.gltf(filepath=sys.argv[-1])\n"
+                         "lid = next(o for o in bpy.context.scene.objects if o.name.startswith('lid'))\n"
+                         "points = [lid.matrix_world @ v.co for v in lid.data.vertices]\n"
+                         "print('BOUNDS ' + json.dumps([[min(p[i] for p in points) for i in range(3)],"
+                         " [max(p[i] for p in points) for i in range(3)]]))\n")
+        result = subprocess.run([BLENDER, "--background", "--python", str(probe), "--", str(root / "closed.glb")],
+                                check=True, capture_output=True, text=True)
+        bounds = json.loads(next(line for line in result.stdout.splitlines() if line.startswith("BOUNDS "))[7:])
+        return json.loads((root / "report.json").read_text()), np.array(bounds)
+
+    def test_a_lid_generated_open_and_short_is_turned_shut_and_fitted_to_its_opening(self):
+        # TRELLIS.2 builds an open chest's inside from its open picture, but makes the tilted lid short front to
+        # back (OPEN1: ~9%). The lid turns about the line where it touches the body until its open face meets the
+        # body's rim, then stretches along the opening's depth: here 0.552 to 0.6 (1.087).
+        with tempfile.TemporaryDirectory() as temporary:
+            report, (low, high) = self._close(Path(temporary), 0.92)
+        self.assertAlmostEqual(report["needed_stretch"], 1 / 0.92, delta=0.03)
+        self.assertLessEqual(report["stretch"], 1.15)
+        self.assertEqual(report["hinge"]["axis"], [1, 0, 0])
+        self.assertAlmostEqual(abs(report["face_match"]["turn_degrees"]), 70, delta=4)
+        # the seal: no ray from the cavity escapes, no lid point sits in the walls
+        self.assertGreater(report["cavity_points"], 0)
+        self.assertLess(report["seal"]["escape"], 0.01)
+        self.assertLess(report["seal"]["inside"], 0.01)
+        # shut over the opening, rim on the body's top and across its depth (Blender's z up, y back), within 3% of
+        # the chest's size: the search trades a little overhang for the seal
+        self.assertAlmostEqual(low[2], 0.5, delta=0.03)
+        self.assertAlmostEqual(high[2], 0.65, delta=0.03)
+        self.assertLess(low[1], -0.27)
+        self.assertGreater(high[1], 0.27)
+
+    def test_a_lid_too_short_for_its_opening_reports_the_stretch_it_needed(self):
+        # 0.42 of the opening's 0.6 would need 1.43: the fit stops at the bound and the gate rejects the seed
+        # (validation.apply_part_fit), rather than a lid clamped short leaving a gap.
+        with tempfile.TemporaryDirectory() as temporary:
+            report, _bounds = self._close(Path(temporary), 0.7)
+        self.assertGreater(report["needed_stretch"], 1.3)
+        self.assertLessEqual(report["stretch"], 1.15)

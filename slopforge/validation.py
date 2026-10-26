@@ -477,6 +477,26 @@ def apply_hybrid_alignment(validation, error, maximum, decisive=True):
     return validation
 
 
+def apply_part_fit(validation, close, maximum):
+    """Fail a candidate generated open whose part had to be scaled more than `maximum` (either way) to fit its
+    opening when it was closed (generation.json open_state.close, blender/close_part.py): the face match's stretch
+    is gated, since the fit stays within the bound and a lid clamped short of its opening leaves a gap. The owner
+    allows 15% (2026-10-26); another seed is tried (part_fit). None (not generated open): no verdict."""
+    if not close:
+        return validation
+    deviation = max(max(value, 1 / value) for value in (close["needed_stretch"], close["stretch"]))
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["open_part_stretch"] = round(float(deviation), 4)
+    limits["max_open_part_stretch"] = maximum
+    if deviation > maximum:
+        validation["errors"] = [*validation.get("errors", []),
+            f"the open part had to be scaled {deviation:.2f} times to fit its opening (limit {maximum:g}), so "
+            "another seed is tried"]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), "part_fit"]
+        validation["status"] = "failed"
+    return validation
+
+
 def apply_mesh_folds(validation, shares, maximum):
     """Fail a candidate whose faces fold against each other (retryable mesh_folded): `shares` is inspection's
     folded_edge_share per mesh object, the share of edges whose two faces point opposite ways. A collapse

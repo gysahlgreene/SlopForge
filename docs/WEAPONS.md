@@ -88,7 +88,10 @@ Declare each moving part, and the grip, as `--part`. The final Blender pass spli
   - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
     right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`. Without it the
     pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
-  - `slide`: moves along an axis, with its range in metres.
+  - `slide`: moves along an axis, with its range in metres, so the model needs its real size: `generate` and
+    `approve` refuse a slide without `--target-size` (`--target-size=-,0.22,-` for a pistol 0.22 m long; Y is a
+    weapon's length). Unsized, a model is one unit long: HP13's 30 mm slide travel was 3% of its length, where a
+    real 1911's is about 14%.
 - **Axes:** in the weapon's frame as Unity shows it: x right, y up, z forward along the blade or barrel (a prop:
   z towards its concept's camera). A range's sign is Unity's: a positive turn about x takes +y towards +z, about
   y +z towards +x, about z +x towards +y. So a trigger hanging below its pivot pulls back with `0..20`, and a lid
@@ -352,7 +355,7 @@ gates do not yet reject what inspection rejected.
 
 ## Props with parts
 
-The same declarations work on a prop: the `prop` type sets `part_model: omnipart`, so a chest that declares
+The same declarations work on a prop: the `prop` type sets `part_model: hybrid`, so a chest that declares
 `--part "lid=hinge:x:-100..0@back-bottom: the domed lid"` is generated as a body and a lid, framed from its concept
 (front towards the concept's camera, top up; no grip, no full-turn search, no tip check), the lid measured against
 its mask, separated with its pivot on its back-bottom edge, and published as a prefab whose `lid` trigger and
@@ -361,6 +364,39 @@ seam it rests on (`back-top` put a domed lid's pivot at its apex), and the sign 
 positive turn sank the lid through the body). Both mistakes were made and caught by the interpenetration check on
 the 2026-10-25 live runs (0.27 and 0.17 of the lid's vertices inside). A chest is the first prop proven this way
 (see the evidence pages).
+
+### Props generated open
+
+A chest generated closed has no inside to copy: on the closed route its cavity is invented and the cut between lid
+and body wanders along plank grooves (HC5, HC6: no seed passed). Instead, the chest is generated **open** from a
+picture of it open, which the owner approves as a second concept, and its lid is closed before the final pass
+([design](superpowers/specs/2026-10-26-open-state-hinged-parts-design.md)):
+
+```sh
+slopforge generate prop chest "Wooden treasure chest with a hinged lid" \
+  --part "lid=hinge:x:-100..0@back-bottom: the domed lid on top of the chest"
+slopforge open chest 2 --count 3 --inside "plain plank walls and a plank floor"
+slopforge approve chest 2 --open 7
+```
+
+- `open` edits concept candidate 2 with `workflows.edit` (`image_edit_qwen_api.json`, Qwen-Image-Edit-2511): the
+  hinged part swung open as far as it turns, the rest kept. The pictures are candidates with `open_of: 2`; the review
+  board offers `approve chest 2 --open <n>`. An edit can move or drop details (a hasp moved, one seed dropped the
+  lid's bands, 2026-10-25): review them.
+- `approve --open` cuts out and masks both pictures. TRELLIS.2 builds the mesh from the open one, inside and all.
+- The split uses the open picture's masks alone (no OmniPart): the open lid stands clear of the body. Body faces
+  above the body's rim go to the lid (its knuckles and band ends, which the mask misses).
+- `blender/close_part.py` closes the lid. The hinge line is where the lid touches the body. Each piece's open face is
+  the flat face through that line that rays from its middle pass through. The lid turns until the two faces meet,
+  then stretches along the opening's depth to its length. A search then seals the box: no ray from the cavity
+  escapes, no lid point sits in the walls, no back of a face shows.
+- The stretch is bounded: the owner allows 15% (2026-10-26). The face match's stretch is gated (`part_fit`): a seed
+  whose lid needed more is retried. TRELLIS.2 makes a tilted lid short from one view (OPEN1: 9%).
+- The final pass is unchanged and compares with the **closed** concept: colour transfer and the lid's coverage of
+  its mask.
+
+Requires the project to set `asset_pipeline.workflows.edit: image_edit_qwen_api.json` and the Qwen-Image-Edit-2511
+files ([ComfyUI](COMFYUI.md)); one hinged part per asset.
 
 ## The prefab a game uses
 

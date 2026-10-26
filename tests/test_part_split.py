@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from slopforge.part_split import binary_cut, label_faces
+from slopforge.part_split import binary_cut, label_faces, lift_above_rim
 
 
 def strip(n, crease_at, crease_angle=80.0):
@@ -163,3 +163,22 @@ class MergeIslandsTests(unittest.TestCase):
         pairs = np.array([(i, i + 1) for i in range(9)])
         labels = np.array(["body"] * 8 + ["trigger"] * 2, dtype=object)  # a small part, but its only island
         self.assertEqual(list(merge_islands(labels, pairs, np.ones(10))), list(labels))
+
+
+class OpenPartRimTests(unittest.TestCase):
+    def test_body_faces_standing_above_the_rim_join_the_open_part(self):
+        # An open chest's mask misses the lid's hinge knuckles and the band ends standing on its back edge, above
+        # the body's rim; left with the body they stop the lid closing (OPEN1, 2026-10-25).
+        walls = [(0.0, 0.0, z) for z in np.linspace(0.0, 0.48, 40)]
+        rim = [(x, 0.0, 0.5) for x in np.linspace(-0.5, 0.5, 30)]
+        knuckles = [(x, 0.5, 0.56) for x in (-0.3, 0.3)]
+        lip = [(0.0, -0.5, 0.505)]  # within the margin: part of the rim
+        lid = [(x, 0.6, 0.9) for x in np.linspace(-0.5, 0.5, 10)]
+        centres = np.array(walls + rim + knuckles + lip + lid)
+        labels = np.array(["body"] * (len(centres) - len(lid)) + ["lid"] * len(lid))
+        lifted, report = lift_above_rim(labels, centres, 1.0, "lid")
+        self.assertEqual(report["moved_faces"], 2)
+        self.assertAlmostEqual(report["rim_height"], 0.5, places=2)
+        self.assertEqual(list(lifted[len(walls) + len(rim):len(walls) + len(rim) + 2]), ["lid", "lid"])
+        self.assertEqual(lifted[len(walls) + len(rim) + 2], "body")
+        self.assertTrue((lifted[:len(walls) + len(rim)] == "body").all())

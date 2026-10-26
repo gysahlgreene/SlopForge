@@ -44,6 +44,15 @@ class ReviewBoardTests(unittest.TestCase):
         self.assertIn("generate concept badge", html)
         self.assertIn("inspect badge", html)
 
+    def test_an_open_picture_is_approved_together_with_the_concept_it_opens(self):
+        items = self.manifest["assets"]["concept:badge"]["candidates"]["items"]
+        items.append({"number": 3, "path": "ai/assets/candidates/concept/badge/candidate.png", "status": "candidate",
+                      "open_of": 1, "seed": 9})
+        html = generate_review_board(self.root, self.manifest).read_text()
+        self.assertIn("approve badge 1 --open 3", html)
+        self.assertNotIn("approve badge 3", html)
+        self.assertIn("Open picture of candidate 1", html)
+
     def test_board_output_and_asset_paths_stay_inside_project(self):
         with self.assertRaisesRegex(ValueError, "within the project"):
             generate_review_board(self.root, self.manifest, "../outside.html")

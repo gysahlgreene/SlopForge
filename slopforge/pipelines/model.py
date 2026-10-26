@@ -14,7 +14,7 @@ from PIL import Image, ImageStat
 from ..backends.blender import inspect_model, process_model
 from ..backends.comfyui import generate_image, generate_model, python_executable, workflow_mask_errors
 from ..backends.omnipart import generate_part_model
-from ..backends.hybrid import generate_hybrid_parts
+from ..backends.hybrid import MAX_OPEN_PART_STRETCH, generate_hybrid_parts
 from ..config import select_quality_tier, workflow_node_inputs
 from ..candidates import generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
@@ -23,6 +23,7 @@ from ..manifest import (save_manifest, load_manifest, start_execution, start_sta
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import generator_provenance, file_sha256, tool_sha256
+from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import load_taxonomy, output_path
@@ -33,10 +34,10 @@ from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
-from ..parts import check_part_masks, make_part_masks, part_settings
+from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_penetration,
-                          apply_visible_backfaces,
+                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
+                          apply_part_penetration, apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
@@ -1304,6 +1305,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     decisive = not ((hybrid_info.get("view") or {}).get("through") and not hybrid_info.get("masks_dropped"))
     validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
                                         float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
+    validation = apply_part_fit(validation, (mesh_info.get("open_state") or {}).get("close"), MAX_OPEN_PART_STRETCH)
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
                                          asset.get("parts") or [], asset_type.get("min_part_coverage", 0.55))
@@ -2122,12 +2124,18 @@ def model_route(config, asset_type):
 
 
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
-            material_prompt=None, material_count=None, quality_tier=None, resume=False):
+            material_prompt=None, material_count=None, quality_tier=None, resume=False, open_number=None):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
     if candidate is None or candidate.get("status") != "candidate":
         raise ValueError(f"Candidate {number} is not valid for {asset['name']}")
+    if candidate.get("open_of") is not None:
+        raise ValueError(f"Candidate {number} is an open picture of candidate {candidate['open_of']}: approve "
+                         f"{candidate['open_of']} with --open {number}")
+    if open_number is not None:  # checked before the run starts; resume finds it in the execution's identity
+        open_choice(asset, number, open_number)
+    check_slide_scale(asset.get("parts") or [], asset.get("target_size"))
     candidate_quality = (candidate.get("generator") or {}).get("quality", {}).get("tier")
     config = select_quality_tier(config, quality_tier or candidate_quality or
                                  config["asset_pipeline"].get("selected_quality_tier", "normal"))
@@ -2228,6 +2236,13 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             if type(view_seed) is not int:
                 raise ValueError("Cannot resume: the multi-view seed is missing; approve without --resume")
         prior = copy.deepcopy(prior)
+        recorded_open = (prior["identity_inputs"].get("open_concept") or {}).get("number")
+        if open_number not in (None, recorded_open):
+            raise ValueError("Cannot resume: the approved open picture changed; approve without --resume")
+        open_number = recorded_open
+    open_candidate = open_choice(asset, number, open_number) if open_number is not None else None
+    if open_candidate and part_backend(asset_type, asset) != "hybrid":
+        raise ValueError("An open picture is split by the hybrid parts route: set part_model: hybrid on the type")
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     try:
         python = python_executable(root, config)
@@ -2247,6 +2262,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     execution = start_execution(asset, {
         "asset_type": asset_type.get("name"), "brief": candidate.get("description", asset.get("description")),
         "selected_concept": {"number": number, "id": candidate_artifact["id"], "sha256": candidate_artifact["sha256"]},
+        **({"open_concept": {"number": open_number, "id": open_candidate["artifact"]["id"],
+                             "sha256": open_candidate["artifact"]["sha256"]}} if open_candidate else {}),
         "workflows": {"concept": concept_workflow,
                       "material": {"identifier": Path(concept_workflow).name if concept_workflow else None,
                                    "sha256": (file_sha256(resolve_workflow(root, concept_workflow))
@@ -2280,6 +2297,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     asset = manifest["assets"][key]
     execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
     candidate = next(item for item in asset["candidates"]["items"] if item["number"] == number)
+    if open_candidate:
+        open_candidate = next(item for item in asset["candidates"]["items"] if item["number"] == open_number)
     try:
         paths["concept"].parent.mkdir(parents=True, exist_ok=True)
         paths["basecolor"].parent.mkdir(parents=True, exist_ok=True)
@@ -2294,6 +2313,19 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             selected_artifact = _artifact_ref(root, paths["concept"], f"approved-concept:{execution['id']}",
                                               "image.concept.approved", "conditioning_preparation", 1,
                                               [candidate_artifact])
+        open_artifact = None
+        if open_candidate:  # the second concept: the same object open (docs/superpowers/specs, open-state props)
+            open_path = paths["concept"].with_name("open_concept.png")
+            old_open = (prior and (asset.get("source") or {}).get("open_concept_artifact")) or None
+            if (old_open and artifact_integrity(root, old_open)[0] and old_open.get("derived_from") ==
+                    [{"artifact_id": open_candidate["artifact"]["id"], "sha256": open_candidate["artifact"]["sha256"]}]):
+                open_artifact = old_open
+            else:
+                shutil.copy2(root / open_candidate["path"], open_path)
+                open_artifact = _artifact_ref(root, open_path, f"approved-open-concept:{execution['id']}",
+                                              "image.concept.open.approved", "conditioning_preparation", 1,
+                                              [open_candidate["artifact"]])
+            open_candidate["approval"] = "approved"
         candidate["approval"] = "approved"
         asset["candidates"]["selected"] = number
         asset["status"] = "processing"
@@ -2302,7 +2334,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         asset["source"] = {"concept": paths["concept"].relative_to(root).as_posix(),
                            "concept_artifact": selected_artifact,
                            "concept_lineage": {"status": "known" if candidate.get("execution_id") else "unknown",
-                               "reason": None if candidate.get("execution_id") else "legacy concept candidate has no execution record"}}
+                               "reason": None if candidate.get("execution_id") else "legacy concept candidate has no execution record"},
+                           **({"open_concept": open_artifact["path"], "open_concept_artifact": open_artifact,
+                               "open_concept_number": open_number} if open_artifact else {})}
         _persist_reload(root, pipeline, manifest)
         asset = manifest["assets"][key]
         execution = next(item for item in asset["executions"] if item["id"] == execution["id"])
@@ -2329,8 +2363,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
         if asset.get("parts"):
             conditioning_settings["parts"] = part_settings(config, asset["parts"])
+        conditioning_inputs = [selected_artifact, *([open_artifact] if open_artifact else [])]
         conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
-                                         [selected_artifact], conditioning_settings)
+                                         conditioning_inputs, conditioning_settings)
         if conditioning_refs is None:
             if prior:
                 conditioning_dir = (root / pipeline["candidate_root"] / asset_type["name"] / asset["name"] /
@@ -2340,7 +2375,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 paths["input_3d"] = conditioning_dir / "concept_3d_input.png"
             asset = manifest["assets"][key]
             execution = next(item for item in asset["executions"] if item["id"] == context["execution_id"])
-            stage = start_stage(execution, "conditioning_preparation", 1, [selected_artifact],
+            stage = start_stage(execution, "conditioning_preparation", 1, conditioning_inputs,
                                 conditioning_settings, {"concept_lineage": asset["source"]["concept_lineage"]})
             save_manifest(root / pipeline["manifest"], manifest)
             begin_stage(stage)
@@ -2379,6 +2414,11 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                   "conditioning_preparation", 1, [cutout_ref]),
                     _artifact_ref(root, parts_dir / "parts_overlay.png", f"part-overlay:{execution['id']}",
                                   "image.part_overlay", "conditioning_preparation", 1, [cutout_ref])]
+            if open_artifact:
+                print("3D stage: cutting out and masking the open picture...", flush=True)
+                conditioning_refs += prepare_open_conditioning(
+                    root, config, python, root / open_artifact["path"], paths["cutout"].parent, asset["parts"],
+                    execution["id"], open_artifact, _artifact_ref)
             _, conditioning_stage = _execution_stage(asset, execution["id"], "conditioning_preparation", 1,
                                                       stage_id=stage["id"])
             if view_slots:
@@ -2401,6 +2441,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             masks_ref = next(item for item in conditioning_refs if item["type"] == "data.part_masks")
             paths["part_masks"] = (root / masks_ref["path"]).parent
             check_part_masks(json.loads((root / masks_ref["path"]).read_text()), asset["parts"])
+        # the mesh and its split come from the open picture when one is approved; the final pass still compares
+        # with the closed concept (paths["cutout"], paths["part_masks"])
+        mesh_paths = (open_paths(root, conditioning_refs, asset["parts"]) if open_artifact else
+                      {"cutout": paths["cutout"], "input_3d": paths["input_3d"], "part_masks": paths.get("part_masks")})
         if asset.get("kit_material"):
             if not workflow:
                 raise StageFailure("configuration", "A kit material is applied by the mesh-aware material stage",
@@ -2473,6 +2517,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                        if part_backend(asset_type, asset) == "hybrid" else
                        {"prepare_parts.py": tool_sha256(tool_root() / "blender/prepare_parts.py")})}
                 mesh_settings["part_sampler"] = _part_sampler(asset_type)
+            if open_artifact:  # the open part is closed in this stage (blender/close_part.py) within the bound
+                mesh_settings["open_state"] = {"part": hinged_part(asset)["name"], "max_stretch": MAX_OPEN_PART_STRETCH,
+                                               "close_tool_sha256": tool_sha256(tool_root() / "blender/close_part.py")}
             scope_sha256 = execution_identity({
                 "inputs": [{"id": item["id"], "sha256": item["sha256"]} for item in mesh_inputs],
                 "settings": {key: value for key, value in mesh_settings.items() if key != "seed"},
@@ -2548,20 +2595,22 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset, asset_type)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
-                        generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,
+                        generate_model(root, config, mesh_paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
                                        require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
                                        remove_hidden_faces=_removes_hidden_faces(asset_type, asset),
                                        project_concept=asset_type.get("concept_projection") == "front",
                                        **({"views": views} if views else {}))
                     else:
-                        generate_model(root, config, paths["input_3d"], asset["name"], source_mesh, model_metadata, mesh_seed)
+                        generate_model(root, config, mesh_paths["input_3d"], asset["name"], source_mesh, model_metadata,
+                                       mesh_seed)
                     if part_backend(asset_type, asset) == "hybrid":
                         # The generated surface, split by OmniPart's parts (docs/WEAPONS.md, Hybrid parts)
-                        generate_hybrid_parts(root, config, paths["cutout"], source_mesh, model_metadata, mesh_seed,
-                                              asset["parts"], paths["part_masks"],
+                        generate_hybrid_parts(root, config, mesh_paths["cutout"], source_mesh, model_metadata, mesh_seed,
+                                              asset["parts"], mesh_paths["part_masks"],
                                               texture_size=asset.get("texture_size") or asset_type.get("texture_size")
-                                              or pipeline.get("texture_size", 2048), **_part_sampler(asset_type))
+                                              or pipeline.get("texture_size", 2048), **_part_sampler(asset_type),
+                                              **({"open_part": hinged_part(asset)} if open_artifact else {}))
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
                 asset = manifest["assets"][key]
@@ -2778,7 +2827,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                     "seed": mesh_seed,
                                     "generation": model_metadata.relative_to(root).as_posix(),
                                     "source_sha256": file_sha256(source_mesh),
-                                    "input_sha256": file_sha256(paths["cutout"] if workflow else paths["input_3d"]),
+                                    "input_sha256": file_sha256(mesh_paths["cutout"] if workflow else mesh_paths["input_3d"]),
                                     "status": "qualified" if viable else "rejected",
                                     "failure": failure,
                                     "execution_id": execution["id"], "stage_attempt": attempt_number,

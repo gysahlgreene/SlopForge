@@ -200,3 +200,17 @@ def merge_islands(labels, pairs, areas, min_share=0.1):
         if neighbours[r]:
             out[region == r] = max(neighbours[r], key=neighbours[r].get)
     return out
+
+
+def lift_above_rim(labels, centres, span, part):
+    """Body faces standing clear above the body's rim, given to the open `part`: an open lid's mask misses its hinge
+    knuckles and band ends on its back edge, and left with the body they stop it closing (OPEN1, 2026-10-25). The rim
+    is the most populated height in the top tenth of the body's faces (z up). Returns (labels, report)."""
+    labels = np.array(labels, copy=True)
+    body = labels == "body"
+    z = centres[body, 2]
+    heights = np.linspace(np.percentile(z, 90), np.percentile(z, 99.5), 200)
+    rim = max(heights, key=lambda h: int((np.abs(z - h) < 0.005 * span).sum()))
+    above = body & (centres[:, 2] > rim + 0.015 * span)
+    labels[above] = part
+    return labels, {"rim_height": round(float(rim), 4), "moved_faces": int(above.sum())}

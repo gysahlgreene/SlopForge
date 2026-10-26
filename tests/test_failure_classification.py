@@ -1060,6 +1060,24 @@ class PropComponentBudgetTests(unittest.TestCase):
         self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), 0.014, 0.03).get("failure_codes", []), [])
         self.assertEqual(apply_hybrid_alignment(_quality_report(component_count=1), None, 0.03).get("failure_codes", []), [])
 
+    def test_an_open_part_stretched_more_than_allowed_to_fit_its_opening_is_retried(self):
+        # The owner allows a lid scaled by at most 15% to fit its opening (2026-10-26). The face match's stretch is
+        # gated: the fit itself stays within the bound, and a lid clamped short of its opening would leave a gap no
+        # back of a face shows. OPEN1's lid needed 1.08; TRELLIS.2 made one seed's lid 0.57 of the body's 0.65.
+        from slopforge.validation import apply_part_fit
+        report = apply_part_fit(_quality_report(component_count=1), {"needed_stretch": 1.21, "stretch": 1.15}, 1.15)
+        self.assertEqual(report["failure_codes"], ["part_fit"])
+        self.assertIn("1.21", report["errors"][-1])
+        self.assertEqual((report["measured"]["open_part_stretch"], report["limits"]["max_open_part_stretch"]),
+                         (1.21, 1.15))
+        self.assertTrue(candidate_quality_rejection(report))
+        shrunk = apply_part_fit(_quality_report(component_count=1), {"needed_stretch": 0.8, "stretch": 0.87}, 1.15)
+        self.assertEqual(shrunk["failure_codes"], ["part_fit"])  # 1/0.8 = 1.25: too long is as wrong as too short
+        fitted = apply_part_fit(_quality_report(component_count=1), {"needed_stretch": 1.08, "stretch": 1.13}, 1.15)
+        self.assertEqual(fitted.get("failure_codes", []), [])
+        self.assertEqual(fitted["measured"]["open_part_stretch"], 1.13)
+        self.assertEqual(apply_part_fit(_quality_report(component_count=1), None, 1.15).get("failure_codes", []), [])
+
     def test_a_hybrid_split_the_mask_decided_is_not_retried_for_omniparts_alignment(self):
         # Seen from the side, every face votes and the mask decides; OmniPart only leans where a mask edge fades. A
         # pistol seed whose slide covered its mask 1.00 and trigger 0.95, clear of the body and closed, failed only

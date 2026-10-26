@@ -195,7 +195,7 @@ def repair_surface(source, destination):
 
 def main(request):
     out = Path(request["out"])
-    parts = part_arrays(request["parts"])
+    parts = part_arrays(request["parts"]) if request.get("parts") else {}  # None: the masks alone vote
     repaired = repair_surface(request["surface"], request["repaired"])
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(request["repaired"]))  # the faces in the order hybrid_apply.py reads

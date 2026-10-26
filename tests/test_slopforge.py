@@ -187,6 +187,30 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("history timed out", error.getvalue())
         self.assertIn("remedy: inspect prompt evidence", error.getvalue())
 
+    def test_open_makes_open_pictures_of_a_concept_and_approve_takes_one(self):
+        # docs/superpowers/specs/2026-10-26-open-state-hinged-parts-design.md: `open` edits a concept candidate with its
+        # hinged part open; `approve <concept> --open <picture>` approves both.
+        from slopforge.style import load_style
+        record = new_record("prop", "chest", "A chest", load_style(self.root), {"strategy": "text_only"})
+        save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 4, "assets": {"prop:chest": record}})
+        made = [{"number": 7, "open_of": 2, "status": "candidate", "path": "open_07.png"}]
+        with patch("slopforge.cli.generate_open_candidates", return_value=made) as generate, \
+                redirect_stdout(StringIO()) as output:
+            self.assertEqual(cli_main(["--project", str(self.root), "open", "chest", "2", "--count", "2",
+                                       "--inside", "plain plank walls"]), 0)
+        self.assertEqual(generate.call_args.args[6:8], (2, 2))
+        self.assertEqual(generate.call_args.kwargs["inside"], "plain plank walls")
+        self.assertIn("approve chest 2 --open 7", output.getvalue())
+        record["parts"] = [{"name": "lid", "kind": "hinge", "axis": "x", "min": -100.0, "max": 0.0}]
+        save_manifest(self.root / "ai/assets/manifest.json", {"schema_version": 4, "assets": {"prop:chest": record}})
+        with patch("slopforge.cli.model.approve") as approve, redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "chest", "2", "--open", "7",
+                                       "--open-part-box", "lid=0.17,0,0.99,0.56"]), 0)
+        self.assertEqual(approve.call_args.kwargs["open_number"], 7)
+        saved = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["prop:chest"]["parts"][0]
+        self.assertEqual(saved["open_box"], [0.17, 0.0, 0.99, 0.56])
+        self.assertNotIn("box", saved)
+
     def test_project_root_discovery_walks_up_for_project_config(self):
         nested = self.root / "Assets/Scenes/Levels"
         nested.mkdir(parents=True)
@@ -703,6 +727,15 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
                                        "--aspect", "portrait"]), 1)
         self.assertIn("--aspect applies to 3D asset types", error.getvalue())
+
+    def test_generate_refuses_a_slide_without_the_models_real_size(self):
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "box", "A sliding box",
+                                       "--part", "drawer=slide:y:-0.2..0"]), 1)
+            self.assertIn("--target-size", error.getvalue())
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "box", "A sliding box",
+                                       "--part", "drawer=slide:y:-0.2..0", "--target-size=-,0.5,-"]), 0)
 
     def test_generate_parses_a_shape_guide_for_3d_types_only(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate, \
