@@ -107,9 +107,9 @@ def validate_parts(parts):
 def part_settings(config, parts):
     """What the conditioning stage's identity records for declared parts: changing a part, a model or the mask
     tool's code re-masks (the tool's name alone reused masks cut by older code, 2026-10-25)."""
-    from .provenance import file_sha256
+    from .provenance import tool_sha256
     return {"parts": parts, "models": _tools(config)[2], "tool": "part_masks.py",
-            "tool_sha256": file_sha256(tool_root() / "processing/part_masks.py")}
+            "tool_sha256": tool_sha256(tool_root() / "processing/part_masks.py")}
 
 
 def _tools(config):

@@ -21,6 +21,23 @@ class WorkflowProvenanceTests(unittest.TestCase):
             second.write_bytes(b"different mesh bytes")
             self.assertNotEqual(first_hash, provenance_module.file_sha256(second))
 
+    def test_a_script_hash_covers_the_sibling_modules_it_imports(self):
+        # mesh_cleanup.py removes hidden faces and closes the cuts, but only prepare_model.py, which imports it, was
+        # hashed into stage identity: a change to it reprocessed no mesh (2026-10-26).
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            (folder / "deeper.py").write_text("X = 1\n")
+            (folder / "helper.py").write_text("def helper():\n    from deeper import X\n    return X\n")
+            (folder / "script.py").write_text("import json\nimport bpy\nfrom helper import helper  # noqa: E402\n")
+            (folder / "alone.py").write_text("import json\n")
+            before = provenance_module.tool_sha256(folder / "script.py")
+            self.assertNotEqual(before, provenance_module.file_sha256(folder / "script.py"))
+            (folder / "deeper.py").write_text("X = 2\n")
+            self.assertNotEqual(before, provenance_module.tool_sha256(folder / "script.py"))
+            # a script that imports no sibling keeps the hash it had, so its stages are not invalidated
+            self.assertEqual(provenance_module.tool_sha256(folder / "alone.py"),
+                             provenance_module.file_sha256(folder / "alone.py"))
+
     def test_execution_identity_uses_semantic_inputs_only(self):
         self.assertTrue(callable(getattr(provenance_module, "execution_identity", None)))
         base = {

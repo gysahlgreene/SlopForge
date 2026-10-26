@@ -14,7 +14,7 @@ from PIL import Image
 
 from ..failures import StageFailure
 from ..paths import blender_executable, tool_root
-from ..provenance import file_sha256
+from ..provenance import tool_sha256
 from ..remote_tool import run_remote_tool
 from ..unity_material import derive_part_maps, part_metal
 from .blender import blender_environment
@@ -103,6 +103,6 @@ def generate_part_model(project_root, config, cutout, name, destination, metadat
         "provenance": {"model_weights": report.get("model_weights", {})},
         "textured": True, "textures": {key: path.name for key, path in maps.items()},
         "parts": report["parts"], "x_sign": report.get("x_sign"),
-        "tool_sha256": {"part_model.py": file_sha256(tool_root() / "processing/part_model.py"),
-                        "prepare_parts.py": file_sha256(tool_root() / "blender/prepare_parts.py")},
+        "tool_sha256": {"part_model.py": tool_sha256(tool_root() / "processing/part_model.py"),
+                        "prepare_parts.py": tool_sha256(tool_root() / "blender/prepare_parts.py")},
     }, indent=2) + "\n")

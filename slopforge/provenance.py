@@ -26,6 +26,27 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
+_SIBLING_IMPORT = re.compile(r"^[ \t]*(?:from[ \t]+(\w+)[ \t]+import|import[ \t]+(\w+))", re.MULTILINE)
+
+
+def tool_sha256(path):
+    """A script's hash, covering the modules it imports from its own folder, recursively: Blender and processing
+    scripts load their helpers that way, and only the script itself was hashed (mesh_cleanup.py, 2026-10-26). A script
+    that imports none keeps its file hash, so the stages it identifies stay valid."""
+    path = Path(path)
+    hashes, pending = {}, [path]
+    while pending:
+        script = pending.pop()
+        if script.name in hashes:
+            continue
+        hashes[script.name] = file_sha256(script)
+        for match in _SIBLING_IMPORT.finditer(script.read_text()):
+            sibling = path.parent / f"{match.group(1) or match.group(2)}.py"
+            if sibling.is_file():
+                pending.append(sibling)
+    return hashes[path.name] if len(hashes) == 1 else _json_sha256(hashes)
+
+
 def _semantic_value(value):
     if isinstance(value, dict):
         return {key: _semantic_value(item) for key, item in value.items()
