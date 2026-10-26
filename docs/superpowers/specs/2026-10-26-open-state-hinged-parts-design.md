@@ -104,8 +104,9 @@ over-spend the face budget.
    candidates with `open_of: <concept>`; `approve <name> <concept> --open <n>` approves both. The review board
    offers that command on an open picture's card. No `open_state` type flag: the approval chooses the route.
 2. **A part may be stretched to fit, by at most 15% either way** (1/1.15 to 1.15), across the opening's depth
-   only. The seal search stays within the bound; the face match's own stretch is gated (`part_fit`), so a lid
-   clamped short of its opening is retried rather than left with a gap. The spike's lid needed 1.08 to 1.21
+   only. The stretch is the face match's, clamped to the bound and gated (`part_fit`), so a lid clamped short of its
+   opening is retried rather than left with a gap; the seal search moves only the turn and an offset (searched,
+   the stretch ran to the bound on OPEN2 and drooped the lid over the front). The spike's lid needed 1.08 to 1.21
    depending on the fit (the published GIF's fit: 1.13); seed 1's 13% foreshortening would need 1.15. If live seeds
    mostly need more, widen the bound with that evidence.
 

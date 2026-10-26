@@ -385,13 +385,16 @@ slopforge approve chest 2 --open 7
   lid's bands, 2026-10-25): review them.
 - `approve --open` cuts out and masks both pictures. TRELLIS.2 builds the mesh from the open one, inside and all.
 - The split uses the open picture's masks alone (no OmniPart): the open lid stands clear of the body. Body faces
-  above the body's rim go to the lid (its knuckles and band ends, which the mask misses).
+  above the body's rim and next to the lid go to the lid (its knuckles and band ends, which the mask misses); a
+  hasp's top on the front stays with the body (OPEN2: given to the lid, it swung down below the closed chest).
 - `blender/close_part.py` closes the lid. The hinge line is where the lid touches the body. Each piece's open face is
   the flat face through that line that rays from its middle pass through. The lid turns until the two faces meet,
-  then stretches along the opening's depth to its length. A search then seals the box: no ray from the cavity
-  escapes, no lid point sits in the walls, no back of a face shows.
-- The stretch is bounded: the owner allows 15% (2026-10-26). The face match's stretch is gated (`part_fit`): a seed
-  whose lid needed more is retried. TRELLIS.2 makes a tilted lid short from one view (OPEN1: 9%).
+  then stretches along the opening's depth to its length. A search over the turn and an offset then seals the box:
+  rays from the cavity must not escape (a gap weighs ten times a lid edge hidden in a wall top), the lid must not
+  sink into the opening, and no back of a face may show. The stretch stays the face match's: searched too, it
+  ran to the bound and drooped the lid over the front (OPEN2).
+- The stretch is bounded: the owner allows 15% (2026-10-26). A seed whose lid needs more is retried (`part_fit`).
+  TRELLIS.2 makes a tilted lid short from one view (OPEN1: 9%; OPEN2's seed needed 1%).
 - The final pass is unchanged and compares with the **closed** concept: colour transfer and the lid's coverage of
   its mask.
 
