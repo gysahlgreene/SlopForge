@@ -54,7 +54,11 @@ result against that declaration before anyone reviews it.
    million-face detail mesh 28% were seen, in 40 s, and at the same 24,000-face budget its slide's
    step, hammer and grip panels came out crisp where they had been lumpy, with backs of faces on
    0.09% of what is seen (0.01% before). Not behind declared glass, which is seen through, nor on
-   types that need a closed body (characters).
+   types that need a closed body (characters). The surface left is open, so nothing after it may
+   recompute which way its faces point: the stray-face cleanup did, whenever it found a stray face,
+   and turned half of a pistol inside out (2026-10-26: backs of faces on 0.36 of what was seen, the
+   grip's panels gone; 8 stray faces on that seed, none on the seed that had passed). It no longer
+   does; a Blender test keeps an open bowl facing in.
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto

@@ -121,6 +121,36 @@ assert len(mesh.polygons) == 2, len(mesh.polygons)
 ''')
             subprocess.run([BLENDER, "--background", "--python", str(script)], check=True, capture_output=True)
 
+    def test_removing_a_stray_face_leaves_the_others_facing_as_they_were(self):
+        # Deleting a face reorients nothing. The cleanup recomputed every face's orientation, which on the open
+        # surface hidden-face removal leaves turned half of a pistol inside out (HP8 seed 1, 2026-10-26: backs of
+        # faces 0.36 of what was seen). An open bowl facing into itself, an open chest's inside, with a stray
+        # triangle: every face of the bowl still faces in.
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "check_orientation.py"
+            script.write_text(f'''import bpy, bmesh, runpy
+from mathutils import Vector
+prepare = runpy.run_path({str(ROOT / "blender/mesh_cleanup.py")!r})
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new()
+bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=8, radius=1.0)
+bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.calc_center_median().z > 0], context="FACES")
+bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
+bm.normal_update()
+assert all(f.normal.dot(-f.calc_center_median()) > 0 for f in bm.faces)
+stray = [bm.verts.new(p) for p in ((5, 0, 0), (6, 0, 0), (5, 1, 0))]
+bm.faces.new(stray)
+mesh = bpy.data.meshes.new("bowl")
+bm.to_mesh(mesh)
+bm.free()
+assert prepare["remove_isolated_single_faces"](mesh) == 1
+outward = [p.index for p in mesh.polygons if p.normal.dot(-Vector(p.center)) <= 0]
+assert not outward, f"{{len(outward)}} of {{len(mesh.polygons)}} faces turned out of the bowl"
+''')
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr[-1500:])
+
     def test_native_maps_keep_uvs_and_seams_are_connected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

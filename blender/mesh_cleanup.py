@@ -2,7 +2,8 @@ import bmesh
 
 
 def remove_isolated_single_faces(mesh):
-    """Drop detached one-face fragments while keeping multi-face islands."""
+    """Drop detached one-face fragments while keeping multi-face islands. The other faces keep their orientation:
+    recomputing it turned half of a pistol inside out on the open surface hidden-face removal leaves (2026-10-26)."""
     parent = list(range(len(mesh.vertices)))
 
     def find(index):
@@ -46,7 +47,6 @@ def remove_isolated_single_faces(mesh):
     bmesh.ops.delete(bm, geom=[bm.faces[index] for index in remove_indices], context="FACES_ONLY")
     bmesh.ops.delete(bm, geom=[edge for edge in bm.edges if not edge.link_faces], context="EDGES")
     bmesh.ops.delete(bm, geom=[vertex for vertex in bm.verts if not vertex.link_edges], context="VERTS")
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
