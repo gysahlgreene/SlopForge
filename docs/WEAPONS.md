@@ -86,8 +86,10 @@ Declare each moving part, and the grip, as `--part`. The final Blender pass spli
 - **Kinds:**
   - `grip`: one at most, the weapon's handle;
   - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
-    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`. Without it the
-    pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
+    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`, the
+    second face measured along the first's edge (the bottom of the lid's back edge, not below a latch at its
+    front). Without it the pivot is the part's contact with the body (a trigger's root) or its box centre when it
+    touches nothing;
   - `slide`: moves along an axis, with its range in metres, so the model needs its real size: `generate` and
     `approve` refuse a slide without `--target-size` (`--target-size=-,0.22,-` for a pistol 0.22 m long; Y is a
     weapon's length). Unsized, a model is one unit long: HP13's 30 mm slide travel was 3% of its length, where a
@@ -384,14 +386,19 @@ slopforge approve chest 2 --open 7
   board offers `approve chest 2 --open <n>`. An edit can move or drop details (a hasp moved, one seed dropped the
   lid's bands, 2026-10-25): review them.
 - `approve --open` cuts out and masks both pictures. TRELLIS.2 builds the mesh from the open one, inside and all.
+  Its hidden faces are not removed: generated with the lid half open, faces the lid shades show in play (OPEN3:
+  holes inside where the removal had deleted them). The face budget pays for the hidden double skin here.
 - The split uses the open picture's masks alone (no OmniPart): the open lid stands clear of the body. Body faces
-  above the body's rim go to the lid (its knuckles and band ends, which the mask misses).
+  above the body's rim and next to the lid go to the lid (its knuckles and band ends, which the mask misses); a
+  hasp's top on the front stays with the body (OPEN2: given to the lid, it swung down below the closed chest).
 - `blender/close_part.py` closes the lid. The hinge line is where the lid touches the body. Each piece's open face is
   the flat face through that line that rays from its middle pass through. The lid turns until the two faces meet,
-  then stretches along the opening's depth to its length. A search then seals the box: no ray from the cavity
-  escapes, no lid point sits in the walls, no back of a face shows.
-- The stretch is bounded: the owner allows 15% (2026-10-26). The face match's stretch is gated (`part_fit`): a seed
-  whose lid needed more is retried. TRELLIS.2 makes a tilted lid short from one view (OPEN1: 9%).
+  then stretches along the opening's depth to its length. A search over the turn and an offset then seals the box:
+  rays from the cavity must not escape (a gap weighs ten times a lid edge hidden in a wall top), the lid must not
+  sink into the opening, and no back of a face may show. The stretch stays the face match's: searched too, it
+  ran to the bound and drooped the lid over the front (OPEN2).
+- The stretch is bounded: the owner allows 15% (2026-10-26). A seed whose lid needs more is retried (`part_fit`).
+  TRELLIS.2 makes a tilted lid short from one view (OPEN1: 9%; OPEN2's seed needed 1%).
 - The final pass is unchanged and compares with the **closed** concept: colour transfer and the lid's coverage of
   its mask.
 

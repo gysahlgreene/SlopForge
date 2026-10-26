@@ -1,13 +1,18 @@
 """Close a part generated open: an open chest's lid turned shut onto its body and fitted to its opening.
 
-A chest generated from its open picture has an inside to show (docs/superpowers/specs/2026-10-26-open-state-props-
-design.md); its lid is shut here, before the final pass. The hinge line is where the lid touches the body. Each
-piece's open face is the flat face through that line that a ray from the piece's middle reaches unblocked; the lid
-turns about the line until its open face meets the body's, then stretches along the opening's depth to its length
-(TRELLIS.2 made a tilted lid ~9% short from one view, OPEN1). A coordinate search from there seals the box: rays from
-the cavity must not escape between lid and body, no lid point may sit inside the walls, and no back of a face may
-show. The stretch stays within max_stretch (the owner's 15%, 2026-10-26); the face match's own stretch is reported,
-and the candidate is gated on it (validation.apply_part_fit).
+A chest generated from its open picture has an inside to show (docs/superpowers/specs/2026-10-26-open-state-hinged-
+parts-design.md); its lid is shut here, before the final pass. The hinge line is where the lid touches the body. Each
+piece's open face is the flat face through that line that rays from the piece's middle pass through; the lid turns
+about the line until its open face meets the body's, then stretches along the opening's depth to its length
+(TRELLIS.2 made a tilted lid ~9% short from one view, OPEN1). A search over the turn and an offset across the hinge
+then seals the box: rays from the cavity must not escape between lid and body, few lid points may go deep into the
+walls, the lid may not sink into the opening below the rim, and no back of a face may show. A gap weighs ten times a
+lid edge hidden in a wall top (OPEN2: weighed the other way, with every lid point inside counted, the search stopped
+at 37 degrees with 1.8% of the rays escaping, a slit; the seal formed at 43). Without the sinking term a sealed lid
+tipped on into the hollow (a test box's lid closed 74 degrees for 70, its front edge 6% of the box low). The stretch
+stays the face match's: searched too, it ran to the bound (OPEN2: 1.15 where the face match measured 1.0095) to push
+the lid's front out past the wall, a lid drooping over the front. It is clamped to max_stretch (the owner's 15%,
+2026-10-26), and the candidate is gated on the face match's own stretch (validation.apply_part_fit).
 
 Request (JSON): surface (GLB, one node per part), part (its node name), out (GLB), report (JSON), max_stretch.
 """
@@ -181,8 +186,10 @@ def main(request):
     golden = math.pi * (3 - math.sqrt(5))
     directions = [Vector((math.cos(golden * i) * math.sqrt(1 - z * z), math.sin(golden * i) * math.sqrt(1 - z * z), z))
                   for i, z in enumerate(np.linspace(1 - 1 / 64, -1 + 1 / 64, 64))]
-    sample = lid_tris.reshape(-1, 3)[np.random.default_rng(0).choice(len(lid_tris) * 3, min(400, len(lid_tris) * 3),
-                                                                      replace=False)]
+    # lid points counted as the final pass counts penetration: newly inside the body and deeper than 0.5% of its size
+    sample = lid_tris.reshape(-1, 3)[::max(1, len(lid_tris) * 3 // 3000)]
+    already = np.abs(winding_numbers(sample, body_tris)) > 0.5
+    rim_level, low, high = float(body_hinge @ body_normal), body_points.min(0), body_points.max(0)
     rest = lid.matrix_world.copy()
 
     def place(params):
@@ -197,23 +204,32 @@ def main(request):
         escaped = sum(1 for p in cavity for direction in directions
                       if body_tree.ray_cast(Vector(p), direction)[0] is None
                       and moved.ray_cast(Vector(p), direction)[0] is None)
+        placed = sample @ A.T + b
+        solid = np.abs(winding_numbers(placed, body_tris)) > 0.5
+        candidates = np.flatnonzero(solid & ~already)  # the nearest-surface query only where it can count
+        deep = np.zeros(len(placed), bool)
+        deep[candidates] = [body_tree.find_nearest(Vector(placed[i]))[3] > 0.005 * size for i in candidates]
+        # in the hollow: below the rim, within the body's footprint, not in its walls
+        sunk = ((placed @ body_normal < rim_level - 0.01 * size) & np.all((placed > low) & (placed < high), axis=1)
+                & ~solid)
         return {"escape": escaped / max(len(cavity) * len(directions), 1),
-                "inside": float(np.mean(np.abs(winding_numbers(sample @ A.T + b, body_tris)) > 0.5)),
+                "inside": float(np.mean(solid & ~already & deep)), "sunk": float(np.mean(sunk)),
                 "backs": float(visible_backfaces([body, lid]))}
 
     def cost(params):
         seal = measure(params)
-        return seal["escape"] + 2 * seal["inside"] + seal["backs"]
+        return 10 * seal["escape"] + seal["inside"] + seal["sunk"] + seal["backs"]
 
-    params, steps = start.copy(), np.array([math.radians(4), 0.02 * size, 0.02 * size, 0.04])
-    best = cost(params)
+    # a coarse scan of the turn first: from the face match alone the local search stalled in a pocket (OPEN2)
+    scan = [(cost(trial), trial) for trial in (start + np.array([math.radians(k), 0, 0, 0]) for k in range(-6, 11, 2))]
+    best, params = min(scan, key=lambda item: item[0])
+    steps = np.array([math.radians(2), 0.02 * size, 0.02 * size])
     while steps[1] > 0.002 * size:
-        for i in range(4):
+        for i in range(3):  # turn and offset; the stretch stays the face match's
             improved = False
             for sign in (1, -1):
                 trial = params.copy()
                 trial[i] += sign * steps[i]
-                trial[3] = min(max(trial[3], 1 / bound), bound)
                 value = cost(trial)
                 if value < best - 1e-5:
                     params, best, improved = trial, value, True
@@ -234,6 +250,7 @@ def main(request):
               "hinge": {"point": [round(float(v), 4) for v in centre], "axis": [int(v) for v in axis]},
               "face_match": {"turn_degrees": round(math.degrees(theta), 2), "stretch": round(needed, 4)},
               "turn_degrees": round(math.degrees(float(params[0])), 2), "stretch": round(float(params[3]), 4),
+              "shift": [round(float((params[1] - start[1]) / size), 4), round(float((params[2] - start[2]) / size), 4)],
               "needed_stretch": round(needed, 4), "max_stretch": bound, "cavity_points": int(len(cavity)),
               "seal": {key: round(value, 5) for key, value in seal.items()}, "seconds": round(time.time() - started)}
     Path(request["report"]).write_text(json.dumps(report, indent=2) + "\n")

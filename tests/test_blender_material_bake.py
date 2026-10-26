@@ -1171,6 +1171,82 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         self.assertAlmostEqual(lid["origin"][2], lid["max"][2], delta=0.005)
         self.assertAlmostEqual(lid["origin"][0], (lid["min"][0] + lid["max"][0]) / 2, delta=0.005)
 
+    LOCKED_CHEST = """import bpy, math, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+def box(name, centre, size, cuts):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=centre)
+    o = bpy.context.object; o.name = name; o.data.name = name; o.scale = size
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.subdivide(number_cuts=cuts); bpy.ops.uv.smart_project(); bpy.ops.object.mode_set(mode='OBJECT')
+    o.data.materials.append(bpy.data.materials.new(name))
+    return o
+body = box('body', (0, 0, 0.2), (0.6, 0.4, 0.4), 3)
+lock = box('lock', (-0.2, -0.22, 0.3), (0.08, 0.04, 0.08), 8)  # a dense hasp on the front, off centre
+bpy.ops.object.select_all(action='DESELECT'); body.select_set(True); lock.select_set(True)
+bpy.context.view_layer.objects.active = body; bpy.ops.object.join()
+box('lid', (0, 0, 0.45), (0.6, 0.4, 0.1), 3)
+for o in bpy.context.scene.objects:  # generated turned a little, as TRELLIS.2 may
+    o.rotation_euler = (0, 0, math.radians(9)); bpy.context.view_layer.objects.active = o
+    o.select_set(True); bpy.ops.object.transform_apply(rotation=True)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_selection=True)
+"""
+
+    def test_a_chest_generated_open_faces_away_from_its_hinge_and_stands_square(self):
+        # OPEN3 and OPEN4 (2026-10-26): the silhouette fit put the camera behind the chest (theta -140 for OPEN2's 45)
+        # and the lock went to the back, the lid hinged on it; principal axes of vertex-weighted samples leaned 6-9
+        # degrees, and the lid turning about X swung crooked. The hinge the lid closed on is the back; the horizontal
+        # axes are the footprint's smallest rectangle.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        turn = math.radians(9)
+        results = {}
+        for side, (x, y) in (("back", (0.0, 0.2)), ("front", (0.0, -0.2))):
+            hinge = [x * math.cos(turn) - y * math.sin(turn), x * math.sin(turn) + y * math.cos(turn), 0.4]
+            parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}},
+                                     "open_state": {"part": "lid", "hinge": hinge}})
+            results[side] = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks,
+                                        pivot="bottom_center",
+                                        extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-bottom",
+                                               "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                                        fixture_script=self.LOCKED_CHEST, files={"parts.json": parts_json})
+        for side, measured in results.items():
+            body, lid = measured["objects"][measured["body"]], measured["objects"]["lid"]
+            with self.subTest(hinge=side):
+                # square: the lid's footprint 0.72 x 0.48 (0.6 x 0.4 at 1.2 to stand 0.6 tall), not a turned one
+                self.assertAlmostEqual(lid["max"][0] - lid["min"][0], 0.72, delta=0.01)
+                self.assertAlmostEqual(lid["max"][1] - lid["min"][1], 0.48, delta=0.01)
+        # the lock stands out on the side away from the hinge, whichever that is: front (-Y) when hinged at the back
+        locked = results["back"]
+        self.assertLess(locked["objects"][locked["body"]]["min"][1], locked["objects"]["lid"]["min"][1] - 0.03)
+        reverse = results["front"]
+        self.assertGreater(reverse["objects"][reverse["body"]]["max"][1], reverse["objects"]["lid"]["max"][1] + 0.03)
+
+    def test_a_chest_as_deep_as_it_is_tall_stands_upright(self):
+        # OPEN5 (2026-10-26): a chest 0.5 deep and 0.5 tall stood pitched: its thinnest axis, the weapon rule's top
+        # when near vertical, lay between its depth and its height. A prop's top is its principal axis nearest +Z.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        deep = (self.LOCKED_CHEST.replace("(0, 0, 0.2), (0.6, 0.4, 0.4), 3", "(0, 0, 0.2), (0.6, 0.5, 0.4), 3")
+                .replace("(-0.2, -0.22, 0.3)", "(-0.2, -0.27, 0.3)")
+                .replace("(0, 0, 0.45), (0.6, 0.4, 0.1), 3", "(0, 0, 0.45), (0.6, 0.5, 0.1), 3"))
+        turn = math.radians(9)
+        parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}},
+                                 "open_state": {"part": "lid", "hinge": [-0.25 * math.sin(turn), 0.25 * math.cos(turn),
+                                                                         0.4]}})
+        measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks,
+                               pivot="bottom_center",
+                               extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-bottom",
+                                      "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                               fixture_script=deep, files={"parts.json": parts_json})
+        lid = measured["objects"]["lid"]
+        self.assertAlmostEqual(lid["max"][2] - lid["min"][2], 0.12, delta=0.01)  # level: 0.1 at 1.2
+        self.assertAlmostEqual(lid["max"][1] - lid["min"][1], 0.6, delta=0.01)
+        self.assertAlmostEqual(lid["max"][0] - lid["min"][0], 0.72, delta=0.01)
+
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1704,6 +1780,39 @@ print("FILLS", len(fills), "LOWEST", min(polygon.center.z for polygon in fills))
         self.assertGreater(int(line[1]), 0)
         self.assertGreater(float(line[3]), 0.3)  # the slide's interface near the top, no cavity floor deep inside
 
+    def test_a_lids_back_bottom_hinge_is_on_its_back_edge_not_below_a_latch_at_its_front(self):
+        # OPEN3 (2026-10-26): a lid with latches hanging 8 cm below the rim at its front pivoted at the bottom of its
+        # whole bounds, 8 cm below the seam at its back, and swung up off the chest instead of turning on its hinges.
+        # A second face is measured along the first's edge: back-bottom is the bottom of the lid's back edge.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new()
+def box(low, high, part):
+    made = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    for vert in made:
+        vert.co = [low[i] + (high[i] - low[i]) * (vert.co[i] + 0.5) for i in range(3)]
+    return {{face for vert in made for face in vert.link_faces}}, part
+pieces = [box((-1, -1, 0), (1, 1, 1), 1), box((-1, -1, 1), (1, 1, 1.3), 2), box((-0.2, -1.05, 0.7), (0.2, -0.95, 1), 2)]
+mesh = bpy.data.meshes.new("chest"); bm.to_mesh(mesh)
+obj = bpy.data.objects.new("chest", mesh); bpy.context.scene.collection.objects.link(obj)
+attribute = mesh.attributes.new("slopforge_part", "INT", "FACE")
+for polygon in mesh.polygons:  # the body's six faces were made first; then the lid's slab and its latch
+    attribute.data[polygon.index].value = 1 if polygon.index < 6 else 2
+table = {{"body": {{"kind": "body", "id": 1}}, "lid": {{"kind": "hinge", "id": 2}}}}
+children = mesh_cleanup.separate_tagged(obj, table, contact=0.01, anchors={{"lid": ["back", "bottom"]}})
+lid = next(child for child in children if child.name.startswith("lid"))
+print("PIVOT", *[round(value, 3) for value in lid.location])
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        pivot = [float(value) for value in next(line for line in result.stdout.splitlines()
+                                                if line.startswith("PIVOT")).split()[1:]]
+        self.assertAlmostEqual(pivot[1], 1.0, delta=0.01)  # the back
+        self.assertAlmostEqual(pivot[2], 1.0, delta=0.01)  # the bottom of the back edge: the seam, not the latch
+
     def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
         # Interfaces and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds
         # over the component budget (2026-10-25). They carry slopforge_fill; a piece made only of them is not counted.
@@ -1814,6 +1923,9 @@ class BlenderClosePartTests(unittest.TestCase):
         self.assertLessEqual(report["stretch"], 1.15)
         self.assertEqual(report["hinge"]["axis"], [1, 0, 0])
         self.assertAlmostEqual(abs(report["face_match"]["turn_degrees"]), 70, delta=4)
+        # and not tipped on into the hollow, which seals as well (it closed 74 degrees, its front edge 6% low)
+        self.assertAlmostEqual(abs(report["turn_degrees"]), 70, delta=3)
+        self.assertLess(report["seal"]["sunk"], 0.01)
         # the seal: no ray from the cavity escapes, no lid point sits in the walls
         self.assertGreater(report["cavity_points"], 0)
         self.assertLess(report["seal"]["escape"], 0.01)

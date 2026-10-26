@@ -173,10 +173,14 @@ class OpenPartRimTests(unittest.TestCase):
         rim = [(x, 0.0, 0.5) for x in np.linspace(-0.5, 0.5, 30)]
         knuckles = [(x, 0.5, 0.56) for x in (-0.3, 0.3)]
         lip = [(0.0, -0.5, 0.505)]  # within the margin: part of the rim
-        lid = [(x, 0.6, 0.9) for x in np.linspace(-0.5, 0.5, 10)]
-        centres = np.array(walls + rim + knuckles + lip + lid)
+        lid = [(x, 0.5, 0.58) for x in np.linspace(-0.5, 0.5, 30)] + [(x, 0.6, 0.9) for x in np.linspace(-0.5, 0.5, 10)]
+        hasp = [(0.0, -0.55, 0.53)]  # the hasp's top on the front, above the rim but nowhere near the lid
+        centres = np.array(walls + rim + knuckles + lip + hasp + lid)
         labels = np.array(["body"] * (len(centres) - len(lid)) + ["lid"] * len(lid))
         lifted, report = lift_above_rim(labels, centres, 1.0, "lid")
+        # OPEN2 (2026-10-26): the rule moved 53 faces of the hasp, 0.47 of the chest away from the lid, and the
+        # closed lid swung them down to hang below the chest's front
+        self.assertEqual(lifted[len(walls) + len(rim) + len(knuckles) + len(lip)], "body")
         self.assertEqual(report["moved_faces"], 2)
         self.assertAlmostEqual(report["rim_height"], 0.5, places=2)
         self.assertEqual(list(lifted[len(walls) + len(rim):len(walls) + len(rim) + 2]), ["lid", "lid"])

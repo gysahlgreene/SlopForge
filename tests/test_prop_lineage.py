@@ -590,7 +590,7 @@ avoid: [environment]
         # The mesh and its split come from the open picture; colour transfer and lid coverage still compare with
         # the closed concept the owner approved (docs/superpowers/specs/2026-10-26-open-state-hinged-parts-design.md).
         self._concept_candidates()
-        self.asset_type["part_model"] = "hybrid"
+        self.asset_type.update({"part_model": "hybrid", "remove_hidden_faces": True})
         self.record["parts"] = [dict(self.LID)]
         self.config["asset_pipeline"]["workflows"]["edit"] = "image_edit_qwen_api.json"
         self._open_candidates(count=1)  # candidate 3 opens candidate 2
@@ -650,6 +650,9 @@ avoid: [environment]
         self.assertIn(open_cutout["sha256"], [item["sha256"] for item in stages["mesh_workflow_execution"]["inputs"]])
         from slopforge.paths import tool_root
         from slopforge.provenance import tool_sha256
+        # generated with the lid half open, faces it shades are not hidden in play: no hidden-face removal (OPEN3:
+        # the inside showed holes where the removal had deleted them, 2026-10-26)
+        self.assertNotIn("remove_hidden_faces", stages["mesh_workflow_execution"]["settings"])
         self.assertEqual(stages["mesh_workflow_execution"]["settings"]["open_state"],
                          {"part": "lid", "max_stretch": 1.15,
                           "close_tool_sha256": tool_sha256(tool_root() / "blender/close_part.py")})

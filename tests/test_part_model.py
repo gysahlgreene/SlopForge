@@ -690,7 +690,7 @@ class HybridBackendTests(unittest.TestCase):
             def close(root_, config, surface_, part, work_dir, **options):
                 seen["close"] = (surface_.name, part["name"], options)
                 surface_.write_bytes(b"closed nodes")
-                return {"turn_degrees": 58.0, "stretch": 1.08}
+                return {"turn_degrees": 58.0, "stretch": 1.08, "hinge": {"point": [0.0, 0.32, -0.11], "axis": [1, 0, 0]}}
             with patch.object(hybrid, "run_omnipart", side_effect=lambda *a, **k: self.fail("OmniPart is not run")), \
                     patch.object(hybrid, "split_surface", side_effect=split), \
                     patch.object(hybrid, "close_open_part", side_effect=close):
@@ -699,10 +699,12 @@ class HybridBackendTests(unittest.TestCase):
             self.assertEqual(seen["split"], (None, ["lid"], "lid"))
             self.assertEqual(seen["close"][:2], ("chest.glb", "lid"))
             info = json.loads(metadata.read_text())
-            self.assertEqual(info["open_state"]["close"], {"turn_degrees": 58.0, "stretch": 1.08})
+            self.assertEqual(info["open_state"]["close"]["stretch"], 1.08)
             self.assertEqual(info["hybrid"]["rim"], {"moved_faces": 12})
             self.assertNotIn("part_generator", info)
             table = json.loads((surface.parent / "parts/parts.json").read_text())
             self.assertIsNone(table["omnipart"])
+            # where the lid touched the body is its back: the final pass faces the chest away from it
+            self.assertEqual(table["open_state"], {"part": "lid", "hinge": [0.0, 0.32, -0.11]})
             from slopforge.provenance import file_sha256
             self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))  # the closed surface's hash

@@ -142,8 +142,10 @@ def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed,
                            parts, out, **({"rim_part": open_part["name"]} if open_part else {}))
     closed = close_open_part(project_root, config, surface, open_part, out) if open_part else None
     # the final pass reads the part table from parts.json (prepare_model.py --parts-json) and closes the openings
-    (out / "parts.json").write_text(json.dumps({"parts": report["parts"], "close_openings": True,
-                                                "omnipart": omnipart}, indent=2) + "\n")
+    (out / "parts.json").write_text(json.dumps({"parts": report["parts"], "close_openings": True, "omnipart": omnipart,
+        # the lid closed onto the body along its back: the final pass faces the prop away from it
+        **({"open_state": {"part": open_part["name"], "hinge": closed["hinge"]["point"]}} if closed else {})},
+        indent=2) + "\n")
     info = json.loads(metadata.read_text())
     info["part_model"] = "hybrid"
     info["parts"] = report["parts"]

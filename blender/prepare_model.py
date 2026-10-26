@@ -356,7 +356,8 @@ parts_table = None
 if "--parts-json" in sys.argv:
     # A weapon generated as parts (OmniPart, prepare_parts.py): one node per part, tagged before the join below
     # and separated again after orientation and scaling (MOVING PARTS).
-    parts_table = json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text())["parts"]
+    parts_info = json.loads(Path(sys.argv[sys.argv.index("--parts-json") + 1]).read_text())
+    parts_table = parts_info["parts"]
     if not reuse_stage_mesh:
         tag_parts(mesh_objects, parts_table)
 
@@ -401,7 +402,8 @@ if oriented:
     # A weapon is drawn tip or muzzle right. Turn its tip to -Y (forward in Unity once exported) and its top to +Z,
     # and mark the faces under the grip mask, seen from the view that best fits the concept.
     import numpy as np
-    from concept_view import fit_view, image_mask, surface_samples, to_concept_pixels, view_axes
+    from concept_view import (area_samples, fit_view, footprint_axes, image_mask, surface_samples, to_concept_pixels,
+                              upright_axis, view_axes)
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
     world, samples = surface_samples(obj)
     fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
@@ -485,9 +487,22 @@ if oriented:
     towards_tip = float(length @ np.array(right))
     if held is None:
         # A prop with parts (a chest): its width (the longer horizontal axis) along X, its depth along Y with the
-        # front, the side the concept's camera sees, towards -Y, so a lid's "back" edge is away from the viewer.
-        towards, _right, _up = view_axes(math.radians(theta), math.radians(phi))
-        depth = axes[1] * (-1.0 if float(axes[1] @ np.array(towards)) > 0 else 1.0)  # +Y points away from the camera
+        # front, the side the concept's camera sees, towards -Y, so a lid's "back" edge is away from the viewer. Its
+        # frame comes from points spread by area and its footprint's smallest rectangle: a dense hasp leaned the
+        # sample axes 6-9 degrees, and the lid then turned about X swung crooked (OPEN3, OPEN4, 2026-10-26).
+        # Its top is the near-vertical direction most of its surface faces along: the weapon rule's thinnest axis lay
+        # between a chest's depth and its height when they were alike, and pitched it (OPEN5).
+        even = area_samples(obj)
+        top = upright_axis(obj)
+        axes = footprint_axes(even, top)
+        hinge = ((parts_info.get("open_state") or {}).get("hinge") if parts_table is not None else None)
+        if hinge is not None:
+            # generated open, the lid touched the body along its back (blender/close_part.py): the silhouette fit
+            # cannot tell a chest's front from its back (theta 45 on OPEN2, -140 on OPEN3 and OPEN4: lock behind)
+            depth = axes[1] * (1.0 if float(axes[1] @ (np.array(hinge) - even.mean(0))) > 0 else -1.0)
+        else:
+            towards, _right, _up = view_axes(math.radians(theta), math.radians(phi))
+            depth = axes[1] * (-1.0 if float(axes[1] @ np.array(towards)) > 0 else 1.0)  # +Y away from the camera
         depth, top = Vector(depth), Vector(top)
         source = Matrix((depth.cross(top), depth, top)).transposed()
         obj.data.transform(source.inverted().to_4x4())

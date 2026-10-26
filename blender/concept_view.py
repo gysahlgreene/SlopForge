@@ -67,6 +67,63 @@ def surface_samples(obj):
     return world, np.concatenate([np.einsum("tsk,tkd->tsd", weights, world[triangles]).reshape(-1, 3), world])
 
 
+def area_samples(obj, count=20000):
+    """World-space points spread over the surface by area: a frame found from them is not leaned by a small part
+    meshed finely (surface_samples weighs every triangle alike, and a chest's dense hasp turned its frame 6-9 degrees
+    on OPEN3 and OPEN4, 2026-10-26)."""
+    world = np.array([obj.matrix_world @ vertex.co for vertex in obj.data.vertices])
+    triangles = world[np.array([polygon.vertices[:3] for polygon in obj.data.polygons if len(polygon.vertices) == 3])]
+    areas = np.linalg.norm(np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]), axis=1)
+    rng = np.random.default_rng(0)
+    chosen = rng.choice(len(triangles), count, p=areas / areas.sum())
+    weights = rng.dirichlet((1, 1, 1), size=count)
+    return np.einsum("sk,skd->sd", weights, triangles[chosen])
+
+
+def upright_axis(obj, within=30.0, step=2.0):
+    """The direction within `within` degrees of +Z that the most face area faces along (either way): a prop stands
+    on its base, and its base, rim and top face up and down. Principal axes cannot tell up on a chest as deep as it is
+    tall: two of them weigh the same and lie anywhere in their plane (OPEN5 stood pitched, 2026-10-26)."""
+    normals, areas = [], []
+    for polygon in obj.data.polygons:
+        normals.append(tuple(obj.matrix_world.to_3x3() @ polygon.normal))
+        areas.append(polygon.area)
+    normals, areas = np.array(normals), np.array(areas)
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+    best, best_score = np.array([0.0, 0.0, 1.0]), -1.0
+    for tilt in np.arange(0.0, within + 1e-9, step):
+        for turn in (np.arange(0.0, 360.0, max(step / max(math.sin(math.radians(tilt)), 1e-9), step)) if tilt else [0.0]):
+            direction = np.array([math.sin(math.radians(tilt)) * math.cos(math.radians(turn)),
+                                  math.sin(math.radians(tilt)) * math.sin(math.radians(turn)), math.cos(math.radians(tilt))])
+            score = float(areas[np.abs(normals @ direction) > math.cos(math.radians(8))].sum())
+            if score > best_score + 1e-9:
+                best, best_score = direction, score
+    return best
+
+
+def footprint_axes(points, top):
+    """The two axes across `top` of the points' smallest enclosing rectangle, the longer side's first: a box-like
+    prop's own edges, whatever crowds its samples."""
+    from mathutils import Vector
+    from mathutils.geometry import convex_hull_2d
+    top = np.asarray(top, float)
+    u = np.cross(top, [1.0, 0.0, 0.0] if abs(top[0]) < 0.9 else [0.0, 1.0, 0.0])
+    u /= np.linalg.norm(u)
+    v = np.cross(top, u)
+    flat = np.stack([points @ u, points @ v], 1)
+    hull = flat[convex_hull_2d([Vector(point) for point in flat])]
+    best = None
+    for a, b in zip(hull, np.roll(hull, -1, 0)):
+        edge = (b - a) / max(float(np.linalg.norm(b - a)), 1e-12)
+        normal = np.array([-edge[1], edge[0]])
+        sides = (float(np.ptp(hull @ edge)), float(np.ptp(hull @ normal)))
+        if best is None or sides[0] * sides[1] < best[0]:
+            best = (sides[0] * sides[1], edge, normal, sides)
+    _, edge, normal, (along, beside) = best
+    first, second = (edge, normal) if along >= beside else (normal, edge)
+    return np.array([first[0] * u + first[1] * v, second[0] * u + second[1] * v])
+
+
 def fit_view(samples, concept, full_turn=False):
     """(silhouette IoU, theta, phi in degrees) of the view whose mesh silhouette best fits the concept mask.
 
