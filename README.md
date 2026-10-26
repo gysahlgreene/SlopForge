@@ -2,7 +2,7 @@
 
 # SlopForge
 
-**Turn an asset brief into a reviewed 3D game asset.**
+**Turn an asset brief into a reviewed, project-ready 3D asset for Unity.**
 
 ![A camera flies over a golden-hour moorland in Unity: over groves of oak, birch and pine and a winding gravel path, through the arch of a broken stone chapel to a small camp of props, then past heather to a granite tor](docs/media/natural-live-2026-10/flythrough.webp)
 
@@ -13,28 +13,76 @@
 [![MIT license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Buy Me A Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-ffdd00?style=flat-square&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/eoinmacd95f)
 
-[Get started](docs/INSTALL.md) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md)
+[Quick start](#quick-start) · [Documentation](docs/README.md) · [Examples](docs/EXAMPLES.md)
 
 </div>
 
-SlopForge connects ComfyUI generation, Blender processing, human review, and Unity delivery. Run inference locally or on a remote GPU, and keep your assets, approval decisions and provenance in your own project.
+SlopForge is for Unity developers and small teams who need 3D assets in their game's style but cannot staff a full
+3D pipeline. You write a brief. SlopForge generates concept candidates for you to choose from, then builds the mesh
+and PBR materials, checks them against the concept and your project's budgets, and publishes the asset to your Unity
+project as a prefab. Inference runs on ComfyUI, on your machine or a remote GPU. Every candidate, decision and file
+is recorded in your project, so a run can be resumed, audited and reproduced.
+
+Generation is stochastic, so nothing is published without passing its checks and your approval. A clean export alone
+does not make an asset game-ready, and each section below says what has and has not been shown.
+
+## See it
+
+| Props | Modular kits, assembled in Unity |
+| :---: | :---: |
+| <img src="docs/media/props-lineup-2026-10/props_lineup.gif" width="400" alt="Seven generated props turning on a dark stage: a stone lantern, a glazed jug, a mossy tree stump, a supply crate, a cast-iron pot, a sci-fi fuel canister and a brass lantern"> | <img src="docs/media/kits-provisional-2026-10-v3/kits_lineup.jpg" width="400" alt="A stone ruin courtyard, a timber house room and a sci-fi corridor room, each assembled in Unity from five generated modules"> |
+| **A pistol with a slide and trigger** | **A chest with a hinged lid** (spike) |
+| <img src="docs/media/moving-parts-2026-10/pistol_moving_parts.gif" width="400" alt="A black pistol with rosewood grips: the trigger pulls back, the slide racks back and returns, the trigger releases"> | <img src="docs/media/moving-parts-2026-10/chest_lid.gif" width="400" alt="A domed wooden chest with iron bands: the lid opens 100 degrees on its back edge onto a plank interior, then closes"> |
+
+## Quick start
+
+**You need:**
+- Python 3.10–3.14 and Blender.
+- A ComfyUI service with the bundled workflows' models, on your machine or a remote GPU. The `final` tier shown here
+  ran on an H100; expect tens of minutes per asset.
+- An existing Unity project. The evidence uses Unity 6000.6.3f1 with URP 17.6.0.
+
+Model weights and ComfyUI custom nodes are installed separately ([installation](docs/INSTALL.md),
+[ComfyUI setup](docs/COMFYUI.md)).
+
+```sh
+git clone https://github.com/gysahlgreene/SlopForge.git
+cd SlopForge
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+slopforge init ~/UnityProjects/MyGame
+slopforge --project ~/UnityProjects/MyGame doctor    # reports what is missing before you spend GPU time
+```
+
+**Your first asset** is a brief, a choice of concept, then an approval of the mesh and its materials:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame generate prop brass_lantern "Brass hurricane lantern" --aspect portrait \
+  --image-prompt "Front three-quarter view of one brass hurricane lantern, taller than it is wide. A rounded glass globe in the middle, drawn as a solid smooth pale surface with a faint sheen, nothing visible through it. Brass wire guards around the globe. A ring handle on top. A round brass base. Complete object, isolated on a plain light-grey background." \
+  --material "frame=metal: aged brass" --material "globe=glass: clear glass"
+slopforge --project ~/UnityProjects/MyGame candidates brass_lantern       # look at the concepts
+slopforge --project ~/UnityProjects/MyGame approve brass_lantern 1        # mesh + material candidates
+slopforge --project ~/UnityProjects/MyGame approve-texture brass_lantern 1  # publish to Unity
+```
+
+Look at the concept, the mesh views, the materials and the validation report before each approval.
+`slopforge review` writes a local HTML board of every candidate. [Writing briefs that reconstruct
+well →](docs/AGENT-INTEGRATION.md#mesh-aware-materials) · [Using it from a coding agent →](docs/AGENT-INTEGRATION.md)
 
 ## What it makes
 
 | Asset type | Status | Evidence |
 | --- | --- | --- |
-| [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
-| [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
-| [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
-| [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
-| [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). The pistol's slide and trigger are split off as moving parts, with a Unity prefab and checked motion clips. The protocol comes next | Three weapons as lit turntables beside their concepts |
-| Mechanical assets with moving parts, creatures | Planned on the [roadmap](ROADMAP.md) | — |
+| [Props](#props): pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified | Ten props as lit turntables, each with concept, Blender and Unity URP views |
+| [Structures and environments](#structures-and-environments): buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
+| [Scenes and natural environments](#scenes-and-natural-environments): terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one owner-approved moorland scene, built from briefs by a recipe and rendered in Unity with a flythrough, rebuilt live from a fresh project | The flythrough above; six stills |
+| [Weapons and moving parts](#weapons-and-moving-parts): pistols, swords, crossbows; lids, slides, triggers | **Experimental**: three weapons through the full pipeline. A pistol's slide and trigger publish as a Unity prefab whose parts move as declared, checked in Play mode (4 of the last 5 seeds). A chest's hinged lid works through a spike that is not yet a pipeline route | Three weapons beside their concepts; the pistol and chest above |
+| [Characters](#characters): rigged humanoids | **Experimental**: four art styles, rigged automatically and walking; well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
+| Creatures | Planned on the [roadmap](ROADMAP.md) | — |
 
-Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
+Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage.
 
 ## Props
-
-![Seven generated props turning on a dark stage: a stone lantern, a glazed jug, a mossy tree stump, a supply crate, a cast-iron pot, a sci-fi fuel canister and a brass lantern](docs/media/props-lineup-2026-10/props_lineup.gif)
 
 **Three briefs, two independent runs each** (2026-10-21):
 
@@ -73,34 +121,13 @@ That makes static props on this tier **Provisional**. The owner reviewed the run
   - one crate's open top was rebuilt closed;
   - one jug shows ribbing in Unity.
 - **Glass:** glass parts work, but an object made entirely of glass does not reconstruct reliably.
-- **Not covered by the checks:** the colour of small parts. Unity is checked in editor batch renders, not in Play mode.
+- **Not covered by the checks:** the colour of small parts. These runs predate prefabs: a prop published now also
+  gets a prefab with a collider and Rigidbody, and a Play-mode check (see [weapons and moving
+  parts](#weapons-and-moving-parts)); no protocol has run on that yet.
 
-[Protocol evidence →](docs/media/props-provisional-2026-10-v5/README.md) · [New prop kinds →](docs/media/props-coverage-2026-10/README.md) · [Earlier showcase (2026-10-18) →](docs/media/material-showcase-2026-10/README.md)
+[Protocol evidence →](docs/media/props-provisional-2026-10-v5/README.md) · [New prop kinds →](docs/media/props-coverage-2026-10/README.md) · [Earlier showcase (2026-10-18) →](docs/media/material-showcase-2026-10/README.md) · [More prop examples →](docs/EXAMPLES.md)
 
-The brass lantern above was made from this brief:
-
-```sh
-slopforge --project ~/UnityProjects/MyGame generate prop brass_lantern "Brass hurricane lantern" --aspect portrait \
-  --image-prompt "Front three-quarter view of one brass hurricane lantern, taller than it is wide. A rounded glass globe in the middle, drawn as a solid smooth pale surface with a faint sheen, nothing visible through it. Brass wire guards around the globe. A ring handle on top. A round brass base. Complete object, isolated on a plain light-grey background." \
-  --material "frame=metal: aged brass" --material "globe=glass: clear glass"
-slopforge --project ~/UnityProjects/MyGame candidates brass_lantern
-slopforge --project ~/UnityProjects/MyGame approve brass_lantern 1
-slopforge --project ~/UnityProjects/MyGame approve-texture brass_lantern 1
-```
-
-Inspect the concept, mesh views, materials, and validation report before each approval. [Writing briefs that reconstruct well →](docs/AGENT-INTEGRATION.md#mesh-aware-materials) · [More prop examples →](docs/EXAMPLES.md)
-
-## Characters
-
-| Realistic | Stylized hero | Anime | Hand-painted |
-| :---: | :---: | :---: | :---: |
-| <img src="docs/media/character-styles-2026-10/realistic_walk.gif" width="180" alt="Realistic mercenary walking"> | <img src="docs/media/character-styles-2026-10/hero_walk.gif" width="180" alt="Stylized hero walking"> | <img src="docs/media/character-styles-2026-10/anime_walk.gif" width="180" alt="Anime adventurer walking"> | <img src="docs/media/character-styles-2026-10/painted_walk.gif" width="180" alt="Hand-painted dwarf walking"> |
-
-Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk improved through owner review but are not approved; the models are not yet game quality: forms are lumpy, faces soft and fingers fused, the limits of current open single-image 3D generation. Experimental and unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
-
-Unity playback is shown separately: an earlier test character has a valid Unity Humanoid Avatar and plays a retargeted walk ([Unity evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) · [diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)).
-
-Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then [animation validation](docs/CHARACTER-ANIMATIONS.md).
+The brass lantern was made from the brief in the [quick start](#quick-start).
 
 ## Structures and environments
 
@@ -212,7 +239,7 @@ slopforge --project ~/UnityProjects/MyGame scene-render moor
 
 [Live run evidence →](docs/media/natural-live-2026-10/README.md) · [The approved prototype →](docs/media/natural-showcase-2026-10/README.md) · [Natural environments guide →](docs/NATURAL-ENVIRONMENTS.md)
 
-## Weapons
+## Weapons and moving parts
 
 | Pistol | Longsword | Crossbow |
 | :---: | :---: | :---: |
@@ -228,17 +255,60 @@ Concepts (top) and the generated weapons (bottom), from one run each on the H100
   are shifted to the concept's colours.
 - **Orientation:** each weapon is turned tip forward and held at the grip drawn on its concept.
 
-<img src="docs/media/weapon-moving-parts-2026-10/pistol_motion.gif" width="240" align="right" alt="The pistol's slide travelling back and its trigger pulling">
+**Moving parts.** A brief declares each moving part as a hinge or a slide with its range, and boxes it on the
+approved concept, for example `--part "slide=slide:z:-0.03..0: the slide"` or
+`--part "lid=hinge:x:-100..0@back-bottom: the domed lid"`. The parts route (`part_model: hybrid`):
+- **Keeps one surface.** TRELLIS.2 builds the surface. OmniPart and the concept's masks only say where each part is,
+  and the surface is cut along its own creases, through the faces rather than around them.
+- **Closes every cut.** Each part and the body are closed where they were cut apart, and the faces no ray from
+  outside reaches are removed before the mesh is reduced.
+- **Checks the motion.** Each part is swept through its range in Blender and again on the Unity prefab. A part that
+  goes into the body, or a hole a moving part uncovers, fails the seed, and the next is tried.
+- **Publishes a prefab a game can use.** It has a convex collider per mesh, a Rigidbody, grip, muzzle and part
+  sockets, and an Animator with a trigger and a hold bool per part. A Play-mode run checks that each part pulses
+  and returns, and that the asset settles on a floor. Props publish the same way.
 
-**Moving parts:** a hinge or slide declared in the brief, and boxed on the approved concept, is cut from the one
-generated mesh, closed, and parented to the body with its pivot. The pistol's slide and trigger move as its own
-pieces ([evidence](docs/media/weapon-moving-parts-2026-10/README.md)). Publishing builds a Unity prefab with a clip
-per part, and checks in Unity that each part moves as declared.
+<img src="docs/media/moving-parts-2026-10/pistol_moving_parts.gif" width="300" align="right" alt="A black pistol with rosewood grips: the trigger pulls back, the slide racks back and returns, the trigger releases">
 
-**Experimental:** no weapon has been through a protocol. Small mechanisms stay soft, and generated metal is glossier
-than drawn.
-[How they were made, evidence and limits →](docs/media/weapon-pipeline-2026-10/README.md) ·
+**The pistol** (2026-10-26) published with its slide and trigger moving as declared. Four of the five seeds tried
+since the last motion fix published. The reruns found five faults on the way, now fixed, each with a test:
+- a surface turned inside out;
+- a trigger failing the motion check against the frame it was cut from;
+- grey flecks in the wood grain;
+- patches cut loose by hidden-face removal;
+- shards along a jagged slide cut.
+
+**The chest** above is a spike, not yet a pipeline route. Generated closed, a chest's inside is invented. So this
+one was generated open from an edit of its approved concept, and its lid was fitted shut before the final pass. The
+closed lid covers its concept's lid mask, and nothing penetrates through the swing.
+
+**Experimental:** one brief per kind, and no protocol yet. Known limits:
+- **Travel is in model units:** weapons have no real-world size yet, so the pistol's 30 mm slide travel is 3% of
+  its length.
+- **Small mechanisms stay soft.**
+- **The chest's lid was stretched 13% to fit its opening.**
+
+[Moving parts evidence →](docs/media/moving-parts-2026-10/README.md) ·
+[How the three weapons were made →](docs/media/weapon-pipeline-2026-10/README.md) ·
 [Weapons guide →](docs/WEAPONS.md)
+
+## Characters
+
+| Realistic | Stylized hero | Anime | Hand-painted |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/media/character-styles-2026-10/realistic_walk.gif" width="180" alt="Realistic mercenary walking"> | <img src="docs/media/character-styles-2026-10/hero_walk.gif" width="180" alt="Stylized hero walking"> | <img src="docs/media/character-styles-2026-10/anime_walk.gif" width="180" alt="Anime adventurer walking"> | <img src="docs/media/character-styles-2026-10/painted_walk.gif" width="180" alt="Hand-painted dwarf walking"> |
+
+Each character is generated from a brief (a pose-conditioned concept, then TRELLIS.2 on an H100), rigged
+automatically with SkinTokens, and retargeted to a motion-capture walk with no manual repair. The rigging and walk
+improved through owner review but are not approved. The models are not yet game quality: forms are lumpy, faces
+soft and fingers fused, which are the limits of current open single-image 3D generation. Experimental and
+unapproved. [How they were made, evidence and limits →](docs/media/character-styles-2026-10/README.md)
+
+Unity playback is shown separately: an earlier test character has a valid Unity Humanoid Avatar and plays a
+retargeted walk ([Unity evidence →](docs/media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) ·
+[diagnostic rig benchmark →](docs/media/character-qualification-2026-10/basalt-corrected-humanoid/README.md)).
+Characters continue through [readiness and rigging](docs/CHARACTER-RIGGING.md), then
+[animation validation](docs/CHARACTER-ANIMATIONS.md).
 
 ## Materials and textures
 
@@ -250,7 +320,8 @@ Every 3D asset gets mesh-aware PBR materials generated with its geometry: base c
 
 - **Material regions:** the brief declares `nonmetal`, `metal`, `emissive[#rrggbb]` or `glass[#rrggbb]` per region. Glass faces get a second, transparent URP material in Unity.
 - **Reconstruction-ready concepts:** every 3D concept prompt asks for even lighting, matte non-metals, thick parts, and glowing or glass parts drawn as solid surfaces so they reconstruct whole.
-- **Clean geometry:** raw shapes are remeshed on the GPU, and normals are baked against the full-detail mesh, so thin planks, handles and lattices survive. UV islands are padded by 4 texels and packed tightly.
+- **Clean geometry:** raw shapes are remeshed on the GPU, and normals are baked against the full-detail mesh, so thin planks, handles and lattices survive. UV islands are padded by 4 texels and packed tightly. Props and weapons drop the faces no ray from outside reaches before the mesh is reduced, so the face budget goes to what a player sees (9–24% of delivered faces had been visible).
+- **Non-metal parts stay non-metal:** a part declared with its colour, such as `grip=nonmetal#622513: walnut`, has its metallic zeroed wherever the map shows its hue, at any lightness, so dark wood grain does not shine like steel.
 - **Checks before review:** a candidate is rejected, and the next seed tried, when any of these fail:
   - it has more than five parts;
   - its silhouette does not fit the concept (this catches shattered meshes);
@@ -282,22 +353,6 @@ flowchart LR
 - **Coordinate:** resume recipes, reuse style/reference libraries, and select quality tiers with bounded candidate budgets.
 - **Deliver:** export models/materials, assemble kit layouts into Unity scenes, render whole scenes with `scene-render`, and prepare character animation tooling for Unity.
 
-## Quick start
-
-Requires **Python 3.10–3.14**, Blender, a compatible ComfyUI service, and an existing Unity project. Model weights and custom nodes are installed separately.
-
-```sh
-git clone https://github.com/gysahlgreene/SlopForge.git
-cd SlopForge
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-slopforge init ~/UnityProjects/MyGame
-slopforge --project ~/UnityProjects/MyGame doctor
-```
-
-[Installation](docs/INSTALL.md) covers dependencies. [ComfyUI configuration](docs/COMFYUI.md) covers local/remote inference and model/workflow compatibility. Then follow the [props](#props) or [characters](#characters) example above.
-
 ## What is qualified today?
 
 | Area | Current evidence |
@@ -306,9 +361,9 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Static props | **Provisional** for `h100`/`final`, commit `221c8d1`, Unity 6000.6.3f1 / URP 17.6.0 import. Three briefs × two independent runs passed every stage and owner-accepted threshold ([criterion v5](docs/media/props-provisional-2026-10-v5/QUALIFICATION-RECORD.md)). Four more prop kinds passed end to end in single exploratory runs; the stump passed only after a UV fix prompted by its failed first run. Not Qualified: six runs cannot measure a failure rate. Since 2026-10-24 meshes are reduced from the full-detail shape ([evidence](docs/media/mesh-reduction-2026-10/README.md)); two protocol props re-approved after it passed, with no protocol rerun. |
 | Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096² by default (2048² for kit modules). Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. Metal decoded darker than its concept is brightened to it; weapons also have small parts' colours shifted to the concept, other types do not. |
 | Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. The stone kit's material step changed after that commit (#101) and has no protocol run. Standalone structures are generated at real size, one run each. The 2026-10-24 mesh-reduction change also applies to kits, with no protocol rerun. |
-| Weapons | **Experimental**: a pistol, a longsword and a crossbow, one run each through Blender on the H100 `final` tier ([evidence](docs/media/weapon-pipeline-2026-10/README.md)); the owner accepted the look for now. One pistol with a slide and trigger split off, published to Unity with motion clips that pass their checks ([evidence](docs/media/weapon-moving-parts-2026-10/README.md)). No protocol; the sword and crossbow have no Unity render. |
+| Weapons and moving parts | **Experimental**: a pistol, a longsword and a crossbow, one run each through Blender on the H100 `final` tier ([evidence](docs/media/weapon-pipeline-2026-10/README.md)); the owner accepted the look for now. A pistol with a slide and trigger publishes as a Unity prefab whose parts move as declared, with Unity's motion checks and Play mode passing: 4 of 5 seeds since the last motion fix ([evidence](docs/media/moving-parts-2026-10/README.md)). A chest's hinged lid through a spike, not yet a route. One brief per kind, no protocol; the sword and crossbow have no Unity render. |
 | Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe rebuilt it once from a blank project ([live run](docs/media/natural-live-2026-10/README.md)). Rendering only: no Play mode or performance check. |
-| Mesh/material preparation and Unity delivery | 28 of the 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode (two stopped earlier). Every M2-v3 kit module and every moorland model was published with `approve-texture`; kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps. Play mode is not run. |
+| Mesh/material preparation and Unity delivery | 28 of the 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode (two stopped earlier). Every M2-v3 kit module and every moorland model was published with `approve-texture`; kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps. Props and weapons now publish as prefabs with a Play-mode check (live on the pistol); the prop and kit protocols predate it. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |
 | Third-party motion retargeting | Humanoid test 1 demonstrates looping idle/walk playback and measured skinned-mesh movement. Broader movement, deformation approval, and production qualification remain open. |
 | Safe Unity replacement/reimport | Implemented for props: republishing keeps GUIDs and texture references, and a prefab follows a republished mesh. If a GUID changes, approval stops and the previous files are restored. Checked by an opt-in live Unity test; a deleted `.meta` is only exercised on a fresh checkout. |

@@ -1081,7 +1081,7 @@ Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](
   decide. Unity's ray count and the Blender sweep's coordinate spaces were wrong and are fixed.
 - **Tests:** unit (votes, cut, alignment rule, gates, colours, plumbing), opt-in Blender (interfaces on a hollow
   shell, chest and drawer fixtures, holes, sweep, hidden faces, view fit), opt-in Unity live (open and closed
-  pockets, flap, a slide into its seat), `make verify` (919 passed).
+  pockets, flap, a slide into its seat), `make verify` (920 passed).
 - **Live (2026-10-25, private runs HP2-HP7, HC2-HC6):** the pistol (P4's concept) passed every gate and published
   with Unity's motion checks and Play mode passing on HP4, HP5 and HP7; on HP7, with hidden faces removed and the
   trigger declared as the 1911's slide (5 mm), slide 0.89 and trigger 0.96 of their masks, penetration 0.002 and
@@ -1101,7 +1101,11 @@ Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](
   any lightness: the grips' metal share 9.8% to 3.9%, the screws among it); hidden-face removal cut seen patches
   loose (1 piece became 71, failing the component budget; the hidden faces joining them now stay: 1 piece, 1.4% more
   faces). HP11 and HP12 then published on their first seeds (clean grips with the concept's checkering; HP12's
-  surface 2 pieces), so 3 of the 4 seeds since the seat fix published. No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
+  surface 2 pieces), so 3 of the 4 seeds since the seat fix published. After the cut refinement (67043b4) HP13 published
+  on its first seed: 4 of 5. No chest has passed on the route. A spike chest generated open from an edit of its
+  concept, its lid fitted shut by scratch tools, passed the final pass's checks: its lid covers 1.00 of the closed
+  concept's lid mask, nothing penetrates through -100..0, and backs of faces read 0.004 at rest and 0.0059 open; it
+  was not published to Unity ([evidence](docs/media/moving-parts-2026-10/README.md)). Before hidden-face removal (HC5) its lid was the whole dome
   and opened onto a cavity, but hidden strips under the dome failed `part_open` (0.12-0.27). With them removed (HC6)
   the rest view reads 0.002, but on two of three seeds the lid's arched ends stayed with the body: no cavity, and the
   interface closing the wide opening crumpled (0.022-0.028 with the lid open). The cut wanders along plank grooves
