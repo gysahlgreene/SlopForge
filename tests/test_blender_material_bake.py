@@ -1493,6 +1493,50 @@ print("TURNED", sweep_penetration(lid, [body], "x", -90.0, 0.0))  # its back hal
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderCutRefinementTests(unittest.TestCase):
+    def test_a_cut_stepping_along_large_triangles_is_cut_straight_through_them(self):
+        # Labels are per face, so on a reduced mesh's large triangles a cut can only step along their edges: HP12's
+        # slide/frame cut ran in triangle-sized teeth, flush at rest, and racked back they parted and showed the
+        # closing faces between them as grey shards (2026-10-26). The faces are split along where the labels'
+        # smoothed shares are equal instead. A strip of cells each split on its diagonal, the top row the part and,
+        # in the row below, each cell's upper triangle: the cut zigzags a whole cell; straight, it runs at 2.5.
+        script = f'''import bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from hybrid_apply import refine_cut
+bm = bmesh.new()
+grid = [[bm.verts.new((x, y, 0)) for y in range(5)] for x in range(11)]
+labels = []
+for x in range(10):
+    for y in range(4):
+        a, b, c, d = grid[x][y], grid[x + 1][y], grid[x + 1][y + 1], grid[x][y + 1]
+        bm.faces.new((a, b, c)); bm.faces.new((a, c, d))  # lower-right, upper-left
+        labels += ["part" if y >= 3 else "body", "part" if y >= 2 else "body"]
+uv = bm.loops.layers.uv.new()
+for f in bm.faces:
+    for loop in f.loops:
+        loop[uv].uv = (loop.vert.co.x / 10, loop.vert.co.y / 4)
+bm.faces.index_update()
+labels = refine_cut(bm, labels)
+cut = {{v for e in bm.edges if len(e.link_faces) == 2 and len({{labels[f.index] for f in e.link_faces}}) == 2 for v in e.verts}}
+inner = [v.co.y for v in cut if 1.5 < v.co.x < 8.5]  # the strip's open ends smooth with fewer neighbours
+print("CUT", round(min(inner), 3), round(max(inner), 3))
+print("UV", max(abs(l[uv].uv.y - l.vert.co.y / 4) for f in bm.faces for l in f.loops))
+print("FAR", sum(1 for f in bm.faces if f.calc_center_median().y > 3.2 and labels[f.index] != "part"),
+      sum(1 for f in bm.faces if f.calc_center_median().y < 1.8 and labels[f.index] != "body"))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        lines = {line.split()[0]: line.split()[1:] for line in result.stdout.splitlines()
+                 if line.startswith(("CUT", "UV", "FAR"))}
+        low, high = map(float, lines["CUT"])
+        self.assertGreater(low, 2.2, lines)  # the cut stays near 2.5 instead of stepping between 2 and 3
+        self.assertLess(high, 2.8, lines)
+        self.assertLess(float(lines["UV"][0]), 1e-4)  # new corners keep their texture coordinates
+        self.assertEqual(lines["FAR"], ["0", "0"])  # away from the cut nothing changes side
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderInterfaceTests(unittest.TestCase):
     def test_a_face_seen_edge_on_at_the_outline_votes_for_the_part_there(self):
         # From a side view a slide's top is seen edge-on, on the outline, and the margin kept along every mask edge

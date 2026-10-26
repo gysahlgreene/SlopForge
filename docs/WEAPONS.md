@@ -287,7 +287,15 @@ need retraining on its latent space, so the two are combined after generation in
    mask that covered the slide. A mask whose votes cover under a quarter of its share of the concept missed its part
    (a trigger a few per cent wide fell through the view's misregistration) and is dropped for that seed
    (`hybrid.masks_dropped`).
-4. `blender/hybrid_apply.py` writes the surface back as one glTF node per part, and the final pass tags, separates
+4. `blender/hybrid_apply.py` first **cuts the faces along the boundary** instead of along their edges
+   (`refine_cut`): labels are per face, so across a reduced mesh's large triangles a cut could only step along their
+   edges, and HP12's slide/frame cut ran in triangle-sized teeth that parted when the slide racked back and showed
+   the closing faces as grey shards (2026-10-26). Each vertex takes its faces' share of each label, smoothed within
+   two rings of the cut; an edge whose ends prefer different labels is split where their shares are equal (through
+   the corner when that point is within 20% of it: closer splits left slivers that shaded as a thin dark line), and
+   a face crossed twice is split between the points. On HP12's seed, at the final pass's 30,000-face budget, the
+   cut's distance to the frame's closing fell (median 0.17% to 0.11% of the size) and the backs of faces seen with
+   the slide back from 0.004 to 0.0028. It then writes the surface back as one glTF node per part, and the final pass tags, separates
    and pivots the parts as for OmniPart's. With `close_openings` in the part table, each part and the body are
    closed where they were cut apart by the **interface** between them (`mesh_cleanup.part_interface`). The solid
    is what the outside cannot reach through the surface (a grid of up to 240 cells along the longest side, walls
