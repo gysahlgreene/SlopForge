@@ -411,6 +411,45 @@ class DerivedMapTests(unittest.TestCase):
             lab = _lab(np.asarray(Image.open(root / "base2.png").convert("RGB"), dtype=float)[8:16, 8:16].reshape(-1, 3))
             self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 6.0)
 
+    def test_a_dark_brown_non_metal_does_not_take_the_grey_steel_beside_it(self):
+        # Walnut grips declared #622513: the colour rule (every channel within 48) also took dark grey steel (51, 51,
+        # 51) as walnut, 6.8% of a pistol's texels; set to non-metal, the colour transfer then tinted them like the
+        # wood and the barrel and trigger came out pink (2026-10-25). A coloured declaration takes only texels with
+        # at least a quarter of its saturation (the generated walnut is duller than the concept's).
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import zero_metallic
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (64, 32), (51, 51, 51)); base.paste((67, 43, 28), (32, 0, 64, 32)); base.save(root / "base.png")
+            Image.new("L", (64, 32), 255).save(root / "metal.png")
+            zero_metallic(root / "base.png", root / "metal.png", [(98, 37, 19)])
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"))
+        self.assertEqual(int(metal[16, 8]), 255)  # grey steel stays metal
+        self.assertEqual(int(metal[16, 48]), 0)  # the walnut does not
+
+    def test_a_grey_colour_does_not_borrow_a_coloured_ones_shift(self):
+        # A grey cluster within 20 CIELAB of the walnut's borrowed the walnut's a*b* shift (+19.6, +10.8) and steel
+        # set to non-metal came out pink (2026-10-25). A colour borrows a shift only from one about as saturated.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (98, 37, 19)  # walnut, seen
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (60, 42, 32)  # duller walnut
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255
+            base = Image.new("RGB", (64, 64), (60, 42, 32)); base.paste((52, 52, 52), (0, 0, 8, 8)); base.save(root / "base.png")
+            Image.new("L", (64, 64), 0).save(root / "metal.png")
+            match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal)
+            grey = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float)[0:8, 0:8].reshape(-1, 3))
+        self.assertLess(float(np.median(np.hypot(grey[:, 1], grey[:, 2]))), 4.0)
+
     def test_part_metal_by_region_name(self):
         from slopforge.unity_material import part_metal
         materials = [{"region": "slide and frame", "class": "metal", "description": "blued steel"},

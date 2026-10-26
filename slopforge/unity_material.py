@@ -133,8 +133,18 @@ def zero_metallic(basecolor_path, metallic_path, matches):
     with Image.open(basecolor_path) as image:
         base = image.convert("RGB")
     mask = Image.new("L", base.size, 0)
+    red, green, blue = base.split()
+    saturation = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(red, green), blue),
+                                     ImageChops.darker(ImageChops.darker(red, green), blue))
     for match in matches:
-        mask = ImageChops.lighter(mask, emitter_colour_mask(base, match))
+        found = emitter_colour_mask(base, match)
+        if match is not None and max(match) - min(match) > 40:
+            # A coloured declaration takes no greys: every channel of dark steel (51, 51, 51) is within the rule's 48
+            # of walnut #622513, and 6.8% of a pistol's texels, set to non-metal, came out pink (2026-10-25). The
+            # generated walnut is duller than the concept's (saturation 30 against 79), so a quarter is the floor.
+            floor = 0.25 * (max(match) - min(match))
+            found = ImageChops.multiply(found, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+        mask = ImageChops.lighter(mask, found)
     with Image.open(metallic_path) as image:
         mode, channel = image.mode, image.convert("L")
     channel.paste(0, mask=mask)
@@ -260,8 +270,11 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
             shifts[k] = (shift, ratio)
     labels = nearest(lab)
     for k in report:
+        # A colour borrows a shift only from one about as saturated: a grey within 20 of a pistol's walnut took its
+        # +19.6 a*, +10.8 b* and came out pink (2026-10-25)
         source = k if k in shifts else min(
-            (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE),
+            (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE
+             and np.hypot(*centres[k][1:]) >= 0.5 * np.hypot(*centres[j][1:])),
             key=lambda j: np.linalg.norm(centres[j] - centres[k]), default=None)
         if source is None:
             continue

@@ -1065,3 +1065,34 @@ Multi-part weapons and props: quality and in-game function (2026-10-25, M3, [gui
   that keeps thin walls; seed variance of
   the pistol's trigger coverage and overflow; Play mode checks motion and settling only; no LODs; the crossbow.
   Status Experimental: one brief per kind, no repeatability claim.
+
+Multi-part weapons and props on the hybrid route (2026-10-25 night, M3, [guide](docs/WEAPONS.md#hybrid-parts-trellis2s-surface-split-by-omniparts-parts)).
+- **Why:** the owner rejected OmniPart's own parts on looks (TRELLIS v1 at 64 cells). The hybrid route keeps
+  TRELLIS.2's surface and uses OmniPart and the concept masks only to say where the parts are.
+- **Change:** `part_model: hybrid` (weapon and prop templates): TRELLIS.2 surface; OmniPart run geometry-only;
+  faces labelled by graph cuts on mask votes (25 units, over OmniPart's cap of 20, fading at part edges, none at the
+  outline) and OmniPart's distances, along creases; the fitted view the least elevated within 0.01 of the best;
+  pieces closed by the interface between them (zero set of the part/rest distance difference inside the solid, rim
+  on the cut), a container's opening a cavity; weapons and props delete the faces no ray from outside reaches before
+  the reduction (`remove_hidden_faces`: 76-91% of delivered faces had been hidden). Masks: SAM asked with the box
+  and with nine points in it. Gates added: `part_open` (backs of faces seen at rest and with each part moved, 0.01),
+  `colour_lost` (coloured in the concept, grey in the map, 0.1), penetration counting only points newly inside and
+  deeper than 0.5% of the size (Blender and Unity, by winding number), OmniPart's alignment only where its votes
+  decide. Unity's ray count and the Blender sweep's coordinate spaces were wrong and are fixed.
+- **Tests:** unit (votes, cut, alignment rule, gates, colours, plumbing), opt-in Blender (interfaces on a hollow
+  shell, chest and drawer fixtures, holes, sweep, hidden faces, view fit), opt-in Unity live (open and closed
+  pockets, flap), `make verify` (915 passed).
+- **Live (2026-10-25, private runs HP2-HP7, HC2-HC6):** the pistol (P4's concept) passed every gate and published
+  with Unity's motion checks and Play mode passing on HP4, HP5 and HP7; on HP7, with hidden faces removed and the
+  trigger declared as the 1911's slide (5 mm), slide 0.89 and trigger 0.96 of their masks, penetration 0.002 and
+  0.000, backs of faces 0.0022 at most, 95% of the surface visible (9% before), crisper hammer, grip panels and
+  slide step at the same budget. Its colours are not right yet: the grips are streaked and the barrel and trigger
+  pink (the non-metal colour rule took grey steel and a grey cluster borrowed the walnut's tint; both fixed after
+  the run, not yet verified live). No chest has passed. Before hidden-face removal (HC5) its lid was the whole dome
+  and opened onto a cavity, but hidden strips under the dome failed `part_open` (0.12-0.27). With them removed (HC6)
+  the rest view reads 0.002, but on two of three seeds the lid's arched ends stayed with the body: no cavity, and the
+  interface closing the wide opening crumpled (0.022-0.028 with the lid open). The cut wanders along plank grooves
+  and trims, about twice a clean seam's length. The cavity's inside is invented: nothing shows what it looks like.
+- **Not verified / open:** a chest that passes, and a reference for its inside; colour after the grey fixes; grips decided per face rather than
+  per texel; any third weapon; seed-to-seed repeatability; dark-metal finish (metal gain hits its cap of 8).
+  Status Experimental.
