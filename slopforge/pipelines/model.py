@@ -2445,6 +2445,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
         # with the closed concept (paths["cutout"], paths["part_masks"])
         mesh_paths = (open_paths(root, conditioning_refs, asset["parts"]) if open_artifact else
                       {"cutout": paths["cutout"], "input_3d": paths["input_3d"], "part_masks": paths.get("part_masks")})
+        # generated with its part half open, faces the part shades are not hidden in play (OPEN3: the inside showed
+        # holes where the removal had deleted them, 2026-10-26)
+        removes_hidden = _removes_hidden_faces(asset_type, asset) and not open_artifact
         if asset.get("kit_material"):
             if not workflow:
                 raise StageFailure("configuration", "A kit material is applied by the mesh-aware material stage",
@@ -2500,7 +2503,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                              "face_budget": _face_budget(pipeline, asset_type, asset, default=None),
                              "voxel_resolution": asset_type.get("voxel_resolution"),
                              "checkpoint": pipeline.get("tools", {}).get("hunyuan_checkpoint")}
-            if _removes_hidden_faces(asset_type, asset):  # only when set: existing assets keep their settings
+            if removes_hidden:  # only when set: existing assets keep their settings
                 mesh_settings["remove_hidden_faces"] = True
                 # prepare_model.py removes them in the mesh stage with mesh_cleanup.py (tool_sha256 covers both)
                 mesh_settings["preparation_tool_sha256"] = tool_sha256(tool_root() / "blender/prepare_model.py")
@@ -2598,7 +2601,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         generate_model(root, config, mesh_paths["cutout"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed, budget, voxel_resolution=asset_type.get("voxel_resolution"),
                                        require_manifold=asset_type.get("max_nonmanifold_edges") == 0,
-                                       remove_hidden_faces=_removes_hidden_faces(asset_type, asset),
+                                       remove_hidden_faces=removes_hidden,
                                        project_concept=asset_type.get("concept_projection") == "front",
                                        **({"views": views} if views else {}))
                     else:

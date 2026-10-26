@@ -86,8 +86,10 @@ Declare each moving part, and the grip, as `--part`. The final Blender pass spli
 - **Kinds:**
   - `grip`: one at most, the weapon's handle;
   - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
-    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`. Without it the
-    pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
+    right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`, the
+    second face measured along the first's edge (the bottom of the lid's back edge, not below a latch at its
+    front). Without it the pivot is the part's contact with the body (a trigger's root) or its box centre when it
+    touches nothing;
   - `slide`: moves along an axis, with its range in metres, so the model needs its real size: `generate` and
     `approve` refuse a slide without `--target-size` (`--target-size=-,0.22,-` for a pistol 0.22 m long; Y is a
     weapon's length). Unsized, a model is one unit long: HP13's 30 mm slide travel was 3% of its length, where a
@@ -384,6 +386,8 @@ slopforge approve chest 2 --open 7
   board offers `approve chest 2 --open <n>`. An edit can move or drop details (a hasp moved, one seed dropped the
   lid's bands, 2026-10-25): review them.
 - `approve --open` cuts out and masks both pictures. TRELLIS.2 builds the mesh from the open one, inside and all.
+  Its hidden faces are not removed: generated with the lid half open, faces the lid shades show in play (OPEN3:
+  holes inside where the removal had deleted them). The face budget pays for the hidden double skin here.
 - The split uses the open picture's masks alone (no OmniPart): the open lid stands clear of the body. Body faces
   above the body's rim and next to the lid go to the lid (its knuckles and band ends, which the mask misses); a
   hasp's top on the front stays with the body (OPEN2: given to the lid, it swung down below the closed chest).

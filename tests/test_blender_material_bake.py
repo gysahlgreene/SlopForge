@@ -1704,6 +1704,39 @@ print("FILLS", len(fills), "LOWEST", min(polygon.center.z for polygon in fills))
         self.assertGreater(int(line[1]), 0)
         self.assertGreater(float(line[3]), 0.3)  # the slide's interface near the top, no cavity floor deep inside
 
+    def test_a_lids_back_bottom_hinge_is_on_its_back_edge_not_below_a_latch_at_its_front(self):
+        # OPEN3 (2026-10-26): a lid with latches hanging 8 cm below the rim at its front pivoted at the bottom of its
+        # whole bounds, 8 cm below the seam at its back, and swung up off the chest instead of turning on its hinges.
+        # A second face is measured along the first's edge: back-bottom is the bottom of the lid's back edge.
+        script = f'''import bpy, bmesh, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+import mesh_cleanup
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new()
+def box(low, high, part):
+    made = bmesh.ops.create_cube(bm, size=1.0)["verts"]
+    for vert in made:
+        vert.co = [low[i] + (high[i] - low[i]) * (vert.co[i] + 0.5) for i in range(3)]
+    return {{face for vert in made for face in vert.link_faces}}, part
+pieces = [box((-1, -1, 0), (1, 1, 1), 1), box((-1, -1, 1), (1, 1, 1.3), 2), box((-0.2, -1.05, 0.7), (0.2, -0.95, 1), 2)]
+mesh = bpy.data.meshes.new("chest"); bm.to_mesh(mesh)
+obj = bpy.data.objects.new("chest", mesh); bpy.context.scene.collection.objects.link(obj)
+attribute = mesh.attributes.new("slopforge_part", "INT", "FACE")
+for polygon in mesh.polygons:  # the body's six faces were made first; then the lid's slab and its latch
+    attribute.data[polygon.index].value = 1 if polygon.index < 6 else 2
+table = {{"body": {{"kind": "body", "id": 1}}, "lid": {{"kind": "hinge", "id": 2}}}}
+children = mesh_cleanup.separate_tagged(obj, table, contact=0.01, anchors={{"lid": ["back", "bottom"]}})
+lid = next(child for child in children if child.name.startswith("lid"))
+print("PIVOT", *[round(value, 3) for value in lid.location])
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        pivot = [float(value) for value in next(line for line in result.stdout.splitlines()
+                                                if line.startswith("PIVOT")).split()[1:]]
+        self.assertAlmostEqual(pivot[1], 1.0, delta=0.01)  # the back
+        self.assertAlmostEqual(pivot[2], 1.0, delta=0.01)  # the bottom of the back edge: the seam, not the latch
+
     def test_a_standalone_fill_is_marked_and_not_counted_as_a_piece(self):
         # Interfaces and cavities are not stitched to the surface: as separate pieces they pushed live hybrid seeds
         # over the component budget (2026-10-25). They carry slopforge_fill; a piece made only of them is not counted.

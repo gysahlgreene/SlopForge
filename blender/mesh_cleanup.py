@@ -1225,7 +1225,7 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
     """Move each hinge or slide's tagged faces into a child of obj (see _attach). A slide pivots at its box centre;
     a hinge at the centroid of its vertices within `contact` of the rest of the weapon, or at its box centre when
     it touches nothing; a hinge with an anchor (faces of its own bounds: front -Y, back +Y, left -X, right +X,
-    bottom -Z, top +Z) pivots on that edge of its box. With close (hybrid parts: pieces of one generated surface),
+    bottom -Z, top +Z) pivots on that edge of its box, each face after the first measured along the edge before it. With close (hybrid parts: pieces of one generated surface),
     each part and the body are closed where they were cut apart by the interface between them (part_interface),
     the faces left under `face_budget` shared between the parts by the length of their cuts; an opening under a
     hinged part that is a container's (a chest's top) becomes a cavity instead (hollow_opening). Returns the
@@ -1287,11 +1287,16 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
         high = Vector([max(vert.co[axis] for vert in verts) for axis in range(3)])
         pivot = (low + high) / 2
         if kind == "hinge" and (anchors or {}).get(name):
-            bound_of = {"front": (1, low), "back": (1, high), "left": (0, low), "right": (0, high),
-                        "bottom": (2, low), "top": (2, high)}
+            bound_of = {"front": (1, min), "back": (1, max), "left": (0, min), "right": (0, max),
+                        "bottom": (2, min), "top": (2, max)}
+            # each face after the first is measured along the edge the ones before it name: back-bottom is the bottom
+            # of the lid's back edge, not below a latch at its front (OPEN3: a pivot 8 cm under the seam swung the lid
+            # up off the chest, 2026-10-26)
+            edge = list(verts)
             for word in anchors[name]:
-                axis, bound = bound_of[word]
-                pivot[axis] = bound[axis]
+                axis, extreme = bound_of[word]
+                pivot[axis] = extreme(vert.co[axis] for vert in edge)
+                edge = [vert for vert in edge if abs(vert.co[axis] - pivot[axis]) <= 0.1 * (high[axis] - low[axis])]
         elif kind == "hinge":
             touching = [vert.co for vert in verts
                         if tree.find_nearest(vert.co)[3] is not None and tree.find_nearest(vert.co)[3] <= contact]
