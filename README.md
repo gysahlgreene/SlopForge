@@ -23,7 +23,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 
 | Asset type | Status | Evidence |
 | --- | --- | --- |
-| [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified. A chest with a hinged lid works through a spike | Ten props as lit turntables, each with concept, Blender and Unity URP views; the chest's lid in motion |
+| [Props](#props) — pickups, furniture, containers, devices | **Provisional** on the H100 `final` tier: three briefs, two independent runs each, passed every check through Unity import. Not yet Qualified. A chest with a hinged lid is generated open and published with its lid working (one run) | Ten props as lit turntables, each with concept, Blender and Unity URP views; the chest's lid in motion |
 | [Characters](#characters) — rigged humanoids | Generated in four art styles, rigged automatically and walking; experimental, well below shippable model quality | Four characters walking as lit turntables; one character with Unity Humanoid playback |
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
 | [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
@@ -81,9 +81,9 @@ That makes static props on this tier **Provisional**. The owner reviewed the run
 
 <p align="center"><img src="docs/media/moving-parts-2026-10/chest_lid.gif" width="600" alt="A domed wooden chest with iron bands: the lid opens 100 degrees on its back edge onto a plank interior, then closes"></p>
 
-A chest's lid on its hinge. The chest was generated open from an edit of its concept, so its inside comes from a
-picture, and its lid was fitted shut before the final pass. It passed the final pass's checks and is a spike, not yet
-published. [Evidence and limits →](docs/media/moving-parts-2026-10/README.md)
+A chest's lid on its hinge. The chest is generated open from an approved open picture of its concept, so its inside
+comes from a picture; the lid is closed by a fit before the final pass. Published to Unity on its first seed, with the
+lid's motion checked and Play mode passed. [Evidence and limits →](docs/media/moving-parts-2026-10/README.md)
 
 The brass lantern above was made from this brief:
 
