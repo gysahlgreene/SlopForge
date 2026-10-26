@@ -403,7 +403,7 @@ if oriented:
     # and mark the faces under the grip mask, seen from the view that best fits the concept.
     import numpy as np
     from concept_view import (area_samples, fit_view, footprint_axes, image_mask, surface_samples, to_concept_pixels,
-                              view_axes)
+                              upright_axis, view_axes)
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
     world, samples = surface_samples(obj)
     fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
@@ -490,10 +490,10 @@ if oriented:
         # front, the side the concept's camera sees, towards -Y, so a lid's "back" edge is away from the viewer. Its
         # frame comes from points spread by area and its footprint's smallest rectangle: a dense hasp leaned the
         # sample axes 6-9 degrees, and the lid then turned about X swung crooked (OPEN3, OPEN4, 2026-10-26).
+        # Its top is the near-vertical direction most of its surface faces along: the weapon rule's thinnest axis lay
+        # between a chest's depth and its height when they were alike, and pitched it (OPEN5).
         even = area_samples(obj)
-        spread = even - even.mean(0)
-        thinnest = np.linalg.eigh(spread.T @ spread)[1][:, 0]
-        top = thinnest * np.sign(thinnest[2]) if abs(thinnest[2]) > math.sqrt(0.5) else np.array([0.0, 0.0, 1.0])
+        top = upright_axis(obj)
         axes = footprint_axes(even, top)
         hinge = ((parts_info.get("open_state") or {}).get("hinge") if parts_table is not None else None)
         if hinge is not None:

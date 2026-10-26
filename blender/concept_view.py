@@ -80,6 +80,27 @@ def area_samples(obj, count=20000):
     return np.einsum("sk,skd->sd", weights, triangles[chosen])
 
 
+def upright_axis(obj, within=30.0, step=2.0):
+    """The direction within `within` degrees of +Z that the most face area faces along (either way): a prop stands
+    on its base, and its base, rim and top face up and down. Principal axes cannot tell up on a chest as deep as it is
+    tall: two of them weigh the same and lie anywhere in their plane (OPEN5 stood pitched, 2026-10-26)."""
+    normals, areas = [], []
+    for polygon in obj.data.polygons:
+        normals.append(tuple(obj.matrix_world.to_3x3() @ polygon.normal))
+        areas.append(polygon.area)
+    normals, areas = np.array(normals), np.array(areas)
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+    best, best_score = np.array([0.0, 0.0, 1.0]), -1.0
+    for tilt in np.arange(0.0, within + 1e-9, step):
+        for turn in (np.arange(0.0, 360.0, max(step / max(math.sin(math.radians(tilt)), 1e-9), step)) if tilt else [0.0]):
+            direction = np.array([math.sin(math.radians(tilt)) * math.cos(math.radians(turn)),
+                                  math.sin(math.radians(tilt)) * math.sin(math.radians(turn)), math.cos(math.radians(tilt))])
+            score = float(areas[np.abs(normals @ direction) > math.cos(math.radians(8))].sum())
+            if score > best_score + 1e-9:
+                best, best_score = direction, score
+    return best
+
+
 def footprint_axes(points, top):
     """The two axes across `top` of the points' smallest enclosing rectangle, the longer side's first: a box-like
     prop's own edges, whatever crowds its samples."""

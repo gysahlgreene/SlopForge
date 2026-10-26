@@ -250,6 +250,7 @@ def main(request):
               "hinge": {"point": [round(float(v), 4) for v in centre], "axis": [int(v) for v in axis]},
               "face_match": {"turn_degrees": round(math.degrees(theta), 2), "stretch": round(needed, 4)},
               "turn_degrees": round(math.degrees(float(params[0])), 2), "stretch": round(float(params[3]), 4),
+              "shift": [round(float((params[1] - start[1]) / size), 4), round(float((params[2] - start[2]) / size), 4)],
               "needed_stretch": round(needed, 4), "max_stretch": bound, "cavity_points": int(len(cavity)),
               "seal": {key: round(value, 5) for key, value in seal.items()}, "seconds": round(time.time() - started)}
     Path(request["report"]).write_text(json.dumps(report, indent=2) + "\n")

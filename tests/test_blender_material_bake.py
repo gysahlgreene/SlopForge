@@ -1224,6 +1224,29 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB', use_select
         reverse = results["front"]
         self.assertGreater(reverse["objects"][reverse["body"]]["max"][1], reverse["objects"]["lid"]["max"][1] + 0.03)
 
+    def test_a_chest_as_deep_as_it_is_tall_stands_upright(self):
+        # OPEN5 (2026-10-26): a chest 0.5 deep and 0.5 tall stood pitched: its thinnest axis, the weapon rule's top
+        # when near vertical, lay between its depth and its height. A prop's top is its principal axis nearest +Z.
+        concept = Image.new("RGBA", (120, 120), (0, 0, 0, 0))
+        concept.paste((120, 90, 60, 255), (20, 40, 100, 110)); concept.paste((120, 90, 60, 255), (20, 28, 100, 40))
+        masks = {"lid": Image.new("L", (120, 120), 0)}; masks["lid"].paste(255, (20, 28, 100, 40))
+        deep = (self.LOCKED_CHEST.replace("(0, 0, 0.2), (0.6, 0.4, 0.4), 3", "(0, 0, 0.2), (0.6, 0.5, 0.4), 3")
+                .replace("(-0.2, -0.22, 0.3)", "(-0.2, -0.27, 0.3)")
+                .replace("(0, 0, 0.45), (0.6, 0.4, 0.1), 3", "(0, 0, 0.45), (0.6, 0.5, 0.1), 3"))
+        turn = math.radians(9)
+        parts_json = json.dumps({"parts": {"body": {"kind": "body", "id": 2}, "lid": {"kind": "hinge", "id": 1}},
+                                 "open_state": {"part": "lid", "hinge": [-0.25 * math.sin(turn), 0.25 * math.cos(turn),
+                                                                         0.4]}})
+        measured = self.orient({}, [], concept, None, budget=20000, target="-,-,0.6", masks=masks,
+                               pivot="bottom_center",
+                               extra=("--part", "lid", "hinge", "lid.png", "--anchor", "lid=back-bottom",
+                                      "--parts-json", "parts.json", "--motion", "lid=x:-100..0"),
+                               fixture_script=deep, files={"parts.json": parts_json})
+        lid = measured["objects"]["lid"]
+        self.assertAlmostEqual(lid["max"][2] - lid["min"][2], 0.12, delta=0.01)  # level: 0.1 at 1.2
+        self.assertAlmostEqual(lid["max"][1] - lid["min"][1], 0.6, delta=0.01)
+        self.assertAlmostEqual(lid["max"][0] - lid["min"][0], 0.72, delta=0.01)
+
     def test_tag_parts_matches_gltf_names_after_blender_renames_a_second_import(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
