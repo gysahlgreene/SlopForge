@@ -1057,6 +1057,20 @@ class SlopForgeTests(unittest.TestCase):
         self.assertIn("WARN Blender", output.getvalue())
         self.assertNotIn("PASS Blender", output.getvalue())
 
+    def test_doctor_warns_when_a_project_type_lacks_settings_its_template_now_has(self):
+        # init copies the templates once, so a project keeps its type files: a prop type copied before the template
+        # opted into concept_colour_transfer left the transfer off in six live chest runs (OPEN2-OPEN6, 2026-10-26).
+        (self.root / "ai/asset_types").mkdir(parents=True, exist_ok=True)
+        (self.root / "ai/asset_types/prop.yaml").write_text("name: prop\npipeline: model\noutput_folder: Models\n"
+                                                            "face_budget: prop_faces\n")
+        output = StringIO()
+        with redirect_stdout(output), patch("slopforge.doctor.ComfyUIClient.health", side_effect=OSError("offline")):
+            run_doctor(self.root)
+        line = next((line for line in output.getvalue().splitlines() if "Asset type prop" in line), "")
+        self.assertTrue(line.startswith("WARN"), output.getvalue())
+        self.assertIn("concept_colour_transfer", line)
+        self.assertNotIn("face_budget", line)
+
     def test_image_validation_measures_dimensions_format_and_alpha(self):
         path = self.root / "sample.png"
         Image.new("RGBA", (8, 6), (1, 2, 3, 128)).save(path)
