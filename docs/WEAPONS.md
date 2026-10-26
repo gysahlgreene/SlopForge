@@ -88,7 +88,10 @@ Declare each moving part, and the grip, as `--part`. The final Blender pass spli
   - `hinge`: rotates about an axis, with its range in degrees; a hinge may add `@face[-face]` (front, back, left,
     right, top, bottom) to pivot on that edge of its own bounds, e.g. `lid=hinge:x:-100..0@back-bottom`. Without it the
     pivot is the part's contact with the body (a trigger's root) or its box centre when it touches nothing;
-  - `slide`: moves along an axis, with its range in metres.
+  - `slide`: moves along an axis, with its range in metres, so the model needs its real size: `generate` and
+    `approve` refuse a slide without `--target-size` (`--target-size=-,0.22,-` for a pistol 0.22 m long; Y is a
+    weapon's length). Unsized, a model is one unit long: HP13's 30 mm slide travel was 3% of its length, where a
+    real 1911's is about 14%.
 - **Axes:** in the weapon's frame as Unity shows it: x right, y up, z forward along the blade or barrel (a prop:
   z towards its concept's camera). A range's sign is Unity's: a positive turn about x takes +y towards +z, about
   y +z towards +x, about z +x towards +y. So a trigger hanging below its pivot pulls back with `0..20`, and a lid

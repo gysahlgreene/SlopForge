@@ -566,6 +566,13 @@ avoid: [environment]
         with self.assertRaisesRegex(ValueError, "open picture"):  # an open picture is not opened again
             self._open_candidates(number=3)
 
+    def test_an_asset_with_a_slide_is_approved_only_at_its_real_size(self):
+        from slopforge.parts import parse_part_spec
+        self._concept_candidates()
+        self.record["parts"] = [parse_part_spec("drawer=slide:y:-0.2..0: the drawer")]
+        with self.assertRaisesRegex(ValueError, "--target-size"):
+            approve_model(self.root, self.config, self.asset_type, self.style, self.manifest, "prop:relay", 2)
+
     def test_an_open_picture_is_approved_only_with_the_concept_it_opens(self):
         self._concept_candidates()
         self.record["parts"] = [dict(self.LID)]

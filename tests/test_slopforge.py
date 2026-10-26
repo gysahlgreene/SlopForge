@@ -728,6 +728,15 @@ class SlopForgeTests(unittest.TestCase):
                                        "--aspect", "portrait"]), 1)
         self.assertIn("--aspect applies to 3D asset types", error.getvalue())
 
+    def test_generate_refuses_a_slide_without_the_models_real_size(self):
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()), redirect_stderr(StringIO()) as error:
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "box", "A sliding box",
+                                       "--part", "drawer=slide:y:-0.2..0"]), 1)
+            self.assertIn("--target-size", error.getvalue())
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "box", "A sliding box",
+                                       "--part", "drawer=slide:y:-0.2..0", "--target-size=-,0.5,-"]), 0)
+
     def test_generate_parses_a_shape_guide_for_3d_types_only(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate, \
                 redirect_stdout(StringIO()):

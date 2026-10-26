@@ -170,3 +170,13 @@ def overlay(cutout, out_dir, parts):
                 inside = np.asarray(mask.convert("L")) > 127
             pixels[inside] = pixels[inside] * 0.35 + np.array(colours[index % len(colours)]) * 0.65
     Image.fromarray(pixels.round().astype(np.uint8)).save(Path(out_dir) / "parts_overlay.png")
+
+
+def check_slide_scale(parts, target_size):
+    """A slide's travel is in metres, so its model needs a real size: without one it is one unit long, and HP13's
+    pistol slide moved 30 mm, 3% of its length, where a real 1911's moves about 14% (2026-10-26)."""
+    slides = [part["name"] for part in parts if part["kind"] == "slide"]
+    if slides and not target_size:
+        raise ValueError(f"The slide part(s) {', '.join(slides)} travel in metres, so the model needs its real size: "
+                         "--target-size, such as --target-size=-,0.22,- for a weapon 0.22 m long (Y is a weapon's "
+                         "length, tip towards -Y)")

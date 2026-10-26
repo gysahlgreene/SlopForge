@@ -16,7 +16,7 @@ from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
 from .open_state import generate_open_candidates
-from .parts import parse_part_box, parse_part_spec, set_part_boxes, validate_parts
+from .parts import check_slide_scale, parse_part_box, parse_part_spec, set_part_boxes, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
@@ -1004,6 +1004,7 @@ def _run(args):
     if pivot == "grip" and not any(part["kind"] == "grip" for part in parts):
         raise ValueError(f"{asset_type} assets are held at their grip: declare it with "
                          "--part 'grip=grip: <how the concept draws it>'")
+    check_slide_scale(parts, target_size)
     if target_size:
         record["target_size"] = target_size
     if pivot:

@@ -42,7 +42,8 @@ gives a different mesh for the same seed number from run to run. This is one bri
 
 **Known limits:**
 - **Travel is in model units.** Weapons have no real-world size, so this pistol is one unit long and its 30 mm
-  slide travel is 3% of its length. A real 1911's is about 14%.
+  slide travel is 3% of its length. A real 1911's is about 14%. Since fixed for new runs: a slide now needs
+  the model's real size (`--target-size`).
 - **Small flakes** remain under the ejection port with the slide back.
 - **Grip texture varies by seed:** some seeds carry the concept's checkering, this one is plain wood.
 - **The chroma check is unreliable on a black weapon:** its concept's median chroma is near grey.

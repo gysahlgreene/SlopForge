@@ -34,7 +34,7 @@ from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
-from ..parts import check_part_masks, make_part_masks, part_settings
+from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
                           apply_part_penetration, apply_visible_backfaces,
@@ -2135,6 +2135,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                          f"{candidate['open_of']} with --open {number}")
     if open_number is not None:  # checked before the run starts; resume finds it in the execution's identity
         open_choice(asset, number, open_number)
+    check_slide_scale(asset.get("parts") or [], asset.get("target_size"))
     candidate_quality = (candidate.get("generator") or {}).get("quality", {}).get("tier")
     config = select_quality_tier(config, quality_tier or candidate_quality or
                                  config["asset_pipeline"].get("selected_quality_tier", "normal"))
