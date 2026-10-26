@@ -358,6 +358,38 @@ avoid: [environment]
                             for parent in output["derived_from"]))
         self.assertTrue(candidate_hashes)
 
+    def test_a_weapon_with_moving_parts_gets_a_prefab_and_fails_on_a_motion_check(self):
+        # W9: publication builds the prefab and clips for a weapon's hinge and slide parts; a failed motion check
+        # fails the publication, which rolls back.
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        from slopforge.failures import StageFailure
+        from slopforge.pipelines.model import approve_texture
+        self.manifest["assets"]["prop:relay"]["parts"] = [
+            {"name": "grip", "kind": "grip", "text": "the grip"},
+            {"name": "trigger", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0, "text": "the trigger"}]
+        calls = []
+        for errors, outcome in (([], "succeeded"), (["hinge trigger pivot drifts 0.0100 m"], "failed")):
+            def prefab(root, name, fbx, parts, **options):
+                calls.append((name, [part["name"] for part in parts], options["prefab"].name, options["clip_folder"].name))
+                return {"errors": errors, "prefab": "Assets/relay.prefab", "controller": "Assets/relay.controller",
+                        "motions": [{"part": "trigger", "angle": -20.0}], "tip_forward": True, "root_inside": True}
+            with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                    patch("slopforge.pipelines.model.build_unity_material", side_effect=fake_unity_material), \
+                    patch("slopforge.pipelines.model.build_weapon_prefab", side_effect=prefab):
+                if outcome == "succeeded":
+                    validation = approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
+                    self.assertEqual(validation["measured"]["weapon_motion"]["motions"][0]["angle"], -20.0)
+                else:
+                    with self.assertRaisesRegex(StageFailure, "pivot drifts"):
+                        approve_texture(self.root, self.config, self.manifest, "prop:relay", 1, force=True)
+            record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+            stage = next(item for item in record["executions"][-1]["stages"] if item["name"] == "final_publication")
+            self.assertEqual(stage["status"], outcome)
+        self.assertEqual(calls, [("relay", ["trigger"], "relay.prefab", "Animations")] * 2)  # the grip is not a clip
+
     def test_same_bytes_at_different_candidate_and_final_paths_keep_same_hash(self):
         self._concept_candidates()
         self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (

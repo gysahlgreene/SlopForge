@@ -28,6 +28,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               make_metallic_gloss, match_concept_colours, match_metal_lightness, unity_cli,
                               zero_metallic)
 from ..emitters import concept_emitter_mask, project_to_texture
+from ..unity_weapon import build_weapon_prefab
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
@@ -1098,7 +1099,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
                 shutil.copy2(tiles[key], paths[key])
         process_model(root, config, root / asset["source"]["glb"], paths["fbx"], paths["blend"], textures,
-                      face_budget, surface_source=paths["surface"],
+                      _reduction_budget(face_budget, asset), surface_source=paths["surface"],
                       preview_dir=paths["preview_front"].parent,
                       material_scale=float(pipeline.get("material_scale", 3.0)),
                       stage_mesh=mesh_path,
@@ -1412,6 +1413,15 @@ def _face_budget(pipeline, asset_type, asset, default=30000):
     faces (2026-10-22 kit: a 3 x 3 m floor used 59,988)."""
     budget = asset.get("face_budget") or pipeline.get("model_budgets", {}).get(asset_type.get("face_budget"), default)
     return int(budget) if budget is not None else None
+
+
+def _reduction_budget(face_budget, asset):
+    """The face count to reduce a mesh to. The final pass cuts a weapon's moving parts from the reduced mesh, and
+    the cut adds faces (the bisect's splits, the caps, a barrel): 1,901 on a 30,000-face pistol (2026-10-24 run B2),
+    so the reduction leaves room for them."""
+    # shortcut: a fixed 10% margin, measured on one pistol; make it a per-type setting if another weapon overruns
+    cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
+    return int(face_budget * 0.9) if cut_later else face_budget
 
 
 def _fit_texture_size(maps, size):
@@ -1884,6 +1894,21 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
+            if moving:
+                # A weapon with moving parts also gets a prefab, a clip per part and a motion check (unity_weapon).
+                motion = build_weapon_prefab(root, asset["name"], paths["fbx"], moving,
+                                             prefab=paths["directory"] / f"{asset['name']}.prefab",
+                                             clip_folder=paths["directory"] / "Animations",
+                                             render=paths["preview_front"].parent / f"{asset['name']}_motion.png")
+                if motion["errors"]:
+                    raise StageFailure("processing_validation",
+                                       "weapon motion checks failed: " + "; ".join(motion["errors"]),
+                                       operation="weapon_motion",
+                                       remedy="check the part's declared axis and range against the published model")
+                validation["measured"]["weapon_motion"] = {key: motion[key] for key in
+                                                           ("prefab", "controller", "motions", "tip_forward",
+                                                            "root_inside")}
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])
@@ -2430,7 +2455,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                 if mesh_outputs is None:
                     config["_journal_context"] = journal_context
                     if workflow:
-                        budget = _face_budget(pipeline, asset_type, asset)
+                        budget = _reduction_budget(_face_budget(pipeline, asset_type, asset), asset)
                         views = {item["type"].removeprefix("image.view."): root / item["path"]
                                  for item in conditioning_refs if item["type"].startswith("image.view.")}
                         generate_model(root, config, paths["cutout"], asset["name"], source_mesh, model_metadata,

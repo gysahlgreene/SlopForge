@@ -22,12 +22,17 @@ At approval each part was given a box on the concept. SAM 2.1 masked the slide (
 the single-view Pixal3D graph has no prepare step between shape and texture:
 1. Vertices are welded by position: the textured GLB splits them along UV seams, and every seam would read as a cut.
 2. A face belongs to the part when most of its corners project onto the mask from the concept's fitted view. Each face
-   then takes the majority of itself and its neighbours, four times, which removes spikes along the cut.
-3. Any island of either side that touches the cut joins the side around it.
-4. The seam edges are split, each side's opening is closed with flat caps, and each cap takes one texel of the
+   then takes the majority of itself and its neighbours, four times, which removes spikes along the cut. A hinge's
+   mask is first widened by 1% of the concept, since SAM masked a trigger's blade alone.
+3. Any strip of either side that lies along the cut joins the side around it.
+4. Where the seam is flat (within 5% of its extent), the surface is bisected on the fitted plane and the faces near
+   the seam take the side of the plane they lie on, so the cut is one straight line. A small curved seam, like a
+   trigger's, keeps its masked outline.
+5. The seam edges are split, each side's opening is closed with flat caps, and each cap takes one texel of the
    surface beside it: the texel nearest the median colour along the cut.
-5. The part becomes a child of the body. A slide pivots at its bounding box centre; a hinge at the centre of its cut.
-6. The FBX exports the body and its children, with each part's kind as a custom property. Inspection records
+6. Under a slide, a barrel cylinder is added as a static child of the body, so the slide drawn back shows a barrel.
+7. The part becomes a child of the body. A slide pivots at its bounding box centre; a hinge at the centre of its cut.
+8. The FBX exports the body and its children, with each part's kind as a custom property. Inspection records
    `parts` (name, kind, faces, parent, pivot) and leaves them out of the component count.
 
 **Two faults found on the way:**
@@ -37,7 +42,22 @@ the single-view Pixal3D graph has no prepare step between shape and texture:
   ![The body after the first cut, with slivers along the slide line](slivers.jpg)
 
 - **Pale caps.** A cap took one boundary texel, which on this pistol was a pale outlier, so the cuts showed as white
-  triangles. Step 4's median choice fixed it.
+  triangles. Step 5's median choice fixed it.
+
+**The owner's review** of the first result ("not good enough yet") named three faults: flat slabs appearing at full
+travel, a lumpy slide rear and hammer, and a trigger that barely read. The second pass (M4, cut offline from M3's
+mesh and maps) addressed the first and third:
+- **Straight cut and a barrel** (steps 4 and 6). The frame's top is now one flat line, and a barrel shows when the
+  slide goes back instead of the frame's cut face. The magazine, an interior plate joined to the body only through
+  inner surfaces, had followed the slide out of the grip; only strips along the cut flip sides now, and it stays
+  inside the body as its own piece.
+- **A whole trigger** (step 2's widening): 288 faces against 120, and a visible pull.
+- **Not fixed:** a thin strip of the slide's underside at the muzzle stays with the frame, so a small slab shows
+  under the barrel at full travel; labelling in-plane faces by their direction opened the cut and was reverted. The
+  slide's rear and hammer are the generator's small-detail limit.
+- **A fault of my own along the way:** cutting offline, I passed the candidate's base colour map as the final pass's
+  `--surface-source`, which bakes that swatch over the base colour path, and overwrote M3's maps. They were restored
+  from the published copies, and the pass now refuses a surface source that is the map it bakes into.
 
 **Live runs** (commit of each in `private/weapons-pipeline-2026-10-24/M*/commit.txt`):
 
@@ -47,18 +67,56 @@ the single-view Pixal3D graph has no prepare step between shape and texture:
 | M2 (islands fixed) | 2 | seed 1's trigger was too small to separate (`part_missing`, retried); seed 2 passed, body in one piece |
 | M3 (caps fixed) | 2 | the same: one retry on a missing trigger, then passed; slide 14,834 faces, trigger 120 |
 
-![The M3 pistol at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
+![The M4 cut at rest and with the slide back 3 cm and the trigger pulled 20°](rest_and_moved.jpg)
 
-The M3 FBX imports with the slide and trigger as children of the body at the recorded pivots, and the project's
-Unity preview imported it.
+**Third pass: the overall look.** Two levers were tried for the owner's fourth fault, through `approve` on the H100:
+- **Multi-view conditioning** (run M5, the `h100_multiview` Pixal3D graph): the view generator drew a side profile
+  for every requested view, so its mirrored-silhouette gate rejected all three attempts (overlap 0.21–0.68 against
+  0.9). Not usable for a side-profile weapon as it stands.
+
+  ![The four generated views, all side profiles](multiview_views.jpg)
+
+- **A bolder concept** (runs B1–B4: the same brief asking for a large hammer, deep serrations and coarse checkering):
+  flatter sides and a cleaner slide. Its first cut (B1) took the frame's dust cover with the slide, since the slide
+  box reached below the slide line; a tighter box (B2) gave the cleanest cut yet (8 open edges against B1's 355),
+  but the candidate failed the face budget: reduced to 28,432 faces, 30,333 after the cut. The cut adds faces
+  (the bisect's splits, the caps, the barrel), after the reduction. **Fix:** a mesh with moving parts is reduced to
+  90% of its budget (`_reduction_budget`), at both reduction sites: the worker-side pass for TRELLIS.2 (B3 showed
+  the first Blender pass alone was not it) and the first Blender pass for native meshes. B4 then passed on its
+  first seed: 25,648 faces reduced, every cap closed, body in one piece, slide 8,431 faces, trigger 122.
+
+  ![The current pistol and the bold one, at rest and moved](current_vs_bold.jpg)
+
+  ![The bold pistol's slide travelling back and its trigger pulling](bold_pistol_motion.gif)
+
+  Still the generator's: the lumpy slide rear and hammer, the small trigger (122 faces), and a mirror finish on
+  steel the concept draws matte (the open metal-finish decision).
+
+## In Unity
+
+Publishing the M3 pistol (`approve-texture`) built its prefab, an animator with one state per part, and one clip per
+part, then sampled each clip at rest and at its limit:
+
+| Part | Declared | Measured | Pivot drift |
+| --- | --- | --- | --- |
+| slide | −0.03 m along z | −0.0300 m | 0 |
+| trigger | −20° about x | −20.00° | 0 |
+
+The weapon points along +Z from the root, and the root (the grip) lies inside its bounds.
+
+![Unity: the pistol at rest, with the slide back, and with the trigger pulled](unity_motion.jpg)
+
+The travel check caught a real fault on its first run: Unity imports the FBX root scaled by 100 under its 0.01 file
+scale, so a slide clip written in the part's local space moved it 3 m. The travel now goes through the parent's
+scale. An opt-in test (`tests/test_unity_weapon.py`) builds a slab with a slide and a hinged lever in Blender,
+exports it as the final pass does, and checks the same numbers in Unity.
 
 **Limits:**
 - **Masks project straight through** the concept's view, so a part must be separate in that view. The frame under
   the slide is only kept because it shows below the slide line; a part hidden behind another cannot be cut.
-- **Caps are flat.** Where the slide comes off, the frame's top is a flat slab and the slide is hollow, since the
-  generator made one closed surface. At rest nothing shows; at full travel the frame's cap shows at the muzzle.
+- **Caps are flat and the parts hollow,** since the generator made one closed surface. The barrel hides most of the
+  frame's cap at full travel; a strip of the slide's underside still shows under it at the muzzle.
 - **A small part can fail to separate.** The trigger is 0.6% of the concept, and one seed in two left too few faces
   under its mask. The pipeline retries the next seed (`part_missing`).
 - **One concept, one weapon.** Three runs of the same pistol concept; no other weapon with moving parts yet.
-- **Not checked:** motion in Unity. The parts reach it as child objects with pivots, but there is no prefab, no clip
-  and no playback check yet (step W9).
+- **Editor sampling only.** The clips are sampled in the editor for the checks and the strip; Play mode is not run.

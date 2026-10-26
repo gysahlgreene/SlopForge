@@ -973,5 +973,31 @@ Weapon moving parts (2026-10-24, M3 step W8, [evidence](docs/media/weapon-moving
   closed, parented, pivoted by kind, in the FBX with their kinds, and the body stays one piece; the material stage
   passes hinge and slide masks for held weapons only, and a part that does not come out fails `part_missing`;
   `make verify`.
-- **Not verified:** motion in Unity (no prefab, clip or playback check: W9); any weapon other than this pistol; a part
-  hidden behind another in the concept's view cannot be cut.
+- **Owner review (2026-10-24):** "not good enough yet": flat slabs at full travel, a lumpy slide rear and hammer, a
+  trigger that barely read. Second pass: a flat seam is bisected on its fitted plane; only strips along the cut flip
+  sides (the magazine plate had followed the slide out); a barrel cylinder under a slide, a static child; a hinge's
+  mask widened by 1% (trigger 288 faces, from 120). A strip of the slide's underside at the muzzle still stays with
+  the frame. Cutting offline, the final pass was given a candidate's base colour as `--surface-source` and baked
+  over it; restored from the published copies, and the pass now refuses that.
+- **Third pass (overall look):** multi-view conditioning draws a side profile for every view of a pistol and fails
+  its own gate (not usable); a bolder concept gives flatter sides and a cleaner cut. Its run exposed a budget bug:
+  the cut adds faces after the reduction (30,333 from 28,432 on a 30,000 budget), so a mesh with moving parts is
+  now reduced to 90% of its budget at both reduction sites (`_reduction_budget`; unit test and first-pass test).
+  The rerun passed on its first seed with every cap closed. Still the generator's: the lumpy hammer, the small
+  trigger, the mirror finish.
+- **Not verified:** any weapon other than this pistol; a part hidden behind another in the concept's view cannot be
+  cut; the second pass ran offline on M3's mesh and maps, not through `approve`; the 10% margin is measured on one
+  pistol.
+
+Weapon motion in Unity (2026-10-24, M3 step W9, [evidence](docs/media/weapon-moving-parts-2026-10/README.md#in-unity)).
+- **Change:** `approve-texture` on a weapon with hinge or slide parts builds `<name>.prefab` (an identity root at the
+  grip over the imported model, with an Animator) and one clip per part (rest, limit, rest), then samples each clip
+  and checks it: hinge pivot drift under 1 mm and angle within 0.5°; slide travel within 1 mm along its axis; tip
+  along +Z; root inside the bounds. A failed check fails the publication (`weapon_motion`). The checks and a strip
+  are recorded.
+- **Live:** the M3 pistol published with its slide at −0.0300 m and trigger at −20.00°, no drift.
+- **Found by the check:** the imported FBX root is scaled 100 under Unity's 0.01 file scale, so a slide clip written
+  in local units moved 3 m; travel now goes through the parent's scale.
+- **Tests:** an opt-in Unity test (a slab with a slide and a hinged lever from Blender, checked in Unity); the request
+  built from the declared parts; publication records the checks and fails on an error; `make verify`.
+- **Not verified:** Play mode; any weapon other than this pistol.

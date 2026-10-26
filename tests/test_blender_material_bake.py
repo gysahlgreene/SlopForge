@@ -12,6 +12,13 @@ from PIL import Image, ImageDraw, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _swatch(basecolor):
+    """A surface swatch beside a fixture's base colour map: the pass refuses to bake the swatch over the map itself."""
+    swatch = Path(basecolor).with_name("surface.png")
+    shutil.copy(basecolor, swatch)
+    return swatch
 BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
 
 
@@ -349,7 +356,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                            check=True, capture_output=True, text=True)
             subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
                             str(glb), str(fbx), str(blend), *map(str, maps), "--face-budget", "1000",
-                            "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                            "--surface-source", str(_swatch(maps[0])), "--preview-dir", str(previews)],
                            check=True, capture_output=True, text=True)
             front = Image.open(previews / "slab_front.png").convert("RGB")
             background = front.getpixel((0, 0))
@@ -407,7 +414,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                            check=True, capture_output=True, text=True)
             subprocess.run([BLENDER, "--background", "--python", str(ROOT / "blender/prepare_model.py"), "--",
                             str(glb), str(root / "box.fbx"), str(root / "box.blend"), *map(str, maps),
-                            "--face-budget", "1000", "--surface-source", str(maps[0]), "--preview-dir", str(previews)],
+                            "--face-budget", "1000", "--surface-source", str(_swatch(maps[0])), "--preview-dir", str(previews)],
                            check=True, capture_output=True, text=True)
             image = Image.open(previews / "box_three_quarter.png").convert("RGB")
             background = image.getpixel((0, 0))
@@ -459,7 +466,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                            check=True, capture_output=True, text=True)
             subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                             str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "wall.fbx"), str(blend),
-                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(maps[0]),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(_swatch(maps[0])),
                             "--target-size", "3,-,3"], check=True, capture_output=True, text=True)
             result = root / "dims.json"
             probe = root / "probe.py"
@@ -504,7 +511,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
                 blend = root / f"{pivot}.blend"
                 subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                                 str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / f"{pivot}.fbx"),
-                                str(blend), *map(str, maps), "--face-budget", "5000", "--surface-source", str(maps[0]),
+                                str(blend), *map(str, maps), "--face-budget", "5000", "--surface-source", str(_swatch(maps[0])),
                                 "--target-size", "3,3,3", "--pivot", pivot], check=True, capture_output=True, text=True)
                 report = root / f"{pivot}.json"
                 subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
@@ -549,7 +556,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             blend, report = root / "corner.blend", root / "corner.json"
             subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                             str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "corner.fbx"), str(blend),
-                            *map(str, maps), "--face-budget", "20000", "--surface-source", str(maps[0]),
+                            *map(str, maps), "--face-budget", "20000", "--surface-source", str(_swatch(maps[0])),
                             "--target-size", "3,3,3", "--arm-thickness", "0.75"], check=True, capture_output=True, text=True)
             subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                             str(ROOT / "blender/inspect_model.py"), "--", str(blend), str(report), "20000", "--real-scale"],
@@ -681,6 +688,32 @@ def _boxes_seen_from_front(boxes, turns, size, scale, centre):
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderSurfaceSourceGuardTests(unittest.TestCase):
+    def test_the_surface_source_may_not_be_the_base_colour_it_bakes_into(self):
+        # Given a candidate's base colour map as the swatch, the pass tiled it over itself (2026-10-24).
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            script = root / "fixture.py"
+            script.write_text("import bpy, sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\n"
+                              "bpy.ops.mesh.primitive_cube_add(size=1)\n"
+                              "bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')\n")
+            subprocess.run([BLENDER, "--background", "--python", str(script), "--", str(root / "cube.glb")],
+                           check=True, capture_output=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(root / "cube.glb"),
+                                     str(root / "out.fbx"), str(root / "out.blend"), *map(str, maps),
+                                     "--face-budget", "1000", "--surface-source", str(maps[0])],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("must not be the base colour map", result.stdout + result.stderr)
+            with Image.open(maps[0]) as image:
+                self.assertEqual(image.getpixel((0, 0)), (128, 128, 128))  # untouched
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderWeaponOrientationTests(unittest.TestCase):
     def orient(self, parts, turns, concept, grip, cuts=0, budget=1000, target="-,1.1,-", masks=None, extra=()):
         """Box parts joined into one mesh (subdivided by cuts) and turned, then the final pass with --target-size and
@@ -722,7 +755,7 @@ bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
             prepared = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
                                        str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "weapon.fbx"),
                                        str(blend), *map(str, maps), "--face-budget", str(budget), "--surface-source",
-                                       str(maps[0]), "--target-size", target, "--pivot", "grip", "--concept",
+                                       str(_swatch(maps[0])), "--target-size", target, "--pivot", "grip", "--concept",
                                        str(root / "concept.png"), "--grip-mask", str(root / "grip.png"),
                                        *[str(root / value) if value.endswith(".png") else value for value in extra]],
                                       capture_output=True, text=True)
@@ -737,7 +770,9 @@ ys, zs = [v.co.y for v in obj.data.vertices], [v.co.z for v in obj.data.vertices
 def record(o):
     points = [o.matrix_world @ v.co for v in o.data.vertices]
     open_edges = sum(1 for e in o.data.edges if sum(e.key in p.edge_keys for p in o.data.polygons) == 1)
+    cap = [(o.matrix_world @ o.data.vertices[i].co).z for p in o.data.polygons if not p.use_smooth for i in p.vertices]
     return {"parent": o.parent.name if o.parent else None, "origin": list(o.matrix_world.translation),
+            "cap_spread": (max(cap) - min(cap)) if cap else None,
             "min": [min(p[i] for p in points) for i in range(3)] if points else None,
             "max": [max(p[i] for p in points) for i in range(3)] if points else None,
             "faces": len(o.data.polygons), "open_edges": open_edges, "kind": o.get("slopforge_part")}
@@ -807,12 +842,15 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         # A one-vertex-wide gap across the slide mask: a strip of body faces inside the slide, as the ragged masks of
         # a live pistol left slivers along the cut (2026-10-24: 12-19 body pieces). Islands join the side around them.
         ImageDraw.Draw(masks["slide"]).rectangle((100, 75, 412, 81), fill=0)  # the vertex row at z 0.125
+        # A jagged bottom edge on the slide mask, as SAM draws one: the cut is snapped to its fitted plane.
+        for x in range(60, 452, 20):
+            ImageDraw.Draw(masks["slide"]).rectangle((x, 94, x + 10, 104), fill=0)
         measured = self.orient(body, [], concept, masks["grip"], cuts=15, budget=20000, target="-,1.0,-",
                                masks={"slide": masks["slide"], "lever": masks["lever"]},
                                extra=("--part", "slide", "slide", "slide.png", "--part", "lever", "hinge", "lever.png"))
         objects, body_name = measured["objects"], measured["body"]
-        self.assertEqual(sorted(objects), sorted([body_name, "slide", "lever"]))
-        slide, lever, rest = objects["slide"], objects["lever"], objects[body_name]
+        self.assertEqual(sorted(objects), sorted([body_name, "slide", "slide_barrel", "lever"]))
+        slide, lever, rest, barrel = objects["slide"], objects["lever"], objects[body_name], objects["slide_barrel"]
         self.assertEqual((slide["parent"], lever["parent"]), (body_name, body_name))
         self.assertEqual((slide["kind"], lever["kind"]), ("slide", "hinge"))
         for name, record in objects.items():
@@ -821,19 +859,25 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         self.assertAlmostEqual(lever["min"][2], 0.0, delta=0.01)
         self.assertAlmostEqual(lever["max"][2], 0.1, delta=0.03)
         self.assertAlmostEqual(slide["min"][2], 0.275, delta=0.03)
-        self.assertAlmostEqual(rest["min"][2], lever["max"][2], delta=0.001)
-        self.assertAlmostEqual(rest["max"][2], slide["min"][2], delta=0.001)
+        # The cuts meet on their fitted planes, which the jagged mask tilts by a fraction of a degree over the length.
+        self.assertAlmostEqual(rest["min"][2], lever["max"][2], delta=0.005)
+        self.assertAlmostEqual(barrel["max"][2] - slide["min"][2], 0.8 * (slide["max"][2] - slide["min"][2]), delta=0.012)
+        self.assertAlmostEqual(rest["max"][2], slide["min"][2], delta=0.005)
+        self.assertLess(slide["cap_spread"], 0.005)  # the cut is one flat plane despite the jagged mask (was 0.1 deep)
         centre = [(low + high) / 2 for low, high in zip(slide["min"], slide["max"])]
         for axis in range(3):
             self.assertAlmostEqual(slide["origin"][axis], centre[axis], delta=1e-4)  # a slide pivots at its centre
         self.assertAlmostEqual(lever["origin"][2], lever["max"][2], delta=1e-4)  # a hinge pivots on its cut
+        # A barrel, its own static child, fills the slide's cavity: a cylinder half way up the slide's height with
+        # radius 0.3 of it, so its top is 0.8 of that height above the cut.
+        self.assertEqual((barrel["parent"], barrel["kind"]), (body_name, "barrel"))
         inspection = measured["inspection"]
         self.assertEqual(sorted((part["name"], part["kind"], part["parent"]) for part in inspection["parts"]),
-                         [("lever", "hinge", body_name), ("slide", "slide", body_name)])
+                         [("lever", "hinge", body_name), ("slide", "slide", body_name), ("slide_barrel", "barrel", body_name)])
         self.assertEqual(inspection["component_count"], 1)  # the parts are not stray pieces of the body
         exported = measured["fbx_inspection"]  # the FBX keeps the hierarchy, the pivots and each part's kind
         self.assertEqual(sorted((part["name"], part["kind"]) for part in exported["parts"]),
-                         [("lever", "hinge"), ("slide", "slide")])
+                         [("lever", "hinge"), ("slide", "slide"), ("slide_barrel", "barrel")])
         for part in exported["parts"]:
             for axis in range(3):
                 self.assertAlmostEqual(part["pivot"][axis], objects[part["name"]]["origin"][axis], delta=1e-3)

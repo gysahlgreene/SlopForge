@@ -241,13 +241,19 @@ def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
     # Islands: a strip of either side enclosed by the other, left where a ragged mask crossed the surface (a live
     # pistol body came out in 12-19 pieces). Any piece of a side that is not its largest, and touches the cut, joins
     # the side around it; pre-existing separate pieces touch no cut and stay.
+    # Only strips along the cut flip, pieces whose every face lies within two rings of the other side: a pistol's
+    # magazine, an interior plate of 421 faces joined to the body only through inner surfaces, had followed the
+    # slide out of the grip (2026-10-24).
     for _ in range(3):
         moved = False
         for side in (True, False):
             faces = [face for face in bm.faces if (face in part) == side]
-            pieces = _face_pieces(faces)
-            for piece in pieces[1:]:
-                if any((other in part) != side for face in piece for edge in face.edges for other in edge.link_faces):
+            border = {vertex for face in faces for vertex in face.verts
+                      if any((other in part) != side for other in vertex.link_faces)}
+            for _ring in range(2):
+                border |= {other for vertex in border for edge in vertex.link_edges for other in edge.verts}
+            for piece in _face_pieces(faces)[1:]:
+                if all(any(vertex in border for vertex in face.verts) for face in piece):
                     part = (part - piece) if side else (part | piece)
                     moved = True
         if not moved:
@@ -257,6 +263,31 @@ def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
         return None
     seam = [edge for edge in bm.edges
             if any(face in part for face in edge.link_faces) and not all(face in part for face in edge.link_faces)]
+    plane = _seam_plane(seam, max(obj.dimensions))
+    if plane is not None:
+        # Cut the surface on the fitted plane near the seam, and give each face there the side of the plane it lies
+        # on, so the cut is one straight line and its caps are flat: a ragged mask leaves teeth of either side
+        # across it, and the muzzle face's body faces had carried the frame's cap to the muzzle (2026-10-24).
+        for face in bm.faces:
+            face[label] = int(face in part)
+        near = {vertex for edge in seam for vertex in edge.verts}
+        for _ in range(2):
+            near |= {other for vertex in near for edge in vertex.link_edges for other in edge.verts}
+        faces = [face for face in bm.faces if any(vertex in near for vertex in face.verts)]
+        centre, normal = plane
+        inward = 1.0 if sum(_side(face, centre, normal) for face in part) >= 0 else -1.0
+        geometry = list(near) + [edge for face in faces for edge in face.edges] + faces
+        bmesh.ops.bisect_plane(bm, geom=list(dict.fromkeys(geometry)), dist=1e-6, plane_co=centre, plane_no=normal)
+        bm.verts.ensure_lookup_table()
+        near = {vertex for vertex in near if vertex.is_valid}
+        for _ in range(2):  # the new vertices on the plane, and the teeth beyond them
+            near |= {other for vertex in near for edge in vertex.link_edges for other in edge.verts}
+        for face in bm.faces:
+            if any(vertex in near for vertex in face.verts):
+                face[label] = int(_side(face.calc_center_median(), centre, normal) * inward > 0)
+        part = {face for face in bm.faces if face[label]}
+        seam = [edge for edge in bm.edges
+                if any(face in part for face in edge.link_faces) and not all(face in part for face in edge.link_faces)]
     for edge in seam:
         for vertex in edge.verts:
             vertex[cut_layer] = 1
@@ -271,30 +302,114 @@ def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
         _cap_cut(target, basecolor)
         target.verts.layers.int.remove(target.verts.layers.int["slopforge_cut"])
         target.faces.layers.int.remove(target.faces.layers.int["slopforge_part"])
+    barrel = None
+    if kind == "slide" and plane is not None:
+        # shortcut: every slide gets a barrel; a slide that is not a gun's (a bolt handle) would get a spurious one.
+        barrel = _barrel_mesh(bm, piece, plane, name)
     bm.to_mesh(obj.data)
     obj.data.update()
     bm.free()
+    if barrel is not None:
+        _attach(obj, barrel, "barrel", sum((Vector(vertex.co) for vertex in barrel.vertices), Vector()) / len(barrel.vertices))
     mesh = bpy.data.meshes.new(name)
     piece.to_mesh(mesh)
     piece.free()
-    for material in obj.data.materials:
-        mesh.materials.append(material)
-    child = bpy.data.objects.new(name, mesh)
-    for collection in obj.users_collection:
-        collection.objects.link(child)
-    child.parent = obj
-    child.matrix_parent_inverse = Matrix.Identity(4)
     if kind == "hinge":
         pivot = sum(cut, Vector()) / len(cut) if cut else Vector()
     else:
         low = Vector([min(vertex.co[axis] for vertex in mesh.vertices) for axis in range(3)])
         high = Vector([max(vertex.co[axis] for vertex in mesh.vertices) for axis in range(3)])
         pivot = (low + high) / 2
+    return _attach(obj, mesh, kind, pivot)
+
+
+def _attach(obj, mesh, kind, pivot):
+    """A child object of obj for the mesh, with obj's materials, its origin at pivot and its kind recorded."""
+    import bpy
+    from mathutils import Matrix
+    for material in obj.data.materials:
+        mesh.materials.append(material)
+    child = bpy.data.objects.new(mesh.name, mesh)
+    for collection in obj.users_collection:
+        collection.objects.link(child)
+    child.parent = obj
+    child.matrix_parent_inverse = Matrix.Identity(4)
     mesh.transform(Matrix.Translation(-pivot))
     mesh.update()
     child.location = pivot
     child["slopforge_part"] = kind
     return child
+
+
+def _side(point, centre, normal):
+    """Signed distance of a point (or a face's centre) from the plane."""
+    from mathutils import Vector
+    point = point if isinstance(point, Vector) else point.calc_center_median() if hasattr(point, "calc_center_median") else Vector(point)
+    return (point - Vector(centre)).dot(Vector(normal))
+
+
+def _seam_plane(seam, size, tolerance=0.05):
+    """The plane that fits the seam's vertices, as (point, normal), when they lie within tolerance of the seam's own
+    extent from it (RMS); None when the seam is not flat. A live pistol slide's seam fitted within 1% of its extent;
+    its trigger's, a small curved loop, only within 9%, and bisecting it left openings the caps could not close, so a
+    hinge like that keeps its ragged cut (2026-10-24)."""
+    import numpy as np
+    vertices = list({vertex for edge in seam for vertex in edge.verts})
+    if len(vertices) < 3:
+        return None
+    points = np.array([vertex.co for vertex in vertices])
+    centre = points.mean(0)
+    normal = np.linalg.eigh((points - centre).T @ (points - centre))[1][:, 0]
+    extent = float((points.max(0) - points.min(0)).max())
+    rms = float(np.sqrt((((points - centre) @ normal) ** 2).mean()))
+    print(f"Seam of {len(vertices)} vertices: extent {extent:.4f}, off-plane RMS {rms:.4f}"
+          f"{'' if rms <= tolerance * extent else ', not flat: cut as masked'}")
+    if rms > tolerance * extent:
+        return None
+    return centre, normal
+
+
+def _barrel_mesh(bm, slide, plane, name, radius_share=0.3):
+    """A cylinder along the weapon's length (-Y forward) in the slide's cavity, as a mesh named <name>_barrel: a
+    slide drawn back then shows a barrel rather than the frame's cut face. It runs between the slide's ends, half
+    way up the slide's height above the cut plane, with radius radius_share of that height, and takes the body's
+    cap colour. It becomes its own static child: a real barrel is a separate part, and a floating cylinder inside
+    the body would count as a stray piece."""
+    import bpy
+    import numpy as np
+    coordinates = np.array([vertex.co for vertex in slide.verts])
+    if not len(coordinates):
+        return None
+    centre, normal = plane
+    normal = np.array(normal) * np.sign(((coordinates - centre) @ normal).mean() or 1.0)  # towards the slide
+    height = float(((coordinates - centre) @ normal).max())
+    if height <= 0:
+        return None
+    axis = centre + normal * height / 2
+    low, high = coordinates.min(0), coordinates.max(0)
+    radius = radius_share * height
+    print(f"Barrel for {name}: height {height:.4f}, radius {radius:.4f}, axis {np.round(axis, 4).tolist()}")
+    uv = bm.loops.layers.uv.active
+    cap_uv = next((loop[uv].uv.copy() for face in bm.faces if not face.smooth for loop in face.loops), None) if uv else None
+    barrel = bmesh.new()
+    barrel_uv = barrel.loops.layers.uv.new(uv.name) if uv else None  # the body's layer name, which the material maps
+    ring = 24
+    angles = np.linspace(0, 2 * np.pi, ring, endpoint=False)
+    # Set back one radius from the slide's front: a muzzle's crown is recessed, and a flush barrel poked through.
+    front = [barrel.verts.new((axis[0] + radius * np.cos(t), low[1] + radius, axis[2] + radius * np.sin(t))) for t in angles]
+    back = [barrel.verts.new((axis[0] + radius * np.cos(t), high[1], axis[2] + radius * np.sin(t))) for t in angles]
+    sides = [barrel.faces.new((front[i], front[(i + 1) % ring], back[(i + 1) % ring], back[i])) for i in range(ring)]
+    ends = bmesh.ops.triangulate(barrel, faces=[barrel.faces.new(front[::-1]), barrel.faces.new(back)])["faces"]
+    bmesh.ops.recalc_face_normals(barrel, faces=sides + ends)
+    for face in sides + ends:
+        face.smooth = face not in ends
+        if cap_uv is not None:
+            for loop in face.loops:
+                loop[barrel_uv].uv = cap_uv
+    mesh = bpy.data.meshes.new(f"{name}_barrel")
+    barrel.to_mesh(mesh)
+    barrel.free()
+    return mesh
 
 
 def _face_pieces(faces):
@@ -322,8 +437,16 @@ def _cap_cut(bm, basecolor=None):
         return []
     before = set(bm.faces)
     bmesh.ops.holes_fill(bm, edges=edges, sides=0)
+    # A loop that is not a simple cycle (a vertex the plane grazed joins two loops) is left open by holes_fill; a
+    # triangle fill closes those too (a live pistol's bisected slide left 104 edges open, 2026-10-24).
+    left = [edge for edge in edges if edge.is_valid and edge.is_boundary]
+    if left:
+        bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=left)
     caps = [face for face in bm.faces if face not in before]
     caps = bmesh.ops.triangulate(bm, faces=caps)["faces"]
+    left = sum(edge.is_valid and edge.is_boundary for edge in edges)
+    if left:
+        print(f"Cut left {left} open edges that the caps could not close")
     uv = bm.loops.layers.uv.active
     if uv is not None and caps:
         cap_set = set(caps)

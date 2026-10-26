@@ -29,12 +29,16 @@ class MeshPBRTests(unittest.TestCase):
                                          "tools": {}}}
             asset_type = {"name": "prop", "face_budget": "prop_faces"}
 
-            for proven in (False, True):
-                with self.subTest(proven=proven):
+            slide = {"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0, "text": "the slide"}
+            for proven, parts in ((False, []), (True, []), (True, [slide])):
+                with self.subTest(proven=proven, parts=parts):
                     reuse = []
+                    asset["parts"] = parts
 
-                    def process(_root, _config, _source, fbx, blend, _textures, _budget, **kwargs):
+                    def process(_root, _config, _source, fbx, blend, _textures, budget, **kwargs):
                         reuse.append(kwargs["reuse_stage_mesh"])
+                        # a moving part is cut from this mesh later and the cut adds faces: reduce with headroom
+                        self.assertEqual(budget, 900 if parts else 1000)
                         for path in (fbx, blend, kwargs["stage_mesh"]):
                             path.write_bytes(b"result")
                         kwargs["preview_dir"].mkdir(parents=True, exist_ok=True)
@@ -67,6 +71,14 @@ class MeshPBRTests(unittest.TestCase):
                         self.assertNotIn("error", candidate, candidate.get("error"))
 
                     self.assertEqual(reuse, [proven])
+
+    def test_a_weapon_with_moving_parts_is_reduced_with_room_for_the_cut(self):
+        # 2026-10-24 pistol B2: reduced to 28,432 faces, 30,333 after the slide and trigger were cut (budget 30,000).
+        from slopforge.pipelines.model import _reduction_budget
+        slide = {"name": "slide", "kind": "slide"}
+        self.assertEqual(_reduction_budget(30000, {"parts": [slide]}), 27000)
+        self.assertEqual(_reduction_budget(30000, {"parts": [{"name": "handle", "kind": "grip"}]}), 30000)
+        self.assertEqual(_reduction_budget(30000, {}), 30000)
 
     def test_material_identity_binds_prepared_mesh_content_of_bundled_graph(self):
         graph = json.loads((Path(__file__).resolve().parents[1] / "workflows" /
