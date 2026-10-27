@@ -4,7 +4,7 @@ import copy
 import numpy as np
 import pytest
 
-from slopforge.creature_rig import structure
+from slopforge.creature_rig import bone_names, deformation_poses, fit_bones, structure
 from slopforge.failures import candidate_quality_rejection
 
 LIMBS = {"ground_contact": 4}
@@ -173,3 +173,74 @@ def test_two_feet_on_one_chain_count_as_a_missing_leg():
     report = structure(creature(legs=legs), LIMBS, LIMITS)
     assert report["failure_codes"] == ["rig_limb_missing"]
     assert "another foot's" in report["errors"][0]
+
+
+NAMES = {"bone_0": "Hips", "bone_1": "Spine1", "bone_2": "Spine2", "bone_3": "Chest", "bone_4": "Neck1",
+         "bone_5": "Head", "bone_6": "HeadEnd", "bone_7": "Tail1", "bone_8": "Tail2",
+         **{f"hind{s}{k}": name + "." + s for s in "LR" for k, name in enumerate(("Thigh", "Shin", "HindPaw", "HindToes"))},
+         **{f"front{s}{k}": name + "." + s for s in "LR"
+            for k, name in enumerate(("Scapula", "UpperArm", "Forearm", "FrontPaw", "FrontToes"))}}
+
+
+def named(bones=BONES, legs=None):
+    rig = creature(bones, legs)
+    return bone_names(structure(rig, LIMBS, LIMITS), rig)
+
+
+def test_a_passing_quadruped_gets_video2rigs_generic_names():
+    names = named()
+    assert names == NAMES
+    assert not any(name.startswith(("Left", "Right")) for name in names.values())   # no humanoid vocabulary
+
+
+def test_bones_past_a_chains_names_are_unfitted_ends():
+    bones = dict(BONES)
+    bones["hindLx"] = ((0.1, 0.37, 0.02), "hindL3")      # a fifth hind bone on each side, the floor on the last two
+    bones["hindRx"] = ((-0.1, 0.37, 0.02), "hindR3")
+    bones["bone_9"] = ((0, -0.78, 0.9), "bone_5")        # a second branch off the head (an ear)
+    legs = default_legs()
+    legs.update({f"hind{s}": ((x, 0.4), f"hind{s}3", f"hind{s}0") for s, x in (("L", 0.1), ("R", -0.1))})
+    names = named(bones, legs)
+    assert names["hindLx"] == "HindToesEnd.L" and names["hindRx"] == "HindToesEnd.R"
+    assert {names["bone_6"], names["bone_9"]} == {"HeadEnd", "HeadEnd1"}
+    assert not {"HindToesEnd.L", "HeadEnd", "HeadEnd1"} & set(fit_bones(names))
+
+
+def test_a_rig_rooted_away_from_the_hind_legs_cannot_be_named():
+    bones = {"root": ((0, 0.4, 0.62), None), **BONES}
+    bones["bone_0"] = (BONES["bone_0"][0], "root")
+    rig = creature(bones)
+    report = structure(rig, LIMBS, LIMITS)
+    assert report["status"] == "passed"
+    with pytest.raises(ValueError, match="hind legs leave the body at bone_0, not at the root root"):
+        bone_names(report, rig)
+
+
+def test_an_undeclared_chain_off_the_chest_cannot_be_named():
+    bones = dict(BONES)
+    bones["wing"] = ((0, -0.3, 0.68), "bone_3")
+    rig = creature(bones)
+    with pytest.raises(ValueError, match="2 chains leave the chest besides the front legs"):
+        bone_names(structure(rig, LIMBS, LIMITS), rig)
+
+
+def test_fit_bones_declare_thin_paws_the_auto_rule_would_drop():
+    """#139: video2rig's auto rule fits only bones leading over 0.4 % of the skin; the declared list keeps every limb
+    bone, the spine, neck, head and tail, symmetric left and right, without end bones."""
+    rig = creature()
+    report = structure(rig, LIMBS, LIMITS)
+    paws = [raw for raw in rig["bones"] if NAMES[raw].startswith(("FrontPaw", "HindPaw", "FrontToes", "HindToes"))]
+    assert paws and all(report["skin_share"][raw] < 0.004 for raw in paws)
+    fit = fit_bones(bone_names(report, rig))
+    assert set(fit) == set(NAMES.values()) - {"HeadEnd"}
+    assert {name[:-2] for name in fit if name.endswith(".L")} == {name[:-2] for name in fit if name.endswith(".R")}
+
+
+def test_the_review_poses_use_only_bones_the_rig_has():
+    poses = deformation_poses(set(NAMES.values()))
+    assert [pose["label"] for pose in poses] == ["rest", "left fore lifted", "right hind lifted",
+                                                 "head up and turned", "tail up and aside", "spine bent"]
+    assert poses[0]["rotations"] == {}
+    used = {bone for pose in poses for bone in pose["rotations"]}
+    assert used <= set(NAMES.values())
+    assert {"Spine1", "Spine2", "Tail1", "Tail2", "Neck1", "Head"} <= used

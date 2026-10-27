@@ -1,10 +1,12 @@
-"""B1 for creatures: a raw rig checked against the creature's limb declaration (AI motion sources plan, package B1;
-docs/CREATURES.md).
+"""B1 for creatures: a raw rig checked against the creature's limb declaration, its generic bone names, the bones
+video2rig fits and the deformation review's poses (AI motion sources plan, package B1; docs/CREATURES.md).
 
 Pure NumPy, so the checks run and are tested without Blender; blender/creature_rig.py measures a rig into the arrays
 `structure` reads: skin vertices and triangles in metres (z up), per-vertex weights by bone, bone names, parent names
 (None for the root) and joint heads. A glTF skin has joints, not bone tails, so a bone is checked by its head.
 """
+import re
+
 import numpy as np
 
 FLOOR = 0.04    # video2rig's standing_legs: a foot's skin within 4 % of the height above the floor
@@ -180,3 +182,106 @@ def structure(rig, limbs, limits):
             "facing": ("+" if sign > 0 else "-") + "XY"[axis], "limbs": found, "pairs": pairs,
             "joints_outside": outside, "winding": {name: round(value, 3) for name, value in zip(names, winding)},
             "skin_share": {name: float(value) for name, value in zip(names, share)}}
+
+
+# video2rig's quadruped auto-rig names (autorig/skeleton.py LEG_PLANS): the bone from the body to the limb when a chain
+# has one more than the limb's names, then the limb's bones. The tool's name priors read these (spike #129 ruling).
+LEG_NAMES = {"hind": (None, ("Thigh", "Shin", "HindPaw", "HindToes")),
+             "front": ("Scapula", ("UpperArm", "Forearm", "FrontPaw", "FrontToes"))}
+_END = re.compile(r"End\d*(\.[LR])?$")
+
+
+def bone_names(report, rig):
+    """Generic names for a rig whose structure passed, {raw name: name}: video2rig's quadruped names, none of Unity's
+    humanoid limb names; a bone past its chain's names is an unfitted ...End. Raises ValueError for a body plan that is
+    not a quadruped's: the hind legs off the root (the hips), the front legs off a chest further up one spine, a tail
+    at most besides, and one neck."""
+    if report["status"] != "passed":
+        raise ValueError("only a rig whose structure passed is named")
+    names = list(rig["bones"])
+    parent = dict(zip(names, rig["parents"]))
+    kids = {name: [other for other in names if parent[other] == name] for name in names}
+    leads = np.bincount(np.asarray(rig["weights"]).argmax(1), minlength=len(names))
+    led = dict(zip(names, leads))
+    limbs = report["limbs"]
+    legs = {bone for limb in limbs for bone in limb["chain"]}
+    hips = next(limb["hub"] for limb in limbs if limb["end"] == "hind")
+    chest = next(limb["hub"] for limb in limbs if limb["end"] == "front")
+    root = next(name for name in names if parent[name] is None)
+    if hips != root:
+        raise ValueError(f"the hind legs leave the body at {hips}, not at the root {root}")
+    spine = [chest]
+    while spine[0] != hips:
+        if parent[spine[0]] is None:
+            raise ValueError(f"the front legs leave the body at {chest}, which is not on a spine from {hips}")
+        spine.insert(0, parent[spine[0]])
+    if len(spine) < 2:
+        raise ValueError(f"the front and hind legs all leave the body at {hips}")
+
+    def line(bone):
+        chain = [bone]
+        while len(kids[chain[-1]]) == 1:
+            chain.append(kids[chain[-1]][0])
+        return chain
+
+    rename = {hips: "Hips", chest: "Chest", **{bone: f"Spine{k}" for k, bone in enumerate(spine[1:-1], 1)}}
+    tails = [bone for bone in kids[hips] if bone not in legs and bone != spine[1]]
+    if len(tails) > 1:
+        raise ValueError(f"{len(tails)} chains leave the hips besides the hind legs and the spine")
+    rename.update({bone: f"Tail{k}" for k, bone in enumerate(line(tails[0]) if tails else [], 1)})
+    necks = [bone for bone in kids[chest] if bone not in legs]
+    if len(necks) != 1:
+        raise ValueError(f"{len(necks)} chains leave the chest besides the front legs; a quadruped has one neck")
+    neck = line(necks[0])
+    head = max(neck[-2:], key=lambda bone: led[bone])   # of the last two, the one leading more skin (the skull)
+    rename.update({bone: f"Neck{k}" for k, bone in enumerate(neck[:neck.index(head)], 1)})
+    rename[head] = "Head"
+    rename.update({bone: "HeadEnd" + (str(k) if k else "") for k, bone in enumerate(neck[neck.index(head) + 1:])})
+    for limb in limbs:
+        top, plan = LEG_NAMES[limb["end"]]
+        chain, side = list(limb["chain"]), "." + limb["side"]
+        if top and len(chain) > len(plan):
+            rename[chain.pop(0)] = top + side
+        for k, bone in enumerate(chain):
+            rename[bone] = (plan[k] if k < len(plan)
+                            else plan[-1] + "End" + (str(k - len(plan)) if k > len(plan) else "")) + side
+    pending = [root]
+    while pending:   # parents before children: what hangs below the head, a leg or the tail is an end
+        bone = pending.pop(0)
+        pending += kids[bone]
+        if bone in rename:
+            continue
+        base = rename[parent[bone]]
+        if base in ("Hips", "Chest") or base.startswith("Spine"):
+            raise ValueError(f"{bone} branches off the {base}; a quadruped's body carries only legs, a neck and a tail")
+        stem, side = (base[:-2], base[-2:]) if base[-2:] in (".L", ".R") else (base, "")
+        stem, k = re.sub(r"End\d*$", "", stem), 0
+        while f"{stem}End{k or ''}{side}" in rename.values():
+            k += 1
+        rename[bone] = f"{stem}End{k or ''}{side}"
+    return {name: rename[name] for name in names}
+
+
+def fit_bones(names):
+    """The bones video2rig fits (#139), declared rather than left to its auto rule, which drops bones leading under
+    0.4 % of the skin (a generated wolf's paws and a shin): every named bone but the ends."""
+    return [name for name in names.values() if not _END.search(name)]
+
+
+# The deformation review's poses (degrees about each bone's local axes: X across the body, pointing to the creature's
+# left, so +X turns a bone pointing back upward; Z turns it sideways). The spike's sheet (spike #129), with the tail
+# raised rather than tucked under.
+_POSES = (("rest", {}),
+          ("left fore lifted", {"Scapula.L": (-20, 0, 0), "UpperArm.L": (-35, 0, 0), "Forearm.L": (-70, 0, 0),
+                                "FrontPaw.L": (60, 0, 0)}),
+          ("right hind lifted", {"Thigh.R": (35, 0, 0), "Shin.R": (60, 0, 0), "HindPaw.R": (-50, 0, 0)}),
+          ("head up and turned", {"Neck1": (-20, 0, 0), "Neck2": (-15, 0, 0), "Head": (0, 0, 35)}),
+          ("tail up and aside", {"Tail1": (40, 0, 20), "Tail2": (25, 0, 15), "Tail3": (15, 0, 15)}),
+          ("spine bent", {f"Spine{k}": (8, 0, 6) for k in range(1, 9)}))
+
+
+def deformation_poses(available):
+    """The review poses for a rig with these bone names, each keeping only the bones it has."""
+    return [{"label": label, "rotations": {bone: list(angles) for bone, angles in rotations.items()
+                                           if bone in available}}
+            for label, rotations in _POSES]
