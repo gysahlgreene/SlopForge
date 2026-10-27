@@ -444,13 +444,6 @@ def main():
         declared_workflow = json.loads(args.workflow.read_text())
         source_workflow = json.loads(json.dumps(declared_workflow))
         workflow_requirements = workflow_requirements_identity(args.workflow, declared_workflow)
-    # The rights in what each sub-stage makes: the graph's models, and Blender where it reduces or projects.
-    # The legacy inline Hunyuan3D graph names no models: its terms are unread.
-    model_rights = workflow_output_rights(args.workflow) if args.workflow else [
-        {"source": "legacy Hunyuan3D 2.0 graph", "status": "unknown",
-         "reason": "the inline graph has no requirements sidecar; Tencent's community licence was not checked for "
-                   "this use"}]
-    blender_rights = [{"source": "blender", **BUILTIN_RIGHTS["blender"]}]
 
     client = ComfyUIClient(COMFY_URL)
     try:
@@ -481,6 +474,15 @@ def main():
         apply_workflow_inputs(workflow, json.loads(args.workflow_inputs))
     if "normal_bake" in workflow and "maps" in workflow:  # keep the normal bake at the color bake's tier resolution
         workflow["normal_bake"]["inputs"]["resolution"] = workflow["maps"]["inputs"]["texture_size"]
+    # The rights in what each sub-stage makes: the models the effective graph loads (after overrides), and Blender
+    # where it reduces or projects. The legacy inline Hunyuan3D graph has no sidecar: its terms are unread.
+    graph_models = sorted({value for node in workflow.values() for value in node.get("inputs", {}).values()
+                           if isinstance(value, str) and value.endswith((".safetensors", ".ckpt", ".gguf", ".onnx"))})
+    model_rights = workflow_output_rights(args.workflow, graph_models) if args.workflow else [
+        {"source": "legacy Hunyuan3D 2.0 graph", "status": "unknown",
+         "reason": "the inline graph has no requirements sidecar; Tencent's community licence was not checked for "
+                   "this use"}]
+    blender_rights = [{"source": "blender", **BUILTIN_RIGHTS["blender"]}]
     dest = Path(args.dest).expanduser().resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shape_prompt_id = None

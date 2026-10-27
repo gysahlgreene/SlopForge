@@ -88,6 +88,18 @@ class WorkflowRequirementsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "model.safetensors.*terms_version"):
             load_workflow_requirements(self.workflow_path)
 
+    def test_rights_follow_the_models_the_effective_graph_loads(self):
+        # PR #133 review: a workflow_inputs override can swap a loader's file; the record must describe what ran.
+        from slopforge.workflow_requirements import workflow_output_rights
+        rights = {"status": "cleared", "terms": "Apache-2.0", "terms_version": "LICENSE", "read_on": "2026-10-27"}
+        self.manifest["models"][0]["output_rights"] = rights
+        self.write_manifest()
+        self.assertEqual(workflow_output_rights(self.workflow_path, ["model.safetensors"]),
+                         [{"source": "model.safetensors", **rights}])
+        swapped = workflow_output_rights(self.workflow_path, ["flux1-dev.safetensors"])
+        self.assertEqual([(item["source"], item["status"]) for item in swapped], [("flux1-dev.safetensors", "unknown")])
+        self.assertIn("not declared", swapped[0]["reason"])
+
     def test_legacy_workflow_without_sidecar_returns_unknown(self):
         self.assertFalse(requirements_path(self.workflow_path).exists())
         self.assertIsNone(load_workflow_requirements(self.workflow_path))

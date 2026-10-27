@@ -77,17 +77,24 @@ def load_workflow_requirements(workflow_path):
     return manifest
 
 
-def workflow_output_rights(workflow_path):
+def workflow_output_rights(workflow_path, models=None):
     """The rights in each model's outputs, as the workflow's sidecar states them: [{source: model, **record}].
-    A model the sidecar states nothing for, or a workflow without a sidecar, is unknown."""
+    `models` are the files the effective graph loads (after workflow_inputs overrides); a file the sidecar does not
+    declare, a model it states nothing for, or a workflow without a sidecar is unknown."""
     manifest = load_workflow_requirements(workflow_path)
     name = Path(workflow_path).name
     if manifest is None:
         return [{"source": name, "status": "unknown", "reason": f"{name} has no requirements sidecar naming its models"}]
-    return [{"source": model["name"], **model["output_rights"]} if "output_rights" in model else
-            {"source": model["name"], "status": "unknown",
-             "reason": f"{manifest['id']} v{manifest['version']} states no output_rights for this model"}
-            for model in manifest["models"]]
+    declared = {model["name"]: model for model in manifest["models"]}
+    entries = []
+    for model in sorted(set(models)) if models else list(declared):
+        record = (declared.get(model) or {}).get("output_rights")
+        entries.append({"source": model, **record} if record else {
+            "source": model, "status": "unknown",
+            "reason": (f"{manifest['id']} v{manifest['version']} states no output_rights for this model"
+                       if model in declared else f"not declared in {manifest['id']} v{manifest['version']}: an "
+                       "override loaded it, and its terms were not read")})
+    return entries
 
 
 def validate_workflow_requirements(workflow_path, workflow, manifest):

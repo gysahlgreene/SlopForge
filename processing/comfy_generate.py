@@ -214,7 +214,7 @@ def main():
                                        "backend": backend_provenance(queried=False),
                                        "model_filenames": [{"status": "known", "value": name} for name in graph_models],
                                        "workflow_requirements": workflow_requirements,
-                                       "output_rights": workflow_output_rights(workflow_path),
+                                       "output_rights": workflow_output_rights(workflow_path, graph_models),
                                        "prompt_id": prompt_id, "output_kind": "image",
                                        "references_used": references_used,
                                        "outputs": outputs, "quality": quality})

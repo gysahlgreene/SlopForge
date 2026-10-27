@@ -159,3 +159,11 @@ def test_doctor_reports_every_providers_rights_and_each_workflows(tmp_path, monk
     assert "API terms not read yet" in line("Provider video_cloud")
     assert line("Workflow rights").startswith("PASS") and "cleared" in line("Workflow rights")
     assert line("Model workflow rights").startswith("PASS") and "Built with DINOv3." in line("Model workflow rights")
+
+
+
+def test_swapped_part_mask_models_are_not_the_ones_whose_terms_were_read():
+    tools = {"parts_host": "gpu", "parts_python": "/opt/parts/bin/python"}
+    assert providers.rights_of(config(tools), "part_masks")[0]["status"] == "cleared"
+    swapped = providers.rights_of(config({**tools, "parts_models": {"sam": "someone/sam-finetune"}}), "part_masks")[0]
+    assert swapped["status"] == "unknown" and "parts_models" in swapped["reason"]

@@ -124,6 +124,10 @@ def load_providers(config):
             found[name] = entry
     masks = _legacy(tools, "parts", ("host", "python", "models"), BUILTIN_RIGHTS["part_masks"])
     if masks:
+        from .parts import DEFAULT_MODELS
+        if {**DEFAULT_MODELS, **(tools.get("parts_models") or {})} != DEFAULT_MODELS:
+            masks["output_rights"] = {"status": "unknown", "reason": "tools.parts_models swaps the models whose terms "
+                                      "were read (Florence-2 large, SAM 2.1 Hiera large)"}
         found["part_masks"] = masks
     if "omnipart" in found and tools.get("parts_host"):  # OmniPart runs on the part-mask host
         found["omnipart"].update(type="ssh_gpu", host=tools["parts_host"])

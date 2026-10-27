@@ -91,6 +91,17 @@ class SurfaceTests(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, "unknown processing"):
                 image.approve(root, {}, {"name": "x", "processing": "sharpen"}, manifest, "foliage:tuft", 1)
 
+    def test_a_surface_run_records_the_rights_of_the_models_its_graph_loads(self):
+        client = Mock()
+        client.upload_input.return_value = {"name": "in.png"}
+        client.list_outputs.return_value = [{"filename": "out.png", "subfolder": "", "type": "output"}]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            Image.new("RGB", (4, 4)).save(root / "in.png")
+            record = surface._run(client, ROOT, "image_upscale_esrgan_api.json", root / "in.png", "upscale_source",
+                                  root / "out.png")
+        self.assertEqual([item["source"] for item in record["output_rights"]], ["RealESRGAN_x4plus.safetensors"])
+
     def test_a_surface_job_that_saves_nothing_names_its_workflow(self):
         client = Mock()
         client.upload_input.return_value = {"name": "in.png"}
