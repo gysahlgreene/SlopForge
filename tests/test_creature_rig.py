@@ -277,3 +277,38 @@ def test_a_checked_rig_carries_its_names_and_fit_bones_or_why_it_has_none():
     assert report["errors"] == ["the rig cannot be named: 2 chains leave the chest besides the front legs; "
                                 "a quadruped has one neck"]
     assert "names" not in report and not candidate_quality_rejection(report)
+
+
+def test_a_skull_that_branches_is_the_head_even_when_its_jaw_leads_the_skin():
+    # the neck line ends at the skull, whose jaw and ears are its children; the jaw leads the head's skin
+    bones = {**BONES, "jaw": ((0, -0.7, 0.72), "bone_5"), "ear": ((0, -0.6, 0.9), "bone_5")}
+    bones.pop("bone_6")
+    rig = creature(bones)
+    head = [index for index, corner in enumerate(rig["vertices"])
+            if corner[1] <= -0.5 and corner[2] >= 0.6 and abs(corner[0]) <= 0.1]   # the head box, every corner
+    rig["weights"][head] = 0.0
+    rig["weights"][head, rig["bones"].index("jaw")] = 1.0
+    names = check_rig(rig, LIMBS, LIMITS)["names"]
+    assert (names["bone_4"], names["bone_5"]) == ("Neck1", "Head")
+    assert {names["jaw"], names["ear"]} == {"HeadEnd", "HeadEnd1"}
+
+
+def test_a_creature_facing_plus_y_is_named_from_its_own_head_end():
+    turned = {name: ((-x, -y, z), parent) for name, ((x, y, z), parent) in BONES.items()}   # turned half a circle
+    rig = creature(turned)
+    rig["vertices"] = rig["vertices"] * (-1, -1, 1)
+    report = check_rig(rig, LIMBS, LIMITS)
+    assert report["status"] == "passed" and report["facing"] == "+Y"
+    assert report["names"] == NAMES       # still left is left: up x forward
+
+
+def test_a_tail_standing_above_the_head_is_refused_not_mislabelled():
+    bones = {**BONES, "bone_8": ((0, 0.72, 1.1), "bone_7")}
+    rig = creature(bones)
+    tail = rig["bones"].index("bone_8")
+    corners, tris = box((-0.03, 0.5, 0.55), (0.03, 0.85, 1.2))   # the tail raised past the ears
+    rig["vertices"][8 * 2:8 * 3] = corners
+    report = check_rig(rig, LIMBS, LIMITS)
+    assert report["status"] == "failed" and report["failure_codes"] == ["rig_structure"]
+    assert "highest skin" in report["errors"][0] and "+Y" in report["errors"][0]
+    assert rig["vertices"][:, 2].argmax() // 8 == 2 and tail     # the highest skin is the tail's

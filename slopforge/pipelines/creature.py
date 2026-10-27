@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw
 
 from ..backends.blender import blender_environment
 from ..character_rigging import run_skintokens_inference, skintokens_preflight
+from .. import creature_rig
 from ..creature_rig import deformation_poses, rig_settings
 from ..failures import StageFailure, failure_record
 from ..manifest import (begin_stage, find_asset, finish_execution, finish_stage, register_artifact, save_manifest,
@@ -40,8 +41,8 @@ def _provider(config, root):
             "checkpoint_sha256": report["checkpoint_sha256"]}
 
 
-def _infer(config, source, raw, seed):
-    return run_skintokens_inference(config, source, raw, seed=seed)
+def _infer(config, source, raw, seed, log):
+    return run_skintokens_inference(config, source, raw, seed=seed, log=log)
 
 
 def _blender(config, root, request):
@@ -65,6 +66,18 @@ def _creature(manifest, name):
     if asset.get("status") != "ready" or not asset.get("outputs", {}).get("fbx"):
         raise ValueError(f"creature {name} has no published model yet: approve its material first (approve-texture)")
     return asset
+
+
+def _published_model(root, asset):
+    """The creature's published FBX and its one publication record; every member is checked before one is selected."""
+    source = root / asset["outputs"]["fbx"]
+    published = asset.get("published_artifacts")
+    matches = ([item for item in published if item.get("path") == asset["outputs"]["fbx"]]
+               if isinstance(published, list) and all(isinstance(item, dict) for item in published) else [])
+    if len(matches) != 1 or not source.is_file() or file_sha256(source) != matches[0].get("sha256"):
+        raise ValueError(f"creature {asset['name']}'s published model is missing, ambiguous or changed since it was "
+                         "published; approve its material again")
+    return source, matches[0]
 
 
 def _sheet(tiles, path, columns):
@@ -104,24 +117,20 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
     count = default if seeds is None else seeds
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 8:
         raise ValueError(f"seeds must be 1 to 8, got {count!r}")
-    source = root / asset["outputs"]["fbx"]
-    published = asset.get("published_artifacts")   # every member checked before one is selected
-    matches = ([item for item in published if item.get("path") == asset["outputs"]["fbx"]]
-               if isinstance(published, list) and all(isinstance(item, dict) for item in published) else [])
-    if len(matches) != 1 or not source.is_file() or file_sha256(source) != matches[0].get("sha256"):
-        raise ValueError(f"creature {name}'s published model is missing, ambiguous or changed since it was published; "
-                         "approve its material again")
-    source_ref = matches[0]
+    source, source_ref = _published_model(root, asset)
     directory = output_path(root, config, asset["type"], asset["name"]) / "Rigging"
     if directory.exists():
         raise FileExistsError(f"Rigging outputs exist; inspect or move them before retrying: {directory}")
     provider = _provider(config, root)
     rights = rights_of(config, "skintokens") + rights_of(config, "blender")
-    tool = tool_sha256(tool_root() / SCRIPT)
+    # the Blender script and its helpers, and the checks module it imports from the package (tool_sha256 follows
+    # only sibling imports)
+    tool, checks = tool_sha256(tool_root() / SCRIPT), file_sha256(creature_rig.__file__)
     manifest_path = root / config["asset_pipeline"]["manifest"]
     execution = start_execution(asset, {"stage": "creature_rigging", "source_sha256": source_ref["sha256"],
                                         **settings, "seeds": count, "provider": provider,
-                                        "skintokens_settings": dict(SKINTOKENS_SETTINGS), "tool_sha256": tool})
+                                        "skintokens_settings": dict(SKINTOKENS_SETTINGS), "tool_sha256": tool,
+                                        "checks_sha256": checks})
     derived = [{"asset_id": asset["id"], "output_id": "fbx"}]
 
     def relative(path):
@@ -133,11 +142,11 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
         raw, report_path = folder / "raw.glb", folder / "structure.json"
         views = {view: str(folder / f"{view}.png") for view in ("front", "side")}
         stage = start_stage(execution, "rig_candidate", seed, [source_ref], {"seed": seed, **settings,
-                            "tool_sha256": tool}, {"provider": provider, "output_rights": rights})
+                            "tool_sha256": tool, "checks_sha256": checks}, {"provider": provider, "output_rights": rights})
         begin_stage(stage)
         save_manifest(manifest_path, manifest)
         try:
-            _infer(config, source, raw, seed)
+            _infer(config, source, raw, seed, folder / "skintokens.log")
             report = _blender(config, root, {"action": "check", "raw": str(raw), "limbs": settings["limbs"],
                                              "limits": settings["limits"], "views": views, "report": str(report_path)})
         except Exception as exc:   # a seed that crashes is recorded; the other seeds still run
@@ -202,7 +211,8 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
     images = [review / f"pose_{index}.png" for index in range(len(poses))]
     contact = review / "contact_sheet.png"
     stage = start_stage(execution, "rig_postprocess", 1, [raw_refs[chosen["seed"]], source_ref],
-                        {"seed": chosen["seed"], "names": chosen["names"], "poses": poses, "tool_sha256": tool},
+                        {"seed": chosen["seed"], "names": chosen["names"], "poses": poses, "tool_sha256": tool,
+                         "checks_sha256": checks},
                         {"output_rights": rights})
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
@@ -236,6 +246,7 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
                       approval_status="not_required")
     asset["rigging"] = {"status": "review_required", "seed": chosen["seed"], **record, "facing": chosen["facing"],
                         "names": chosen["names"], "fit_bones": chosen["fit_bones"], "rig_sha256": file_sha256(rigged),
+                        "source_sha256": source_ref["sha256"],
                         "contact_sheet": relative(contact), "structure": chosen["structure"],
                         "material_transfer": finished.get("material_transfer")}
     asset.setdefault("pipeline_status", {})["rigging_status"] = "review_required"
@@ -254,6 +265,8 @@ def approve_rig(project_root, manifest, name, *, confirmed=False):
     rigging = asset.get("rigging") or {}
     if rigging.get("status") not in ("review_required", "approved") or "rig" not in asset.get("artifacts", {}):
         raise ValueError(f"creature {name} has no rig to approve: run `slopforge creature rig {name}`")
+    if _published_model(root, asset)[1]["sha256"] != rigging.get("source_sha256"):
+        raise ValueError(f"creature {name}'s model was republished since its rig was made; rig it again")
     rig = root / asset["artifacts"]["rig"]["path"]
     if not rig.is_file() or file_sha256(rig) != rigging.get("rig_sha256"):
         raise ValueError(f"creature {name}'s rig is missing or changed since it was made; rig it again")

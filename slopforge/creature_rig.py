@@ -209,7 +209,8 @@ def bone_names(report, rig):
     chest = next(limb["hub"] for limb in limbs if limb["end"] == "front")
     root = next(name for name in names if parent[name] is None)
     if hips != root:
-        raise ValueError(f"the hind legs leave the body at {hips}, not at the root {root}")
+        raise ValueError(f"the hind legs leave the body at {hips}, not at the root {root} (the head end is read from "
+                         f"the highest skin, here {report['facing']}; a tail standing above the head reads the wrong way)")
     spine = [chest]
     while spine[0] != hips:
         if parent[spine[0]] is None:
@@ -233,7 +234,9 @@ def bone_names(report, rig):
     if len(necks) != 1:
         raise ValueError(f"{len(necks)} chains leave the chest besides the front legs; a quadruped has one neck")
     neck = line(necks[0])
-    head = max(neck[-2:], key=lambda bone: led[bone])   # of the last two, the one leading more skin (the skull)
+    # a line ending where it branches ends at the skull (its jaw and ears are children); else of the last two, the one
+    # leading more skin (spike #129's seed 3: the last but one leads the skull, the last only the jaw), the later on a tie
+    head = neck[-1] if kids[neck[-1]] else max(reversed(neck[-2:]), key=lambda bone: led[bone])
     rename.update({bone: f"Neck{k}" for k, bone in enumerate(neck[:neck.index(head)], 1)})
     rename[head] = "Head"
     rename.update({bone: "HeadEnd" + (str(k) if k else "") for k, bone in enumerate(neck[neck.index(head) + 1:])})

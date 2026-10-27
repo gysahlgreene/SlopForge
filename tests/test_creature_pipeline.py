@@ -47,8 +47,9 @@ def stubs(monkeypatch):
     calls = {"infer": [], "blender": []}
     variants = dict(PASSING)
 
-    def infer(config, source, raw, seed):
+    def infer(config, source, raw, seed, log):
         calls["infer"].append(seed)
+        calls.setdefault("logs", []).append(log)
         if variants.get(seed) is None:
             raise RuntimeError("SkinTokens inference failed; inspect the project log")
         raw.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +112,13 @@ def test_every_seed_is_kept_and_the_best_passing_rig_is_finished(tmp_path, stubs
     assert [stage["name"] for stage in execution["stages"]] == ["rig_candidate"] * 4 + ["rig_postprocess"]
     assert all(stage["status"] == "succeeded" and stage["outputs"] for stage in execution["stages"])
     assert execution["stages"][0]["inputs"][0]["type"] == "mesh.fbx"
+    # the checks module's rules are part of every stage's identity, beside the Blender script
+    checks = file_sha256(ROOT / "slopforge/creature_rig.py")
+    assert execution["identity_inputs"]["checks_sha256"] == checks
+    assert all(stage["settings"]["checks_sha256"] == checks for stage in execution["stages"])
+    # each seed keeps its own SkinTokens log beside its candidate
+    assert stubs[0]["logs"] == [root / asset["artifacts"][f"rig_candidate.seed_{seed}"]["path"].replace(
+        "raw.glb", "skintokens.log") for seed in PASSING]
 
 
 def test_a_seed_that_crashes_is_recorded_and_the_others_still_run(tmp_path, stubs):
@@ -155,6 +163,18 @@ def test_only_a_published_creature_can_be_rigged(tmp_path, stubs):
     with pytest.raises(ValueError, match="seeds"):
         pipeline.rig_creature(root, config, {**manifest, "assets": {"creature:wolf": {**asset, "type": "creature"}}},
                               "wolf", seeds=9)
+
+
+def test_a_rig_made_from_an_earlier_publication_cannot_be_approved(tmp_path, stubs):
+    root, config, manifest = project(tmp_path)
+    pipeline.rig_creature(root, config, manifest, "wolf")
+    asset = manifest["assets"]["creature:wolf"]
+    fbx = root / asset["outputs"]["fbx"]          # approve-texture --force republishes the model at the same path
+    fbx.write_bytes(b"Kaydara FBX Binary  \x00republished")
+    asset["published_artifacts"][0]["sha256"] = file_sha256(fbx)
+    with pytest.raises(ValueError, match="republished since its rig was made"):
+        pipeline.approve_rig(root, manifest, "wolf", confirmed=True)
+    assert asset["artifacts"]["rig"]["approval"]["status"] == "pending"
 
 
 def test_approval_needs_confirmation_and_shippable_rights(tmp_path, stubs):
