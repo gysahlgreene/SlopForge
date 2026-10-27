@@ -40,27 +40,8 @@ def play_mode_script(prefab_asset_path, parts):
     # a parameterised coroutine test needs ExpectedResult = null, or NUnit reports "non-void return value"
     cases = "\n".join(f'    [TestCase("{part["name"]}", ExpectedResult = null)]'
                       for part in parts if part["kind"] in ("hinge", "slide"))
-    return f"""using System.Collections;
-using NUnit.Framework;
-using UnityEngine;
-using UnityEditor;
-using UnityEngine.TestTools;
-
-namespace SlopForge
-{{
-public class PrefabPlayTests
-{{
-    const string PrefabPath = "{prefab_asset_path}";
-
-    static GameObject Spawn()
-    {{
-        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
-        Assert.IsNotNull(prefab, "prefab missing: " + PrefabPath);
-        var instance = Object.Instantiate(prefab, new Vector3(0f, 0.5f, 0f), Quaternion.identity);
-        return instance;
-    }}
-
-{cases}
+    # NUnit fails a parameterised test with no cases ("No arguments were provided"): a static prefab has no pulse test
+    pulses = f"""{cases}
     [UnityTest]
     public IEnumerator PartPulses(string part)
     {{
@@ -86,7 +67,28 @@ public class PrefabPlayTests
         Object.Destroy(instance);
     }}
 
-    [UnityTest]
+""" if cases else ""
+    return f"""using System.Collections;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEditor;
+using UnityEngine.TestTools;
+
+namespace SlopForge
+{{
+public class PrefabPlayTests
+{{
+    const string PrefabPath = "{prefab_asset_path}";
+
+    static GameObject Spawn()
+    {{
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+        Assert.IsNotNull(prefab, "prefab missing: " + PrefabPath);
+        var instance = Object.Instantiate(prefab, new Vector3(0f, 0.5f, 0f), Quaternion.identity);
+        return instance;
+    }}
+
+{pulses}    [UnityTest]
     public IEnumerator RestsOnTheGround()
     {{
         var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
