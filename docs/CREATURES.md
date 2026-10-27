@@ -1,9 +1,80 @@
 # Creatures
 
-M5 (Creatures/Generic rigs) has groundwork only: no creature asset, rig or motion is produced by SlopForge yet. This
-page documents the creature-motion provider the track will use. The design and its packages are in the
+M5 (Creatures/Generic rigs) can generate a four-legged creature and rig it for review (package B1). No creature motion
+is produced yet. This page documents the creature asset type, its rig, and the creature-motion provider the track will
+use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
 (epic [#128](https://github.com/gysahlgreene/SlopForge/issues/128)).
+
+## Rigging a creature (B1)
+
+A creature is the `creature` asset type: a model generated like a prop, on the TRELLIS.2 route, at the character face
+budget. Its type declares the limbs the rig is checked against: four legs that stand on the ground (`limbs:
+{ground_contact: 4}`). Only quadrupeds are supported for now (owner decision D12). Generate, approve a concept and
+approve a material as for any model, then rig the published model:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame generate creature wolf "Grey wolf" --material "fur=nonmetal: grey and cream fur"
+slopforge --project ~/UnityProjects/MyGame approve wolf <n>
+slopforge --project ~/UnityProjects/MyGame approve-texture wolf <n>
+slopforge --project ~/UnityProjects/MyGame creature rig wolf            # --seeds 1-8; the type's rig_seeds is 4
+slopforge --project ~/UnityProjects/MyGame creature approve-rig wolf --confirm
+```
+
+`creature rig` runs SkinTokens once per seed (seeds 1 to N) on the published FBX. The rigging provider is configured as
+for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md)). Blender then checks each raw rig
+(`slopforge/creature_rig.py`, measured by `blender/creature_rig.py`):
+
+- **One armature and one root bone.**
+- **A bone chain of its own for every declared leg.** The feet are the patches of skin within 4 % of the height above
+  the floor. The chain is traced from the bone leading a foot's skin up to the bone the body branches at. It needs three
+  bones or more, and must stand the way video2rig's `standing_legs` tests it: its last two bones lead skin within 4 % of
+  the height above the floor. A leg whose skin follows a torso bone has no chain, as with a leg TRELLIS.2 painted onto
+  the body. So does a foot that shares another foot's chain.
+- **Twin legs are symmetric.** They have the same bone count, leave the body at the same bone, and mirror within
+  `max_rig_asymmetry` of the height across that bone. The type's 0.05 is a proposal awaiting the owner's ruling. In the
+  bounded check, the passing wolf seed mirrored within 0.005 and a failing seed 0.28.
+- **Every joint is inside the skin,** by generalized winding number above 0.5.
+- **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
+- **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
+  chest further up one spine. Besides those, only a tail and one neck may leave them.
+
+Each seed's result is kept as `rig_candidate.seed_N` with its verdict, raw GLB, structure report and front and side
+views; a rejected seed stays `failed` with its reasons. A seed that crashes is recorded and the others still run. No
+passing seed fails the run, with every candidate kept. A rerun refuses while `Rigging/` exists: move it aside first.
+
+The best passing seed is finished. Best means it mirrors most closely; on a tie, the lower seed wins.
+
+- **Names.** Its bones get video2rig's quadruped names (no humanoid names, and no Unity Humanoid mapping):
+  - the body: `Hips`, `Spine1..`, `Chest`, `Neck1..`, `Head`, `Tail1..`;
+  - each front leg: `Scapula`, `UpperArm`, `Forearm`, `FrontPaw` and `FrontToes`;
+  - each hind leg: `Thigh`, `Shin`, `HindPaw` and `HindToes`, with `.L` and `.R`.
+  
+  A bone past its chain's names becomes an `…End` bone.
+- **Bone axes.** Each bone's tail runs along its chain, and each bone's local X lies across the body, which is how
+  video2rig bends a joint.
+- **Material.** The source material comes back as in the character route.
+- **Outputs.** It is exported as `<name>_rig.fbx` and a packed `<name>_rig.blend` under `Creatures/<name>/Rigging/`,
+  registered as the pending `rig` artifact. Next to it are `Review/seed_sheet.png`, with every seed's views and verdict,
+  and `Review/contact_sheet.png`, with six poses: rest, left foreleg lifted, right hind leg lifted, head up and turned,
+  tail up and aside, and spine bent.
+- **`fit_bones`.** The manifest records the bones video2rig must fit (`rigging.fit_bones`): every named bone but the
+  ends, declared rather than left to the tool's auto rule. That rule drops bones leading under 0.4 % of the skin, such
+  as a generated wolf's paws ([#139](https://github.com/gysahlgreene/SlopForge/issues/139)). Each bone's share of the
+  skin is in its structure report.
+
+The structure checks are structural evidence only. Deformation is judged by a person: `approve-rig --confirm` records
+that review. It refuses a rig changed since it was made, or one whose lineage's output rights are `unknown` or
+`restricted`. The facing comes from the highest skin (the head end), so check the sheet's left and right legs: a raised
+tail higher than the head would swap them.
+
+**Verified (2026-10-27):** offline tests on a four-legged box fixture and a local Blender test of the fixture through
+the check, the names and the finish. The live gate runs a configured project's published creature:
+
+```sh
+SLOPFORGE_RUN_SKINTOKENS=1 SLOPFORGE_PROJECT_ROOT=<project> SLOPFORGE_CREATURE=<name> \
+  python -m pytest -q -s tests/test_creature_pipeline.py -k external
+```
 
 ## video2rig
 

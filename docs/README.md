@@ -33,7 +33,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Natural environments](NATURAL-ENVIRONMENTS.md): rocks, tiling ground and bark, foliage cut-outs, trees and shrubs, and `scene-render`
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
-- [Creatures](CREATURES.md): video2rig as the creature-motion provider (install, preflight, what runs where, licence; M5, groundwork only)
+- [Creatures](CREATURES.md): the creature asset type and its rig (`creature rig`, B1), and video2rig as the creature-motion provider (install, preflight, what runs where, licence; M5)
 - [Unity delivery](UNITY.md)
 
 ## Examples and qualification evidence

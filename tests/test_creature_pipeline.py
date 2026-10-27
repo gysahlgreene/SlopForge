@@ -194,3 +194,23 @@ def test_the_cli_rigs_and_approves_a_creature(tmp_path, stubs, capsys):
         "review_required"
     assert main(["--project", str(root), "creature", "approve-rig", "wolf", "--confirm"]) == 0
     assert load_manifest(root / "ai/assets/manifest.json")["assets"]["creature:wolf"]["rigging"]["status"] == "approved"
+
+
+@pytest.mark.skipif(__import__("os").environ.get("SLOPFORGE_RUN_SKINTOKENS") != "1", reason="opt-in external runtime")
+def test_external_creature_rig():
+    """The live gate: rig a published creature of a configured project with the real SkinTokens and Blender."""
+    import os
+    from slopforge.character_rigging import skintokens_preflight
+    from slopforge.config import load_project
+    from slopforge.manifest import load_manifest
+    project, name = os.environ.get("SLOPFORGE_PROJECT_ROOT"), os.environ.get("SLOPFORGE_CREATURE")
+    if not (project and name):
+        pytest.skip("blocked: set SLOPFORGE_PROJECT_ROOT and SLOPFORGE_CREATURE (a creature with a published model)")
+    config = load_project(project)
+    report = skintokens_preflight(config, project)
+    if report["status"] != "ready":
+        pytest.skip("blocked: " + "; ".join(report["reasons"]))
+    manifest = load_manifest(Path(project) / config["asset_pipeline"]["manifest"])
+    result = pipeline.rig_creature(project, config, manifest, name, seeds=int(os.environ.get("SLOPFORGE_SEEDS", "4")))
+    assert result["status"] == "review_required"
+    assert set(manifest["assets"][f"creature:{name}"]["rigging"]["fit_bones"]) >= {"FrontPaw.L", "HindPaw.R", "Head"}
