@@ -153,7 +153,7 @@ def test_preflight_refuses_an_unpinned_or_changed_backbone(install, damage):
 def test_preflight_reports_missing_settings(tmp_path):
     report = video2rig.preflight({"asset_pipeline": {"tools": {}}}, tmp_path)
     assert report["local"]["status"] == "unavailable"
-    assert "tools.video2rig_python" in " ".join(report["local"]["reasons"])
+    assert "providers.video2rig.python" in " ".join(report["local"]["reasons"])
 
 
 def ready():  # a training machine's reply, for the pins in force (the fixtures swap them)
@@ -197,7 +197,7 @@ def test_one_bad_setting_or_reply_never_hides_the_other_machine(install, tmp_pat
         report = video2rig.preflight(config(install, video2rig_train_host="gpu-box", **tools), tmp_path)
         assert report["local"]["status"] == "ready", report["local"]["reasons"]
         return report["train"]["status"], " ".join(report["train"]["reasons"])
-    assert train(video2rig_train_checkout="/opt/v") == ("unavailable", "Set tools.video2rig_train_python")
+    assert train(video2rig_train_checkout="/opt/v") == ("unavailable", "Set providers.video2rig.train_python")
     status, reason = train(video2rig_train_python="venv/bin/python", video2rig_train_checkout="/opt/v")
     assert status == "unavailable" and "absolute" in reason
     real_run = subprocess.run

@@ -4,7 +4,7 @@ video2rig (github.com/canitcode/video2rig, AGPL-3.0) reads a creature's motion f
 per-creature joint reader on DINOv2-small and fits it to the rig. SlopForge (MIT) runs it as a separate program from
 its own checkout and venv and exchanges files with it: it never imports, vendors or patches it
 (tests/test_video2rig_provider.py guards against imports, the preflight against a modified checkout). Blender renders, reading and fitting run on the SlopForge machine;
-readers train on the configured GPU provider (tools.video2rig_train_host), or here when none is set.
+readers train on the configured GPU provider (providers.video2rig.train_host), or here when none is set.
 """
 import json
 import os
@@ -26,19 +26,27 @@ STEPS = {"export_rig": ("blend",), "render_start": ("blend",), "prepare": ("blen
          "check": ("clip",), "run": ("clip",), "review": ("clip",), "import_motion": ("blend", "clip", "save")}
 
 
-def _tools(config):
-    return config.get("asset_pipeline", {}).get("tools", {})
+KEYS = ("python", "checkout", "train_host", "train_python", "train_checkout")
+
+
+def settings(config):
+    """The provider's settings: providers.video2rig, else the tools.video2rig_* keys it was first configured with."""
+    pipeline = config.get("asset_pipeline", {})
+    block = (pipeline.get("providers") or {}).get("video2rig")
+    tools = pipeline.get("tools") or {}
+    return {key: (block.get(key) if isinstance(block, dict) else None) or tools.get(f"video2rig_{key}")
+            for key in KEYS}
 
 
 def _local(config, project_root):
-    tools = _tools(config)
+    values = settings(config)
     # abspath, not resolve: a venv's python is a symlink, and the interpreter it points at has no venv
-    return [Path(os.path.abspath(Path(project_root) / Path(tools[key]).expanduser())) if tools.get(key) else None
-            for key in ("video2rig_python", "video2rig_checkout")]
+    return [Path(os.path.abspath(Path(project_root) / Path(values[key]).expanduser())) if values[key] else None
+            for key in ("python", "checkout")]
 
 
 def configured(config):
-    return any(_tools(config).get(key) for key in ("video2rig_python", "video2rig_checkout", "video2rig_train_host"))
+    return any(settings(config).values())
 
 
 def _unavailable(reason):
@@ -46,13 +54,13 @@ def _unavailable(reason):
 
 
 def _remote_preflight(tools, host):
-    unset = [f"tools.{key}" for key in ("video2rig_train_python", "video2rig_train_checkout") if not tools.get(key)]
+    unset = [f"providers.video2rig.{key}" for key in ("train_python", "train_checkout") if not tools.get(key)]
     if unset:
         return _unavailable("Set " + " and ".join(unset))
-    payload = {"python": tools["video2rig_train_python"], "checkout": tools["video2rig_train_checkout"], "role": "train"}
+    payload = {"python": tools["train_python"], "checkout": tools["train_checkout"], "role": "train"}
     if not all(str(payload[key]).startswith("/") for key in ("python", "checkout")):
-        return _unavailable("tools.video2rig_train_python and tools.video2rig_train_checkout must be absolute paths "
-                            "on tools.video2rig_train_host")
+        return _unavailable("providers.video2rig.train_python and .train_checkout must be absolute paths on "
+                            "its train_host")
     completed = subprocess.run(["ssh", "-o", "BatchMode=yes", host,
                                 shlex.join([payload["python"], "-", "preflight", json.dumps(payload)])],
                                input=Path(runtime.__file__).read_text(), capture_output=True, text=True, check=False)
@@ -75,8 +83,8 @@ def _remote_preflight(tools, host):
 
 def preflight(config, project_root):
     """Both machines' installs: "local" (the SlopForge machine) and "train" (the GPU provider, over SSH when
-    tools.video2rig_train_host is set, else this machine). A bad setting or reply rejects its machine only."""
-    tools = _tools(config)
+    providers.video2rig.train_host is set, else this machine). A bad setting or reply rejects its machine only."""
+    tools = settings(config)
     python, checkout = _local(config, project_root)
 
     def checked(check):
@@ -85,11 +93,11 @@ def preflight(config, project_root):
         except Exception as exc:  # a preflight reports; doctor must still list the other machine
             return _unavailable(str(exc))
     if not python or not checkout:
-        unset = [f"tools.{key}" for key in ("video2rig_python", "video2rig_checkout") if not tools.get(key)]
+        unset = [f"providers.video2rig.{key}" for key in ("python", "checkout") if not tools.get(key)]
         local = _unavailable("Set " + " and ".join(unset) + " (scripts/install-video2rig.sh prints them)")
     else:
         local = checked(lambda: runtime.preflight(python, checkout, "local", blender_executable(config, project_root)))
-    host = tools.get("video2rig_train_host")
+    host = tools.get("train_host")
     if host:
         return {"local": local, "train": {**checked(lambda: _remote_preflight(tools, host)), "host": host}}
     train = checked(lambda: runtime.preflight(python, checkout, "train")) if python and checkout else dict(local)
@@ -178,11 +186,11 @@ def run(config, project_root, step, project, log, **options):
     """Run one step with the provider's Python in its checkout, offline against the pinned backbone, and return
     what it wrote: reader-train.json (train), check.json (check: a FAIL verdict is an answer, not an error),
     {"report", "motion"} (run), else None."""
-    host = _tools(config).get("video2rig_train_host")
+    host = settings(config)["train_host"]
     if step == "train" and host:
-        raise StageFailure("configuration", f"readers train on {host} (tools.video2rig_train_host), and sending a "
+        raise StageFailure("configuration", f"readers train on {host} (providers.video2rig.train_host), and sending a "
                            "project there is not built yet (plan package B3)", operation="video2rig train",
-                           remedy="Unset tools.video2rig_train_host to train on this machine's CUDA card")
+                           remedy="Unset providers.video2rig.train_host to train on this machine's CUDA card")
     project = Path(project).resolve()
     argv = command(config, project_root, step, project, **options)
     _, checkout = _local(config, project_root)

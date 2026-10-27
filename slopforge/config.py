@@ -17,6 +17,7 @@ DEFAULTS = {
     "character_rigging_provider": "blender_rigify",
     "workflows": {"image": "image_text2img_api.json"},
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors", "skintokens_python": None, "skintokens_checkout": None, "skintokens_checkpoint": None, "parts_host": None, "parts_python": None, "parts_models": None, "omnipart_python": None, "omnipart_checkout": None, "video2rig_python": None, "video2rig_checkout": None, "video2rig_train_host": None, "video2rig_train_python": None, "video2rig_train_checkout": None},
+    "providers": {},
     "compute_profile": "default",
     "compute_profiles": {},
     "quality_tier": "final",

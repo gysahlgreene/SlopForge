@@ -119,12 +119,24 @@ asset_pipeline:
     # Weapons with moving parts: OmniPart on the part-mask host (scripts/install-omnipart.sh, docs/WEAPONS.md)
     # omnipart_python: /home/<user>/SlopForgeOmniPart/omnipart/bin/python
     # omnipart_checkout: /home/<user>/SlopForgeOmniPart/OmniPart
-    # Creature motion from video: video2rig on this machine, readers trained on a CUDA machine
-    # (scripts/install-video2rig.sh on both, docs/CREATURES.md); leave the train_* keys unset when this machine has the card
-    # video2rig_python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python
-    # video2rig_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
-    # video2rig_train_host: <ssh host>
-    # video2rig_train_python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python
-    # video2rig_train_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
+
+  # Providers: what SlopForge is pointed at to make assets, each with the rights in its outputs
+  # (docs/ARCHITECTURE.md, Providers). The tools.* keys above are read in as providers too.
+  providers:
+    # Creature motion from video (scripts/install-video2rig.sh, docs/CREATURES.md); leave the train_* keys unset
+    # when this machine has the CUDA card.
+    # video2rig:
+    #   type: local_tool
+    #   python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python
+    #   checkout: /home/<user>/SlopForgeVideo2rig/video2rig
+    #   train_host: <ssh host>
+    #   train_python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python
+    #   train_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
+    # A hosted API: the key stays in the environment variable key_env names, never in this file.
+    # video_cloud:
+    #   type: hosted_api
+    #   vendor: replicate
+    #   key_env: REPLICATE_API_TOKEN
+    #   output_rights: {status: unknown, reason: "terms not read yet"}
 
   overwrite_existing: false
