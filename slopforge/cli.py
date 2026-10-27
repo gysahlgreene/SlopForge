@@ -198,6 +198,21 @@ def parser():
     approve_rig_cmd = creature_commands.add_parser("approve-rig", help="Approve a creature rig after reviewing its contact sheet")
     approve_rig_cmd.add_argument("name", help="Tracked creature asset name")
     approve_rig_cmd.add_argument("--confirm", action="store_true", help="Confirm human review of the contact sheet")
+    calibrate_cmd = creature_commands.add_parser(
+        "calibrate", help="Make a rigged creature's video2rig project: creature.json, the two-view start frame and the "
+                          "reader's training pictures (docs/CREATURES.md)")
+    calibrate_cmd.add_argument("name", help="Tracked creature asset name")
+    calibrate_cmd.add_argument("--views", help="Two views, such as three-quarter,side (default: the type's)")
+    calibrate_cmd.add_argument("--widths", help="Panel widths in pixels adding up to 1920, such as 640,1280 "
+                                                "(default: split by each view's span)")
+    calibrate_cmd.add_argument("--poses", type=int, help="Training pictures (default: the type's training_poses)")
+    synth_cmd = creature_commands.add_parser("synth", help="Render a known motion through the creature's start cameras")
+    synth_cmd.add_argument("name", help="Tracked creature asset name")
+    synth_cmd.add_argument("clip", help="Clip name: lower-case letters, digits and underscores")
+    synth_cmd.add_argument("--kind", required=True, choices=("random", "gait", "action"))
+    synth_cmd.add_argument("--seed", type=int, default=0)
+    synth_cmd.add_argument("--frames", type=int, default=96)
+    synth_cmd.add_argument("--action", help="The authored action to loop (--kind action)")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -704,6 +719,22 @@ def _run(args):
         print("Review the rig and six pose images before approving it.")
         return 0
 
+    if args.command == "creature" and args.creature_action in ("calibrate", "synth"):
+        from .pipelines.creature import calibrate_creature, synthesize_motion
+        if args.creature_action == "calibrate":
+            result = calibrate_creature(root, config, manifest, args.name,
+                                        views=args.views.split(",") if args.views else None,
+                                        widths=[int(item) for item in args.widths.split(",")] if args.widths else None,
+                                        poses=args.poses)
+            framing = result["framing"]
+            print(f"Creature {args.name}: {result['status']}; views {','.join(framing['views'])}, widths "
+                  f"{','.join(map(str, framing['widths']))}, {result['training_poses']} training pictures")
+            print(f"Project: {result['project']}")
+            return 0
+        result = synthesize_motion(root, config, manifest, args.name, args.clip, kind=args.kind, seed=args.seed,
+                                   frames=args.frames, action=args.action)
+        print(f"Creature {args.name}: {args.kind} clip {args.clip}, {result['frames']} frames: {result['clip']}")
+        return 0
     if args.command == "creature":
         from .pipelines.creature import approve_rig, rig_creature
         if args.creature_action == "approve-rig":

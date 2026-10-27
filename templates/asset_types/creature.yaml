@@ -31,3 +31,30 @@ max_rig_asymmetry: 0.05
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).
 rig_seeds: 4
+# B2 (docs/CREATURES.md, video2rig's start frame): the two views. The three-quarter view sees the trunk and keeps a
+# lifted front paw off the hind leg behind it, which a dead-front view stacks (#140: trunk joints read 0.99-1.0 against
+# 0.65-0.69). The panel widths follow each view's span unless `widths` declares them; render_start's margins.
+views: [three-quarter, side]
+margin: 1.8
+margin_wide: 1.45
+# Pictures the reader trains on (video2rig's reader.prepare --poses).
+training_poses: 3000
+# Joint ranges (#140), degrees from the start pose, by the role of B1's generic names; video2rig applies each to the
+# bone's bend, twist and sideways turn alike. Values are video2rig's own bend limits for these names (spike #129's
+# exams ran on them; Tail, Scapula and UpperArm have none there: its default, 160); FrontPaw 150, as the Khronos Fox's
+# authored walk folds its front paws 148. An end bone takes its chain's (HindToesEnd: HindToes). Knees (Shin) and
+# elbows (Forearm) are one-way hinges and the root (Hips) is free, so they take none.
+joint_limits:
+  Spine: 35
+  Chest: 35
+  Neck: 45
+  Head: 60
+  HeadEnd: 60
+  Tail: 160
+  Scapula: 160
+  UpperArm: 160
+  FrontPaw: 150
+  FrontToes: 90
+  Thigh: 130
+  HindPaw: 100
+  HindToes: 90

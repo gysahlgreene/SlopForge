@@ -7,17 +7,23 @@ finishes the best passing one: generic names, each bone's local X across the bod
 behind the delivery-rights gate.
 """
 import json
+import os
+import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw
 
+from ..backends import video2rig
 from ..backends.blender import blender_environment
 from ..character_rigging import run_skintokens_inference, skintokens_preflight
-from .. import creature_rig
+from .. import creature_rig, creature_views
 from ..creature_rig import deformation_poses, rig_settings
+from ..creature_views import creature_config, framing, motion_settings, outside_panels
 from ..failures import StageFailure, failure_record
 from ..manifest import (begin_stage, find_asset, finish_execution, finish_stage, register_artifact, save_manifest,
                         set_artifact_approval, start_execution, start_stage)
@@ -279,3 +285,234 @@ def approve_rig(project_root, manifest, name, *, confirmed=False):
                          "output_rights": rights}
     asset.setdefault("pipeline_status", {})["rigging_status"] = "approved"
     return {"status": "approved", "output_rights": rights}
+
+
+# B2: video2rig's start frame, the reader's training set and known motions (docs/CREATURES.md)
+
+FACING = {"-Y": (0, -1, 0), "+Y": (0, 1, 0), "-X": (-1, 0, 0), "+X": (1, 0, 0)}
+
+
+def _v2r(config, root, step, project, log, **options):
+    return video2rig.run(config, root, step, project, log, **options)
+
+
+def _video2rig_identity(config, root):
+    return video2rig.identity(video2rig.preflight(config, root)["local"])
+
+
+def _synth(config, root, blend, request):
+    """blender/synth_motion.py in the creature's rig .blend; its report, or RuntimeError with its error."""
+    with tempfile.TemporaryDirectory(prefix="slopforge-synth-") as temporary:
+        path = Path(temporary) / "request.json"
+        path.write_text(json.dumps(request, default=str))
+        subprocess.run([blender_executable(config, root), str(blend), "--background", "--factory-startup",
+                        "--python", str(tool_root() / "blender/synth_motion.py"), "--", str(path)], check=False,
+                       env=blender_environment())
+    report = json.loads(Path(request["report"]).read_text()) if Path(request["report"]).is_file() else None
+    if not report or report.get("status") != "complete":
+        raise RuntimeError("synthetic motion failed: " + "; ".join((report or {}).get("errors", ["no report"])))
+    return report
+
+
+def _encode(frames, mp4):
+    ffmpeg = os.environ.get("V2R_FFMPEG") or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise StageFailure("environment", "ffmpeg is not installed", operation="creature synth",
+                           remedy="Install ffmpeg, or set V2R_FFMPEG to its path")
+    subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", "24", "-i", str(Path(frames) / "%04d.png"),
+                    "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+
+
+def _rig_blend(root, asset):
+    """The rig .blend B1 finished, and the stage output that produced it as it is now; every execution record is
+    checked before one is selected."""
+    rigging = asset.get("rigging") or {}
+    if rigging.get("status") not in ("review_required", "approved") or "rig_blend" not in asset.get("artifacts", {}):
+        raise ValueError(f"creature {asset['name']} has no rig: run `slopforge creature rig {asset['name']}` first")
+    executions = asset.get("executions")
+    if (not isinstance(executions, list) or not all(isinstance(item, dict) and isinstance(item.get("stages", []), list)
+                                                     and all(isinstance(stage, dict) for stage in item.get("stages", []))
+                                                     for item in executions)):
+        raise ValueError(f"creature {asset['name']}'s execution records are malformed")
+    path = asset["artifacts"]["rig_blend"]["path"]
+    blend = root / path
+    digest = file_sha256(blend) if blend.is_file() else None
+    refs = [output for item in executions for stage in item.get("stages", [])
+            if stage.get("name") == "rig_postprocess" and stage.get("status") == "succeeded"
+            for output in stage.get("outputs") or [] if isinstance(output, dict) and output.get("path") == path
+            and output.get("sha256") == digest]
+    if not refs:
+        raise ValueError(f"creature {asset['name']}'s rig .blend is missing or changed since it was made; rig it again")
+    return blend, refs[-1]
+
+
+def _fail(root, config, manifest, asset, execution, stage, exc, record):
+    failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=stage["attempt"],
+                             operation=stage["name"])
+    finish_stage(stage, "failed", error=str(exc) or type(exc).__name__, failure=failure)
+    finish_execution(execution, "failed", failure=failure)
+    record.update(status="failed", error=str(exc) or type(exc).__name__)
+    save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+
+
+def calibrate_creature(project_root, config, manifest, name, *, views=None, widths=None, poses=None):
+    """Turn a rigged creature into a video2rig project: creature.json from its rig record and type (fit_bones, hinges,
+    declared joint ranges), the rig exported, the two-view start frame rendered with its view pair and framing and
+    checked to hold the whole creature, then the reader's training pictures (reader.prepare, training skipped)."""
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    blend, blend_ref = _rig_blend(root, asset)
+    settings = motion_settings(load_taxonomy(root)[asset["type"]])
+    settings.update({key: value for key, value in (("views", views), ("widths", widths)) if value is not None})
+    count = poses or settings["training_poses"]
+    creature = creature_config(asset["name"], asset["rigging"], settings["joint_limits"])
+    folder = output_path(root, config, asset["type"], asset["name"]) / "Motion"
+    if (folder / "video2rig").exists():
+        raise FileExistsError(f"A video2rig project exists; inspect or move it before calibrating again: "
+                              f"{folder / 'video2rig'}")
+    provider = _video2rig_identity(config, root)
+    rights = [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
+    manifest_path = root / config["asset_pipeline"]["manifest"]
+    request = {key: settings.get(key) for key in ("views", "widths", "margin", "margin_wide", "side")}
+    execution = start_execution(asset, {"stage": "creature_calibration", "rig_blend_sha256": blend_ref["sha256"],
+                                        "creature": creature, "framing": request, "training_poses": count,
+                                        "video2rig": video2rig.runtime.VIDEO2RIG_REVISION,
+                                        "checks_sha256": file_sha256(creature_views.__file__)})
+    project = video2rig.project_folder(folder, creature)
+    log = folder / "video2rig.log"
+    record = asset["motion"] = {"status": "calibrating", "project": project.relative_to(root).as_posix(),
+                                "creature": creature, "training_poses": count, "rig_status": asset["rigging"]["status"],
+                                "clips": {}}
+    stage = start_stage(execution, "creature_calibration", 1, [blend_ref], {"creature": creature, "framing": request},
+                        {"provider": provider, "output_rights": rights})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    try:
+        _v2r(config, root, "export_rig", project, log, blend=blend)
+        mesh, rig = np.load(project / "rig/mesh.npz"), json.loads((project / "rig/rig.json").read_text())
+        world = np.asarray(rig["armature_world"], float)
+        skin = mesh["verts"] @ world[:3, :3].T + world[:3, 3]
+        forward = np.array(FACING[creature["facing"]], float)
+        chosen = framing(settings, length=float(np.ptp(skin @ forward)),
+                         width=float(np.ptp(skin @ np.cross((0, 0, 1), forward))))
+        _v2r(config, root, "render_start", project, log, blend=blend, framing=chosen)
+        cut = outside_panels(json.loads((project / "start/cameras.json").read_text()), skin)
+        if cut:
+            raise StageFailure("processing_validation", f"the creature leaves the start frame (points outside, by "
+                               f"view: {cut})", operation="creature calibrate",
+                               remedy="raise margin_wide or margin, or declare other views or widths")
+    except Exception as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, record)
+        raise
+    record["framing"] = chosen
+    start = [_artifact_ref(root, project / path, f"{execution['id']}:{label}", kind, "creature_calibration", 1,
+                           [blend_ref]) for label, kind, path in (("mesh", "data.rig_mesh", "rig/mesh.npz"),
+                                                                  ("rig", "data.rig", "rig/rig.json"),
+                                                                  ("cameras", "data.cameras", "start/cameras.json"),
+                                                                  ("start", "image.calibrated_views", "start/start.png"))]
+    finish_stage(stage, "succeeded", start)
+    stage = start_stage(execution, "detector_training_set", 1, start[:3], {"poses": count, "creature": creature},
+                        {"provider": provider, "output_rights": rights})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    try:
+        _v2r(config, root, "prepare", project, log, blend=blend, poses=count)
+        if not (project / "reader/poses.npz").is_file():
+            raise StageFailure("processing_validation", "reader.prepare wrote no reader/poses.npz",
+                               operation="creature calibrate", remedy=f"Read {log}")
+    except Exception as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, record)
+        raise
+    finish_stage(stage, "succeeded", [_artifact_ref(root, project / path, f"{execution['id']}:{label}", kind,
+                                                    "detector_training_set", 1, start)
+                                      for label, kind, path in (("poses", "data.training_set", "reader/poses.npz"),
+                                                                ("visible", "data.training_visibility",
+                                                                 "reader/visible.npz"))
+                                      if (project / path).is_file()])
+    finish_execution(execution, "succeeded")
+    record["status"] = "calibrated"
+    save_manifest(manifest_path, manifest)
+    return {"status": "calibrated", "project": record["project"], "framing": chosen, "training_poses": count}
+
+
+def synthesize_motion(project_root, config, manifest, name, clip, *, kind, seed=0, frames=96, action=None):
+    """Render a known motion (synth_motion.py: random, gait or an authored action) through the creature's start
+    cameras as an exam clip, with its truth: video2rig's render_poses at each panel's own size, the panels joined
+    as render_start joins them, 24 fps. A motion that leaves a panel is refused (nothing may leave the frame)."""
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    record = asset.get("motion") or {}
+    if record.get("status") != "calibrated":
+        raise ValueError(f"creature {name} is not calibrated: run `slopforge creature calibrate {name}` first")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", clip):
+        raise ValueError(f"clip names are lower-case letters, digits and underscores, got {clip!r}")
+    project = root / record["project"]
+    exam, mp4 = project / "exam" / clip, project / "clips" / f"{clip}.mp4"
+    if exam.exists() or mp4.exists():
+        raise FileExistsError(f"Clip {clip} exists; inspect or move it before rendering it again: {exam}")
+    blend, blend_ref = _rig_blend(root, asset)
+    creature = json.loads((project / "creature.json").read_text())
+    if creature != record["creature"]:
+        raise ValueError(f"{project / 'creature.json'} changed since calibration; calibrate {name} again")
+    cameras = json.loads((project / "start/cameras.json").read_text())
+    settings = {"clip": clip, "kind": kind, "seed": seed, "frames": frames, "action": action}
+    tool = tool_sha256(tool_root() / "blender/synth_motion.py")
+    execution = start_execution(asset, {"stage": "synthetic_motion", **settings, "creature": creature,
+                                        "cameras_sha256": file_sha256(project / "start/cameras.json"),
+                                        "tool_sha256": tool, "checks_sha256": file_sha256(creature_views.__file__),
+                                        "video2rig": video2rig.runtime.VIDEO2RIG_REVISION})
+    provider = _video2rig_identity(config, root)
+    rights = [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
+    stage = start_stage(execution, "synthetic_motion", 1, [blend_ref], {**settings, "tool_sha256": tool},
+                        {"provider": provider, "output_rights": rights})
+    begin_stage(stage)
+    manifest_path = root / config["asset_pipeline"]["manifest"]
+    save_manifest(manifest_path, manifest)
+    log = project.parent / "video2rig.log"
+    try:
+        exam.mkdir(parents=True)
+        _synth(config, root, blend, {"creature": creature, "kind": kind, "seed": seed, "frames": frames,
+                                     "action": action, "loops": 4, "out": str(exam / "poses.npz"),
+                                     "truth": str(exam / "truth.json"), "report": str(exam / "synth_report.json")})
+        panels = {}
+        for fit in sorted({max(view["width_px"], view["height_px"]) for view in cameras["views"]}):
+            out = exam / f"renders_fit{fit}"
+            _v2r(config, root, "render_poses", project, log, blend=blend, motion=exam / "poses.npz", out=out, fit=fit)
+            panels.update({view["name"]: out / view["name"] for view in cameras["views"]
+                           if max(view["width_px"], view["height_px"]) == fit})
+            shutil.copy(out / "labels.npz", exam / "labels.npz")
+        labels = np.load(exam / "labels.npz")
+        world = np.asarray(labels["armature_world"], float)
+        joints = np.concatenate([labels["heads"], labels["tails"]], axis=1).reshape(-1, 3)
+        left = outside_panels(cameras, joints @ world[:3, :3].T + world[:3, 3])
+        if left:
+            raise StageFailure("processing_validation", f"the {kind} motion leaves the frame (joint positions "
+                               f"outside, by view: {left})", operation="creature synth",
+                               remedy="calibrate with a larger margin_wide, or make a motion that stays nearer")
+        count = len(np.load(exam / "poses.npz")["quats"])
+        width, height = cameras["frame_px"]
+        (exam / "frames").mkdir()
+        for index in range(count):
+            frame = np.zeros((height, width, 3), np.uint8)
+            for view in cameras["views"]:
+                with Image.open(panels[view["name"]] / f"{index:04d}.jpg") as panel:
+                    frame[:, view["x0_px"]:view["x0_px"] + view["width_px"]] = np.asarray(panel.convert("RGB"))
+            for view in cameras["views"][1:]:   # render_start's divider: 4 px at .03
+                frame[:, view["x0_px"] - 2:view["x0_px"] + 2] = round(0.03 * 255)
+            Image.fromarray(frame).save(exam / "frames" / f"{index:04d}.png")
+        mp4.parent.mkdir(exist_ok=True)
+        _encode(exam / "frames", mp4)
+    except Exception as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, {})
+        raise
+    finish_stage(stage, "succeeded", [_artifact_ref(root, path, f"{execution['id']}:{label}", kind_, "synthetic_motion",
+                                                    1, [blend_ref])
+                                      for label, kind_, path in (("poses", "data.known_motion", exam / "poses.npz"),
+                                                                 ("truth", "data.motion_truth", exam / "truth.json"),
+                                                                 ("labels", "data.motion_labels", exam / "labels.npz"),
+                                                                 ("clip", "video.synthetic_clip", mp4))])
+    finish_execution(execution, "succeeded")
+    record["clips"][clip] = {"kind": kind, "seed": seed, "frames": count, "action": action,
+                             "clip": mp4.relative_to(root).as_posix(), "exam": exam.relative_to(root).as_posix()}
+    save_manifest(manifest_path, manifest)
+    return {"status": "rendered", "clip": record["clips"][clip]["clip"], "frames": count}

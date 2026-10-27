@@ -94,3 +94,18 @@ def range_violations(angles, joints):
             found[bone] = {"frames": int(over.sum()), "max_degrees": round(float(series.max()), 3),
                            "range_degrees": round(limit, 3)}
     return found
+
+
+def motion_settings(asset_type):
+    """A creature type's B2 declarations: joint limits by role, the view pair and framing, the training poses."""
+    name = asset_type.get("name")
+    limits = asset_type.get("joint_limits")
+    if (not isinstance(limits, dict) or not limits or not all(
+            isinstance(role, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+            and 0 < value <= 180 for role, value in limits.items())):
+        raise ValueError(f"asset type {name!r}: joint_limits must map bone roles to degrees above 0 and at most 180")
+    poses = asset_type.get("training_poses", 3000)
+    if isinstance(poses, bool) or not isinstance(poses, int) or not 100 <= poses <= 20000:
+        raise ValueError(f"asset type {name!r}: training_poses must be 100 to 20000, got {poses!r}")
+    return {"joint_limits": dict(limits), "training_poses": poses,
+            **{key: asset_type[key] for key in ("views", "widths", "margin", "margin_wide", "side") if key in asset_type}}
