@@ -10,10 +10,21 @@ import yaml
 from .character_rigging import _character_asset
 from .manifest import register_artifact
 from .paths import blender_executable, tool_root
+from .providers import BUILTIN_RIGHTS, validate_output_rights
 
 
 CLIP_NAMES = {"idle", "walk", "run", "jump", "attack", "hurt", "death", "interact"}
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+# Where a clip came from and what its terms allow; optional, checked when present, at library or clip level.
+TERMS_FIELDS = ("licence", "source", "attribution", "generated_by")
+
+
+def _check_terms(record, where):
+    for field in TERMS_FIELDS:
+        if field in record and (not isinstance(record[field], str) or not record[field].strip()):
+            raise ValueError(f"{where} {field} must be non-empty text")
+    if "output_rights" in record:
+        validate_output_rights(record["output_rights"], f"{where} output_rights")
 
 
 def validate_animation_library(project_root, name):
@@ -28,6 +39,7 @@ def validate_animation_library(project_root, name):
         raise ValueError("Animation library must be a version 1 mapping")
     if data.get("skeleton_type") not in {"humanoid", "generic"}:
         raise ValueError("Animation library skeleton_type must be humanoid or generic")
+    _check_terms(data, "Animation library")
     clips = data.get("clips")
     if not isinstance(clips, list) or not clips:
         raise ValueError("Animation library requires at least one clip")
@@ -39,6 +51,7 @@ def validate_animation_library(project_root, name):
         if clip["id"] in ids:
             raise ValueError(f"Duplicate animation clip id {clip['id']!r}")
         ids.add(clip["id"])
+        _check_terms(clip, f"Clip {clip['id']!r}")
         if clip.get("name") not in CLIP_NAMES:
             raise ValueError(f"Unsupported game animation name: {clip.get('name')!r}")
         relative = clip.get("path")
@@ -127,6 +140,14 @@ def retarget_animation(project_root, config, manifest, character_selector, libra
                       "source_clip": clip_id, "source_path": clip["path"],
                       "source_rig": rig["path"], "bone_mapping": mapping,
                       "loop": clip["loop"], "root_motion": clip["root_motion"]}
+        provenance.update({field: clip.get(field, library.get(field)) for field in TERMS_FIELDS
+                           if field in clip or field in library})
+        source = f"animation library {library_name}, clip {clip_id}"
+        rights = clip.get("output_rights") or library.get("output_rights")
+        provenance["output_rights"] = [
+            {"source": source, **rights} if rights else
+            {"source": source, "status": "unknown", "reason": f"animation library {library_name} declares no output_rights"},
+            {"source": "blender", **BUILTIN_RIGHTS["blender"]}]
         artifact = register_artifact(manifest, character["id"], f"animation.{clip_id}", "animation.fbx",
                                      relative, status="candidate",
                                      derived_from=[{"asset_id": character["id"], "output_id": "rig"}],

@@ -105,6 +105,61 @@ class AnimationLibraryTests(unittest.TestCase):
         self.assertEqual(character["animations"]["walk"]["max_vertex_displacement"], 0.37)
         self.assertEqual(character["animations"]["walk"]["loop"], True)
 
+    def test_library_licence_fields_are_optional_and_checked_when_present(self):
+        validate_animation_library(self.root, "base")  # a library without them still validates
+        cleared = {"status": "cleared", "terms": "CMU Graphics Lab Motion Capture Database statement",
+                   "terms_version": "mocap.cs.cmu.edu, read 2026-10-27", "read_on": "2026-10-27"}
+        self.definition.update(licence="free for all uses, not resold as is", source="http://mocap.cs.cmu.edu/",
+                               attribution="Carnegie Mellon University", generated_by="optical motion capture",
+                               output_rights=cleared)
+        self.definition["clips"][0]["output_rights"] = {"status": "unknown", "reason": "this clip was edited by hand"}
+        self.save()
+        library = validate_animation_library(self.root, "base")
+        self.assertEqual(library["output_rights"], cleared)
+        self.assertEqual(library["clips"][0]["output_rights"]["status"], "unknown")
+        good = json.loads(json.dumps(self.definition))
+        for field, value in (("licence", ""), ("source", 7), ("attribution", None), ("generated_by", ["x"]),
+                             ("output_rights", {"status": "cleared"})):
+            self.definition = json.loads(json.dumps(good))
+            self.definition[field] = value
+            self.save()
+            with self.assertRaisesRegex(ValueError, field):
+                validate_animation_library(self.root, "base")
+        self.definition = json.loads(json.dumps(good))
+        self.definition["clips"][0]["licence"] = 3
+        self.save()
+        with self.assertRaisesRegex(ValueError, "walk.*licence"):
+            validate_animation_library(self.root, "base")
+
+    def _retarget(self, manifest):
+        def fake_blender(command, check):
+            request = json.loads(Path(command[-1]).read_text())
+            Path(request["output"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(request["output"]).write_bytes(b"retargeted FBX")
+            Path(request["report"]).write_text(json.dumps({"status": "complete", "frames": 12,
+                                                           "max_vertex_displacement": 0.37}))
+        with patch("slopforge.animation.subprocess.run", side_effect=fake_blender):
+            retarget_animation(self.root, self.config(), manifest, "pilot", "base", "walk")
+
+    def test_retarget_records_the_clips_terms_and_output_rights(self):
+        character, manifest = self._character_manifest()
+        self._retarget(manifest)
+        rights = character["artifacts"]["animation.walk"]["provenance"]["output_rights"]
+        self.assertEqual(rights[0]["status"], "unknown")  # the library states nothing
+        self.assertIn("animation library base declares no output_rights", rights[0]["reason"])
+        self.assertEqual(rights[1]["source"], "blender")
+        (self.root / "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx").unlink()
+        self.definition.update(licence="free for all uses", source="http://mocap.cs.cmu.edu/", output_rights={
+            "status": "cleared", "terms": "CMU statement", "terms_version": "2026-10-27", "read_on": "2026-10-27"})
+        self.save()
+        character, manifest = self._character_manifest()
+        self._retarget(manifest)
+        provenance = character["artifacts"]["animation.walk"]["provenance"]
+        self.assertEqual(provenance["output_rights"][0], {"source": "animation library base, clip walk",
+                                                          "status": "cleared", "terms": "CMU statement",
+                                                          "terms_version": "2026-10-27", "read_on": "2026-10-27"})
+        self.assertEqual((provenance["licence"], provenance["source"]), ("free for all uses", "http://mocap.cs.cmu.edu/"))
+
     def test_retarget_rejects_unapproved_rig_without_invoking_blender(self):
         _, manifest = self._character_manifest(approval="pending")
         with patch("slopforge.animation.subprocess.run") as run:
