@@ -83,8 +83,11 @@ and Unity's lightmap unwrap of a 57,000-face wolf aborted.
 - Live: a wolf generated through the `creature` type on the H100 at `final` (57,000 faces) was published and rigged
   three times with four seeds each. In every run seed 2 passed and was kept; 4 of 12 seeds passed overall
   ([evidence](media/creature-rig-b1-2026-10/README.md)).
-- **SkinTokens is not reproducible per seed.** The same seed on the same model gave a different skeleton each run. The
-  seed is recorded, but it does not reproduce a candidate.
+- **SkinTokens is not reproducible per seed.** The same seed on the same model gave a different skeleton each run. A
+  bounded run with PyTorch's deterministic mode (strict, cuDNN deterministic, cuBLAS workspace set) changed nothing:
+  every repeat of seeds 1–4 differed (34 to 46 joints). The surface sampling uses the seeded global random state, so
+  the source lies elsewhere and is not found yet. The seed is recorded, but it does not reproduce a candidate: keep
+  the rejects, and do not expect a rerun to give the same rig.
 - The kept rig's deformation awaits the owner's review.
 
 The live gate runs a configured project's published creature:
