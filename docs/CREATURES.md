@@ -113,3 +113,64 @@ To check an install, run this with a project whose `ai/project.yaml` sets the ke
 ```sh
 SLOPFORGE_RUN_VIDEO2RIG=1 SLOPFORGE_PROJECT_ROOT=<project> python -m pytest -q -s tests/test_video2rig_provider.py -k external
 ```
+
+## The motion exam, v1
+
+The exam measures how well video2rig reads back a motion SlopForge already knows. The owner set these limits on
+2026-10-27 (decisions D5 and D7 of the plan), from the four clips of the bounded check
+[#129](https://github.com/gysahlgreene/SlopForge/issues/129): two creatures, two motions each
+([evidence](media/creature-motion-spike-2026-10/README.md)).
+
+**Scope.** Exam v1 judges synthetic motion only: a known motion rendered through video2rig's own two cameras and
+studio, with no video model. That is the best case, so a creature that fails here will not do better on generated
+video. The limits can be revised with new evidence, and passing them qualifies nothing on its own.
+
+**Limits per exam clip, with the spike's measurements:**
+
+| Metric | Limit | Fox random | Fox walk | Wolf random | Wolf gait |
+| --- | --- | --- | --- | --- | --- |
+| Bone direction error, median over all fitted bones | ≤ 5° | 2.7° | 3.1° | 2.7° | 2.0° |
+| Worst non-tail bone's median | ≤ 10° | 5.6° | 5.5° | 5.5° | 3.5° |
+| Worst non-tail bone's p95 | ≤ 25° | 16.2° | **155.7°** ¹ | 10.8° | 10.2° |
+| Worst tail bone's p95 | ≤ 40° | 27.2° | 18.6° | 24.9° | 28.5° |
+| Joint error with travel removed, median (share of height) | ≤ 0.025 | 0.011 | 0.020 | 0.008 | 0.007 |
+| Joint error with travel removed, p95 | ≤ 0.10 | 0.050 | 0.071 | 0.029 | 0.064 |
+| Detection, side view | ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, front view | ≥ 0.45 | 0.69 | 0.65 | 0.56 | 0.59 |
+| Limb-end tips read in their better view (share of frames) | ≥ 0.95 | 1.0 | 1.0 | 1.0 | 1.0 |
+| Near/far swap rate, worst left/right pair | ≤ 0.15 | 0.00 | 0.14 | 0.01 | 0.096 |
+| D7: views disagree, body (share of height) | ≤ 1.5 % | 0.93 % | 0.57 % | 0.25 % | 0.26 % |
+| D7: views disagree, limbs | ≤ 2.0 % | 0.76 % | 1.05 % | 0.27 % | 0.27 % |
+
+¹ Fails. Three bones are over the limit: both front paws (155.7° and 141.4°) and the right forearm (48.3°).
+
+**What fails.** Only the Fox walk fails, on those three bones. It also fails with the paws' range declared at fit time
+(127°) and with it declared before the reader trained (156°, swap rate 0.16). In every frame the front view misreads,
+the lifted front paw is drawn over the hind leg behind it, so the reader guesses. The fit then weighs that guess
+against the side view's correct reading ([#140](https://github.com/gysahlgreene/SlopForge/issues/140)). The fit's
+weighting goes upstream to video2rig. A three-quarter front camera (`render_start.py --views three-quarter,side`) is
+untested.
+The closest passes are the wolf gait's swap rate (0.096), the Fox walk's joint median (0.020) and the wolf random
+clip's front detection (0.56).
+
+**How each metric is measured:**
+
+- *Bone direction error:* the angle between the fitted and the true head-to-tail direction, per bone per frame. Tail
+  bones have their own limit because the fit drives them with springs.
+- *Joint error with travel removed:* the 3-D miss per joint per frame, after taking the root's translation out of both
+  the fit and the truth, over the creature's height. World-space error belongs to D9
+  ([#141](https://github.com/gysahlgreene/SlopForge/issues/141)), because clips walked on the spot come back with travel.
+- *Detection:* the share of frames in which the reader reads a joint at confidence ≥ 0.4, the fit's own "unsure"
+  limit. The front view never sees the hips, spine and tail base, so its limit is lower.
+- *Swap rate:* per left/right pair, the share of frames in which the fit puts the far limb near. Only frames where the
+  true pair is more than 2 % of the height apart in the body's side plane count.
+- *Views disagree (D7):* the body and limb figures from video2rig's `check`. The tool fails a clip whose body is over
+  1.5 % and only warns on limbs over 2 %. SlopForge fails both. A generated clip that fails is regenerated, not repaired.
+
+**When a result counts.** An exam result counts only when all three of these hold:
+
+- every frame was compared;
+- the truth matches the render's own joint labels;
+- the truth stays inside the joint ranges declared for the reader.
+
+D7's frame-rate tolerance is not set yet.
