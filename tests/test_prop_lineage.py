@@ -735,6 +735,26 @@ avoid: [environment]
         self.assertEqual(stage["settings"]["preparation_tool_sha256"],
                          tool_sha256(tool_root() / "blender/prepare_model.py"))
 
+    def test_a_type_that_is_never_lightmapped_is_published_without_lightmap_uvs(self):
+        # A creature deforms, so Unity lights it with probes, never a lightmap; and Unity's lightmap unwrap of a
+        # 57,000-face wolf aborted ("Could not pack uvs") and left the FBX without its material (2026-10-27).
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        from slopforge.pipelines.model import approve_texture
+        with (self.root / "ai/asset_types/prop.yaml").open("a") as stream:
+            stream.write("lightmap_uvs: false\n")
+        imports = []
+
+        def unity_material(root, fbx, material, maps, **options):
+            imports.append(options.get("lightmap_uvs"))
+            return fake_unity_material(root, fbx, material, maps, **options)
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=unity_material):
+            approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
+        self.assertEqual(imports, [False])
+
     def test_a_static_asset_of_a_prefab_type_is_published_with_a_prefab(self):
         self._concept_candidates()
         self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (

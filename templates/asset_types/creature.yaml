@@ -11,6 +11,9 @@ min_concept_fit: 0.8
 min_concept_chroma_ratio: 0.6
 max_concept_darkened_share: 0.4
 remove_hidden_faces: true
+# A creature deforms, so Unity lights it with probes, never a lightmap; Unity's lightmap unwrap of a 57,000-face wolf
+# also aborted and left its FBX without the material (2026-10-27).
+lightmap_uvs: false
 requirements:
   - one four-legged creature standing still on all four feet, in a side three-quarter view
   - legs straight and slightly apart, so each leg is clearly separate from the others and from the body
