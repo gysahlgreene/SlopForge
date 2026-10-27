@@ -13,8 +13,8 @@ seed, frames, action (kind action), loops, out (poses.npz), truth (truth.json), 
   elbows fold in the swing, paws flex, spine, head and tail sway; lowest skin on the floor.
 - action: an authored action of the .blend, eased in from the start pose, looped, lifted by one constant so that no
   frame's skin goes under the start pose's floor.
-Every motion starts at the start pose. A motion that turns a bone past its declared range is refused (exam v1: the
-truth stays inside the ranges the reader was declared).
+Every motion starts at the start pose. A motion that turns a bone past its declared range on any of its three channels,
+or a knee or elbow past video2rig's own hinge limits, is refused (exam v1: the truth stays inside the reader's ranges).
 """
 import json
 import math
@@ -203,16 +203,19 @@ def make(request):
     else:
         raise ValueError(f"unknown motion kind {kind!r}")
 
-    angles = {name: np.degrees(2 * np.arccos(np.clip(np.abs(quats[:, names.index(name), 0]), 0, 1)))
-              for name in moved if name != root_name}
-    violations = range_violations(angles, config["joints"])
+    # each bone's turns about its X, Y and Z as video2rig bounds them: intrinsic XYZ (scipy as_euler('XYZ')), which is
+    # Blender's Euler order ZYX; every motion here is composed X @ Y @ Z, so these are its own channel angles
+    channels = {name: np.degrees([tuple(Quaternion(q).to_euler("ZYX")) for q in quats[:, names.index(name)]])
+                for name in moved if name != root_name}
+    violations = range_violations(channels, config["joints"], hinges)
     if violations:
         raise ValueError(f"the {kind} motion turns bones past their declared ranges: {json.dumps(violations)}")
     np.savez_compressed(request["out"], bones=np.array(names), root=root_name, quats=quats, root_location=locs)
     truth = {"kind": kind, "seed": request.get("seed", 0), "frames": int(frames), "fps": FPS,
              "action": request.get("action"), "root": root_name, "moved_bones": moved, "hinges": hinges,
              "fold_signs": folds, "facing": config["facing"], "lift_world_units": float(sink),
-             "max_turn_degrees": {name: round(float(series.max()), 3) for name, series in angles.items()}}
+             "max_turn_degrees": {name: [round(float(value), 3) for value in np.abs(series).max(0)]
+                                  for name, series in channels.items()}}
     Path(request["truth"]).write_text(json.dumps(truth, indent=2, sort_keys=True) + "\n")
     return {"status": "complete", "frames": int(frames), "moved_bones": len(moved)}
 

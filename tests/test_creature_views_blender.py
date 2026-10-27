@@ -54,7 +54,8 @@ def test_a_seeded_motion_is_byte_stable_and_inside_its_ranges(rigged, tmp_path):
     motion = np.load(tmp_path / "a.npz")
     assert motion["quats"].shape == (48, len(config["fit_bones"]) + 1, 4)     # every bone; HeadEnd is not fitted
     truth = json.loads((tmp_path / "a.json").read_text())
-    assert truth["max_turn_degrees"]["FrontPaw.L"] <= 150 and truth["moved_bones"] == config["fit_bones"]
+    assert max(truth["max_turn_degrees"]["FrontPaw.L"]) <= 150 and truth["moved_bones"] == config["fit_bones"]
+    assert truth["max_turn_degrees"]["Shin.L"][1:] == [0.0, 0.0]          # a knee folds about X only
     other, _ = synth(tmp_path, blend, config, "c", kind="random", seed=4, frames=48)
     assert (tmp_path / "c.npz").read_bytes() != (tmp_path / "a.npz").read_bytes()
     process, report = synth(tmp_path, blend, config, "gait", kind="gait", frames=48)
@@ -68,3 +69,21 @@ def test_a_motion_past_a_declared_range_is_refused(rigged, tmp_path):
     process, report = synth(tmp_path, blend, tight, "gait", kind="gait", frames=48)
     assert report["status"] == "error" and "Tail1" in report["errors"][0], process.stdout[-2000:]
     assert not (tmp_path / "gait.npz").exists()
+
+
+def test_blender_euler_zyx_is_videorigs_intrinsic_xyz():
+    """synth_motion composes X @ Y @ Z and reads the channels back with to_euler('ZYX'); video2rig bounds them as
+    scipy's as_euler('XYZ'). The angles must round-trip, past 90 degrees too."""
+    expr = ("import math\nfrom mathutils import Quaternion\nfor a, b, c in ((0.3, -0.5, 1.1), (2.4, 0.2, -0.4)):\n"
+            "    q = Quaternion((1, 0, 0), a) @ Quaternion((0, 1, 0), b) @ Quaternion((0, 0, 1), c)\n"
+            "    print('EULER', *[round(v, 6) for v in q.to_euler('ZYX')], a, b, c, *[round(v, 6) for v in q])\n")
+    out = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-expr", expr], capture_output=True,
+                         text=True).stdout
+    rows = [list(map(float, line.split()[1:])) for line in out.splitlines() if line.startswith("EULER")]
+    from scipy.spatial.transform import Rotation
+    for x, y, z, a, b, c, w, qx, qy, qz in rows:
+        assert (x, y, z) == pytest.approx((a, b, c), abs=1e-5)
+        x_, y_, z_, w_ = Rotation.from_euler("XYZ", [a, b, c]).as_quat()      # scipy: x y z w
+        sign = 1 if w * w_ >= 0 else -1
+        assert (w, qx, qy, qz) == pytest.approx((sign * w_, sign * x_, sign * y_, sign * z_), abs=1e-5)
+    assert len(rows) == 2

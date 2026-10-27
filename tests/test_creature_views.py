@@ -77,9 +77,11 @@ def test_points_leaving_a_panel_are_counted_per_view():
 
 def test_a_motion_past_a_declared_range_is_refused():
     joints = {"FrontPaw.L": {"range": math.radians(150)}, "Tail1": {"range": math.radians(30)}}
-    angles = {"FrontPaw.L": np.array([0, 90, 148]), "Tail1": np.array([0, 20, 31]), "Hips": np.array([0, 50, 90])}
-    assert range_violations(angles, joints) == {"Tail1": {"frames": 1, "max_degrees": 31.0, "range_degrees": 30.0}}
-    assert range_violations({"Tail1": np.array([0, 29.9])}, joints) == {}
+    channels = {"FrontPaw.L": np.array([[0, 0, 0], [90, 5, 5], [148, 0, 0]]),
+                "Tail1": np.array([[0, 0, 0], [20, 0, 0], [5, 0, -31]]), "Hips": np.array([[0, 50, 90]])}
+    assert range_violations(channels, joints, {}) == {"Tail1": {"frames": 1, "max_degrees": 31.0,
+                                                                "range_degrees": 30.0}}
+    assert range_violations({"Tail1": np.array([[29.9, -29.9, 0]])}, joints, {}) == {}
 
 
 def test_the_creature_type_declares_its_views_framing_and_every_role_a_quadruped_needs():
@@ -96,3 +98,25 @@ def test_the_creature_type_declares_its_views_framing_and_every_role_a_quadruped
                 {"training_poses": 10}):
         with pytest.raises(ValueError):
             motion_settings({**template, **bad})
+
+
+def test_an_end_bone_on_a_numbered_or_hinge_stem_finds_a_limit():
+    rigging = {**RIGGING, "fit_bones": RIGGING["fit_bones"] + ["Tail3End", "ShinEnd.L", "ForearmEnd1.R"]}
+    joints = creature_config("wolf", rigging, {**LIMITS, "End": 45})["joints"]
+    assert joints["Tail3End"]["range"] == pytest.approx(math.radians(160))        # its chain's (Tail)
+    assert joints["ShinEnd.L"]["range"] == pytest.approx(math.radians(45))        # a hinge has none: the ends'
+    assert joints["ForearmEnd1.R"]["range"] == pytest.approx(math.radians(45))
+    with pytest.raises(ValueError, match="no declared joint limit for ShinEnd"):
+        creature_config("wolf", rigging, LIMITS)
+
+
+def test_each_euler_channel_is_checked_against_its_range_and_hinges_against_videorigs_limits():
+    # video2rig bounds a bone's X, Y and Z (intrinsic XYZ) channels each by p0 +- range, not its total turn
+    joints = {"Tail1": {"range": math.radians(20)}, "Thigh.L": {"range": math.radians(130)}}
+    hinges = {"Shin.L": "back", "Forearm.R": "front"}
+    inside = {"Tail1": np.array([[18.0, 6.0, 18.0]]), "Thigh.L": np.array([[120.0, 30.0, 40.0]]),
+              "Shin.L": np.array([[90.0, 20.0, 10.0]]), "Forearm.R": np.array([[-120.0, 70.0, 5.0]])}
+    assert range_violations(inside, joints, hinges) == {}       # a total of ~26 deg on a 20 deg tail is fine
+    outside = {"Thigh.L": np.array([[-143.0, -37.0, -96.0]]), "Shin.L": np.array([[30.0, 30.0, 0.0]]),
+               "Forearm.R": np.array([[10.0, 0.0, 12.0]])}
+    assert set(range_violations(outside, joints, hinges)) == {"Thigh.L", "Shin.L", "Forearm.R"}

@@ -16,6 +16,9 @@ import numpy as np
 VIEWS = ("front", "side", "three-quarter", "top")
 FRAME_WIDTH = 1920
 HINGES = {"Shin": "back", "Forearm": "front"}   # knees fold back, elbows forward: video2rig's hinges dict
+# video2rig's own limits on a hinge (creature.py bounds): the bend one way from straight up to 2.7 rad, the twist about
+# the bone 1.4 rad on an elbow and 0.45 on a knee, the sideways turn 0.2 rad; degrees
+HINGE_LIMITS = {"Forearm": (154.7, 80.2, 11.5), "Shin": (154.7, 25.8, 11.5)}
 
 
 def _role(bone):
@@ -23,19 +26,29 @@ def _role(bone):
     return re.sub(r"\d+$", "", re.sub(r"\.[LR]$", "", bone))
 
 
+def _limit(limits, bone):
+    """A bone's declared limit: its role's; an end bone without one takes its chain's (Tail3End -> Tail), then the
+    type's `End` (an end off a hinge, such as a dewclaw off a shin)."""
+    role = _role(bone)
+    if not role.endswith("End"):
+        return limits.get(role)
+    chain = re.sub(r"\d+$", "", role[:-3])
+    return next((limits[key] for key in (role, chain, "End") if key in limits), None)
+
+
 def creature_config(name, rigging, limits):
-    """creature.json for video2rig. `limits` are the type's joint limits in degrees by role; an end bone without its
-    own takes its chain's (HindToesEnd -> HindToes). Raises ValueError for a fitted bone with no declared limit."""
+    """creature.json for video2rig. `limits` are the type's joint limits in degrees by role (_limit). Raises
+    ValueError for a fitted bone with no declared limit."""
     fit = list(rigging["fit_bones"])
     hinges = {bone: HINGES[_role(bone)] for bone in fit if _role(bone) in HINGES}
     joints = {}
     for bone in fit:
         if bone == "Hips" or bone in hinges:   # the root carries the body; a hinge's own declaration bounds it
             continue
-        role = _role(bone)
-        limit = limits.get(role, limits.get(role[:-3]) if role.endswith("End") else None)
+        limit = _limit(limits, bone)
         if limit is None:
-            raise ValueError(f"no declared joint limit for {role} (bone {bone}): add it to the type's joint_limits")
+            raise ValueError(f"no declared joint limit for {_role(bone)} (bone {bone}): add it, or an End limit for "
+                             "end bones, to the type's joint_limits")
         joints[bone] = {"range": math.radians(limit)}
     return {"name": name, "root_bone": "Hips", "facing": rigging["facing"], "fit_bones": fit, "hinges": hinges,
             "joints": joints}
@@ -80,19 +93,26 @@ def outside_panels(cameras, points):
     return counts
 
 
-def range_violations(angles, joints):
-    """{bone: frames past its declared range, the largest turn, the range} for a known motion's per-frame turns from
-    the start pose (degrees, by bone); bones without a declared range (the root, hinges) are not checked here."""
+def range_violations(channels, joints, hinges):
+    """{bone: frames past its limits, the largest channel turn, the limit} for a known motion's per-frame turns from
+    the start pose: degrees about the bone's X (bend, across the body), Y (twist) and Z (sideways), intrinsic XYZ, as
+    video2rig bounds each channel (p0 +- range). A declared range bounds all three; a hinge has video2rig's own limits
+    (HINGE_LIMITS); the root is free."""
     found = {}
-    for bone, series in angles.items():
-        if bone not in joints:
+    for bone, series in channels.items():
+        if bone in joints:
+            limit = np.full(3, math.degrees(joints[bone]["range"]))
+        elif bone in hinges:
+            limit = np.array(HINGE_LIMITS[_role(bone)])
+        else:
             continue
-        limit = math.degrees(joints[bone]["range"])
-        series = np.asarray(series, float)
-        over = series > limit + 1e-6
+        turns = np.abs(np.asarray(series, float).reshape(-1, 3))
+        over = (turns > limit + 1e-6).any(1)
         if over.any():
-            found[bone] = {"frames": int(over.sum()), "max_degrees": round(float(series.max()), 3),
-                           "range_degrees": round(limit, 3)}
+            worst = int(np.argmax((turns / limit).max(1)))
+            channel = int(np.argmax(turns[worst] / limit))
+            found[bone] = {"frames": int(over.sum()), "max_degrees": round(float(turns[worst, channel]), 3),
+                           "range_degrees": round(float(limit[channel]), 3)}
     return found
 
 
