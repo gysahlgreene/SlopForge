@@ -372,14 +372,37 @@ Compute: the configured ComfyUI and `ssh_gpu` providers (mesh generation; SkinTo
 
 **Ruled by the owner on 2026-10-27:** D0 yes · D1 accept · D2 yes, in that order (Wan 2.2 on `comfyui` first, then one `hosted_api` adapter, Replicate first) · D3 yes (SkinTokens first, UniRig as fallback) · D4 DINOv2 · D5–D9 set after the spike · D10 wait for M4 · D11 (a) and (b) accepted; the Llama 3 legal reading is deferred until Track A; hosted video APIs stay `unknown` until the owner reads their terms · D12 quadrupeds only, walk and idle first · D13 accept · D14 adopt video2rig with the exam as acceptance and the own reader as fallback · D15 (a). The list below is kept as the record of what was asked.
 
+**Ruled by the owner on 2026-10-27, after the spike (#129):** D5, and D7's cross-view limits, as **exam v1 for synthetic motion** (below). D7's frame-rate tolerance, D6, D8 and D9 are still open. The remaining Fox-walk paw failure is the fit's weighting of two views when one is along the line of sight: it goes upstream, with SlopForge's own fit as B3's fallback (#140); it does not block B1.
+
+### Exam v1 (D5, D7)
+
+**Scope:** synthetic motion only (a known motion rendered through video2rig's own cameras and studio, no video model), the best case; set from the spike's four clips; revisable with evidence; not a qualification claim. Recorded with definitions in `docs/CREATURES.md` ("The motion exam, v1"); evidence: [the spike page](https://github.com/gysahlgreene/SlopForge/blob/main/docs/media/creature-motion-spike-2026-10/README.md).
+
+| Metric, per exam clip | Limit | Fox random | Fox walk | Wolf random | Wolf gait |
+| --- | --- | --- | --- | --- | --- |
+| Bone direction error, median over all fitted bones | ≤ 5° | 2.7° | 3.1° | 2.7° | 2.0° |
+| Worst non-tail bone's median | ≤ 10° | 5.6° | 5.5° | 5.5° | 3.5° |
+| Worst non-tail bone's p95 | ≤ 25° | 16.2° | **155.7°** (fails: both front paws, right forearm) | 10.8° | 10.2° |
+| Worst tail bone's p95 | ≤ 40° | 27.2° | 18.6° | 24.9° | 28.5° |
+| Joint error with travel removed, median (share of height) | ≤ 0.025 | 0.011 | 0.020 | 0.008 | 0.007 |
+| Joint error with travel removed, p95 | ≤ 0.10 | 0.050 | 0.071 | 0.029 | 0.064 |
+| Detection (confidence ≥ 0.4), side view | ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, front view | ≥ 0.45 | 0.69 | 0.65 | 0.56 | 0.59 |
+| Limb-end tips read in their better view | ≥ 0.95 | 1.0 | 1.0 | 1.0 | 1.0 |
+| Near/far swap rate, worst left/right pair (proposed 0.10; owner set 0.15) | ≤ 0.15 | 0.00 | 0.14 | 0.01 | 0.096 |
+| D7: views disagree, body (video2rig `check`, share of height) | ≤ 1.5 % | 0.93 % | 0.57 % | 0.25 % | 0.26 % |
+| D7: views disagree, limbs (the tool warns; SlopForge fails) | ≤ 2.0 % | 0.76 % | 1.05 % | 0.27 % | 0.27 % |
+
+Only the Fox walk fails; it fails the same way with the paws' range declared at fit time (127°) and before training (156°). A result counts only when every frame is compared, the truth matches the render's labels, and the truth stays inside the reader's declared joint ranges.
+
 - **D0** Accept package B0 (failure-code split, library licence fields, remote-tool timeout) as groundwork that can land now, since it changes no stage behaviour? Recommended: yes.
 - **D1** The M5 roadmap wording in section 1 (gait as first gate, video route as second package, gait kept as fallback). Recommended: accept.
 - **D2** First video provider: Wan 2.2 on the `comfyui` provider (cleared, seeded), then one `hosted_api` adapter (Replicate first, since its output grant is read and cleared) once a hosted model's own terms are cleared? Recommended: yes, in that order.
 - **D3** Rig provider for creatures: SkinTokens first, UniRig as fallback with its own preflight? Recommended: yes.
 - **D4** Detector backbone: DINOv2 (Apache-2.0, verified, not gated) or DINOv3 (already excepted, but gated and with two conflicting licence texts)? Recommended: DINOv2.
-- **D5** Exam thresholds (per-bone position and rotation limits, detection rate, swap rate): set after the spike reports numbers; no limit is invented here.
+- **D5** Exam thresholds (per-bone position and rotation limits, detection rate, swap rate): set after the spike reports numbers; no limit is invented here. *Ruled: exam v1 above.*
 - **D6** Video retry budget per motion type (the bound for `candidate_quality` retries) and the per-creature spend cap.
-- **D7** Intake limits: cross-view disagreement as a fraction of height; true-fps tolerance.
+- **D7** Intake limits: cross-view disagreement as a fraction of height; true-fps tolerance. *Cross-view limits ruled: exam v1 above; true-fps tolerance open.*
 - **D8** Track A per-frame limb-direction limit (the developer saw 3° worst **[reported]**).
 - **D9** Root motion vs in-place delivery for creature clips, and the foot-sliding limit.
 - **D10** Track A timing: wait for M4 as the roadmap orders, or allow A1 earlier as a licensed-source package? Recommended: wait; it also needs D11's Llama 3 reading and an amendment to #15's non-goal.
