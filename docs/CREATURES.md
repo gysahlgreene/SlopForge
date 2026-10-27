@@ -77,8 +77,17 @@ back to front. The review poses show it, because the wrong leg lifts.
 published without lightmap UVs (`lightmap_uvs: false` in its type). It deforms, so Unity lights it with light probes,
 and Unity's lightmap unwrap of a 57,000-face wolf aborted.
 
-**Verified (2026-10-27):** offline tests on a four-legged box fixture and a local Blender test of the fixture through
-the check, the names and the finish. The live gate runs a configured project's published creature:
+**Verified (2026-10-27):**
+- Offline tests on a four-legged box fixture, and a local Blender test of the fixture through the check, the names and
+  the finish.
+- Live: a wolf generated through the `creature` type on the H100 at `final` (57,000 faces) was published and rigged
+  three times with four seeds each. In every run seed 2 passed and was kept; 4 of 12 seeds passed overall
+  ([evidence](media/creature-rig-b1-2026-10/README.md)).
+- **SkinTokens is not reproducible per seed.** The same seed on the same model gave a different skeleton each run. The
+  seed is recorded, but it does not reproduce a candidate.
+- The kept rig's deformation awaits the owner's review.
+
+The live gate runs a configured project's published creature:
 
 ```sh
 SLOPFORGE_RUN_SKINTOKENS=1 SLOPFORGE_PROJECT_ROOT=<project> SLOPFORGE_CREATURE=<name> \
