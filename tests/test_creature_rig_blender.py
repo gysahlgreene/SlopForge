@@ -53,6 +53,15 @@ def test_a_fixture_quadruped_is_checked_named_and_finished(tmp_path):
     assert finished["material_coverage"]["base_color"] > 0
     assert (tmp_path / "rig.fbx").stat().st_size and (tmp_path / "rig.blend").stat().st_size
     assert all(Path(path).stat().st_size for path in images)
+    # the skin is opaque: Blender's FBX import wired the published base colour's Color into Alpha, and Cycles (video2rig's
+    # studio) drew the B1 wolf see-through
+    probe = ("import bpy\nfor m in bpy.data.materials:\n    for n in (m.node_tree.nodes if m.use_nodes else []):\n"
+             "        if n.type == 'BSDF_PRINCIPLED':\n            print('ALPHA', m.name, len(n.inputs['Alpha'].links), "
+             "n.inputs['Alpha'].default_value)\n")
+    checked = subprocess.run([BLENDER, "--background", str(tmp_path / "rig.blend"), "--python-expr", probe],
+                             capture_output=True, text=True).stdout
+    alphas = [line.split()[-2:] for line in checked.splitlines() if line.startswith("ALPHA")]
+    assert alphas and all(links == "0" and float(value) == 1.0 for links, value in alphas), alphas
     # lit as the material previews (the wolf's: mean luminance 138): one sun left its near side dark (64), the
     # character review's lights, made for a 1.8 m humanoid, blew it out (218)
     rest = np.asarray(Image.open(images[0]).convert("RGB"), float)

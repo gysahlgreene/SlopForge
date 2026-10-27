@@ -183,6 +183,20 @@ def set_bones(rig, meshes, names, left):
     return min(across, default=1.0)
 
 
+def make_opaque(meshes):
+    """A creature's skin is opaque. Blender's FBX import wires the published base colour's Color into Alpha, and
+    Cycles (video2rig's studio renders) then drew the B1 wolf see-through. Returns the links removed."""
+    removed = 0
+    for material in {material for obj in meshes for material in obj.data.materials if material and material.use_nodes}:
+        for node in material.node_tree.nodes:
+            if node.type == "BSDF_PRINCIPLED":
+                for link in list(node.inputs["Alpha"].links):
+                    material.node_tree.links.remove(link)
+                    removed += 1
+                node.inputs["Alpha"].default_value = 1.0
+    return removed
+
+
 def render_poses(rig, meshes, poses, images, forward, left):
     scene = bpy.context.scene
     low = np.min([obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box], axis=0)
@@ -234,6 +248,7 @@ def finish(request):
     coverage, methods = transfer(source_meshes, meshes, Path(request["rigged_model"]).parent)
     if coverage.get("base_color", 0) <= 0:
         raise ValueError("the source's base colour did not transfer to the rig")
+    alpha_links = make_opaque(meshes)
     for obj in source_meshes:
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -248,6 +263,7 @@ def finish(request):
     render_poses(rig, meshes, request["poses"], request["pose_images"], forward, left)
     return {"status": "complete", "bone_names": [bone.name for bone in rig.data.bones],
             "lateral_x_min": lateral_x, "welded_vertices": welded, "material_coverage": coverage,
+            "alpha_links_removed": alpha_links,
             "material_transfer": methods, "rigged_model_sha256": sha(request["rigged_model"]),
             "blend_sha256": sha(request["blend"]), "blender_version": bpy.app.version_string}
 
@@ -272,6 +288,7 @@ def fixture(request):
     texture.image = image
     shader = next(node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED")
     material.node_tree.links.new(texture.outputs["Color"], shader.inputs["Base Color"])
+    material.node_tree.links.new(texture.outputs["Alpha"], shader.inputs["Alpha"])   # as the model pipeline wires it
     mesh.materials.append(material)
     body = bpy.data.objects.new("Creature", mesh)
     bpy.context.scene.collection.objects.link(body)
