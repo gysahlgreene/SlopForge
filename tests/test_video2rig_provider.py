@@ -493,4 +493,4 @@ def test_render_start_takes_the_declared_facing(install, tmp_path):
                "side": "left", "facing": "-Y"}
     argv = video2rig.command(config(install), tmp_path, "render_start", tmp_path / "wolf", blend="w.blend",
                              framing=framing)
-    assert argv[-2:] == ["--facing", "-Y"]
+    assert argv[-1] == "--facing=-Y"     # "--facing -Y" reads -Y as an option to argparse

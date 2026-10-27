@@ -87,3 +87,54 @@ def test_blender_euler_zyx_is_videorigs_intrinsic_xyz():
         sign = 1 if w * w_ >= 0 else -1
         assert (w, qx, qy, qz) == pytest.approx((sign * w_, sign * x_, sign * y_, sign * z_), abs=1e-5)
     assert len(rows) == 2
+
+
+V2R = Path(os.environ.get("SLOPFORGE_VIDEO2RIG_CHECKOUT", Path.home() / "SlopForgeVideo2rig/video2rig"))
+
+
+@pytest.mark.skipif(not (V2R / "blender/render_start.py").is_file(), reason="video2rig's checkout is not installed")
+def test_the_start_cameras_project_as_blender_renders_them(rigged, tmp_path):
+    """Plan B2: the wrapped render's cameras.json projects as the camera maths says, to under half a pixel, and the
+    skin's projected box is the silhouette render_start drew."""
+    from slopforge.backends import video2rig
+    from slopforge.creature_views import framing, project
+    blend, config = rigged
+    settings = {"asset_pipeline": {"tools": {"blender": BLENDER}, "providers": {"video2rig": {
+        "python": shutil.which("python3"), "checkout": str(V2R)}}}}
+    chosen = {**framing({"views": ["three-quarter", "side"]}, length=1.65, width=0.3), "facing": config["facing"]}
+    argv = video2rig.command(settings, tmp_path, "render_start", tmp_path / "v2r", blend=blend, framing=chosen)
+    assert subprocess.run(argv + ["--samples", "4"], capture_output=True, text=True).returncode == 0
+    cameras = json.loads((tmp_path / "v2r/start/cameras.json").read_text())
+    rig = creature(extra=0)
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import bpy, json, sys\nfrom mathutils import Matrix, Vector\nfrom bpy_extras.object_utils import "
+        "world_to_camera_view\ncams, points = json.load(open(sys.argv[-2])), json.load(open(sys.argv[-1]))\n"
+        "scene = bpy.context.scene\nout = {}\nfor v in cams['views']:\n"
+        "    data = bpy.data.cameras.new(v['name']); data.type = 'ORTHO'\n"
+        "    data.ortho_scale = max(v['ortho_width'], v['ortho_height'])\n"
+        "    cam = bpy.data.objects.new(v['name'], data); scene.collection.objects.link(cam)\n"
+        "    r, u, f = Vector(v['right']), Vector(v['up']), Vector(v['forward'])\n"
+        "    cam.matrix_world = Matrix.Translation(Vector(v['location'])) @ "
+        "Matrix((r, u, -f)).transposed().to_4x4()\n"
+        "    scene.render.resolution_x, scene.render.resolution_y = v['width_px'], v['height_px']\n"
+        "    bpy.context.view_layer.update()\n"
+        "    out[v['name']] = [[c.x * v['width_px'], (1 - c.y) * v['height_px']] for c in "
+        "(world_to_camera_view(scene, cam, Vector(p)) for p in points)]\n"
+        "print('PROJECTED', json.dumps(out))\n")
+    (tmp_path / "cams.json").write_text(json.dumps(cameras))
+    (tmp_path / "points.json").write_text(json.dumps(rig["heads"].tolist()))
+    out = subprocess.run([BLENDER, "--background", "--factory-startup", "--python", str(probe), "--",
+                          str(tmp_path / "cams.json"), str(tmp_path / "points.json")], capture_output=True, text=True)
+    blender_px = json.loads(next(line for line in out.stdout.splitlines() if line.startswith("PROJECTED"))[10:])
+    from PIL import Image
+    start = np.asarray(Image.open(tmp_path / "v2r/start/start.png").convert("RGB"), float)
+    for view in cameras["views"]:
+        ours = project(view, rig["heads"])
+        assert np.abs(ours - np.array(blender_px[view["name"]])).max() < 0.5, view["name"]
+        # the skin's projected box is the silhouette render_start drew: the fixture's tan against its grey studio
+        panel = start[:, view["x0_px"]:view["x0_px"] + view["width_px"]]
+        drawn = np.argwhere(panel.max(2) - panel.min(2) > 30)
+        skin = project(view, rig["vertices"])
+        assert np.abs([drawn[:, 1].min() - skin[:, 0].min(), drawn[:, 1].max() - skin[:, 0].max(),
+                       drawn[:, 0].min() - skin[:, 1].min(), drawn[:, 0].max() - skin[:, 1].max()]).max() < 2.5

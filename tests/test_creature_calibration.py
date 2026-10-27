@@ -16,6 +16,9 @@ from tests.test_creature_pipeline import project, stubs  # noqa: F401  (B1's stu
 from tests.test_creature_rig import creature
 
 
+PANEL_COLOURS = ((200, 40, 40), (40, 40, 200))
+
+
 def cameras(views, widths, ortho=1.8):
     """Orthographic cameras about the fixture (its skin spans x -0.15..0.15, y -0.8..0.85, z 0..0.95)."""
     looks = {"side": ([10, 0.03, 0.5], [0, -1, 0]), "three-quarter": ([7, -7, 0.5], [0.71, 0.71, 0]),
@@ -56,11 +59,12 @@ def tool(monkeypatch):
         elif step == "render_poses":
             out, frames = Path(options["out"]), len(np.load(options["motion"])["quats"])
             views = json.loads((project / "start/cameras.json").read_text())["views"]
-            for view in views:
+            for number, view in enumerate(views):
                 if max(view["width_px"], view["height_px"]) == options["fit"]:
                     (out / view["name"]).mkdir(parents=True)
-                    for index in range(frames):
-                        Image.new("RGB", (view["width_px"], view["height_px"])).save(out / view["name"] / f"{index:04d}.jpg")
+                    for index in range(frames):    # each view its own colour, to see the panels' order in the clip
+                        Image.new("RGB", (view["width_px"], view["height_px"]), PANEL_COLOURS[number]).save(
+                            out / view["name"] / f"{index:04d}.jpg")
             heads = np.tile((rig["heads"] + [0, calls["label_offset"], 0])[None], (frames, 1, 1))
             np.savez(out / "labels.npz", names=np.array(rig["bones"]), heads=heads, tails=heads,
                      armature_world=np.eye(4))
@@ -156,6 +160,11 @@ def test_a_synthetic_clip_is_rendered_through_the_start_cameras_with_its_truth(r
     assert len(list((project / "exam/random_s0/frames").glob("*.png"))) == 24
     with Image.open(project / "exam/random_s0/frames/0000.png") as frame:
         assert frame.size == (1920, 1080)
+        pixels = np.asarray(frame.convert("RGB"), int)
+    second = json.loads((project / "start/cameras.json").read_text())["views"][1]["x0_px"]
+    assert np.abs(pixels[500, 20] - PANEL_COLOURS[0]).max() < 12           # the first view on the left
+    assert np.abs(pixels[500, second + 20] - PANEL_COLOURS[1]).max() < 12  # then the second
+    assert (pixels[500, second - 2:second + 2] == 8).all()                  # render_start's 4 px divider
     assert asset["motion"]["clips"]["random_s0"]["kind"] == "random" and result["clip"].endswith("random_s0.mp4")
     assert asset["executions"][-1]["stages"][-1]["name"] == "synthetic_motion"
     with pytest.raises(FileExistsError, match="inspect or move it"):

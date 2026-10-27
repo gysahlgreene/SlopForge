@@ -79,14 +79,18 @@ def framing(settings, length, width):
     return {"views": views, "widths": list(widths), "margin": margin, "margin_wide": margin_wide, "side": side}
 
 
+def project(view, points):
+    """Panel pixels (x right, y down) of world points through one of cameras.json's orthographic views."""
+    offset = np.asarray(points, float).reshape(-1, 3) - np.asarray(view["location"], float)
+    return np.stack([(offset @ np.asarray(view["right"], float) / view["ortho_width"] + 0.5) * view["width_px"],
+                     (0.5 - offset @ np.asarray(view["up"], float) / view["ortho_height"]) * view["height_px"]], -1)
+
+
 def outside_panels(cameras, points):
     """{view name: points outside its panel} for world points seen through cameras.json's orthographic views."""
-    points = np.asarray(points, float).reshape(-1, 3)
     counts = {}
     for view in cameras["views"]:
-        offset = points - np.asarray(view["location"], float)
-        x = (offset @ np.asarray(view["right"], float) / view["ortho_width"] + 0.5) * view["width_px"]
-        y = (0.5 - offset @ np.asarray(view["up"], float) / view["ortho_height"]) * view["height_px"]
+        x, y = project(view, points).T
         out = int(((x < 0) | (x > view["width_px"]) | (y < 0) | (y > view["height_px"])).sum())
         if out:
             counts[view["name"]] = out
