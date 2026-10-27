@@ -221,8 +221,8 @@ def lineage_rights(asset, refs):
             if not isinstance(outputs, list) or not all(isinstance(output, dict) and isinstance(output.get("id"), str)
                                                         for output in outputs):
                 return _unknown(f"stage {item.get('name')} attempt {item.get('attempt')} has malformed outputs")
-            for output in outputs:
-                producers.setdefault(output["id"], []).append((item, output))
+            for output in outputs:  # identity is the id with the content: concept candidates reuse ids
+                producers.setdefault((output["id"], output.get("sha256")), []).append(item)
     if not isinstance(refs, list) or not refs:
         return _unknown("no lineage recorded for the delivered artifact")
     parts, queue, seen = [], list(refs), set()
@@ -234,17 +234,17 @@ def lineage_rights(asset, refs):
         if (item["id"], item["sha256"]) in seen:
             continue
         seen.add((item["id"], item["sha256"]))
-        found = producers.get(item["id"], [])
+        found = producers.get((item["id"], item["sha256"]), [])
         if not found:
-            parts.append(_unknown(f"no stage records producing {item['id']}"))
+            parts.append(_unknown(f"no stage records producing {item['id']} with this content"))
             continue
         recorded = {json.dumps((producer.get("provenance") or {}).get("output_rights") if
                                isinstance(producer.get("provenance"), dict) else "malformed", sort_keys=True)
-                    for producer, _ in found}
-        if any(output.get("sha256") != item["sha256"] for _, output in found) or len(recorded) != 1:
-            parts.append(_unknown(f"the stages recording {item['id']} disagree about it"))
+                    for producer in found}
+        if len(recorded) != 1:  # adopted copies of one stage must agree
+            parts.append(_unknown(f"the stages recording {item['id']} disagree about its rights"))
             continue
-        producer = found[0][0]
+        producer = found[0]
         label = f"{producer.get('name')} attempt {producer.get('attempt')}"
         entries = (producer.get("provenance") or {}).get("output_rights") if isinstance(
             producer.get("provenance"), dict) else "malformed"

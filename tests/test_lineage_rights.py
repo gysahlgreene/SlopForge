@@ -61,7 +61,6 @@ def _mutate(change):
     (lambda a, r: _stages(a)[0]["provenance"].update(output_rights=[{"source": "z_image", "status": "unknown",
                                                                        "reason": "terms unread"}]), "terms unread"),
     (lambda a, r: a["executions"].pop(0), "no stage records producing concept"),
-    (lambda a, r: _stages(a)[1]["outputs"].append(ref("concept", "d")), "disagree"),
     (lambda a, r: a["executions"].append({"id": "copy", "stages": [stage("concept_generation", [], [ref("concept", "c")],
                                                                          [{"source": "other", **CLEARED}])]}),
      "disagree"),
@@ -87,6 +86,16 @@ def test_an_adopted_copy_that_agrees_keeps_the_baseline_and_a_cycle_ends():
     assert lineage_rights(asset, refs)["status"] == "attribution_required"
     _stages(asset)[0]["inputs"] = [copy.deepcopy(refs[0])]  # the concept claims the material as input
     assert lineage_rights(asset, refs)["status"] == "attribution_required"
+
+
+def test_a_regenerated_artifact_with_the_same_id_is_another_artifact():
+    """Concept candidates reuse ids across generations; identity is the id with the content hash."""
+    asset, refs = baseline()
+    asset["executions"].append({"id": "later", "stages": [stage("concept_generation", [], [ref("concept", "d")],
+                                                                None, status="failed")]})
+    assert lineage_rights(asset, refs)["status"] == "attribution_required"
+    _stages(asset)[0]["outputs"] = [ref("concept", "e")]  # no producer of the referenced content is left
+    assert "no stage records producing concept" in " ".join(lineage_rights(asset, refs)["reasons"])
 
 
 def test_restricted_anywhere_wins():
