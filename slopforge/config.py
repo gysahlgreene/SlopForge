@@ -134,6 +134,8 @@ def load_project(project_root):
         else:
             result["asset_pipeline"][key] = value
     result["asset_pipeline"]["selected_compute_profile"] = profile
+    from .providers import load_providers
+    load_providers(result)  # a broken providers block stops here, before any stage records rights from it
     result["_compute_profile_workflows"] = copy.deepcopy(overrides.get("workflows", {}))
     result["_quality_base_pipeline"] = copy.deepcopy(result["asset_pipeline"])
     quality_tier = os.environ.get("SLOPFORGE_QUALITY_TIER", result["asset_pipeline"].get("quality_tier", "normal"))

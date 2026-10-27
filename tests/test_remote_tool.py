@@ -40,7 +40,8 @@ class RemoteToolTests(unittest.TestCase):
                                          "extra": ["/tmp/slopforge-omnipart-abc123/grip.png", 7],
                                          "out_dir": "/tmp/slopforge-omnipart-abc123/out"}])  # nested names too
             script = next(command for command in calls if command[0] == "ssh" and "python" in command[-1])
-            self.assertEqual(script[-1], "cd /opt/omnipart && SPCONV_ALGO=native /opt/env/bin/python - "
+            # the host's own timeout ends the job there too: killing the local ssh would leave it on the GPU
+            self.assertEqual(script[-1], "cd /opt/omnipart && SPCONV_ALGO=native timeout 10800 /opt/env/bin/python - "
                                          "/tmp/slopforge-omnipart-abc123/request.json")
             self.assertTrue((root / "out/parts.json").is_file())
             self.assertEqual(calls[-1], ["ssh", "-o", "BatchMode=yes", "gpu", "rm", "-rf", "--",

@@ -61,7 +61,8 @@ def run_remote_tool(host, python, script, request, uploads, downloads, *, label=
                                   (request_path, work / "request.json")):
                 if step(["scp", "-q", "-o", "BatchMode=yes", str(local), f"{host}:{target}"]).returncode != 0:
                     raise failed(f"Could not upload {Path(local).name} to {host}")
-        command = shlex.join([python, "-", str(work / "request.json")])
+        # the host's timeout ends the job there too; the local one below only ends the ssh session
+        command = shlex.join(["timeout", str(timeout), python, "-", str(work / "request.json")])
         if env:
             command = " ".join(f"{key}={shlex.quote(value)}" for key, value in env.items()) + " " + command
         if cwd:

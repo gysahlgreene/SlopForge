@@ -178,3 +178,18 @@ def test_swapped_part_mask_models_are_not_the_ones_whose_terms_were_read():
 def test_credentials_anywhere_in_a_provider_block_are_refused(block):
     with pytest.raises(ValueError, match="credentials never go in the project file"):
         providers.load_providers(config(declared={"video_cloud": block}))
+
+
+def test_a_broken_providers_block_stops_the_project_from_loading(tmp_path):
+    """Otherwise every stage would record unknown rights for Blender and BiRefNet, and resume would copy them on."""
+    import yaml
+    from slopforge.config import load_project
+    from slopforge.initializer import init_project
+    (tmp_path / "Assets").mkdir()
+    init_project(tmp_path)
+    project = tmp_path / "ai/project.yaml"
+    settings = yaml.safe_load(project.read_text())
+    settings["asset_pipeline"]["providers"] = {"video_cloud": {"type": "hosted_api", "vendor": "replicate"}}
+    project.write_text(yaml.safe_dump(settings))
+    with pytest.raises(ValueError, match="providers.video_cloud.key_env"):
+        load_project(tmp_path)
