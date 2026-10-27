@@ -214,3 +214,17 @@ def test_external_creature_rig():
     result = pipeline.rig_creature(project, config, manifest, name, seeds=int(os.environ.get("SLOPFORGE_SEEDS", "4")))
     assert result["status"] == "review_required"
     assert set(manifest["assets"][f"creature:{name}"]["rigging"]["fit_bones"]) >= {"FrontPaw.L", "HindPaw.R", "Head"}
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda asset: asset["published_artifacts"].append(dict(asset["published_artifacts"][0])),   # two records, one path
+    lambda asset: asset["published_artifacts"].append("fbx"),                                     # a malformed sibling
+    lambda asset: asset.update(published_artifacts={"fbx": asset["published_artifacts"][0]}),     # not a list
+    lambda asset: asset["published_artifacts"][0].update(sha256="0" * 64),                       # the file changed since
+])
+def test_an_unclear_publication_record_refuses_to_rig(tmp_path, stubs, mutate):
+    root, config, manifest = project(tmp_path)
+    mutate(manifest["assets"]["creature:wolf"])
+    with pytest.raises(ValueError, match="published model"):
+        pipeline.rig_creature(root, config, manifest, "wolf")
+    assert stubs[0]["infer"] == []

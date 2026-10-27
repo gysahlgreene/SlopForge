@@ -105,11 +105,13 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 8:
         raise ValueError(f"seeds must be 1 to 8, got {count!r}")
     source = root / asset["outputs"]["fbx"]
-    source_ref = next((item for item in asset.get("published_artifacts") or []
-                       if item.get("path") == asset["outputs"]["fbx"]), None)
-    if source_ref is None or not source.is_file() or file_sha256(source) != source_ref["sha256"]:
-        raise ValueError(f"creature {name}'s published model is missing or changed since it was published; "
+    published = asset.get("published_artifacts")   # every member checked before one is selected
+    matches = ([item for item in published if item.get("path") == asset["outputs"]["fbx"]]
+               if isinstance(published, list) and all(isinstance(item, dict) for item in published) else [])
+    if len(matches) != 1 or not source.is_file() or file_sha256(source) != matches[0].get("sha256"):
+        raise ValueError(f"creature {name}'s published model is missing, ambiguous or changed since it was published; "
                          "approve its material again")
+    source_ref = matches[0]
     directory = output_path(root, config, asset["type"], asset["name"]) / "Rigging"
     if directory.exists():
         raise FileExistsError(f"Rigging outputs exist; inspect or move them before retrying: {directory}")
