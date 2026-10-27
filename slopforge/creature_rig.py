@@ -285,3 +285,20 @@ def deformation_poses(available):
     return [{"label": label, "rotations": {bone: list(angles) for bone, angles in rotations.items()
                                            if bone in available}}
             for label, rotations in _POSES]
+
+
+def rig_settings(asset_type):
+    """The limb declaration, the B1 limits and the seed count of a creature asset type."""
+    limbs = asset_type.get("limbs")
+    if limbs != {"ground_contact": 4}:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: limbs must be {{ground_contact: 4}}; quadrupeds only "
+                         f"(owner decision D12), got {limbs!r}")
+    asymmetry = asset_type.get("max_rig_asymmetry")
+    if isinstance(asymmetry, bool) or not isinstance(asymmetry, (int, float)) or not 0 <= asymmetry <= 1:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: max_rig_asymmetry must be a share of the height "
+                         f"from 0 to 1, got {asymmetry!r}")
+    seeds = asset_type.get("rig_seeds", 4)
+    if isinstance(seeds, bool) or not isinstance(seeds, int) or not 1 <= seeds <= 8:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: rig_seeds must be 1 to 8, got {seeds!r}")
+    return {"limbs": dict(limbs), "seeds": seeds,
+            "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0}}

@@ -1,0 +1,29 @@
+name: creature
+pipeline: model
+output_folder: Creatures
+# A creature is generated like a prop (the TRELLIS.2 route), then rigged by `slopforge creature rig` (B1) and
+# animated (M5; docs/CREATURES.md). The bounded check's wolf (#129) was made this way at the prop budget: 28,472 faces.
+face_budget: prop_faces
+max_components: 5
+max_concept_hue_difference: 4
+min_concept_fit: 0.8
+min_concept_chroma_ratio: 0.6
+max_concept_darkened_share: 0.4
+remove_hidden_faces: true
+requirements:
+  - one four-legged creature standing still on all four feet, in a side three-quarter view
+  - legs straight and slightly apart, so each leg is clearly separate from the others and from the body
+  - head forward, mouth closed, a tail hanging apart from the hind legs
+  - complete animal with plausible anatomy, isolated on a plain light background
+avoid: [humanoid, rider, saddle or harness, multiple creatures, action pose, crossed or hidden legs, wings, floor,
+        pedestal, cast shadow]
+# The limb declaration the rig is checked against: legs that stand on the ground, in front and hind pairs. Quadrupeds
+# only for now (owner decision D12); a leg TRELLIS.2 paints on the body has no geometry to rig and fails B1.
+limbs:
+  ground_contact: 4
+# Twin legs' joints must mirror within this share of the creature's height. Proposed for the owner's ruling from the
+# bounded check: the passing wolf seed mirrored within 0.005, a failing seed 0.28.
+max_rig_asymmetry: 0.05
+# SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
+# 1 of 4 passed).
+rig_seeds: 4

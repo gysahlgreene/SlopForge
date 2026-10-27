@@ -1,5 +1,6 @@
 """B1: a raw creature rig checked against its limb declaration, on a four-legged box fixture (no Blender)."""
 import copy
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -244,3 +245,22 @@ def test_the_review_poses_use_only_bones_the_rig_has():
     used = {bone for pose in poses for bone in pose["rotations"]}
     assert used <= set(NAMES.values())
     assert {"Spine1", "Spine2", "Tail1", "Tail2", "Neck1", "Head"} <= used
+
+
+def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
+    import shutil
+    import yaml
+    from slopforge.creature_rig import rig_settings
+    from slopforge.taxonomy import load_taxonomy
+    template = Path(__file__).resolve().parents[1] / "templates/asset_types/creature.yaml"
+    (tmp_path / "ai/asset_types").mkdir(parents=True)
+    shutil.copy(template, tmp_path / "ai/asset_types/creature.yaml")
+    creature_type = load_taxonomy(tmp_path)["creature"]
+    assert creature_type["pipeline"] == "model"
+    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4}
+    for bad in ({"ground_contact": 6}, {"ground_contact": 4, "wings": 2}, None):
+        with pytest.raises(ValueError, match="quadrupeds only"):
+            rig_settings({**creature_type, "limbs": bad})
+    with pytest.raises(ValueError, match="max_rig_asymmetry"):
+        rig_settings({**creature_type, "max_rig_asymmetry": 2})
+    assert yaml.safe_load(template.read_text())["limbs"] == LIMBS
