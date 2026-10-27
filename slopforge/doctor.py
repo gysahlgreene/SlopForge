@@ -84,6 +84,17 @@ def run_doctor(project_root=None):
         if packaged.is_file():
             workflow_paths.append(("Workflow", packaged))
 
+    # The rights in what each configured workflow's models make (docs/COMFYUI.md, Output rights)
+    from .providers import combine_rights
+    from .workflow_requirements import workflow_output_rights
+    for role, workflow_path in workflow_paths:
+        try:
+            rights = combine_rights(workflow_output_rights(workflow_path))
+        except Exception as exc:
+            report("WARN", f"{role} rights", f"unknown: {exc}")
+            continue
+        report(*_rights_line(rights, f"{role} rights"))
+
     workflow_checks = []
     for role, workflow_path in workflow_paths:
         try:
@@ -197,6 +208,24 @@ def run_doctor(project_root=None):
         else:
             report("OK" if skin["status"] == "ready" else "WARN", "SkinTokens",
                    skin["status"] + (": " + "; ".join(skin["reasons"]) if skin["reasons"] else ""))
+    if config is not None:
+        from . import providers as provider_map
+        try:
+            found = provider_map.load_providers(config)
+        except ValueError as exc:
+            report("FAIL", "Providers", str(exc))
+            found = {}
+        for name, provider in found.items():
+            if name in ("comfyui", "video2rig"):
+                continue  # ComfyUI's models' rights are each workflow's (above); video2rig's lines carry its own
+            record = provider.get("output_rights") or {}
+            status, label, detail = _rights_line(provider_map.combine_rights([{"source": name, **record}]),
+                                                 f"Provider {name} ({provider['type']})", record)
+            if provider["type"] == "hosted_api":
+                ready = provider_map.preflight(name, provider, config, root)
+                if ready["status"] != "ready":
+                    status, detail = "WARN", f"{ready['status']}: {'; '.join(ready['reasons'])}; {detail}"
+            report(status, label, detail)
     from .backends import video2rig
     if config is not None and video2rig.configured(config):
         rights = video2rig.OUTPUT_RIGHTS
@@ -215,3 +244,17 @@ def run_doctor(project_root=None):
             report("PASS" if result["status"] == "ready" else "WARN", label,
                    f"{result['status']}: {detail}; {rights}")
     return 1 if failures else 0
+
+
+_DELIVERIES = "approve-texture, the image pipeline's approve, character approve-deformation and animation unity-setup"
+
+
+def _rights_line(rights, label, record=None):
+    """A doctor line for output rights: unknown and restricted warn (experiments still run; delivery stops)."""
+    terms = f" ({record['terms']}, {record.get('terms_version')}, read {record['read_on']})" if record and \
+        record.get("terms") and record.get("read_on") else ""
+    if rights["status"] in ("cleared", "attribution_required"):
+        notices = f"; ships with: {' '.join(rights['notices'])}" if rights["notices"] else ""
+        return "PASS", label, f"{rights['status']}{terms}{notices}"
+    return "WARN", label, (f"{rights['status']}{terms}: {'; '.join(rights['reasons'])}; blocks {_DELIVERIES} for "
+                           "what it makes")

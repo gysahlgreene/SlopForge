@@ -132,3 +132,30 @@ def test_a_stage_records_a_providers_rights_from_the_map_with_the_users_reading_
     assert providers.rights_of(config(), "omnipart")[0]["status"] == "restricted"  # not configured: still its terms
     broken = providers.rights_of(config(declared={"omnipart": "nope"}), "omnipart")[0]
     assert broken["status"] == "unknown" and "providers" in broken["reason"]
+
+
+def test_doctor_reports_every_providers_rights_and_each_workflows(tmp_path, monkeypatch, capsys):
+    from unittest.mock import patch
+    import yaml
+    from slopforge.doctor import run_doctor
+    from slopforge.initializer import init_project
+    (tmp_path / "Assets").mkdir()
+    init_project(tmp_path)
+    project = tmp_path / "ai/project.yaml"
+    settings = yaml.safe_load(project.read_text())
+    settings["asset_pipeline"]["tools"].update(omnipart_python="/opt/op/bin/python", omnipart_checkout="/opt/op")
+    settings["asset_pipeline"]["providers"] = {"video_cloud": {
+        "type": "hosted_api", "vendor": "replicate", "key_env": "SLOPFORGE_TEST_UNSET_TOKEN",
+        "output_rights": {"status": "unknown", "reason": "API terms not read yet"}}}
+    project.write_text(yaml.safe_dump(settings))
+    monkeypatch.delenv("SLOPFORGE_TEST_UNSET_TOKEN", raising=False)
+    with patch("slopforge.doctor.ComfyUIClient.health", side_effect=OSError("offline")):
+        assert run_doctor(tmp_path) == 0  # rights warn: experiments may proceed
+    lines = capsys.readouterr().out.splitlines()
+    line = lambda label: next(item for item in lines if label in item)
+    assert line("Provider omnipart").startswith("WARN") and "restricted" in line("Provider omnipart")
+    assert "non-commercial" in line("Provider omnipart") and "approve-texture" in line("Provider omnipart")
+    assert line("Provider video_cloud").startswith("WARN") and "SLOPFORGE_TEST_UNSET_TOKEN" in line("Provider video_cloud")
+    assert "API terms not read yet" in line("Provider video_cloud")
+    assert line("Workflow rights").startswith("PASS") and "cleared" in line("Workflow rights")
+    assert line("Model workflow rights").startswith("PASS") and "Built with DINOv3." in line("Model workflow rights")
