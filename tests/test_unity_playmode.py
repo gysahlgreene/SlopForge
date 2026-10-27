@@ -29,6 +29,14 @@ class PlayModeScriptTests(unittest.TestCase):
         self.assertIn("SetTrigger(part)", script)  # the Animator parameter a game sets
         self.assertIn("RestsOnTheGround", script)  # physics: the Rigidbody settles on a floor, does not fall through
 
+    def test_a_static_prefab_plays_only_the_physics_check(self):
+        # 2026-10-27 live run (a supply crate, the prop type's static prefab): a parameterised test with no cases
+        # fails in NUnit ("No arguments were provided"), so every static prop's publication failed in Play mode.
+        for parts in ([], [{"name": "grip", "kind": "grip"}]):
+            script = play_mode_script("Assets/Art/Generated/Models/supply_crate/supply_crate.prefab", parts)
+            self.assertNotIn("PartPulses", script)
+            self.assertIn("RestsOnTheGround", script)
+
     def test_the_editor_binary_comes_from_the_project_version_or_the_environment(self):
         # The `unity` wrapper adds -quit, which ends a -runTests run before any test runs (2026-10-25), so the
         # editor is launched directly: the project's version under the Hub's install folder, or UNITY_EDITOR_PATH.
