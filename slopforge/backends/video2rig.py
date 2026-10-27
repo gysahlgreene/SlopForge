@@ -160,7 +160,8 @@ def command(config, project_root, step, project, *, blend=None, clip=None, save=
         return script("render_start.py") + ["--out", str(project / "start")] + ([
             "--views", ",".join(framing["views"]), "--widths", ",".join(map(str, framing["widths"])),
             "--margin", str(framing["margin"]), "--margin-wide", str(framing["margin_wide"]),
-            "--side", framing["side"]] if framing else [])
+            "--side", framing["side"]] + (["--facing", framing["facing"]] if framing.get("facing") else [])
+            if framing else [])
     if step == "render_poses":
         return script("render_poses.py") + [
             "--poses", str(Path(motion).resolve()), "--cameras", str(project / "start/cameras.json"),

@@ -219,3 +219,50 @@ def test_external_creature_calibration():
     assert result["status"] == "calibrated"
     clip = pipeline.synthesize_motion(project, config, manifest, name, "random_s0", kind="random", seed=0)
     assert (Path(project) / clip["clip"]).stat().st_size and clip["frames"] == 96
+
+
+def test_render_start_is_told_the_declared_facing(rigged, tool):
+    root, config, manifest = rigged
+    pipeline.calibrate_creature(root, config, manifest, "wolf")
+    assert dict(tool["steps"])["render_start"]["framing"]["facing"] == "-Y"
+
+
+@pytest.mark.parametrize("options", [{"views": ["front", "back"]}, {"widths": [640, 1000]}])
+def test_bad_framing_refuses_before_anything_is_made(rigged, tool, options):
+    root, config, manifest = rigged
+    executions = len(manifest["assets"]["creature:wolf"]["executions"])
+    with pytest.raises(ValueError):
+        pipeline.calibrate_creature(root, config, manifest, "wolf", **options)
+    assert tool["steps"] == [] and len(manifest["assets"]["creature:wolf"]["executions"]) == executions
+    assert not (root / "Assets/Generated/Creatures/wolf/Motion").exists()
+
+
+@pytest.mark.parametrize("options, message", [({"kind": "dance"}, "kind"), ({"kind": "action"}, "--action"),
+                                              ({"kind": "random", "frames": 0}, "frames")])
+def test_a_bad_motion_request_refuses_before_a_clip_folder_exists(rigged, tool, options, message):
+    root, config, manifest = rigged
+    pipeline.calibrate_creature(root, config, manifest, "wolf")
+    with pytest.raises(ValueError, match=message):
+        pipeline.synthesize_motion(root, config, manifest, "wolf", "clip", **options)
+    assert not (root / manifest["assets"]["creature:wolf"]["motion"]["project"] / "exam/clip").exists()
+
+
+def test_the_rig_blend_must_be_the_one_b1_made(rigged, tool):
+    root, config, manifest = rigged
+    asset = manifest["assets"]["creature:wolf"]
+    blend = root / asset["artifacts"]["rig_blend"]["path"]
+    blend.write_bytes(b"edited by hand")
+    with pytest.raises(ValueError, match="changed since it was made"):
+        pipeline.calibrate_creature(root, config, manifest, "wolf")
+    blend.write_bytes(b"rig")
+    stage = next(stage for item in asset["executions"] for stage in item["stages"] if stage["name"] == "rig_postprocess")
+    stage["outputs"] = 7                                    # a malformed record refuses with a reason, never a TypeError
+    with pytest.raises(ValueError, match="malformed"):
+        pipeline.calibrate_creature(root, config, manifest, "wolf")
+
+
+def test_the_stages_record_that_the_rig_awaits_review(rigged, tool):
+    root, config, manifest = rigged
+    pipeline.calibrate_creature(root, config, manifest, "wolf")
+    stages = manifest["assets"]["creature:wolf"]["executions"][-1]["stages"]
+    assert all(stage["provenance"]["rig_review"] == "review_required" for stage in stages)

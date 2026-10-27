@@ -486,3 +486,11 @@ def test_render_start_takes_the_creatures_framing_and_render_poses_its_motion(in
                                      "--sharp", "--project", str(project)]
     with pytest.raises(ValueError, match="render_poses needs motion, out, fit"):
         video2rig.command(settings, tmp_path, "render_poses", project, blend=blend)
+
+
+def test_render_start_takes_the_declared_facing(install, tmp_path):
+    framing = {"views": ["three-quarter", "side"], "widths": [958, 962], "margin": 1.8, "margin_wide": 1.45,
+               "side": "left", "facing": "-Y"}
+    argv = video2rig.command(config(install), tmp_path, "render_start", tmp_path / "wolf", blend="w.blend",
+                             framing=framing)
+    assert argv[-2:] == ["--facing", "-Y"]

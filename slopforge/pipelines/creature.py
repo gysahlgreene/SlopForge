@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw
 
 from ..backends import video2rig
 from ..backends.blender import blender_environment
-from ..character_rigging import run_skintokens_inference, skintokens_preflight
+from ..character_rigging import _project_file, run_skintokens_inference, skintokens_preflight
 from .. import creature_rig, creature_views
 from ..creature_rig import deformation_poses, rig_settings
 from ..creature_views import creature_config, framing, motion_settings, outside_panels
@@ -330,17 +330,18 @@ def _rig_blend(root, asset):
     if rigging.get("status") not in ("review_required", "approved") or "rig_blend" not in asset.get("artifacts", {}):
         raise ValueError(f"creature {asset['name']} has no rig: run `slopforge creature rig {asset['name']}` first")
     executions = asset.get("executions")
-    if (not isinstance(executions, list) or not all(isinstance(item, dict) and isinstance(item.get("stages", []), list)
-                                                     and all(isinstance(stage, dict) for stage in item.get("stages", []))
-                                                     for item in executions)):
+    stages = [stage for item in executions for stage in item.get("stages", [])] if (
+        isinstance(executions, list) and all(isinstance(item, dict) and isinstance(item.get("stages", []), list)
+                                             for item in executions)) else None
+    if stages is None or not all(isinstance(stage, dict) and isinstance(stage.get("outputs") or [], list)
+                                 and all(isinstance(output, dict) for output in stage.get("outputs") or [])
+                                 for stage in stages):
         raise ValueError(f"creature {asset['name']}'s execution records are malformed")
-    path = asset["artifacts"]["rig_blend"]["path"]
-    blend = root / path
+    path, blend = _project_file(root, asset["artifacts"]["rig_blend"].get("path"), "The rig .blend")
+    blend = Path(blend)
     digest = file_sha256(blend) if blend.is_file() else None
-    refs = [output for item in executions for stage in item.get("stages", [])
-            if stage.get("name") == "rig_postprocess" and stage.get("status") == "succeeded"
-            for output in stage.get("outputs") or [] if isinstance(output, dict) and output.get("path") == path
-            and output.get("sha256") == digest]
+    refs = [output for stage in stages if stage.get("name") == "rig_postprocess" and stage.get("status") == "succeeded"
+            for output in stage.get("outputs") or [] if output.get("path") == path and output.get("sha256") == digest]
     if not refs:
         raise ValueError(f"creature {asset['name']}'s rig .blend is missing or changed since it was made; rig it again")
     return blend, refs[-1]
@@ -364,7 +365,10 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
     blend, blend_ref = _rig_blend(root, asset)
     settings = motion_settings(load_taxonomy(root)[asset["type"]])
     settings.update({key: value for key, value in (("views", views), ("widths", widths)) if value is not None})
+    framing(settings, length=1.0, width=1.0)   # views, widths and margins refuse here, before anything is made
     count = poses or settings["training_poses"]
+    if isinstance(count, bool) or not isinstance(count, int) or not 100 <= count <= 20000:
+        raise ValueError(f"training poses must be 100 to 20000, got {count!r}")
     creature = creature_config(asset["name"], asset["rigging"], settings["joint_limits"])
     folder = output_path(root, config, asset["type"], asset["name"]) / "Motion"
     if (folder / "video2rig").exists():
@@ -383,8 +387,9 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
     record = asset["motion"] = {"status": "calibrating", "project": project.relative_to(root).as_posix(),
                                 "creature": creature, "training_poses": count, "rig_status": asset["rigging"]["status"],
                                 "clips": {}}
+    review = asset["rigging"]["status"]   # a rig awaiting its deformation review may be calibrated; the stages say so
     stage = start_stage(execution, "creature_calibration", 1, [blend_ref], {"creature": creature, "framing": request},
-                        {"provider": provider, "output_rights": rights})
+                        {"provider": provider, "output_rights": rights, "rig_review": review})
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
     try:
@@ -395,6 +400,7 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
         forward = np.array(FACING[creature["facing"]], float)
         chosen = framing(settings, length=float(np.ptp(skin @ forward)),
                          width=float(np.ptp(skin @ np.cross((0, 0, 1), forward))))
+        chosen["facing"] = creature["facing"]   # declared, not guessed by render_start from foot and toe names
         _v2r(config, root, "render_start", project, log, blend=blend, framing=chosen)
         cut = outside_panels(json.loads((project / "start/cameras.json").read_text()), skin)
         if cut:
@@ -412,7 +418,7 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
                                                                   ("start", "image.calibrated_views", "start/start.png"))]
     finish_stage(stage, "succeeded", start)
     stage = start_stage(execution, "detector_training_set", 1, start[:3], {"poses": count, "creature": creature},
-                        {"provider": provider, "output_rights": rights})
+                        {"provider": provider, "output_rights": rights, "rig_review": review})
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
     try:
@@ -446,6 +452,14 @@ def synthesize_motion(project_root, config, manifest, name, clip, *, kind, seed=
         raise ValueError(f"creature {name} is not calibrated: run `slopforge creature calibrate {name}` first")
     if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", clip):
         raise ValueError(f"clip names are lower-case letters, digits and underscores, got {clip!r}")
+    if kind not in ("random", "gait", "action"):
+        raise ValueError(f"the motion kind must be random, gait or action, got {kind!r}")
+    if kind == "action" and not action:
+        raise ValueError("--kind action needs --action, the authored action to loop")
+    if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 2400:
+        raise ValueError(f"frames must be 1 to 2400, got {frames!r}")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError(f"seed must be a whole number of 0 or more, got {seed!r}")
     project = root / record["project"]
     exam, mp4 = project / "exam" / clip, project / "clips" / f"{clip}.mp4"
     if exam.exists() or mp4.exists():
@@ -464,7 +478,7 @@ def synthesize_motion(project_root, config, manifest, name, clip, *, kind, seed=
     provider = _video2rig_identity(config, root)
     rights = [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
     stage = start_stage(execution, "synthetic_motion", 1, [blend_ref], {**settings, "tool_sha256": tool},
-                        {"provider": provider, "output_rights": rights})
+                        {"provider": provider, "output_rights": rights, "rig_review": asset["rigging"]["status"]})
     begin_stage(stage)
     manifest_path = root / config["asset_pipeline"]["manifest"]
     save_manifest(manifest_path, manifest)
