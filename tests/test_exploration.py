@@ -15,6 +15,11 @@ from slopforge.manifest import load_manifest
 from slopforge.review import generate_review_board
 
 
+# What the real ComfyUI worker records about its models' terms (delivery refuses a candidate without it).
+FAKE_RIGHTS = [{"source": "fixture.safetensors", "status": "cleared", "terms": "MIT", "terms_version": "fixture",
+                "read_on": "2026-10-27"}]
+
+
 class ExplorationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -107,7 +112,8 @@ class ExplorationTests(unittest.TestCase):
     def test_explore_cli_and_promote_create_normal_approval_candidate(self):
         def backend(_root, _config, _workflow, prompt, destination, _prefix, seed, metadata, **_kwargs):
             Image.new("RGB", (8, 8), "gold").save(destination)
-            metadata.write_text(json.dumps({"workflow": "fixture.json", "seed": seed, "model": "fixture"}))
+            metadata.write_text(json.dumps({"workflow": "fixture.json", "seed": seed, "model": "fixture",
+                                            "output_rights": FAKE_RIGHTS}))
 
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend):
             result = cli_main(["--project", str(self.root), "explore", "concept", "relic_ideas", "A relic",

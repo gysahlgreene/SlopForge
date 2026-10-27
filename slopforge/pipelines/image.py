@@ -8,6 +8,7 @@ from ..candidates import approve_image_candidate, generate_candidates
 from ..conditioning import ensure_supported, resolve_conditioning
 from ..paths import resolve_workflow
 from ..provenance import file_sha256
+from ..providers import NOTICES_FILE, combine_rights, require_shippable, rights_of, write_notices
 from ..config import workflow_node_inputs
 from ..style import build_prompt, style_identity
 from ..surface import make_cutout, make_tiling_material
@@ -54,10 +55,35 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     return candidates
 
 
+def _candidate_rights(asset, number):
+    """What the candidate's ComfyUI worker recorded about its models' terms; nothing recorded is unknown."""
+    candidate = next((item for item in (asset.get("candidates") or {}).get("items", [])
+                      if item.get("number") == number), None)
+    recorded = ((candidate or {}).get("generator") or {}).get("output_rights")
+    return recorded if isinstance(recorded, list) else [
+        {"source": f"candidate {number}", "status": "unknown",
+         "reason": "its worker recorded no output rights (made before they were recorded: generate it again)"}]
+
+
+def _deliver(root, asset, entries):
+    """The image pipeline publishes into the Unity project: its rights decide whether it may (docs/COMFYUI.md)."""
+    rights = require_shippable(combine_rights(entries), asset.get("name", "the image"), "approve")
+    asset["output_rights"] = rights
+    published = root / asset["outputs"]["image"]
+    write_notices(published.parent, asset.get("name", published.stem), rights, f"{published.stem}.{NOTICES_FILE}")
+    return rights
+
+
 def approve(project_root, config, asset_type, manifest, key, number, force=False):
     processing = asset_type.get("processing")
+    entries = _candidate_rights(manifest["assets"][key], number)
+    # Refused before anything is published; the processing's own rights are checked after it runs, below.
+    require_shippable(combine_rights(entries), manifest["assets"][key].get("name", key), "approve")
     if not processing:
-        return approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+        result = approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
+        if result["status"] != "failed":
+            _deliver(Path(project_root).resolve(), manifest["assets"][key], entries)
+        return result
     root = Path(project_root).resolve()
     snapshot = copy.deepcopy(manifest["assets"][key])
     # Processing runs after the published image is replaced, so a failure puts back the files and the record the
@@ -74,7 +100,10 @@ def approve(project_root, config, asset_type, manifest, key, number, force=False
             result = approve_image_candidate(project_root, config, asset_type, manifest, key, number, force)
             if result["status"] == "failed":
                 return result
-            return _process(root, config, asset_type, manifest["assets"][key], processing)
+            result = _process(root, config, asset_type, manifest["assets"][key], processing)
+            asset = manifest["assets"][key]
+            _deliver(root, asset, entries + _processing_rights(config, asset.get("processing") or {}))
+            return result
         except BaseException:
             image = manifest["assets"][key].get("outputs", {}).get("image")
             for path in {*published, *((root / image, (root / image).with_suffix("")) if image else ())}:
@@ -86,6 +115,19 @@ def approve(project_root, config, asset_type, manifest, key, number, force=False
                 (shutil.copytree if kept.is_dir() else shutil.copy2)(kept, path)
             manifest["assets"][key] = snapshot
             raise
+
+
+def _processing_rights(config, record):
+    """A cut-out is BiRefNet's; a tiling material's inpaint and upscale are what their workers recorded."""
+    if record.get("kind") == "cutout":
+        return rights_of(config, "background_removal")
+    entries = []
+    for step in ("seamless", "upscale"):
+        if step in record:
+            recorded = record[step].get("output_rights") if isinstance(record[step], dict) else None
+            entries += recorded if isinstance(recorded, list) else [
+                {"source": f"tiling {step}", "status": "unknown", "reason": "its run recorded no output rights"}]
+    return entries
 
 
 def _process(root, config, asset_type, asset, processing):

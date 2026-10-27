@@ -13,6 +13,10 @@ from slopforge.backends.comfyui import ComfyUIError
 ROOT = Path(__file__).resolve().parents[1]
 
 
+CLEARED = {"output_rights": [{"source": "z_image_turbo_bf16.safetensors", "status": "cleared", "terms": "Apache-2.0",
+                               "terms_version": "model card", "read_on": "2026-10-27"}]}
+
+
 class SurfaceTests(unittest.TestCase):
     def test_cutout_crops_to_the_plant(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -72,7 +76,8 @@ class SurfaceTests(unittest.TestCase):
 
     def test_approval_runs_the_declared_processing(self):
         from slopforge.pipelines import image
-        manifest = {"assets": {"foliage:tuft": {"outputs": {"image": "Foliage/tuft.png"}, "description": "tuft"}}}
+        manifest = {"assets": {"foliage:tuft": {"outputs": {"image": "Foliage/tuft.png"}, "description": "tuft",
+                                                "candidates": {"items": [{"number": 1, "generator": CLEARED}]}}}}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "Foliage").mkdir()
@@ -100,7 +105,8 @@ class SurfaceTests(unittest.TestCase):
     def test_failed_processing_restores_the_published_image_and_its_record(self):
         from slopforge.pipelines import image
         record = {"outputs": {"image": "Foliage/tuft.png"}, "description": "tuft", "status": "ready",
-                  "processing": {"kind": "cutout", "sha256": "old"}}
+                  "processing": {"kind": "cutout", "sha256": "old"},
+                  "candidates": {"items": [{"number": 2, "generator": CLEARED}]}}
         manifest = {"assets": {"foliage:tuft": dict(record)}}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -109,7 +115,8 @@ class SurfaceTests(unittest.TestCase):
 
             def approve_new(*_args, **_kwargs):  # publishes candidate 2's uncut image, as the real approval does
                 Image.new("RGB", (4, 4), (255, 255, 255)).save(root / "Foliage/tuft.png")
-                manifest["assets"]["foliage:tuft"]["candidates"] = {"selected": 2}
+                manifest["assets"]["foliage:tuft"]["candidates"] = {"selected": 2,
+                                                                    "items": [{"number": 2, "generator": CLEARED}]}
                 return {"status": "passed"}
             with patch("slopforge.pipelines.image.approve_image_candidate", side_effect=approve_new), \
                     patch("slopforge.pipelines.image.make_cutout", side_effect=RuntimeError("rembg failed")), \

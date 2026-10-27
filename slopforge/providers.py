@@ -347,9 +347,9 @@ def rights_of(config, name):
 NOTICES_FILE = "SlopForge-NOTICES.txt"
 
 
-def write_notices(directory, what, rights):
+def write_notices(directory, what, rights, filename=NOTICES_FILE):
     """The notices a delivered asset owes, in a file beside it so they ship with it; a stale one is removed."""
-    path = Path(directory) / NOTICES_FILE
+    path = Path(directory) / filename
     if not rights["notices"]:
         path.unlink(missing_ok=True)
         return None
