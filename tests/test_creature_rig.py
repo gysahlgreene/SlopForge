@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from slopforge.creature_rig import bone_names, deformation_poses, fit_bones, structure
+from slopforge.creature_rig import bone_names, check_rig, deformation_poses, fit_bones, structure
 from slopforge.failures import candidate_quality_rejection
 
 LIMBS = {"ground_contact": 4}
@@ -264,3 +264,16 @@ def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
     with pytest.raises(ValueError, match="max_rig_asymmetry"):
         rig_settings({**creature_type, "max_rig_asymmetry": 2})
     assert yaml.safe_load(template.read_text())["limbs"] == LIMBS
+
+
+def test_a_checked_rig_carries_its_names_and_fit_bones_or_why_it_has_none():
+    report = check_rig(creature(), LIMBS, LIMITS)
+    assert report["status"] == "passed" and report["names"] == NAMES
+    assert report["fit_bones"] == fit_bones(report["names"]) and set(report["fit_bones"]) == set(fit_bones(NAMES))
+    bones = dict(BONES)
+    bones["wing"] = ((0, -0.3, 0.68), "bone_3")
+    report = check_rig(creature(bones), LIMBS, LIMITS)
+    assert report["status"] == "failed" and report["failure_codes"] == ["rig_structure"]
+    assert report["errors"] == ["the rig cannot be named: 2 chains leave the chest besides the front legs; "
+                                "a quadruped has one neck"]
+    assert "names" not in report and not candidate_quality_rejection(report)

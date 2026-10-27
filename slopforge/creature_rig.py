@@ -302,3 +302,16 @@ def rig_settings(asset_type):
         raise ValueError(f"asset type {asset_type.get('name')!r}: rig_seeds must be 1 to 8, got {seeds!r}")
     return {"limbs": dict(limbs), "seeds": seeds,
             "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0}}
+
+
+def check_rig(rig, limbs, limits):
+    """structure(), then for a passing rig its generic names and fit_bones; a rig that cannot be named fails."""
+    report = structure(rig, limbs, limits)
+    if report["status"] == "passed":
+        try:
+            report["names"] = bone_names(report, rig)
+        except ValueError as exc:
+            report.update(status="failed", errors=[f"the rig cannot be named: {exc}"], failure_codes=["rig_structure"])
+        else:
+            report["fit_bones"] = fit_bones(report["names"])
+    return report
