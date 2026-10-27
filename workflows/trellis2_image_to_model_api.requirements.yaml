@@ -84,24 +84,28 @@ nodes:
 models:
 - name: dino_v3_vit_l.safetensors
   source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
-  license: unverified
-  license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
+  license: DINOv3 License
+  license_source: https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md
   sha256: unknown
+  output_rights: {status: "attribution_required", terms: "DINOv3 License (no territory limit; trade-control end uses excluded, section 1.b.v)", terms_version: "GitHub LICENSE.md of 2025-08-19 and the ai.meta.com text of 2025-08-14", read_on: "2026-10-27", notice: "Built with DINOv3."}
 - name: trellis_2_int8_convrot.safetensors
   source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
-  license: unverified
-  license_source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
+  license: "MIT (upstream TRELLIS.2)"
+  license_source: https://github.com/microsoft/TRELLIS.2
   sha256: unknown
+  output_rights: {status: "cleared", terms: "MIT", terms_version: "microsoft/TRELLIS.2 LICENSE; Comfy-Org/TRELLIS.2 names it as upstream", read_on: "2026-10-27"}
 - name: trellis_2_shape_vae_bf16.safetensors
   source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
   license: 'upstream model card: MIT; repackaged artifact not independently verified'
   license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
   sha256: unknown
+  output_rights: {status: "cleared", terms: "MIT", terms_version: "microsoft/TRELLIS.2 LICENSE; Comfy-Org/TRELLIS.2 names it as upstream", read_on: "2026-10-27"}
 - name: trellis_2_texture_vae_bf16.safetensors
   source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
   license: 'upstream model card: MIT; repackaged artifact not independently verified'
   license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
   sha256: unknown
+  output_rights: {status: "cleared", terms: "MIT", terms_version: "microsoft/TRELLIS.2 LICENSE; Comfy-Org/TRELLIS.2 names it as upstream", read_on: "2026-10-27"}
 inputs:
 - name: image
   type: image

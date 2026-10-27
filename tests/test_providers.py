@@ -23,8 +23,9 @@ def test_existing_tool_keys_are_read_into_the_map():
     assert found["comfyui"]["type"] == "comfyui" and found["comfyui"]["url"] == "http://gpu:8188"
     assert (found["skintokens"]["type"], found["skintokens"]["host"]) == ("ssh_gpu", "gpu")
     assert (found["part_masks"]["type"], found["omnipart"]["type"]) == ("ssh_gpu", "ssh_gpu")
-    for name in ("skintokens", "part_masks", "omnipart"):
+    for name in ("skintokens", "part_masks"):
         assert found[name]["output_rights"]["status"] == "cleared", name
+    assert found["omnipart"]["output_rights"]["status"] == "restricted"
     assert "video2rig" not in found  # not configured
     local = providers.load_providers(config({"skintokens_python": "/opt/st/bin/python"}))
     assert local["skintokens"]["type"] == "local_tool"
@@ -91,3 +92,28 @@ def test_a_declared_provider_without_rights_is_unknown_and_the_map_must_be_a_map
     assert "providers.thing.output_rights" in found["thing"]["output_rights"]["reason"]
     with pytest.raises(ValueError, match="providers must be a mapping"):
         providers.load_providers(config(declared=["video2rig"]))
+
+
+def test_bundled_workflows_state_every_models_rights():
+    """The terms read on 2026-10-27 (docs/COMFYUI.md, Output rights): concepts and edits cleared, the TRELLIS.2 and
+    Pixal3D graphs owe "Built with DINOv3.", the upscaler's file has no documented source."""
+    from slopforge.paths import tool_root
+    from slopforge.providers import combine_rights
+    from slopforge.workflow_requirements import workflow_output_rights
+    expected = {"image_text2img_api.json": "cleared", "image_character_pose_api.json": "cleared",
+                "image_seamless_inpaint_api.json": "cleared", "image_edit_qwen_api.json": "cleared",
+                "image_views_qwen_edit_api.json": "cleared", "image_upscale_esrgan_api.json": "unknown"}
+    for path in sorted((tool_root() / "workflows").glob("*_api.json")):
+        entries = workflow_output_rights(path)
+        assert all("states no output_rights" not in entry.get("reason", "") for entry in entries), path.name
+        rights = combine_rights(entries)
+        assert rights["status"] == expected.get(path.name, "attribution_required"), path.name
+        if rights["status"] == "attribution_required":
+            assert rights["notices"] == ["Built with DINOv3."], path.name
+
+
+def test_omnipart_is_restricted_by_its_nvidia_dependencies():
+    found = providers.load_providers(config({"omnipart_python": "/opt/op/bin/python", "omnipart_checkout": "/opt/op"}))
+    rights = found["omnipart"]["output_rights"]
+    assert rights["status"] == "restricted" and "non-commercial" in rights["reason"]
+    assert providers.BUILTIN_RIGHTS["part_masks"]["status"] == "cleared"

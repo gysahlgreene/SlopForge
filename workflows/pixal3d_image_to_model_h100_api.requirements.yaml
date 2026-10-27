@@ -35,24 +35,28 @@ nodes:
 models:
   - name: dino_v3_L_naf_fp32.safetensors
     source: https://huggingface.co/Comfy-Org/Pixal3D/tree/main
-    license: MIT
-    license_source: https://github.com/Comfy-Org/ComfyUI/blob/master/LICENSE
+    license: "DINOv3 License; NAF upsampler Apache-2.0"
+    license_source: https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md
     sha256: 4ad2ec4e0879a5b5b04cd97325cc37da954a7b6edca5170b86510f17f2b2290f
+    output_rights: {status: "attribution_required", terms: "DINOv3 License (no territory limit; trade-control end uses excluded, section 1.b.v)", terms_version: "GitHub LICENSE.md of 2025-08-19 and the ai.meta.com text of 2025-08-14", read_on: "2026-10-27", notice: "Built with DINOv3."}
   - name: pixal3d_bf16.safetensors
     source: https://huggingface.co/Comfy-Org/Pixal3D/tree/main
     license: MIT
-    license_source: https://github.com/Comfy-Org/Pixal3D/blob/main/LICENSE
+    license_source: https://huggingface.co/TencentARC/Pixal3D/blob/main/LICENSE
     sha256: 5f3cd67b7ff9104d810754bcd89e47a6c2393e41f8c0a808d0dead37802d85fe
+    output_rights: {status: "cleared", terms: "MIT", terms_version: "TencentARC/Pixal3D LICENSE and NOTICE", read_on: "2026-10-27"}
   - name: trellis_2_shape_vae_bf16.safetensors
     source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
     license: 'upstream model card: MIT; repackaged artifact not independently verified'
     license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
     sha256: de0cb4949a76c59ee5c091a995a69bcc8c51d5aeda939f0c641a50d2a72341f4
+    output_rights: {status: "cleared", terms: "MIT", terms_version: "microsoft/TRELLIS.2 LICENSE; Comfy-Org/TRELLIS.2 names it as upstream", read_on: "2026-10-27"}
   - name: trellis_2_texture_vae_bf16.safetensors
     source: https://huggingface.co/Comfy-Org/TRELLIS.2/tree/main
     license: 'upstream model card: MIT; repackaged artifact not independently verified'
     license_source: https://huggingface.co/microsoft/TRELLIS.2-4B
     sha256: 714e5ebf094a610e12a8e3b5175c18a62f37f6ea4218acb6073644456b73ab0e
+    output_rights: {status: "cleared", terms: "MIT", terms_version: "microsoft/TRELLIS.2 LICENSE; Comfy-Org/TRELLIS.2 names it as upstream", read_on: "2026-10-27"}
 inputs:
   - {name: image, type: image}
   - {name: seed, type: integer}

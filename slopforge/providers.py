@@ -6,6 +6,7 @@ or a local tool. Each carries an `output_rights` record saying whether what it m
 `restricted` (terms read, commercial use forbidden or conditioned) or `unknown` (not read). An artifact's rights are
 the weakest across its lineage; delivery refuses `restricted` and `unknown`, experiments never do.
 """
+import json
 import os
 import re
 
@@ -68,18 +69,27 @@ PROVIDER_TYPES = ("comfyui", "hosted_api", "ssh_gpu", "local_tool")
 _NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 _CREDENTIAL_FIELDS = {"api_key", "key", "token", "secret", "password", "credentials"}
-# Terms of the providers SlopForge configures through tools.* keys, and of its own local tools (plan section 7).
+# Terms of the providers SlopForge configures through tools.* keys, and of its own local tools: read on 2026-10-27 from
+# the publishers' licence files and cards (docs/COMFYUI.md, Output rights).
 BUILTIN_RIGHTS = {
-    "skintokens": {"status": "cleared", "terms": "MIT (SkinTokens code and weights); Apache-2.0 (Qwen3-0.6B)",
-                   "terms_version": "SkinTokens 273b691", "read_on": "2026-10-27"},
+    "skintokens": {"status": "cleared", "terms": "MIT (SkinTokens code and weights; Qwen3-0.6B, Apache-2.0, is used "
+                   "for its architecture only)", "terms_version": "SkinTokens LICENSE at 273b691; weights card",
+                   "read_on": "2026-10-27"},
     "part_masks": {"status": "cleared", "terms": "MIT (Florence-2 large); Apache-2.0 (SAM 2.1 Hiera large)",
-                   "terms_version": "model cards", "read_on": "2026-10-27"},
-    "omnipart": {"status": "cleared", "terms": "MIT (OmniPart code and weights)",
-                 "terms_version": "OmniPart ceb1a4ff, weights dfc4b4c7", "read_on": "2026-10-27"},
+                   "terms_version": "microsoft/Florence-2-large LICENSE; facebook/sam2.1-hiera-large card",
+                   "read_on": "2026-10-27"},
+    # OmniPart is MIT, but the part synthesis SlopForge runs decodes meshes with NVIDIA FlexiCubes and writes GLBs with
+    # nvdiffrast, both under the NVIDIA Source Code License: "only may be used or intended for use non-commercially".
+    "omnipart": {"status": "restricted", "terms": "MIT (OmniPart); NVIDIA Source Code License, section 3.3 "
+                 "(FlexiCubes, nvdiffrast)", "terms_version": "OmniPart ceb1a4ff: flexicubes/LICENSE.txt, nvdiffrast "
+                 "LICENSE.txt", "read_on": "2026-10-27",
+                 "reason": "its mesh decoder (FlexiCubes) and GLB export (nvdiffrast) are licensed for non-commercial "
+                           "research or evaluation only"},
     "background_removal": {"status": "cleared", "terms": "MIT (BiRefNet general, through rembg)",
-                           "terms_version": "BiRefNet LICENSE", "read_on": "2026-10-27"},
-    "blender": {"status": "cleared", "terms": "GPL-2.0-or-later covers Blender, not what it makes",
-                "terms_version": "blender.org licence FAQ", "read_on": "2026-10-27"},
+                           "terms_version": "ZhengPeng7/BiRefNet LICENSE; rembg's BiRefNet-general-epoch_244.onnx",
+                           "read_on": "2026-10-27"},
+    "blender": {"status": "cleared", "terms": "GPL-2.0-or-later covers Blender; what you make with it is yours",
+                "terms_version": "blender.org/about/license", "read_on": "2026-10-27"},
 }
 
 
@@ -176,3 +186,144 @@ def require_ready(name, report):
         raise StageFailure(report.get("category", "configuration"),
                            f"provider {name} is not ready: " + "; ".join(report.get("reasons", [])),
                            operation=f"provider {name} preflight", remedy="Run slopforge doctor and fix what it reports")
+
+
+def _unknown(reason):
+    return {"status": "unknown", "notices": [], "reasons": [reason], "sources": []}
+
+
+def merge_rights(*parts):
+    """Combined rights of several lineages: the weakest status, every notice once, every reason."""
+    status, notices, reasons, sources = "cleared", [], [], []
+    for part in parts:
+        if RIGHTS.index(part["status"]) < RIGHTS.index(status):
+            status = part["status"]
+        notices += [notice for notice in part["notices"] if notice not in notices]
+        reasons += part["reasons"]
+        sources += part["sources"]
+    return {"status": status, "notices": notices, "reasons": reasons, "sources": sources}
+
+
+def lineage_rights(asset, refs):
+    """The rights in `refs` (artifact references of an asset's execution records), over their complete lineage:
+    every producing stage's recorded output_rights, through every input. A stage that recorded none, a reference no
+    stage produced, copies that disagree and malformed records are unknown with a reason; nothing raises."""
+    executions = asset.get("executions") if isinstance(asset, dict) else None
+    if not isinstance(executions, list):
+        return _unknown("the asset's execution records are malformed")
+    producers = {}  # every member is checked before any is selected (provenance skill)
+    for execution in executions:
+        stages = execution.get("stages") if isinstance(execution, dict) else None
+        if not isinstance(stages, list) or not all(isinstance(item, dict) for item in stages):
+            return _unknown(f"execution {execution.get('id') if isinstance(execution, dict) else '?'} is malformed")
+        for item in stages:
+            outputs = item.get("outputs")
+            if not isinstance(outputs, list) or not all(isinstance(output, dict) and isinstance(output.get("id"), str)
+                                                        for output in outputs):
+                return _unknown(f"stage {item.get('name')} attempt {item.get('attempt')} has malformed outputs")
+            for output in outputs:
+                producers.setdefault(output["id"], []).append((item, output))
+    if not isinstance(refs, list) or not refs:
+        return _unknown("no lineage recorded for the delivered artifact")
+    parts, queue, seen = [], list(refs), set()
+    while queue:
+        item = queue.pop()
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not isinstance(item.get("sha256"), str):
+            parts.append(_unknown("a lineage reference is malformed"))
+            continue
+        if (item["id"], item["sha256"]) in seen:
+            continue
+        seen.add((item["id"], item["sha256"]))
+        found = producers.get(item["id"], [])
+        if not found:
+            parts.append(_unknown(f"no stage records producing {item['id']}"))
+            continue
+        recorded = {json.dumps((producer.get("provenance") or {}).get("output_rights") if
+                               isinstance(producer.get("provenance"), dict) else "malformed", sort_keys=True)
+                    for producer, _ in found}
+        if any(output.get("sha256") != item["sha256"] for _, output in found) or len(recorded) != 1:
+            parts.append(_unknown(f"the stages recording {item['id']} disagree about it"))
+            continue
+        producer = found[0][0]
+        label = f"{producer.get('name')} attempt {producer.get('attempt')}"
+        entries = (producer.get("provenance") or {}).get("output_rights") if isinstance(
+            producer.get("provenance"), dict) else "malformed"
+        if producer.get("status") != "succeeded":
+            parts.append(_unknown(f"{label} did not succeed"))
+        elif entries is None:
+            parts.append(_unknown(f"{label} recorded no output rights (made before they were recorded: regenerate it)"))
+        elif not isinstance(entries, list):
+            parts.append(_unknown(f"{label} has malformed output rights"))
+        else:
+            parts.append(combine_rights(entries))
+        inputs = producer.get("inputs")
+        if isinstance(inputs, list):
+            queue.extend(inputs)
+        else:
+            parts.append(_unknown(f"{label} has malformed inputs"))
+    return merge_rights(*parts)
+
+
+def published_rights(asset):
+    """The rights recorded on an asset when it was delivered (a combined record), or unknown."""
+    record = asset.get("output_rights") if isinstance(asset, dict) else None
+    name = asset.get("name", "an asset") if isinstance(asset, dict) else "an asset"
+    if record is None:
+        return _unknown(f"{name} was delivered before output rights were recorded: deliver it again")
+    if (not isinstance(record, dict) or record.get("status") not in RIGHTS or
+            not all(isinstance(record.get(key), list) for key in ("notices", "reasons", "sources")) or
+            not all(isinstance(item, str) for item in record["notices"] + record["reasons"])):
+        return _unknown(f"{name}'s recorded output rights are malformed")
+    return {key: list(record[key]) if isinstance(record[key], list) else record[key]
+            for key in ("status", "notices", "reasons", "sources")}
+
+
+def artifact_rights(manifest, selector, artifact_id):
+    """The rights in a registered artifact (characters, rigs, animations): its own recorded output_rights and those
+    of everything it derives from; an asset's delivered output reads the asset's delivery record."""
+    from .manifest import find_asset
+    assets = manifest.get("assets") if isinstance(manifest, dict) else None
+    if not isinstance(assets, dict) or not all(isinstance(item, dict) for item in assets.values()):
+        return _unknown("the manifest's assets are malformed")
+    by_id = {}
+    for item in assets.values():
+        by_id.setdefault(item.get("id"), []).append(item)
+    try:
+        start = find_asset(manifest, selector)
+    except (KeyError, ValueError) as exc:
+        return _unknown(f"asset {selector}: {exc}")
+    seen = set()
+
+    def walk(asset, name):
+        if (id(asset), name) in seen:
+            return merge_rights()
+        seen.add((id(asset), name))
+        artifact = (asset.get("artifacts") or {}).get(name)
+        if not isinstance(artifact, dict):
+            return _unknown(f"{asset.get('name')} has no artifact {name}")
+        entries = (artifact.get("provenance") or {}).get("output_rights")
+        parts = [combine_rights(entries) if isinstance(entries, list) else
+                 _unknown(f"{asset.get('name')} {name} recorded no output rights")]
+        for source in artifact.get("derived_from") or []:
+            parents = by_id.get(source.get("asset_id")) if isinstance(source, dict) else None
+            if not parents or len(parents) != 1:
+                parts.append(_unknown(f"source asset {source.get('asset_id') if isinstance(source, dict) else '?'} "
+                                      "is missing or ambiguous"))
+            elif source.get("output_id") in (parents[0].get("artifacts") or {}):
+                parts.append(walk(parents[0], source["output_id"]))
+            else:
+                parts.append(published_rights(parents[0]))
+        return merge_rights(*parts)
+    return walk(start, artifact_id)
+
+
+def require_shippable(rights, what, operation):
+    """Delivery's gate: `attribution_required` and `cleared` pass; `unknown` and `restricted` stop it."""
+    if rights["status"] in SHIPPABLE:
+        return rights
+    raise StageFailure("configuration", f"{what} cannot be delivered by {operation}: the rights in its outputs are "
+                       f"{rights['status']} ({'; '.join(rights['reasons']) or 'no reason recorded'})",
+                       operation=operation,
+                       remedy="Read the terms of each source named and record them (providers.<name>.output_rights, "
+                              "or the model's output_rights in its workflow's requirements sidecar), or regenerate "
+                              "on providers whose outputs are cleared; generating and reviewing still work")
