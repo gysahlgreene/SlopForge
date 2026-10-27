@@ -17,6 +17,7 @@ DEFAULTS = {
     "character_rigging_provider": "blender_rigify",
     "workflows": {"image": "image_text2img_api.json"},
     "tools": {"comfy_url": "http://127.0.0.1:8188", "comfy_backend": "auto", "comfy_home": None, "blender": None, "asset_python": None, "hunyuan_checkpoint": "hunyuan3d-dit-v2_fp16.safetensors", "skintokens_python": None, "skintokens_checkout": None, "skintokens_checkpoint": None, "parts_host": None, "parts_python": None, "parts_models": None, "omnipart_python": None, "omnipart_checkout": None, "video2rig_python": None, "video2rig_checkout": None, "video2rig_train_host": None, "video2rig_train_python": None, "video2rig_train_checkout": None},
+    "providers": {},
     "compute_profile": "default",
     "compute_profiles": {},
     "quality_tier": "final",
@@ -133,6 +134,8 @@ def load_project(project_root):
         else:
             result["asset_pipeline"][key] = value
     result["asset_pipeline"]["selected_compute_profile"] = profile
+    from .providers import load_providers
+    load_providers(result)  # a broken providers block stops here, before any stage records rights from it
     result["_compute_profile_workflows"] = copy.deepcopy(overrides.get("workflows", {}))
     result["_quality_base_pipeline"] = copy.deepcopy(result["asset_pipeline"])
     quality_tier = os.environ.get("SLOPFORGE_QUALITY_TIER", result["asset_pipeline"].get("quality_tier", "normal"))

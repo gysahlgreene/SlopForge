@@ -109,6 +109,8 @@ def generate_candidates(project_root, config, asset_type, style, name, descripti
                 record["generator"] = generator_provenance(metadata.get("workflow"), metadata)
                 asset = manifest["assets"][key]
                 asset["generator"] = generator_provenance(metadata.get("workflow"), metadata)
+                if stage is not None and isinstance(metadata.get("output_rights"), list):
+                    stage["provenance"]["output_rights"] = metadata["output_rights"]  # the worker's record
             if execution and candidate_path.is_file() and not record.get("error"):
                 artifact = {"id": f"concept-candidate:{number}", "type": "image.concept",
                             "path": candidate_path.relative_to(root).as_posix(), "sha256": file_sha256(candidate_path),

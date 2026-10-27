@@ -5,6 +5,7 @@ import yaml
 
 from .backends.comfyui import ComfyUIClient, workflow_mask_errors
 from .provenance import workflow_sha256
+from .providers import validate_output_rights
 
 
 def requirements_path(workflow_path):
@@ -70,7 +71,30 @@ def load_workflow_requirements(workflow_path):
     models = [model["name"] for model in manifest["models"]]
     if len(models) != len(set(models)):
         raise ValueError("Workflow requirements models contain duplicate names")
+    for model in manifest["models"]:  # optional: the rights in the model's outputs (docs/COMFYUI.md)
+        if "output_rights" in model:
+            validate_output_rights(model["output_rights"], f"Workflow requirements model {model['name']} output_rights")
     return manifest
+
+
+def workflow_output_rights(workflow_path, models=None):
+    """The rights in each model's outputs, as the workflow's sidecar states them: [{source: model, **record}].
+    `models` are the files the effective graph loads (after workflow_inputs overrides); a file the sidecar does not
+    declare, a model it states nothing for, or a workflow without a sidecar is unknown."""
+    manifest = load_workflow_requirements(workflow_path)
+    name = Path(workflow_path).name
+    if manifest is None:
+        return [{"source": name, "status": "unknown", "reason": f"{name} has no requirements sidecar naming its models"}]
+    declared = {model["name"]: model for model in manifest["models"]}
+    entries = []
+    for model in sorted(set(models)) if models else list(declared):
+        record = (declared.get(model) or {}).get("output_rights")
+        entries.append({"source": model, **record} if record else {
+            "source": model, "status": "unknown",
+            "reason": (f"{manifest['id']} v{manifest['version']} states no output_rights for this model"
+                       if model in declared else f"not declared in {manifest['id']} v{manifest['version']}: an "
+                       "override loaded it, and its terms were not read")})
+    return entries
 
 
 def validate_workflow_requirements(workflow_path, workflow, manifest):

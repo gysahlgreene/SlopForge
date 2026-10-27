@@ -7,6 +7,8 @@ animations verified in Play mode, and first-person close-up quality; a chest wit
 page is the live evidence for the branch that followed (`feat/weapon-parts-quality`): the private run folders are
 `private/weapons-parts-2026-10-25/{P2,P3,R2,C2,C3,C4}` (commit of each in `commit.txt`), all on the `h100` profile.
 
+**Output rights (recorded 2026-10-27): restricted.** OmniPart's part synthesis, which made these parts, runs NVIDIA FlexiCubes and nvdiffrast, licensed for non-commercial use only. The assets are kept as M3 evidence, not for a sold game, and will be regenerated on a cleared parts route ([#134](https://github.com/gysahlgreene/SlopForge/issues/134)).
+
 ## What changed on the route
 
 - **Quality:** the concept-side view joins the parts before it renders, so the metal-lightness match and the

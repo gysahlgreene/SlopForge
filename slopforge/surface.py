@@ -16,6 +16,7 @@ from PIL import Image, ImageFilter
 
 from .backends.comfyui import ComfyUIClient, ComfyUIError, python_executable
 from .paths import comfy_url, resolve_workflow, tool_root
+from .workflow_requirements import workflow_output_rights, workflow_requirements_identity
 from .provenance import file_sha256
 
 TILE_SIZE = 2048
@@ -126,6 +127,7 @@ def _run(client, root, workflow_path, image, bind, out, prompt=None, seed=None):
     """Upload image, bind it into a workflow graph, run it, and download its first output to out."""
     resolved = resolve_workflow(root, workflow_path)
     graph = json.loads(resolved.read_text())
+    workflow_requirements_identity(resolved, graph)  # a graph its sidecar does not describe stops here
     uploaded = client.upload_input(image, "slopforge/surface")
     graph[bind]["inputs"]["image"] = "/".join(part for part in (uploaded.get("subfolder") or "", uploaded["name"]) if part)
     for node in graph.values():
@@ -140,7 +142,10 @@ def _run(client, root, workflow_path, image, bind, out, prompt=None, seed=None):
         raise ComfyUIError(f"{resolved.name} finished without saving an image", category="inference",
                            operation="surface")
     client.download_output(saved[0], out)
-    return {"workflow": resolved.name, "workflow_sha256": file_sha256(resolved), "prompt_id": prompt_id}
+    models = [value for node in graph.values() for value in node.get("inputs", {}).values()
+              if isinstance(value, str) and value.endswith((".safetensors", ".ckpt", ".gguf", ".onnx"))]
+    return {"workflow": resolved.name, "workflow_sha256": file_sha256(resolved), "prompt_id": prompt_id,
+            "output_rights": workflow_output_rights(resolved, models)}
 
 
 def make_tiling_material(root, config, source, prompt, out_dir, seed=7, seams="cut"):

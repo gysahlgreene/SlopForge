@@ -23,6 +23,7 @@ models:
   license: BSD-3-Clause
   license_source: https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE
   sha256: unknown
+  output_rights: {status: "unknown", reason: "upstream publishes RealESRGAN_x4plus.pth (BSD-3-Clause); this .safetensors conversion has no documented source, so its terms cannot be tied to it"}
 inputs:
 - name: image
   type: image/png

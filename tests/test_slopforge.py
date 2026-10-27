@@ -45,6 +45,11 @@ def make_project(root):
     return root
 
 
+# What the real ComfyUI worker records about its models' terms (delivery refuses a candidate without it).
+FAKE_RIGHTS = [{"source": "fixture.safetensors", "status": "cleared", "terms": "MIT", "terms_version": "fixture",
+                "read_on": "2026-10-27"}]
+
+
 class SlopForgeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -109,7 +114,7 @@ class SlopForgeTests(unittest.TestCase):
 
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
             Image.new("RGB", (16, 16), (seed % 255, 10, 20)).save(destination)
-            metadata.write_text(json.dumps({"seed": seed, "model": "fixture"}))
+            metadata.write_text(json.dumps({"seed": seed, "model": "fixture", "output_rights": FAKE_RIGHTS}))
 
         from slopforge.pipelines import image as image_pipeline
         approve_image = image_pipeline.approve
@@ -335,7 +340,7 @@ class SlopForgeTests(unittest.TestCase):
     def test_cli_auto_approval_keeps_first_candidate_provenance(self):
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata):
             Image.new("RGB", (16, 16), "red").save(destination)
-            metadata.write_text(json.dumps({"workflow": "fixture.json", "seed": seed,
+            metadata.write_text(json.dumps({"output_rights": FAKE_RIGHTS, "workflow": "fixture.json", "seed": seed,
                                             "model": "fixture", "prompt_id": str(seed)}))
 
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend), redirect_stdout(StringIO()):
@@ -654,6 +659,8 @@ class SlopForgeTests(unittest.TestCase):
                                          "selected": None}
 
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model._delivery_rights",  # rights: test_texture_approval.OutputRightsGateTests
+                      return_value={"status": "cleared", "notices": [], "reasons": [], "sources": []}), \
                 patch("slopforge.pipelines.model.build_unity_material") as build_material:
             result = model.approve_texture(self.root, config, manifest, "prop:relic", 1)
         build_material.assert_called_once()

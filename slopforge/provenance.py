@@ -108,7 +108,7 @@ def generator_provenance(workflow, metadata=None):
     }
     for field in ("quality", "references_used", "workflow_sha256", "workflow_requirements",
                   "workflow_source_sha256", "workflow_source", "workflow_effective_sha256",
-                  "effective_bindings", "backend", "model_filenames", "provenance", "outputs"):
+                  "effective_bindings", "backend", "model_filenames", "provenance", "outputs", "output_rights"):
         if field in metadata and (field != "workflow_sha256" or metadata[field] is not None):
             result[field] = metadata[field]
     return result

@@ -7,6 +7,7 @@ from pathlib import Path
 from .animation import _contained_file
 from .character_rigging import _character_asset
 from .manifest import register_artifact
+from .providers import artifact_rights, merge_rights, require_shippable, write_notices
 from .unity_material import unity_cli
 
 
@@ -51,6 +52,10 @@ def build_character_animator(project_root, config, manifest, character_selector,
                       "root_motion": bool(artifact.get("provenance", {}).get("root_motion", False))})
     if not clips:
         raise ValueError("Unity setup requires at least one ready, approved retargeted animation")
+    # Unity delivery: the rig's and every clip's rights over their lineage decide, before Unity runs
+    rights = require_shippable(merge_rights(*(artifact_rights(manifest, character["id"], name)
+                                              for name in ("rig", *(clip["id"] for clip in clips)))),
+                               character["name"], "animation unity-setup")
 
     output_dir = (root / config["asset_pipeline"]["output_root"] / "Characters" /
                   character["name"] / "Unity").resolve()
@@ -183,8 +188,10 @@ public static class {class_name}
         script.unlink(missing_ok=True)
         script.with_suffix(".cs.meta").unlink(missing_ok=True)
 
+    write_notices(output_dir, character["name"], rights)
     provenance = {"provider": "Unity ModelImporter and AnimatorController", "rig_type": rig_type,
-                  "source_rig": rig["path"], "animations": [clip["id"] for clip in clips]}
+                  "source_rig": rig["path"], "animations": [clip["id"] for clip in clips],
+                  "output_rights": [], "delivered_rights": rights}
     derived_from = ([{"asset_id": character["id"], "output_id": "rig"}] +
                     [{"asset_id": character["id"], "output_id": clip["id"]} for clip in clips])
     controller_artifact = register_artifact(manifest, character["id"], "unity.animator_controller",

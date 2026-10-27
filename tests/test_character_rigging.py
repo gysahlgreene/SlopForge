@@ -164,6 +164,44 @@ class CharacterRiggingTests(unittest.TestCase):
             approve_deformation(self.root, self.manifest, "character:pilot", confirmed=True)
         self.assertEqual(character["artifacts"]["rig"]["approval"]["status"], "pending")
 
+    CLEARED = {"source": "skintokens", "status": "cleared", "terms": "MIT", "terms_version": "LICENSE",
+               "read_on": "2026-10-27"}
+
+    def test_a_rig_records_its_providers_rights(self):
+        record_rigging_result(self.root, self.manifest, "character:pilot", {**self.result, "output_rights": [self.CLEARED]})
+        self.assertEqual(self.manifest["assets"]["character:pilot"]["artifacts"]["rig"]["provenance"]["output_rights"],
+                         [self.CLEARED])
+
+    def _complete_evidence(self, rights):
+        from slopforge.character_rigging import SKINTOKENS_POSES
+        record_rigging_result(self.root, self.manifest, "character:pilot",
+                              {**self.result, **({"output_rights": rights} if rights is not None else {})})
+        character = self.manifest["assets"]["character:pilot"]
+        character["rigging"]["structural_report"] = {"status": "pass"}
+        for key in ("rig_contact_sheet", *(f"rig_pose.{pose}" for pose in SKINTOKENS_POSES)):
+            path = self.root / f"Assets/Characters/pilot/review/{key}.png"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            Image.new("RGBA", (2, 2), (0, 0, 0, 255)).save(path)
+            register_artifact(self.manifest, "character:pilot", key, "image.rig_evidence",
+                              path.relative_to(self.root).as_posix(), status="candidate", approval_status="pending")
+        return character
+
+    def test_deformation_approval_refuses_a_rig_whose_rights_are_not_shippable(self):
+        from slopforge.failures import StageFailure
+        character = self._complete_evidence([self.CLEARED])
+        # the model it was rigged from was delivered before output rights were recorded
+        with self.assertRaises(StageFailure) as failure:
+            approve_deformation(self.root, self.manifest, "character:pilot", confirmed=True)
+        self.assertEqual(failure.exception.category, "configuration")
+        self.assertNotEqual(character["rigging"].get("deformation_approval", {}).get("status"), "approved")
+        character["published_artifacts"] = [{"path": "Assets/Characters/pilot/model.glb"}]
+        character["output_rights"] = {"status": "attribution_required", "notices": ["Built with DINOv3."],
+                                      "reasons": [], "sources": []}
+        self.assertEqual(approve_deformation(self.root, self.manifest, "character:pilot", confirmed=True),
+                         {"status": "approved"})
+        self.assertEqual(character["rigging"]["deformation_approval"]["output_rights"]["notices"],
+                         ["Built with DINOv3."])
+
     def test_skintokens_masks_weights_by_voxel_reachability(self):
         from slopforge.character_rigging import _SKINTOKENS_SETTINGS
         # Without the postprocess, a sampled run weighted ~1,000 trouser vertices to a fingertip.
@@ -219,6 +257,8 @@ class CharacterRiggingTests(unittest.TestCase):
         self.assertEqual(character["pipeline_status"]["deformation_status"], "needs_review")
         self.assertEqual(character["artifacts"]["rig"]["approval"]["status"], "pending")
         self.assertEqual(character["artifacts"]["rig"]["validation"]["status"], "pass")
+        self.assertEqual([item["source"] for item in character["artifacts"]["rig"]["provenance"]["output_rights"]],
+                         ["skintokens", "blender"])
         self.assertEqual(character["rigging"]["unity_humanoid_mapping"],
                          {"Hips": "Hips", "LeftHand": "LeftHand", "Spine": "Spine"})
 

@@ -5,7 +5,9 @@
 # and about 20 GB). The host needs no CUDA toolkit or sudo: micromamba (BSD-3) supplies CUDA 12.1 nvcc and GCC 11.
 # Versions verified on 2026-10-25 (H100): Python 3.10 for the repository's cp310 wheels (flash-attn 2.7.0.post2,
 # diff_gaussian_rasterization, nvdiffrast), torch 2.4.0 + cu121, setuptools below 81 (lightning 2.2 imports
-# pkg_resources). OmniPart's layout stage (NVIDIA PartField, non-commercial) is not used; only its MIT part synthesis.
+# pkg_resources). OmniPart's layout stage (NVIDIA PartField, non-commercial) is not used, but its part synthesis decodes
+# meshes with NVIDIA FlexiCubes and exports with nvdiffrast, both non-commercial: SlopForge records its outputs as
+# restricted and refuses to deliver them (docs/COMFYUI.md, Providers and output rights).
 set -eu
 DIR=${1:-$HOME/SlopForgeOmniPart}
 mkdir -p "$DIR"; cd "$DIR"

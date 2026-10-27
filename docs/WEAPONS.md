@@ -190,7 +190,7 @@ scale, so a slide moved 3 m until its travel was taken through the parent's scal
 
 ## Moving parts from part-level generation
 
-A weapon that declares a hinge or slide is generated as **separate parts** by OmniPart (MIT; TRELLIS v1 backbone),
+A weapon that declares a hinge or slide is generated as **separate parts** by OmniPart (MIT, but see below; TRELLIS v1 backbone),
 not as one mesh cut along masks: cutting one closed surface gave hollow parts with flat caps and lumpy small
 mechanisms, which the owner rejected three times (2026-10-24). The weapon type sets `part_model`: `hybrid` (the
 default, [below](#hybrid-parts-trellis2s-surface-split-by-omniparts-parts)) keeps TRELLIS.2's surface and uses
@@ -220,7 +220,9 @@ pass):
    rows down grid z; the full thickness) and becomes its 3D box. The boxes follow OmniPart's bottom-up part order,
    and the tool stops with a clear error if the two orders differ. OmniPart's own layout model (NVIDIA
    PartField) is never called: its licence is non-commercial.
-3. OmniPart's MIT part synthesis fills the boxes and returns one textured mesh per part. The tool renames each
+3. OmniPart's part synthesis fills the boxes and returns one textured mesh per part. Its mesh decoder (NVIDIA
+   FlexiCubes) and GLB export (nvdiffrast) are under the NVIDIA Source Code License, for non-commercial use only, so
+   everything this route makes is `restricted` and delivery refuses it ([output rights](COMFYUI.md#providers-and-output-rights)). The tool renames each
    node after its part and records, per declared hinge or slide, a diagnostic `structure_coverage` (the share of
    its mask's grid cells that hold a sparse-structure voxel; a thin lever barely registers there, so it is not the
    gate). OmniPart crops the object square and reads the mask on its 37×37 feature grid, pairing part k with mask id k, so a part too

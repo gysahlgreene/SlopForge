@@ -14,6 +14,7 @@ from .backends.blender import blender_environment
 from .manifest import asset_key
 from .paths import blender_executable, tool_root
 from .provenance import file_sha256
+from .providers import combine_rights, merge_rights, published_rights, require_shippable, rights_of, write_notices
 from .taxonomy import validate_asset_name
 
 SPECIES = ("oak", "birch", "pine", "shrub")
@@ -73,6 +74,9 @@ def make_vegetation(root, config, manifest, name, species, height, seed, bark, f
         raise ValueError("Vegetation height must be positive")
     root = Path(root).resolve()
     bark_asset, leaves, sources = _sources(root, manifest, bark, foliage)
+    # A plant publishes into Unity from delivered bark and foliage, with Blender: their delivery records decide
+    rights = require_shippable(merge_rights(published_rights(bark_asset), *(published_rights(item) for item in leaves),
+                                            combine_rights(rights_of(config, "blender"))), name, "vegetation")
     folder = root / config["asset_pipeline"]["output_root"] / "Vegetation" / name
     materials = folder / "Materials"
     materials.mkdir(parents=True, exist_ok=True)
@@ -93,6 +97,8 @@ def make_vegetation(root, config, manifest, name, species, height, seed, bark, f
               "generator": {"tool": "blender/vegetation.py", "species": species, "height": height, "seed": seed},
               "sources": sources,
               "outputs": {role: path.relative_to(root).as_posix() for role, path in outputs.items()},
-              "validation": {"status": "passed", "errors": [], "warnings": [], "measured": report}}
+              "validation": {"status": "passed", "errors": [], "warnings": [], "measured": report},
+              "output_rights": rights}
+    write_notices(folder, name, rights)
     manifest["assets"][key] = record
     return record

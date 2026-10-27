@@ -51,22 +51,26 @@ models:
   license: apache-2.0
   license_source: https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1
   sha256: d1251cc7bc3486bc61d25c3be498ef394c31c85ddf4ee9137d2e933411f4a689
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 model card", read_on: "2026-10-27"}
   install_path: models/model_patches
 - name: ae.safetensors
   source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/vae
-  license: unverified
-  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  license: "Apache-2.0 (FLUX.1 [schnell] autoencoder)"
+  license_source: https://huggingface.co/black-forest-labs/FLUX.1-schnell
   sha256: unknown
+  output_rights: {status: "cleared", terms: "Apache-2.0 (FLUX.1 [schnell] autoencoder: identical bytes, sha256 afc8e282)", terms_version: "black-forest-labs/FLUX.1-schnell model card", read_on: "2026-10-27"}
 - name: qwen_3_4b.safetensors
   source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/text_encoders
-  license: unverified
-  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  license: Apache-2.0
+  license_source: https://huggingface.co/Qwen/Qwen3-4B
   sha256: unknown
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "Qwen/Qwen3-4B LICENSE (shards byte-identical)", read_on: "2026-10-27"}
 - name: z_image_turbo_bf16.safetensors
   source: https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/diffusion_models
-  license: unverified
-  license_source: https://huggingface.co/Comfy-Org/z_image_turbo
+  license: Apache-2.0
+  license_source: https://huggingface.co/Tongyi-MAI/Z-Image-Turbo
   sha256: unknown
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "Tongyi-MAI/Z-Image-Turbo and Comfy-Org/z_image_turbo model cards", read_on: "2026-10-27"}
 inputs:
 - name: prompt
   type: text

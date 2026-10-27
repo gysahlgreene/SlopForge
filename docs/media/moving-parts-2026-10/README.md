@@ -5,6 +5,9 @@ are `private/weapons-parts-2026-10-25/HP13` and `.../OPEN7` (commit of each run 
 
 ## Pistol: slide and trigger (Experimental)
 
+**Output rights (recorded 2026-10-27): restricted.** OmniPart's part synthesis, which made this pistol's part labels, runs NVIDIA FlexiCubes and nvdiffrast, licensed for non-commercial use only. It is kept as M3 evidence, not for a sold game, and will be regenerated on a cleared parts route ([#134](https://github.com/gysahlgreene/SlopForge/issues/134)).
+
+
 <img src="pistol_moving_parts.gif" width="600" alt="A black pistol with rosewood grips: the trigger pulls back, the slide racks back and returns, the trigger releases">
 
 The brief declares the slide as a slide along the barrel, `-0.03..0`, and the 1911's trigger as a slide, `-0.005..0`.
@@ -48,6 +51,8 @@ gives a different mesh for the same seed number from run to run. This is one bri
 - **The chroma check is unreliable on a black weapon:** its concept's median chroma is near grey.
 
 ## Chest: lid on a hinge (Experimental)
+
+**Output rights (recorded 2026-10-27): attribution_required** ("Built with DINOv3.", through TRELLIS.2). The open route splits the lid by its mask alone and never runs OmniPart.
 
 <img src="chest_lid.gif" width="600" alt="A domed wooden chest with iron bands: the lid opens 100 degrees on its back edge onto a plank interior, then closes">
 
