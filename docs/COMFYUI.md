@@ -122,6 +122,20 @@ The opt-in `h100_multiview` profile (props) adds two graphs. `pixal3d_multiview_
 
 Project workflows in `ai/workflows/` override bundled workflow files. Put an optional `name.requirements.yaml` next to `name.json`; legacy overrides without sidecars continue to work and doctor reports their requirements as unknown. Workflow node classes and selectable model values are checked against the configured ComfyUI before queuing. `slopforge doctor` reports the URL, detected backend, selected compute profile, service health, ComfyUI version/device, sidecar consistency, workflow node availability, model-choice availability, and unverified dependency revisions/hashes for each configured workflow, including `character_model`. Image generation downloads only saved results (`type: output`); preview-node images (`type: temp`) are ignored. The doctor preflight does not submit a prompt or test file transfer; it remains read-only. It also warns when a project's asset type file lacks settings its packaged template has gained since `init` copied it: a prop type without `concept_colour_transfer` left six live chest runs with their colours uncorrected (2026-10-26). Copy the settings you want from the named template.
 
+Tiling materials (`tiling_material` types) are upscaled by `image_upscale_esrgan_api.json`, which loads
+`models/upscale_models/RealESRGAN_x4plus.safetensors`. Make that file from Real-ESRGAN's own release, so its source
+and terms are known:
+
+```sh
+curl -LO https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth   # BSD-3-Clause
+<ComfyUI python> scripts/convert-realesrgan.py RealESRGAN_x4plus.pth <ComfyUI>/models/upscale_models/RealESRGAN_x4plus.safetensors
+```
+
+The script refuses a `.pth` whose sha256 is not the release's, and checks that the result's sha256 is the one in the
+sidecar (`37f9a931`). [Comfy-Org/Real-ESRGAN_repackaged](https://huggingface.co/Comfy-Org/Real-ESRGAN_repackaged)
+publishes the same bytes, and the H100's installed file had that hash before the script existed: it was already
+this conversion.
+
 Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map each slot's image and optional strength to node IDs and input names in the selected image workflow. Approved references are uploaded through the same HTTP client for local and remote services. See [STYLE-SYSTEM.md](STYLE-SYSTEM.md) for configuration and CLI selection.
 
 The bundled text-to-image graph remains text-only. It creates supporting concept images and does not qualify the 3D generation route.
@@ -203,7 +217,7 @@ legal advice.
 | Edits and multi-view views | Qwen-Image-Edit-2511, Qwen2.5-VL 7B, the Qwen-Image VAE, the multiple-angles LoRA | cleared (Apache-2.0) |
 | TRELLIS.2 graphs | TRELLIS.2 (MIT) with DINOv3 ViT-L | attribution_required: "Built with DINOv3." |
 | Pixal3D graphs | Pixal3D (MIT) with DINOv3 and the NAF upsampler (Apache-2.0) | attribution_required: "Built with DINOv3." |
-| Tiling upscale | `RealESRGAN_x4plus.safetensors` | unknown: a conversion of the BSD-3-Clause `.pth` with no documented source |
+| Tiling upscale | `RealESRGAN_x4plus.safetensors`: xinntao's release `.pth`, converted by `scripts/convert-realesrgan.py` | cleared (BSD-3-Clause) |
 | Part masks; cut-outs; Blender; SkinTokens; video2rig | Florence-2 (MIT), SAM 2.1 (Apache-2.0); BiRefNet (MIT); GPL covers Blender, not its outputs; MIT; see [Creatures](CREATURES.md) | cleared |
 | Moving parts (OmniPart and hybrid routes) | OmniPart (MIT), whose part synthesis runs its vendored NVIDIA FlexiCubes and nvdiffrast | **restricted**: NVIDIA Source Code License, non-commercial use only (FlexiCubes' own repository is now Apache-2.0, but OmniPart vendors the earlier copy, and nvdiffrast stays non-commercial) |
 

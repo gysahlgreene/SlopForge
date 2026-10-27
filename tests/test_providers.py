@@ -95,14 +95,14 @@ def test_a_declared_provider_without_rights_is_unknown_and_the_map_must_be_a_map
 
 
 def test_bundled_workflows_state_every_models_rights():
-    """The terms read on 2026-10-27 (docs/COMFYUI.md, Output rights): concepts and edits cleared, the TRELLIS.2 and
-    Pixal3D graphs owe "Built with DINOv3.", the upscaler's file has no documented source."""
+    """The terms read on 2026-10-27 (docs/COMFYUI.md, Output rights): concepts, edits and the upscaler cleared, the
+    TRELLIS.2 and Pixal3D graphs owe "Built with DINOv3."."""
     from slopforge.paths import tool_root
     from slopforge.providers import combine_rights
     from slopforge.workflow_requirements import workflow_output_rights
     expected = {"image_text2img_api.json": "cleared", "image_character_pose_api.json": "cleared",
                 "image_seamless_inpaint_api.json": "cleared", "image_edit_qwen_api.json": "cleared",
-                "image_views_qwen_edit_api.json": "cleared", "image_upscale_esrgan_api.json": "unknown"}
+                "image_views_qwen_edit_api.json": "cleared", "image_upscale_esrgan_api.json": "cleared"}
     for path in sorted((tool_root() / "workflows").glob("*_api.json")):
         entries = workflow_output_rights(path)
         assert all("states no output_rights" not in entry.get("reason", "") for entry in entries), path.name
@@ -193,3 +193,16 @@ def test_a_broken_providers_block_stops_the_project_from_loading(tmp_path):
     project.write_text(yaml.safe_dump(settings))
     with pytest.raises(ValueError, match="providers.video_cloud.key_env"):
         load_project(tmp_path)
+
+
+def test_the_upscaler_is_the_release_weights_converted_by_the_pinned_script():
+    """The sidecar's hashes are the converter's: the .safetensors is xinntao's v0.1.0 .pth, converted by
+    scripts/convert-realesrgan.py, so its source and terms are documented."""
+    import runpy
+    from slopforge.paths import tool_root
+    from slopforge.workflow_requirements import load_workflow_requirements
+    script = runpy.run_path(str(tool_root() / "scripts/convert-realesrgan.py"))
+    model, = load_workflow_requirements(tool_root() / "workflows/image_upscale_esrgan_api.json")["models"]
+    assert model["source"] == script["SOURCE_URL"]
+    assert (model["source_sha256"], model["sha256"]) == (script["SOURCE_SHA256"], script["CONVERTED_SHA256"])
+    assert model["output_rights"]["status"] == "cleared" and model["license"] == "BSD-3-Clause"
