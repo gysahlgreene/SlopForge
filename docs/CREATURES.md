@@ -117,11 +117,18 @@ slopforge --project ~/UnityProjects/MyGame creature synth wolf gait --kind gait
   ([#140](https://github.com/gysahlgreene/SlopForge/issues/140)).
 
   The `creature` type declares video2rig's own bend limits for these names, since spike #129's exams ran on them, and
-  `FrontPaw` 150, because the Khronos Fox's authored walk folds its front paws 148°. video2rig applies one range to a
-  bone's bend, twist and sideways turn alike, so a bone's twist may now turn as far as its bend.
+  `FrontPaw` 150, because the Khronos Fox's authored walk folds its front paws 148°. An end bone takes its chain's
+  limit (`Tail3End`: `Tail`), else the type's `End` (45), for an end off a knee or elbow such as a dewclaw.
+
+  **What a declared range replaces.** video2rig applies one range to a bone's bend, twist and sideways turn alike,
+  replacing its per-channel priors for that bone. That includes a paw's one-way bend: it allowed 20° the wrong way,
+  and a declared paw range allows the full range both ways. It also includes a toe's twist of 10° and the default
+  twist of 69°. The training poses then include wider twists and some wrong-way paw bends. Whether that costs accuracy
+  is for B3's exam to measure.
 - A fitted bone without a declared limit refuses.
 
-**The start frame** comes from video2rig's `render_start.py` with the creature's view pair and framing (#142):
+**The start frame** comes from video2rig's `render_start.py` with the creature's view pair, framing and declared
+facing (#142). Passed as `--facing=-Y`, the facing is never guessed from foot and toe names:
 - **Views.** The `creature` type uses `three-quarter,side`. The three-quarter view sees the trunk, and keeps a lifted
   front paw off the hind leg that a dead-front camera puts behind it (#140). `front,side` is a per-creature choice
   (`--views`).
@@ -140,8 +147,10 @@ same seed writes the same file. Each kind starts at the start pose and keeps the
 - `gait`: an in-place walk.
 - `action`: an authored action, looped.
 
-A motion that turns a bone past its declared range is refused, because exam v1 counts a result only when the truth
-stays inside the reader's ranges. The clip is rendered with video2rig's `render_poses.py` through the start cameras:
+A motion is checked channel by channel, as video2rig bounds a bone (its turns about X, Y and Z, intrinsic XYZ, each
+within the range). A knee or elbow is checked against video2rig's own hinge limits. A motion past either is refused,
+because exam v1 counts a result only when the truth stays inside the reader's ranges. Bad views, widths, kinds or
+`--action` refuse before anything is made. The clip is rendered with video2rig's `render_poses.py` through the start cameras:
 - each panel at its own size, one pose a picture;
 - joined as render_start joins panels, at 24 fps, into `clips/<clip>.mp4`;
 - with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
