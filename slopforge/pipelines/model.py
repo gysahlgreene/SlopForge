@@ -22,6 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
+from ..providers import rights_of
 from ..provenance import generator_provenance, file_sha256, tool_sha256
 from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
@@ -902,6 +903,19 @@ def _candidate_failure(candidate, *, attempt):
                           operation="candidate_validation")
 
 
+def _recorded_rights(metadata_paths):
+    """The rights each ComfyUI run's worker recorded in its metadata; a run that recorded none is unknown."""
+    entries = []
+    for path in metadata_paths:
+        info = json.loads(path.read_text()) if path.is_file() else {}
+        recorded = info.get("output_rights")
+        for entry in recorded if isinstance(recorded, list) else [
+                {"source": path.name, "status": "unknown", "reason": "its worker recorded no output rights"}]:
+            if entry not in entries:
+                entries.append(entry)
+    return entries
+
+
 def _lineage_provenance(context, name, attempt, facts):
     if not context:
         return
@@ -1032,6 +1046,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                     if "backend" in info else missing("backend identity")),
                 "model": ({"status": "known", "value": info["model"]}
                     if "model" in info else missing("model identity")),
+                **({"output_rights": info["output_rights"]} if isinstance(info.get("output_rights"), list) else {}),
             })
             material_refs = _lineage_finish(lineage, "material_generation", number,
                 [(paths["surface"], "surface.swatch"), (metadata_path, "generation.metadata")])
@@ -1057,6 +1072,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                     tiles[key] = root / reference["path"]
         else:
             _lineage_start(lineage, "material_map_acquisition", number, (), map_settings, parents=surface_ref)
+            _lineage_provenance(lineage, "material_map_acquisition", number, {"output_rights": []})
             map_started = bool(lineage)
             tiles["basecolor"].parent.mkdir(parents=True, exist_ok=True)
             subprocess.run([python, str(tool_root() / "processing/make_pbr_maps.py"), "--basecolor", str(paths["surface"]),
@@ -1100,6 +1116,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
         mesh_path = root / asset["source"]["processed_mesh"]
         _lineage_start(lineage, "material_assembly_export", number, (),
                        assembly_settings, parents=assembly_inputs)
+        _lineage_provenance(lineage, "material_assembly_export", number, {"output_rights": rights_of(config, "blender")})
         assembly_started = bool(lineage)
         for key in map_keys:
             if key != "metallic_gloss" and tiles[key].is_file() and tiles[key].resolve() != paths[key].resolve():
@@ -1171,6 +1188,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     _lineage_start(context, "material_generation", number, (),
                    {"workflow": "mesh_pbr", "seed": mesh_info.get("seed")},
                    parents=(lineage or {}).get("material_inputs", (lineage or {}).get("upstream", [])))
+    # The mesh stage's maps, copied and resized: their rights travel with them, no provider is added.
+    _lineage_provenance(context, "material_generation", number, {"output_rights": []})
     if mesh_info.get("conditioning_image"):
         shutil.copy2(mesh_path.parent / mesh_info["conditioning_image"], paths["directory"] / "conditioning.png")
         mesh_info = {**mesh_info, "conditioning_image": "conditioning.png"}
@@ -1246,6 +1265,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     _lineage_start(lineage, "material_assembly_export", number, (),
                    {"preserve_uvs": True, "face_budget": budget, **_placement(asset), **kit_settings},
                    parents=assembly_inputs)
+    _lineage_provenance(lineage, "material_assembly_export", number, {"output_rights": rights_of(config, "blender")})
     grip = next((part for part in asset.get("parts") or [] if part["kind"] == "grip"), None)
     masks = (lineage or {}).get("part_masks")
     held = asset.get("pivot") == "grip"
@@ -1899,7 +1919,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
         "publication_roles": ["surface", "fbx", "blend", "maps", "previews", "unity_material", "validation"],
     }, parent_execution_id=candidate.get("execution_id"))
     publication_stage = start_stage(execution, "final_publication", 1, candidate_artifacts,
-                                    {"approval": "selected material candidate"}, {})
+                                    {"approval": "selected material candidate"}, {"output_rights": []})
     save_manifest(root / pipeline["manifest"], manifest)
     begin_stage(publication_stage)
     from .. import SCHEMA_VERSION
@@ -2423,6 +2443,12 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                                                       stage_id=stage["id"])
             if view_slots:
                 conditioning_stage["provenance"]["view_attempts"] = view_attempts
+            # BiRefNet's cut-outs, the views' graph (as its worker recorded it) and the part masks
+            conditioning_stage["provenance"]["output_rights"] = (
+                rights_of(config, "background_removal")
+                + _recorded_rights([root / Path(item["path"]).with_suffix(".json") for item in conditioning_refs
+                                    if item["type"].startswith("image.view_raw.")])
+                + (rights_of(config, "part_masks") if asset.get("parts") else []))
             finish_stage(conditioning_stage, "succeeded", conditioning_refs)
             _persist_reload(root, pipeline, manifest)
         else:
@@ -2637,6 +2663,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         if mesh_info.get("workflow_effective_sha256") else
                         missing("Worker did not record the effective workflow hash")),
                     "effective_bindings": mesh_info.get("effective_bindings", missing("Worker did not record effective bindings")),
+                    # the worker's record of its models (and OmniPart's, on the part routes), and Blender's reduction
+                    **({"output_rights": mesh_info["output_rights"] + rights_of(config, "blender")}
+                       if isinstance(mesh_info.get("output_rights"), list) else {}),
                     })
             except KeyboardInterrupt as exc:
                 config.pop("_journal_context", None)

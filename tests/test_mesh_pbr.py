@@ -267,6 +267,13 @@ class MeshPBRTests(unittest.TestCase):
             self.assertEqual(saved["model_filenames"][0]["value"], "configured.safetensors")
             # No requirements sidecar: the models' terms are unknown, and recorded so.
             self.assertEqual([item["status"] for item in saved["output_rights"]], ["unknown"])
+            journal = json.loads(manifest_path.read_text())["assets"]["prop:relay"]["executions"][0]["stages"]
+            recorded = {stage["name"]: [item["source"] for item in stage["provenance"].get("output_rights", ["none"])]
+                        for stage in journal}
+            self.assertEqual(recorded["mesh_workflow_execution"], [workflow_path.name])
+            self.assertEqual(recorded["mesh_raw_acquisition"], [workflow_path.name])
+            self.assertEqual(recorded["mesh_preparation"], ["blender"])
+            self.assertEqual(recorded["mesh_output_acquisition"], [workflow_path.name])  # no concept projection
             self.assertEqual(saved["provenance"]["model_weights"]["status"], "unavailable")
             self.assertEqual(saved["provenance"]["custom_node_revisions"]["status"], "unavailable")
             self.assertEqual(len(client.queued_facts), 2)
@@ -527,6 +534,9 @@ class MeshPBRTests(unittest.TestCase):
             assembly = next(stage for stage in saved["executions"][0]["stages"]
                             if stage["name"] == "material_assembly_export")
             self.assertIn(prepared["id"], {item["id"] for item in assembly["inputs"]})
+            # The maps come from the mesh stage (its rights travel with them); the assembly is Blender's.
+            self.assertEqual(material_stage["provenance"]["output_rights"], [])
+            self.assertEqual([item["source"] for item in assembly["provenance"]["output_rights"]], ["blender"])
             asset["material_candidates"] = {"items": [candidate]}
             with self.assertRaisesRegex(ValueError, "mesh-generated PBR"):
                 retexture(root, config, {}, {}, {"assets": {"prop:relay": asset}}, "prop:relay")

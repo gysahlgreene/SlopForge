@@ -598,6 +598,9 @@ class OmniPartBackendTests(unittest.TestCase):
             self.assertEqual(metal, {"grip=0", "slide=1", "body=1"})
             self.assertTrue((root / "mesh_01/pistol.glb").is_file())
             info = json.loads((root / "mesh_01/generation.json").read_text())
+            # OmniPart's part synthesis runs NVIDIA FlexiCubes and nvdiffrast (non-commercial): recorded restricted
+            self.assertEqual([(item["source"], item["status"]) for item in info["output_rights"]],
+                             [("omnipart", "restricted")])
             self.assertEqual((info["textured"], info["part_model"], info["seed"]), (True, "omnipart", 5))
             self.assertEqual(sorted(info["textures"]), ["basecolor", "metallic", "normal", "roughness"])
             self.assertEqual(info["backend"]["provider"], "omnipart")
@@ -626,7 +629,10 @@ class HybridBackendTests(unittest.TestCase):
             surface.parent.mkdir()
             surface.write_bytes(b"whole")
             metadata = root / "mesh_01/generation.json"
-            metadata.write_text(json.dumps({"workflow": "trellis2", "outputs": [{"path": "pistol.glb", "sha256": "old"}]}))
+            metadata.write_text(json.dumps({"workflow": "trellis2", "outputs": [{"path": "pistol.glb", "sha256": "old"}],
+                                            "output_rights": [{"source": "trellis_2_bf16.safetensors",
+                                                               "status": "cleared", "terms": "MIT",
+                                                               "terms_version": "LICENSE", "read_on": "2026-10-27"}]}))
             masks = root / "masks"
             masks.mkdir()
             parts = [{"name": "grip", "kind": "grip"}, {"name": "slide", "kind": "slide"}]
@@ -658,6 +664,8 @@ class HybridBackendTests(unittest.TestCase):
             self.assertEqual(info["hybrid"]["alignment_error"], 0.014)
             self.assertTrue(info["hybrid"]["view"]["through"])  # whether the mask voted on every face
             self.assertEqual(info["part_generator"]["model_weights"], {"omnipart/OmniPart": "rev"})
+            self.assertEqual([item["source"] for item in info["output_rights"]],
+                             ["trellis_2_bf16.safetensors", "omnipart"])  # the surface's models and the split's
             from slopforge.provenance import file_sha256
             self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))
             self.assertEqual(info["outputs"][-1]["kind"], "mesh.whole")

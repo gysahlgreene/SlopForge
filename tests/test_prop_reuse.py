@@ -1548,6 +1548,10 @@ avoid: [environment]
         self.assertTrue(all(item["derived_from"] == [{"artifact_id": approved["id"], "sha256": approved["sha256"]}]
                             for item in stage["outputs"]))
         self.assertEqual(stage["settings"]["views"]["prompts"]["front"], VIEW_PROMPTS["front"])
+        # Each view's worker record is read back; this fake worker recorded none, so each view is unknown.
+        rights = {item["source"]: item["status"] for item in stage["provenance"]["output_rights"]}
+        self.assertEqual(rights, {"background_removal": "cleared", "view_front_raw.json": "unknown",
+                                  "view_back_raw.json": "unknown"})
         self.assertEqual(stage["settings"]["views"]["min_mirror_iou"], 0.9)
         self.assertEqual(stage["settings"]["views"]["seed"], execution["identity_inputs"]["views"]["seed"])
         self.assertEqual(self.mesh_views, {slot: self.root.resolve() / outputs[f"image.view.{slot}"]["path"]

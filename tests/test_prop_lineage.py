@@ -7,6 +7,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from slopforge.config import load_project
+from slopforge.providers import BUILTIN_RIGHTS
 from slopforge.manifest import load_manifest, new_record, save_manifest
 from slopforge.pipelines.image import generate as generate_concepts
 from slopforge.pipelines.model import approve as approve_model, generate as generate_prop_concepts
@@ -18,6 +19,14 @@ from slopforge.validation import validate_model_outputs
 def fake_unity_material(_root, _fbx, material, _maps, render=None, lightmap_uvs=False):
     Path(material).write_bytes(b"mat")
     return {"unity_version": "test", "assets": {}, "material_textures": {}}
+
+
+CONCEPT_RIGHTS = {"source": "z_image_turbo_bf16.safetensors", "status": "cleared", "terms": "Apache-2.0",
+                  "terms_version": "model card", "read_on": "2026-10-27"}
+MESH_RIGHTS = [{"source": "trellis_2_bf16.safetensors", "status": "cleared", "terms": "MIT",
+                "terms_version": "LICENSE", "read_on": "2026-10-27"},
+               {"source": "dino_v3_vit_l.safetensors", "status": "attribution_required", "terms": "DINOv3 License",
+                "terms_version": "2025-08-19", "read_on": "2026-10-27", "notice": "Built with DINOv3."}]
 
 
 class PropLineageTests(unittest.TestCase):
@@ -65,7 +74,7 @@ avoid: [environment]
         def backend(_root, _config, _workflow, _prompt, destination, _prefix, seed, metadata, **_kwargs):
             Image.new("RGB", (512, 512), (seed % 255, 10, 20)).save(destination)
             metadata.write_text(json.dumps({"workflow": "concept.json", "seed": seed,
-                                            "workflow_sha256": "a" * 64}))
+                                            "workflow_sha256": "a" * 64, "output_rights": [CONCEPT_RIGHTS]}))
         with patch("slopforge.pipelines.image.generate_image", side_effect=backend):
             generate_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 2,
                               self.manifest, "prop:relay", generation_prompt="A copper relay")
@@ -150,6 +159,31 @@ avoid: [environment]
         self.assertEqual(success["attempt"], 2)
         self.assertEqual(record["model_attempts"][-1]["execution_id"], execution["id"])
         self.assertEqual(execution["retry_decisions"][-1]["action"], "next_candidate")
+
+    def test_every_stage_records_the_rights_in_what_it_ran(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"),
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "output_rights": MESH_RIGHTS}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        stages = {stage["name"]: stage for execution in record["executions"] for stage in execution["stages"]
+                  if stage["status"] == "succeeded"}
+        self.assertEqual(stages["concept_generation"]["provenance"]["output_rights"], [CONCEPT_RIGHTS])
+        self.assertEqual([item["source"] for item in stages["conditioning_preparation"]["provenance"]["output_rights"]],
+                         ["background_removal"])
+        self.assertEqual(stages["mesh_workflow_execution"]["provenance"]["output_rights"],
+                         MESH_RIGHTS + [{"source": "blender", **BUILTIN_RIGHTS["blender"]}])
+
+    def test_a_mesh_worker_that_records_no_rights_leaves_the_mesh_stage_unrecorded(self):
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"), metadata.write_text(json.dumps({"workflow": "model", "seed": seed}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        mesh = next(stage for execution in record["executions"] for stage in execution["stages"]
+                    if stage["name"] == "mesh_workflow_execution" and stage["status"] == "succeeded")
+        self.assertNotIn("output_rights", mesh["provenance"])  # unknown at delivery, never silently cleared
 
     def test_approved_concept_candidate_is_saved_as_approved(self):
         self._concept_candidates()
@@ -438,6 +472,10 @@ avoid: [environment]
         asset = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
         stage = next(item for item in asset["executions"][-1]["stages"] if item["name"] == "mesh_workflow_execution")
         self.assertEqual(stage["settings"]["part_model"], "omnipart")
+        conditioning = next(item for execution in asset["executions"] for item in execution["stages"]
+                            if item["name"] == "conditioning_preparation" and item["status"] == "succeeded")
+        self.assertEqual([item["source"] for item in conditioning["provenance"]["output_rights"]],
+                         ["background_removal", "part_masks"])
         self.assertEqual(sorted(stage["settings"]["part_tools_sha256"]), ["part_model.py", "prepare_parts.py"])
         self.assertEqual(stage["settings"]["part_sampler"], {"steps": 25, "cfg": 7.5})  # a change regenerates
         # the derived maps come from the generated parts: the material stage gets the mesh as its lineage parent

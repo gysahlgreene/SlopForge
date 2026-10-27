@@ -114,7 +114,8 @@ def load_providers(config):
     if not isinstance(declared, dict):
         raise ValueError("asset_pipeline.providers must be a mapping of names to provider blocks")
     # ComfyUI's models carry their own terms in each workflow's requirements sidecar.
-    found = {"comfyui": {"type": "comfyui", "url": comfy_url(config), "configured_by": "COMFYUI_URL or tools.comfy_url"}}
+    found = {"comfyui": {"type": "comfyui", "url": comfy_url({"asset_pipeline": {"tools": tools}}),
+                         "configured_by": "COMFYUI_URL or tools.comfy_url"}}
     for name, keys in (("skintokens", ("host", "python", "checkout", "checkpoint")),
                        ("omnipart", ("python", "checkout"))):
         entry = _legacy(tools, name, keys, BUILTIN_RIGHTS[name])
@@ -327,3 +328,16 @@ def require_shippable(rights, what, operation):
                        remedy="Read the terms of each source named and record them (providers.<name>.output_rights, "
                               "or the model's output_rights in its workflow's requirements sidecar), or regenerate "
                               "on providers whose outputs are cleared; generating and reviewing still work")
+
+
+def rights_of(config, name):
+    """[{source, **record}] for a stage that used provider `name` (or one of SlopForge's own local tools): the
+    project's providers map first, so a user's own reading of the terms wins, else the terms read for SlopForge."""
+    try:
+        entry = load_providers(config).get(name) or {}
+    except ValueError as exc:
+        return [{"source": name, "status": "unknown", "reason": f"the providers configuration is invalid ({exc})"}]
+    record = entry.get("output_rights") or BUILTIN_RIGHTS.get(name)
+    if not record:
+        return [{"source": name, "status": "unknown", "reason": f"provider {name} states no output rights"}]
+    return [{"source": name, **record}]

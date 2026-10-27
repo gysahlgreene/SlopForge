@@ -117,3 +117,18 @@ def test_omnipart_is_restricted_by_its_nvidia_dependencies():
     rights = found["omnipart"]["output_rights"]
     assert rights["status"] == "restricted" and "non-commercial" in rights["reason"]
     assert providers.BUILTIN_RIGHTS["part_masks"]["status"] == "cleared"
+
+
+def test_a_stage_records_a_providers_rights_from_the_map_with_the_users_reading_first():
+    assert providers.rights_of(config(), "blender")[0]["source"] == "blender"
+    assert providers.rights_of(config(), "background_removal")[0]["status"] == "cleared"
+    tools = {"omnipart_python": "/opt/op/bin/python", "omnipart_checkout": "/opt/op"}
+    assert providers.rights_of(config(tools), "omnipart")[0]["status"] == "restricted"
+    reading = {"status": "cleared", "terms": "NVIDIA commercial licence for FlexiCubes and nvdiffrast",
+               "terms_version": "signed 2026-11-01", "read_on": "2026-11-01"}
+    own = config(tools, {"omnipart": {"type": "ssh_gpu", "host": "gpu", "python": "/opt/op/bin/python",
+                                      "checkout": "/opt/op", "output_rights": reading}})
+    assert providers.rights_of(own, "omnipart") == [{"source": "omnipart", **reading}]
+    assert providers.rights_of(config(), "omnipart")[0]["status"] == "restricted"  # not configured: still its terms
+    broken = providers.rights_of(config(declared={"omnipart": "nope"}), "omnipart")[0]
+    assert broken["status"] == "unknown" and "providers" in broken["reason"]

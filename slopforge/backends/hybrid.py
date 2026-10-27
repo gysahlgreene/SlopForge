@@ -16,6 +16,7 @@ from PIL import Image
 from ..part_split import align, label_faces, lift_above_rim, merge_islands, part_distances
 from ..paths import blender_executable, tool_root
 from ..provenance import file_sha256, tool_sha256
+from ..providers import rights_of
 from .blender import blender_environment
 from .omnipart import run_omnipart
 
@@ -154,6 +155,8 @@ def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed,
     if omnipart is not None:
         info["part_generator"] = {"backend": omnipart.get("backend", {}),
                                   "model_weights": omnipart.get("model_weights", {}), "seed": seed}
+        if isinstance(info.get("output_rights"), list):  # the surface's models, and OmniPart's for the split
+            info["output_rights"] = info["output_rights"] + rights_of(config, "omnipart")
     if closed is not None:
         info["open_state"] = {"part": open_part["name"], "close": closed}
     for output in info.get("outputs") or []:  # the surface is rewritten as nodes: its recorded hash follows it

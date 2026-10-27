@@ -18,6 +18,7 @@ from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
 from slopforge.backends.comfyui import backend_provenance, _write_failure_report
 from slopforge.quality import apply_workflow_inputs
+from slopforge.providers import BUILTIN_RIGHTS
 from slopforge.workflow_requirements import workflow_output_rights, workflow_requirements_identity
 from slopforge.validation import validate_image
 from slopforge.manifest import (load_manifest, save_manifest, find_asset, begin_stage,
@@ -443,6 +444,13 @@ def main():
         declared_workflow = json.loads(args.workflow.read_text())
         source_workflow = json.loads(json.dumps(declared_workflow))
         workflow_requirements = workflow_requirements_identity(args.workflow, declared_workflow)
+    # The rights in what each sub-stage makes: the graph's models, and Blender where it reduces or projects.
+    # The legacy inline Hunyuan3D graph names no models: its terms are unread.
+    model_rights = workflow_output_rights(args.workflow) if args.workflow else [
+        {"source": "legacy Hunyuan3D 2.0 graph", "status": "unknown",
+         "reason": "the inline graph has no requirements sidecar; Tencent's community licence was not checked for "
+                   "this use"}]
+    blender_rights = [{"source": "blender", **BUILTIN_RIGHTS["blender"]}]
 
     client = ComfyUIClient(COMFY_URL)
     try:
@@ -494,7 +502,8 @@ def main():
         print("Mesh stage: generating the detailed shape...", flush=True)
         with _journal_stage(journal, "mesh_workflow_execution", journal_attempt,
                             {"phase": "raw_shape", "seed": seed},
-                            {"backend": backend_provenance(health, queried=True), **raw_provenance}) as stage:
+                            {"backend": backend_provenance(health, queried=True), **raw_provenance,
+                             "output_rights": model_rights}) as stage:
             entry, shape_prompt_id = run_model_workflow(raw_workflow, client)
             raw = find_glb(entry["outputs"].get("save_raw", {}))
             if not raw:
@@ -504,7 +513,7 @@ def main():
         detail_path = dest.with_name(dest.stem + "_detail.glb") if detail else None
         baked_normal = dest.with_name(dest.stem + "_normal_mikktspace.png") if detail else None
         with _journal_stage(journal, "mesh_raw_acquisition", journal_attempt,
-                            {"phase": "raw_shape"}) as stage:
+                            {"phase": "raw_shape"}, {"output_rights": model_rights}) as stage:
             client.download_output(raw, raw_path)
             if detail:
                 client.download_output(detail, detail_path)
@@ -524,6 +533,7 @@ def main():
                             {"face_budget": args.face_budget, "voxel_resolution": args.voxel_resolution,
                              "source": source_kind,
                              **({"remove_hidden_faces": True} if args.remove_hidden_faces else {})},
+                            {"output_rights": blender_rights},
                             inputs=None if raw_refs is None else [ref for ref in raw_refs if ref["type"] == source_kind]):
             subprocess.run([str(args.blender), "--background", "--python-exit-code", "1", "--python", str(script), "--", str(source_path),
                             str(prepared), str(dest.with_name("native_mesh.blend")), "--face-budget", str(args.face_budget),
@@ -567,7 +577,8 @@ def main():
     }
     with _journal_stage(journal, "material_generation", journal_attempt,
                         {"seed": seed, "workflow": args.workflow.name if args.workflow else "hunyuan3d"},
-                        {"backend": backend_provenance(health, queried=True), **material_provenance},
+                        {"backend": backend_provenance(health, queried=True), **material_provenance,
+                         "output_rights": model_rights},
                         inputs=material_inputs) as stage:
         entry, prompt_id = run_model_workflow(workflow, client)
         glb = find_glb(entry["outputs"].get("save", {})) if args.workflow else find_glb(entry["outputs"])
@@ -575,7 +586,9 @@ def main():
             raise ValueError("ComfyUI finished but no final GLB was produced")
         _journal_finish(journal, stage, [])
     with _journal_stage(journal, "mesh_output_acquisition", journal_attempt,
-                        {"phase": "material_outputs"}, inputs=material_inputs) as stage:
+                        {"phase": "material_outputs"},
+                        {"output_rights": model_rights + (blender_rights if args.project_concept else [])},
+                        inputs=material_inputs) as stage:
         client.download_output(glb, dest)
         textured = any(node.get("class_type") == "ApplyTextureToMesh" for node in workflow.values())
         mikktspace = locals().get("baked_normal")
@@ -653,11 +666,7 @@ def main():
                                         "model_filenames": [{"status": "known", "value": value} for value in model_filenames],
                                         "outputs": output_records,
                                         "workflow_requirements": workflow_requirements,
-                                        # the legacy inline Hunyuan3D graph names no models: its terms are unread
-                                        "output_rights": workflow_output_rights(args.workflow) if args.workflow else [
-                                            {"source": "legacy Hunyuan3D 2.0 graph", "status": "unknown",
-                                             "reason": "the inline graph has no requirements sidecar; Tencent's "
-                                                       "community licence was not checked for this use"}],
+                                        "output_rights": model_rights,
                                         "mesh_preparation": mesh_preparation,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,
