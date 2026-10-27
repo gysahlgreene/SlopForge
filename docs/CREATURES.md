@@ -31,13 +31,18 @@ The script checks out the pinned commit (`55d51b3`), its only one, and makes a P
 revision `ed25f3a3` into `<dir>/hf`, imports the tool, and prints the settings for `ai/project.yaml`:
 
 ```yaml
-tools:
-  video2rig_python: ~/SlopForgeVideo2rig/.venv/bin/python     # the SlopForge machine
-  video2rig_checkout: ~/SlopForgeVideo2rig/video2rig
-  video2rig_train_host: <ssh host>                              # leave the train_* keys unset when this machine
-  video2rig_train_python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python   # has the CUDA card
-  video2rig_train_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
+asset_pipeline:
+  providers:
+    video2rig:
+      type: local_tool
+      python: ~/SlopForgeVideo2rig/.venv/bin/python                # the SlopForge machine
+      checkout: ~/SlopForgeVideo2rig/video2rig
+      train_host: <ssh host>                                       # leave the train_* keys unset when this
+      train_python: /home/<user>/SlopForgeVideo2rig/.venv/bin/python   # machine has the CUDA card
+      train_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
 ```
+
+The `tools.video2rig_*` keys it was first configured with still work; the providers map wins when both are set.
 
 The tool loads its backbone without naming a revision. SlopForge always runs it with `HF_HOME=<dir>/hf`,
 `HF_HUB_CACHE=<dir>/hf/hub` and `HF_HUB_OFFLINE=1`, so that load reads the pinned snapshot and never the network. It
@@ -53,7 +58,7 @@ transformers ahead of the venv's.
 - On the GPU provider: `reader.train`, in bfloat16.
 
 Sending a project to the GPU provider for `reader.train` and bringing the reader back is not built yet; it belongs
-to package B3. Until then the client runs `train` only on a machine with no `video2rig_train_host` set, and
+to package B3. Until then the client runs `train` only on a machine with no `train_host` set, and
 refuses it otherwise.
 
 The client builds each documented command line and runs it with the provider's Python in its checkout. It makes
@@ -64,7 +69,7 @@ the client deletes the step's previous output, so a step that crashes cannot han
 builds video2rig's older road, the BootsTAPIR point tracker. It refuses `run` when the creature has no
 `reader/reader.pt`, because the tool would otherwise fall back to that road without saying so.
 
-**Preflight.** `slopforge doctor` lists the provider once any `video2rig_*` key is set. It shows one line for this
+**Preflight.** `slopforge doctor` lists the provider once `providers.video2rig` (or a `tools.video2rig_*` key) is set. It shows one line for this
 machine and one for the training machine, each with the output-rights status. Each preflight passes only when all of
 these hold:
 

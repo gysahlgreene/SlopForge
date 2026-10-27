@@ -126,6 +126,99 @@ Reference conditioning uses `asset_pipeline.conditioning.workflow_inputs` to map
 
 The bundled text-to-image graph remains text-only. It creates supporting concept images and does not qualify the 3D generation route.
 
+## Providers and output rights
+
+SlopForge is pointed at inference services the user is allowed to use, and everything it delivers must be usable in
+a game the user sells. Every provider and every model therefore carries an `output_rights` record, and delivery
+checks it.
+
+**The record.** It has a `status`, which is one of the following:
+
+| Status | Meaning |
+| --- | --- |
+| `cleared` | The terms were read, and the outputs may be used commercially. |
+| `attribution_required` | Cleared, with a notice that must ship with the asset. |
+| `restricted` | The terms were read, and they forbid or condition commercial use. |
+| `unknown` | The terms have not been read, or they cannot be tied to the file. |
+
+The other fields depend on the status:
+
+- `cleared`, `attribution_required` and `restricted` need `terms`, `terms_version` and `read_on` (YYYY-MM-DD).
+- `attribution_required` also needs `notice`, the exact text to ship.
+- `restricted` and `unknown` need `reason`.
+
+**Where it lives.**
+
+- **Each model in a workflow's requirements sidecar.** The ComfyUI worker copies these records into the generation
+  metadata of every run.
+- **Each provider in `asset_pipeline.providers`.** These are ComfyUI services, hosted APIs, GPU hosts over SSH and
+  local tools. The old `tools.*` keys (ComfyUI, SkinTokens, part masks, OmniPart, video2rig) are read into the map, so
+  existing projects keep working.
+- **The animation libraries.** See [Character animation libraries](CHARACTER-ANIMATIONS.md).
+
+```yaml
+asset_pipeline:
+  providers:
+    video2rig: {type: local_tool, python: ..., checkout: ...}    # docs/CREATURES.md
+    video_cloud:
+      type: hosted_api
+      vendor: replicate
+      key_env: REPLICATE_API_TOKEN       # the variable's name; the key never goes in this file
+      output_rights: {status: unknown, reason: "API terms not read yet"}
+    omnipart:                            # a user's own reading wins over SlopForge's
+      type: ssh_gpu
+      host: gpu
+      python: /opt/op/bin/python
+      checkout: /opt/op
+      output_rights: {status: cleared, terms: "...", terms_version: "...", read_on: "2026-11-01"}
+```
+
+**What it gates.** Every stage records the rights of what it ran. An asset's rights are the weakest across its whole
+lineage, and its notices accumulate. Delivery refuses `unknown` and `restricted` and names each source; it fails as a
+configuration failure, with the remedy. The deliveries are:
+
+- `approve-texture`;
+- the image pipeline's `approve`;
+- `character approve-deformation`;
+- `animation unity-setup`.
+
+Generating, approving a concept for 3D, retexturing, `unity-preview` and reviewing always run, whatever the rights.
+An `attribution_required` delivery writes its notices beside the asset:
+
+- a model: `SlopForge-NOTICES.txt` in its folder;
+- an image: `<name>.SlopForge-NOTICES.txt` beside it;
+- a character: `SlopForge-NOTICES.txt` in its Unity folder.
+
+`slopforge doctor` lists each configured workflow's rights and each provider's rights.
+
+Assets made before rights were recorded (2026-10-27) are `unknown`. Generate them again to deliver them.
+
+**The terms read on 2026-10-27.** They were read from the publishers' licence files and model cards; this is not
+legal advice.
+
+| Route | Models or tools | Status |
+| --- | --- | --- |
+| Concepts, poses, seam inpaint | Z-Image Turbo, Qwen3 4B, FLUX.1 [schnell]'s autoencoder (`ae.safetensors`, identical bytes), Z-Image Fun ControlNet Union 2.1 | cleared (Apache-2.0) |
+| Edits and multi-view views | Qwen-Image-Edit-2511, Qwen2.5-VL 7B, the Qwen-Image VAE, the multiple-angles LoRA | cleared (Apache-2.0) |
+| TRELLIS.2 graphs | TRELLIS.2 (MIT) with DINOv3 ViT-L | attribution_required: "Built with DINOv3." |
+| Pixal3D graphs | Pixal3D (MIT) with DINOv3 and the NAF upsampler (Apache-2.0) | attribution_required: "Built with DINOv3." |
+| Tiling upscale | `RealESRGAN_x4plus.safetensors` | unknown: a conversion of the BSD-3-Clause `.pth` with no documented source |
+| Part masks; cut-outs; Blender; SkinTokens; video2rig | Florence-2 (MIT), SAM 2.1 (Apache-2.0); BiRefNet (MIT); GPL covers Blender, not its outputs; MIT; see [Creatures](CREATURES.md) | cleared |
+| Moving parts (OmniPart and hybrid routes) | OmniPart (MIT), whose part synthesis runs NVIDIA FlexiCubes and nvdiffrast | **restricted**: NVIDIA Source Code License, non-commercial use only |
+
+Notes on these readings:
+
+- **Badge-level readings.** For the Z-Image ControlNet, the LoRA, and the OmniPart and SkinTokens weights, the
+  reading rests on the card's licence badge; their repositories have no licence file.
+- **The DINOv3 notice.** Meta's newer text (GitHub, 2025-08-19) asks for "Built with DINOv3" only when DINO
+  materials are distributed. SlopForge ships it with outputs anyway, which does no harm.
+- **DINOv3's trade-control clause.** Section 1.b.v excludes end uses related to weapons prohibited by trade controls.
+  Whether game weapon art falls under it is the user's call.
+- **Pixal3D's EU flag.** TencentARC's card sets an EU-disallow flag. It blocks nothing while the repository is
+  ungated.
+- **Node code.** The TRELLIS.2 nodes are ComfyUI core (`comfy_extras/nodes_trellis2.py`) and use neither nvdiffrast
+  nor FlexiCubes. The licences of other custom node code are not recorded.
+
 ## Integration checks
 
 Normal unit tests use mocked HTTP and need no running ComfyUI:

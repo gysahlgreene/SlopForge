@@ -295,14 +295,14 @@ No model weights are bundled; each is downloaded from its publisher. The default
 
 | Stage | Model or tool | Licence |
 | --- | --- | --- |
-| Concept images | [Z-Image Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) with the [Qwen3 4B](https://huggingface.co/Qwen/Qwen3-4B) text encoder ([ComfyUI files](https://huggingface.co/Comfy-Org/z_image_turbo)) | Apache-2.0 |
+| Concept images | [Z-Image Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) with the [Qwen3 4B](https://huggingface.co/Qwen/Qwen3-4B) text encoder and [FLUX.1 [schnell]](https://huggingface.co/black-forest-labs/FLUX.1-schnell)'s autoencoder ([ComfyUI files](https://huggingface.co/Comfy-Org/z_image_turbo)) | Apache-2.0 |
 | Character poses, shape guides | [Z-Image-Turbo Fun ControlNet Union 2.1](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) | Apache-2.0 |
 | Background removal | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) general, through [rembg](https://github.com/danielgatis/rembg) | MIT |
 | Image to 3D mesh and PBR maps | [TRELLIS.2](https://huggingface.co/microsoft/TRELLIS.2-4B) ([ComfyUI files](https://huggingface.co/Comfy-Org/TRELLIS.2)), conditioned by [DINOv3 ViT-L](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m) | MIT; DINOv3 License |
-| Multi-view 3D (experimental) | [Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D) by TencentARC; views by [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) and the [multiple-angles LoRA](https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA) | MIT; Apache-2.0 |
+| Multi-view 3D (experimental) | [Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D) by TencentARC, conditioned by DINOv3 with the NAF upsampler; views by [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) and the [multiple-angles LoRA](https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA) | MIT; DINOv3 License; Apache-2.0 |
 | Open pictures of a chest (experimental) | [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) | Apache-2.0 |
 | Part masks | [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) and [SAM 2.1 Hiera large](https://huggingface.co/facebook/sam2.1-hiera-large) | MIT; Apache-2.0 |
-| Part layout for moving parts | [OmniPart](https://github.com/HKU-MMLab/OmniPart), built on [TRELLIS](https://github.com/microsoft/TRELLIS) | MIT |
+| Part layout for moving parts | [OmniPart](https://github.com/HKU-MMLab/OmniPart), built on [TRELLIS](https://github.com/microsoft/TRELLIS) | MIT; its NVIDIA FlexiCubes and nvdiffrast are non-commercial, so delivery refuses what it makes |
 | Tiling material upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) x4plus | BSD-3-Clause |
 | Character rigging | [SkinTokens](https://github.com/VAST-AI-Research/SkinTokens), or Blender's Rigify | MIT; GPL-2.0+ |
 | Character motion | [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu/) | Free for any use, not resold |
