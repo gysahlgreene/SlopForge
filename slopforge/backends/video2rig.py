@@ -23,7 +23,8 @@ OUTPUT_RIGHTS = {"status": "cleared", "terms": "AGPL-3.0 (the tool) and the auth
                  "terms_version": f"video2rig commit {runtime.VIDEO2RIG_REVISION[:7]}", "read_on": "2026-10-27"}
 # What each step needs; train needs a step count because the tool's default, 8 minutes, depends on the card's speed.
 STEPS = {"export_rig": ("blend",), "render_start": ("blend",), "prepare": ("blend",), "train": ("steps",),
-         "check": ("clip",), "run": ("clip",), "review": ("clip",), "import_motion": ("blend", "clip", "save")}
+         "check": ("clip",), "run": ("clip",), "review": ("clip",), "import_motion": ("blend", "clip", "save"),
+         "render_poses": ("blend", "motion", "out", "fit")}
 
 
 KEYS = ("python", "checkout", "train_host", "train_python", "train_checkout")
@@ -133,13 +134,17 @@ def project_folder(candidate_dir, settings=None):
     return project
 
 
-def command(config, project_root, step, project, *, blend=None, clip=None, save=None, poses=3000, steps=None):
+def command(config, project_root, step, project, *, blend=None, clip=None, save=None, poses=3000, steps=None,
+            framing=None, motion=None, out=None, fit=None):
     """The command line of one step as video2rig's README documents it ("The whole thing in six steps"). Its older
     road (the BootsTAPIR point tracker: `run` without a reader, `--old`, `track`, `solve`) is never built. Paths are
-    made absolute: the tool runs in its checkout, and a relative one would land there."""
+    made absolute: the tool runs in its checkout, and a relative one would land there. `framing` is render_start's
+    documented view pair and framing (slopforge.creature_views.framing); render_poses renders a known motion
+    (`motion`, a poses.npz) through the start cameras into `out`, each panel at `fit` pixels, one pose a picture."""
     if step not in STEPS:
         raise ValueError(f"unknown video2rig step {step!r}; expected one of {', '.join(STEPS)}")
-    missing = [name for name in STEPS[step] if not {"blend": blend, "clip": clip, "save": save, "steps": steps}[name]]
+    missing = [name for name in STEPS[step] if not {"blend": blend, "clip": clip, "save": save, "steps": steps,
+                                                    "motion": motion, "out": out, "fit": fit}[name]]
     if missing:
         raise ValueError(f"video2rig {step} needs {', '.join(missing)}")
     python, checkout = _local(config, project_root)
@@ -152,7 +157,15 @@ def command(config, project_root, step, project, *, blend=None, clip=None, save=
     if step == "export_rig":
         return script("export_rig.py") + ["--out", str(project / "rig")]
     if step == "render_start":
-        return script("render_start.py") + ["--out", str(project / "start")]
+        return script("render_start.py") + ["--out", str(project / "start")] + ([
+            "--views", ",".join(framing["views"]), "--widths", ",".join(map(str, framing["widths"])),
+            "--margin", str(framing["margin"]), "--margin-wide", str(framing["margin_wide"]),
+            "--side", framing["side"]] if framing else [])
+    if step == "render_poses":
+        return script("render_poses.py") + [
+            "--poses", str(Path(motion).resolve()), "--cameras", str(project / "start/cameras.json"),
+            "--out", str(Path(out).resolve()), "--copies", "1", "--fit", str(fit), "--height", "1080", "--sharp",
+            "--project", str(project)]
     if step == "prepare":  # D15 (a): the training pictures render here; training is the "train" step
         return tool[:2] + ["video2rig.reader.prepare", str(project), "--blend", str(blend), "--blender", blender,
                            "--poses", str(poses), "--skip-train"]

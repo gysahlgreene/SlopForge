@@ -464,3 +464,25 @@ def test_external_video2rig_preflight():
     for role in ("local", "train"):
         assert report[role]["status"] == "ready", (role, report[role]["reasons"])
     print(json.dumps({"train": report["train"], "identity": video2rig.identity(report["train"])}, indent=2))
+
+
+def test_render_start_takes_the_creatures_framing_and_render_poses_its_motion(install, tmp_path):
+    """#142: the client passes render_start's documented framing options; B2's known motions render through the
+    start cameras with the tool's own render_poses.py, one pose per picture, each panel at its own size."""
+    settings, project = config(install), tmp_path / "wolf"
+    blender, blend = install.blender, str(tmp_path / "wolf.blend")
+    script = lambda name: [blender, blend, "--background", "--python-exit-code", "1", "--python",
+                           str(install.checkout / "blender" / name), "--"]
+    framing = {"views": ["three-quarter", "side"], "widths": [958, 962], "margin": 1.8, "margin_wide": 1.45,
+               "side": "left"}
+    assert video2rig.command(settings, tmp_path, "render_start", project, blend=blend, framing=framing) == \
+        script("render_start.py") + ["--out", str(project / "start"), "--views", "three-quarter,side",
+                                     "--widths", "958,962", "--margin", "1.8", "--margin-wide", "1.45", "--side", "left"]
+    out, motion = tmp_path / "renders", tmp_path / "poses.npz"
+    assert video2rig.command(settings, tmp_path, "render_poses", project, blend=blend, motion=motion, out=out,
+                             fit=962) == \
+        script("render_poses.py") + ["--poses", str(motion), "--cameras", str(project / "start/cameras.json"),
+                                     "--out", str(out), "--copies", "1", "--fit", "962", "--height", "1080",
+                                     "--sharp", "--project", str(project)]
+    with pytest.raises(ValueError, match="render_poses needs motion, out, fit"):
+        video2rig.command(settings, tmp_path, "render_poses", project, blend=blend)
