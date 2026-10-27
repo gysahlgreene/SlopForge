@@ -22,7 +22,7 @@ from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "open", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "environment-check", "environment-scene", "vegetation", "scene-render"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "open", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "creature", "environment-check", "environment-scene", "vegetation", "scene-render"}
 
 
 def parser():
@@ -188,6 +188,16 @@ def parser():
     rig_character = character_commands.add_parser("rig", help="Rig an approved character model with the configured provider")
     rig_character.add_argument("name", help="Tracked character asset name")
     rig_character.add_argument("--source-output", default="model", help="Approved model artifact id (default: model)")
+    creature = sub.add_parser("creature", help="Rig an approved four-legged creature for review (M5)")
+    creature_commands = creature.add_subparsers(dest="creature_action", required=True)
+    rig_creature_cmd = creature_commands.add_parser(
+        "rig", help="Rig a creature's published model: a kept candidate per SkinTokens seed, the best passing one "
+                    "finished for review (docs/CREATURES.md)")
+    rig_creature_cmd.add_argument("name", help="Tracked creature asset name")
+    rig_creature_cmd.add_argument("--seeds", type=int, help="SkinTokens seeds to try, 1 to 8 (default: the type's rig_seeds)")
+    approve_rig_cmd = creature_commands.add_parser("approve-rig", help="Approve a creature rig after reviewing its contact sheet")
+    approve_rig_cmd.add_argument("name", help="Tracked creature asset name")
+    approve_rig_cmd.add_argument("--confirm", action="store_true", help="Confirm human review of the contact sheet")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -692,6 +702,22 @@ def _run(args):
         print(f"Character {args.name}: {result['status']}")
         print(f"Rig candidate: {result['rig_artifact']['path']}")
         print("Review the rig and six pose images before approving it.")
+        return 0
+
+    if args.command == "creature":
+        from .pipelines.creature import approve_rig, rig_creature
+        if args.creature_action == "approve-rig":
+            result = approve_rig(root, manifest, args.name, confirmed=args.confirm)
+            save_manifest(manifest_path, manifest)
+            print(f"Creature {args.name} rig: {result['status']} (output rights {result['output_rights']['status']})")
+            return 0
+        result = rig_creature(root, config, manifest, args.name, seeds=args.seeds)
+        for item in result["candidates"]:
+            print(f"  seed {item['seed']}: {item['status']}" + (f" ({item['errors'][0]})" if item["errors"] else ""))
+        print(f"Creature {args.name}: {result['status']}, seed {result['seed']} chosen")
+        print(f"Rig candidate: {result['rig']['path']}")
+        print(f"Contact sheet: {result['contact_sheet']}; seed sheet: {result['seed_sheet']}")
+        print(f"Review the contact sheet, then: slopforge creature approve-rig {args.name} --confirm")
         return 0
 
     if args.command == "review":

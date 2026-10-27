@@ -2,8 +2,9 @@ name: creature
 pipeline: model
 output_folder: Creatures
 # A creature is generated like a prop (the TRELLIS.2 route), then rigged by `slopforge creature rig` (B1) and
-# animated (M5; docs/CREATURES.md). The bounded check's wolf (#129) was made this way at the prop budget: 28,472 faces.
-face_budget: prop_faces
+# animated (M5; docs/CREATURES.md). The character budget, not the prop's: the bounded check's wolf (#129), cut to the
+# prop budget (28,472 faces), read as low-poly in its fur outline and thin legs (owner, 2026-10-27).
+face_budget: character_faces
 max_components: 5
 max_concept_hue_difference: 4
 min_concept_fit: 0.8
