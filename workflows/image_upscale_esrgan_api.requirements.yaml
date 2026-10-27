@@ -19,11 +19,14 @@ nodes:
   revision: unknown
 models:
 - name: RealESRGAN_x4plus.safetensors
-  source: https://github.com/xinntao/Real-ESRGAN
+  # xinntao's release .pth, converted by scripts/convert-realesrgan.py (its EMA weights, unchanged, without pickle);
+  # Comfy-Org/Real-ESRGAN_repackaged publishes the same bytes (sha256 37f9a931, BSD-3-Clause)
+  source: https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
+  source_sha256: 4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1
   license: BSD-3-Clause
   license_source: https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE
-  sha256: unknown
-  output_rights: {status: "unknown", reason: "upstream publishes RealESRGAN_x4plus.pth (BSD-3-Clause); this .safetensors conversion has no documented source, so its terms cannot be tied to it"}
+  sha256: 37f9a931c215f040aa6d50f711f2cb115f713c46df1d0d6469a8bd7bfe9a60bb
+  output_rights: {status: "cleared", terms: "BSD-3-Clause", terms_version: "Real-ESRGAN LICENSE; release v0.1.0", read_on: "2026-10-27"}
 inputs:
 - name: image
   type: image/png
