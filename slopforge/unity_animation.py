@@ -3,11 +3,11 @@ import json
 import subprocess
 import uuid
 from pathlib import Path
-from .providers import artifact_rights, merge_rights, require_shippable, write_notices
 
 from .animation import _contained_file
 from .character_rigging import _character_asset
 from .manifest import register_artifact
+from .providers import artifact_rights, merge_rights, require_shippable, write_notices
 from .unity_material import unity_cli
 
 

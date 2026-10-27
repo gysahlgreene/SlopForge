@@ -10,10 +10,14 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image
 
+from slopforge.failures import StageFailure
 from slopforge.vegetation import build_leaf_atlas, is_current, make_vegetation
 
 ROOT = Path(__file__).resolve().parents[1]
 BLENDER = os.environ.get("BLENDER_BIN") or shutil.which("blender") or "/Applications/Blender.app/Contents/MacOS/Blender"
+
+
+CLEARED = {"status": "cleared", "notices": [], "reasons": [], "sources": []}
 
 
 def _cutout(path, colour):
@@ -39,9 +43,10 @@ class VegetationTests(unittest.TestCase):
         Image.new("RGB", (8, 8), (128, 128, 255)).save(root / "bark_n.png")
         _cutout(root / "sprig.png", (60, 140, 40))
         return {"assets": {
-            "tiling_material:oak_bark": {"name": "oak_bark", "status": "ready",
+            "tiling_material:oak_bark": {"name": "oak_bark", "status": "ready", "output_rights": CLEARED,
                                          "outputs": {"tiling_basecolor": "bark.png", "tiling_normal": "bark_n.png"}},
-            "foliage:oak_sprig": {"name": "oak_sprig", "status": "ready", "outputs": {"image": "sprig.png"}}}}
+            "foliage:oak_sprig": {"name": "oak_sprig", "status": "ready", "output_rights": CLEARED,
+                                  "outputs": {"image": "sprig.png"}}}}
 
     def test_tree_is_built_from_approved_bark_and_foliage_and_recorded(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -67,6 +72,29 @@ class VegetationTests(unittest.TestCase):
                 make_vegetation(root, config, manifest, "palm", "palm", 9.0, 11, "oak_bark", ["oak_sprig"])
             with self.assertRaisesRegex(ValueError, "Asset name"):  # would write outside the output folder
                 make_vegetation(root, config, manifest, "../../x", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+
+    def test_a_plant_publishes_into_unity_only_from_shippable_bark_and_foliage(self):
+        # PR #133 review: vegetation writes an FBX and the bark's maps into Assets, so it is a delivery
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(root)
+            config = {"asset_pipeline": {"output_root": "Assets/Art/Generated"}}
+            manifest["assets"]["foliage:oak_sprig"]["output_rights"] = {
+                "status": "attribution_required", "notices": ["Built with X."], "reasons": [], "sources": []}
+
+            def fake_blender(command, **_):
+                Path(command[command.index("--") + 2]).write_text(json.dumps({"faces": 1}))
+            with patch("slopforge.vegetation.subprocess.run", side_effect=fake_blender), \
+                    patch("slopforge.vegetation.blender_executable", return_value="blender"):
+                record = make_vegetation(root, config, manifest, "oak_a", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+                self.assertEqual(record["output_rights"]["status"], "attribution_required")
+                self.assertIn("Built with X.", (root / "Assets/Art/Generated/Vegetation/oak_a/SlopForge-NOTICES.txt")
+                              .read_text())
+                del manifest["assets"]["tiling_material:oak_bark"]["output_rights"]  # delivered before rights existed
+                with self.assertRaises(StageFailure) as failure:
+                    make_vegetation(root, config, manifest, "oak_b", "oak", 9.0, 11, "oak_bark", ["oak_sprig"])
+            self.assertEqual(failure.exception.category, "configuration")
+            self.assertFalse((root / "Assets/Art/Generated/Vegetation/oak_b").exists())
 
     def test_a_built_plant_is_reused_only_while_its_spec_and_sources_match(self):
         with tempfile.TemporaryDirectory() as temporary:
