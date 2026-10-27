@@ -1,7 +1,7 @@
 # Creatures
 
-M5 (Creatures/Generic rigs) can generate a four-legged creature and rig it for review (package B1). No creature motion
-is produced yet. This page documents the creature asset type, its rig, and the creature-motion provider the track will
+M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
+video2rig views and render known motions (B2). No motion read from video is produced yet. This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
 (epic [#128](https://github.com/gysahlgreene/SlopForge/issues/128)).
@@ -96,6 +96,57 @@ The live gate runs a configured project's published creature:
 SLOPFORGE_RUN_SKINTOKENS=1 SLOPFORGE_PROJECT_ROOT=<project> SLOPFORGE_CREATURE=<name> \
   python -m pytest -q -s tests/test_creature_pipeline.py -k external
 ```
+
+## Views, training pictures and known motions (B2)
+
+A rigged creature becomes a video2rig project with `creature calibrate`. Known motions are rendered through its cameras
+with `creature synth`. Both run on the SlopForge machine, using the video2rig install configured below (local keys
+only). They also run on a rig still awaiting deformation review, and `motion.rig_status` records which.
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature calibrate wolf        # --views a,b --widths w1,w2 --poses N
+slopforge --project ~/UnityProjects/MyGame creature synth wolf random_s0 --kind random --seed 0
+slopforge --project ~/UnityProjects/MyGame creature synth wolf gait --kind gait
+```
+
+**`creature.json`** is written from the rig record and the type, never from priors keyed to bone names
+(`slopforge/creature_views.py`):
+- `fit_bones` from B1 ([#139](https://github.com/gysahlgreene/SlopForge/issues/139)).
+- Knees (`Shin`) and elbows (`Forearm`) as one-way `hinges`.
+- For every other fitted bone but the root (`Hips`), `joints.<bone>.range`, from the type's `joint_limits` by role
+  ([#140](https://github.com/gysahlgreene/SlopForge/issues/140)).
+
+  The `creature` type declares video2rig's own bend limits for these names, since spike #129's exams ran on them, and
+  `FrontPaw` 150, because the Khronos Fox's authored walk folds its front paws 148°. video2rig applies one range to a
+  bone's bend, twist and sideways turn alike, so a bone's twist may now turn as far as its bend.
+- A fitted bone without a declared limit refuses.
+
+**The start frame** comes from video2rig's `render_start.py` with the creature's view pair and framing (#142):
+- **Views.** The `creature` type uses `three-quarter,side`. The three-quarter view sees the trunk, and keeps a lifted
+  front paw off the hind leg that a dead-front camera puts behind it (#140). `front,side` is a per-creature choice
+  (`--views`).
+- **Widths.** render_start fits one scale to both panels, so unless `--widths` declares them, the 1920 px frame is split
+  by each view's span across its panel (three-quarter: 0.77 length + 0.64 width; side: the length). Neither panel then
+  wastes resolution.
+- **Margins.** `margin` 1.8 and `margin_wide` 1.45 come from the type.
+- **Check.** The calibration refuses a start frame from which any of the skin falls outside a panel.
+
+**The reader's training pictures** are rendered with `reader.prepare --skip-train`: the type's `training_poses`, 3000.
+Training them on the GPU provider is B3.
+
+**A known motion** comes from `blender/synth_motion.py`, promoted from the spike's exam motion. It is seeded, and the
+same seed writes the same file. Each kind starts at the start pose and keeps the skin on the floor:
+- `random`: every fitted bone follows smooth noise, inside 0.9 of its declared range.
+- `gait`: an in-place walk.
+- `action`: an authored action, looped.
+
+A motion that turns a bone past its declared range is refused, because exam v1 counts a result only when the truth
+stays inside the reader's ranges. The clip is rendered with video2rig's `render_poses.py` through the start cameras:
+- each panel at its own size, one pose a picture;
+- joined as render_start joins panels, at 24 fps, into `clips/<clip>.mp4`;
+- with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
+
+A motion whose joints leave a panel is refused.
 
 ## video2rig
 
