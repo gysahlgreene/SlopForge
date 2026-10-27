@@ -1,10 +1,12 @@
 # Weapons with moving parts generated as parts (2026-10-25)
 
 Step W8b of M3 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)): the moving parts of a weapon come
-from part-level generation (OmniPart, MIT) instead of a cut through one mesh, after the owner rejected the cut
+from part-level generation (OmniPart) instead of a cut through one mesh, after the owner rejected the cut
 three times. Three briefs went through `approve` on the `h100` profile with the route described in
 [the weapons guide](../../WEAPONS.md#moving-parts-from-part-level-generation); the private run folders are
 `private/weapons-parts-2026-10-25/{P1,R1,X1}` (commit of each in `commit.txt`).
+
+**Output rights (recorded 2026-10-27): restricted.** OmniPart's part synthesis, which made these parts, runs NVIDIA FlexiCubes and nvdiffrast, licensed for non-commercial use only. The assets are kept as M3 evidence, not for a sold game, and will be regenerated on a cleared parts route ([#134](https://github.com/gysahlgreene/SlopForge/issues/134)).
 
 ![Pistol, rifle and crossbow: concept, generated parts, at rest and moved](three_weapons.jpg)
 

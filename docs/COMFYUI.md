@@ -213,7 +213,8 @@ Notes on these readings:
 - **The DINOv3 notice.** Meta's newer text (GitHub, 2025-08-19) asks for "Built with DINOv3" only when DINO
   materials are distributed. SlopForge ships it with outputs anyway, which does no harm.
 - **DINOv3's trade-control clause.** Section 1.b.v excludes end uses related to weapons prohibited by trade controls.
-  Whether game weapon art falls under it is the user's call.
+  The owner's reading (2026-10-27, recorded as a reading, not legal advice): the clause concerns trade-controlled
+  uses (real weapons, defence and export-controlled work), not game art of fictional weapons; not a blocker.
 - **Pixal3D's EU flag.** TencentARC's card sets an EU-disallow flag. It blocks nothing while the repository is
   ungated.
 - **Node code.** The TRELLIS.2 nodes are ComfyUI core (`comfy_extras/nodes_trellis2.py`) and use neither nvdiffrast
