@@ -197,4 +197,21 @@ def run_doctor(project_root=None):
         else:
             report("OK" if skin["status"] == "ready" else "WARN", "SkinTokens",
                    skin["status"] + (": " + "; ".join(skin["reasons"]) if skin["reasons"] else ""))
+    from .backends import video2rig
+    if config is not None and video2rig.configured(config):
+        rights = video2rig.OUTPUT_RIGHTS
+        rights = (f"output rights: {rights['status']} ({rights['terms']}, {rights['terms_version']}, "
+                  f"read {rights['read_on']})")
+        try:
+            machines = video2rig.preflight(config, root)
+        except Exception as exc:
+            machines = {"local": {"status": "unavailable", "reasons": [f"preflight failed: {exc}"]}}
+        for role, result in machines.items():
+            label = "video2rig (this machine)" if role == "local" else \
+                f"video2rig training ({result.get('host', 'this machine')})"
+            detail = "; ".join(result["reasons"]) if result["reasons"] else (
+                f"commit {result['revision'][:7]}, facebook/dinov2-small {result['dinov2_revision'][:7]}, "
+                f"torch {result['torch']} {result['device']}")
+            report("PASS" if result["status"] == "ready" else "WARN", label,
+                   f"{result['status']}: {detail}; {rights}")
     return 1 if failures else 0
