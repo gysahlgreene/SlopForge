@@ -183,7 +183,8 @@ configuration failure, with the remedy. The deliveries are:
 - `animation unity-setup`.
 
 Generating, approving a concept for 3D, retexturing, `unity-preview` and reviewing always run, whatever the rights.
-An `attribution_required` delivery writes its notices beside the asset:
+An `attribution_required` delivery writes its notices beside the asset. Unity does not build a text file nobody
+references, so copy these notices into the game's credits or about screen yourself:
 
 - a model: `SlopForge-NOTICES.txt` in its folder;
 - an image: `<name>.SlopForge-NOTICES.txt` beside it;
@@ -204,7 +205,7 @@ legal advice.
 | Pixal3D graphs | Pixal3D (MIT) with DINOv3 and the NAF upsampler (Apache-2.0) | attribution_required: "Built with DINOv3." |
 | Tiling upscale | `RealESRGAN_x4plus.safetensors` | unknown: a conversion of the BSD-3-Clause `.pth` with no documented source |
 | Part masks; cut-outs; Blender; SkinTokens; video2rig | Florence-2 (MIT), SAM 2.1 (Apache-2.0); BiRefNet (MIT); GPL covers Blender, not its outputs; MIT; see [Creatures](CREATURES.md) | cleared |
-| Moving parts (OmniPart and hybrid routes) | OmniPart (MIT), whose part synthesis runs NVIDIA FlexiCubes and nvdiffrast | **restricted**: NVIDIA Source Code License, non-commercial use only |
+| Moving parts (OmniPart and hybrid routes) | OmniPart (MIT), whose part synthesis runs its vendored NVIDIA FlexiCubes and nvdiffrast | **restricted**: NVIDIA Source Code License, non-commercial use only (FlexiCubes' own repository is now Apache-2.0, but OmniPart vendors the earlier copy, and nvdiffrast stays non-commercial) |
 
 Notes on these readings:
 
