@@ -12,9 +12,10 @@ and side in one frame). It trains a joint reader on renders of the creature's ow
 rig to the reading, frame by frame. SlopForge runs it as a `local_tool` provider (`slopforge/backends/video2rig.py`).
 
 **Licence.** video2rig is AGPL-3.0. SlopForge runs it as a separate program from its own checkout and environment, and
-exchanges files with it. It never imports, bundles or patches it, so SlopForge's code stays MIT.
-`tests/test_video2rig_provider.py` fails if any module under `slopforge/`, `processing/`, `blender/` or `scripts/`
-imports it. If you offer SlopForge as a service that runs video2rig for other people, you must offer them the source
+exchanges files with it. It never bundles or patches it, and no SlopForge module imports it, so SlopForge's code stays
+MIT. The only imports of video2rig happen inside the tool's own Python: the install script's self-check and the
+preflight's probe. `tests/test_video2rig_provider.py` fails if any module under `slopforge/`, `processing/`,
+`blender/` or `scripts/` imports it, and the preflight refuses a modified checkout. If you offer SlopForge as a service that runs video2rig for other people, you must offer them the source
 of the video2rig you run (`THIRD_PARTY_NOTICES.md`). Its outputs are recorded as `cleared` (read 2026-10-27). A clip's
 rights still depend on the video it was read from.
 
@@ -38,8 +39,11 @@ tools:
   video2rig_train_checkout: /home/<user>/SlopForgeVideo2rig/video2rig
 ```
 
-The tool loads its backbone without naming a revision. SlopForge always runs it with `HF_HOME=<dir>/hf` and
-`HF_HUB_OFFLINE=1`, so that load reads the pinned snapshot and never the network.
+The tool loads its backbone without naming a revision. SlopForge always runs it with `HF_HOME=<dir>/hf`,
+`HF_HUB_CACHE=<dir>/hf/hub` and `HF_HUB_OFFLINE=1`, so that load reads the pinned snapshot and never the network. It
+also drops any `HUGGINGFACE_HUB_CACHE`, `TRANSFORMERS_CACHE` or `PYTHONPATH` from the caller's environment. A
+user's own cache setting would otherwise outrank `HF_HOME`, and `PYTHONPATH` could put another torch or
+transformers ahead of the venv's.
 
 **What runs where.** These follow the owner's decision D15 (a) and keep Blender on the SlopForge machine:
 
@@ -48,7 +52,14 @@ The tool loads its backbone without naming a revision. SlopForge always runs it 
   of the motion also run there.
 - On the GPU provider: `reader.train`, in bfloat16.
 
-The client builds each documented command line and runs it with the provider's Python in its checkout. It reads back
+Sending a project to the GPU provider for `reader.train` and bringing the reader back is not built yet; it belongs
+to package B3. Until then the client runs `train` only on a machine with no `video2rig_train_host` set, and
+refuses it otherwise.
+
+The client builds each documented command line and runs it with the provider's Python in its checkout. It makes
+every path absolute first, because a relative one would land inside the pinned checkout. `train` requires a step
+count, because the tool's default of 8 minutes trains for however many steps the card manages. Before each step,
+the client deletes the step's previous output, so a step that crashes cannot hand back an earlier take's answer. It reads back
 `reader-train.json`, `check.json` (a FAIL verdict is the check's answer, not an error) and `report.json`. It never
 builds video2rig's older road, the BootsTAPIR point tracker. It refuses `run` when the creature has no
 `reader/reader.pt`, because the tool would otherwise fall back to that road without saying so.
@@ -64,10 +75,13 @@ these hold:
 - On the training machine, a CUDA card with bfloat16 is present.
 
 The training machine's preflight runs over SSH, by streaming the standard-library `video2rig_runtime.py` to the
-tool's own Python. The identity a stage records is
+tool's own Python. A missing setting or an unreadable reply rejects that machine only. A reply of `ready` for other
+pins counts as unverified.
+
+`identity()` builds the record a creature stage will copy into provenance once one exists (package B3):
 `{name: video2rig, model_id: facebook/dinov2-small, revision, weights_sha256}`. `revision` is the commit and
 `weights_sha256` is the creature's `reader.pt`, or `unavailable` before one is trained. The record also carries the
-DINOv2 revision and sha256 and the output rights.
+DINOv2 revision and sha256, the torch and transformers versions with the device, and the output rights.
 
 **Verified so far (2026-10-27, step 0 of package V0):**
 
@@ -77,8 +91,13 @@ DINOv2 revision and sha256 and the output rights.
 - macOS (Apple silicon): the install ran with CPU wheels. Run by hand with the tool's own scripts, the fixture's rig
   export, start picture and `reader.prepare --skip-train` (40 poses) all worked.
 
+Step 0 ran by hand with the tool's own commands, not through SlopForge's client. On 2026-10-27, after the review
+fixes, the install script ran again on both machines, and on macOS with a stray `HF_HUB_CACHE` and `PYTHONPATH` set.
+The preflight passes on both: the H100 (CUDA bfloat16, over SSH) and macOS (CPU).
+
 **Not verified yet:**
 
+- The client's step runner against the real tool. It has run only against a stand-in in the offline tests.
 - Reading and fitting a clip on any machine.
 - Any real creature.
 - The accuracy exam on synthetic motion (package B3).

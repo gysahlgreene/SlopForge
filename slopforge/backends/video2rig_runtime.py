@@ -8,6 +8,7 @@ checkout), <dir>/.venv, <dir>/hf (the pinned DINOv2-small snapshot the tool read
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -44,9 +45,16 @@ def hf_home(checkout):
     return Path(checkout).resolve().parent / "hf"
 
 
+# HF_HUB_CACHE and the older cache variables outrank HF_HOME in huggingface_hub, and PYTHONPATH can put another
+# torch or transformers ahead of the venv's: none of the user's may reach the tool (PR #131 review).
+_INHERITED = ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE", "PYTHONPATH")
+
+
 def environment(checkout):
     """The tool's environment: its unpinned backbone load resolves to the pinned snapshot, never to the network."""
-    return {**os.environ, "HF_HOME": str(hf_home(checkout)), "HF_HUB_OFFLINE": "1"}
+    hf = hf_home(checkout)
+    return {**{key: value for key, value in os.environ.items() if key not in _INHERITED},
+            "HF_HOME": str(hf), "HF_HUB_CACHE": str(hf / "hub"), "HF_HUB_OFFLINE": "1"}
 
 
 def _git(checkout, *args):
@@ -69,8 +77,13 @@ def preflight(python, checkout, role, blender=None):
     if (_git(checkout, "rev-parse", "HEAD") or "").strip() != VIDEO2RIG_REVISION:
         reasons.append(f"the checkout is not at the pinned commit {VIDEO2RIG_REVISION[:7]}; run "
                        "scripts/install-video2rig.sh again")
-    if _git(checkout, "status", "--porcelain", "--untracked-files=all") != "":
-        reasons.append("the checkout has modified or untracked files; video2rig runs unmodified (a fix goes upstream)")
+    changes = _git(checkout, "status", "--porcelain", "--untracked-files=all")
+    if changes is None:
+        reasons.append("git status failed in the checkout")
+    elif changes:
+        paths = [line[3:] for line in changes.splitlines()]
+        reasons.append(f"the checkout has modified or untracked files ({', '.join(paths[:5])}"
+                       f"{', ...' if len(paths) > 5 else ''}); video2rig runs unmodified (a fix goes upstream)")
     hub = hf_home(checkout) / "hub/models--facebook--dinov2-small"
     weights = hub / "snapshots" / DINOV2_REVISION / "model.safetensors"
     ref = hub / "refs/main"
@@ -80,10 +93,9 @@ def preflight(python, checkout, role, blender=None):
                        "run scripts/install-video2rig.sh again")
     if role == "local":
         ffmpeg = os.environ.get("V2R_FFMPEG")
-        if not (Path(ffmpeg).is_file() if ffmpeg else any(
-                (Path(folder) / "ffmpeg").is_file() for folder in os.environ.get("PATH", "").split(os.pathsep))):
+        if not (Path(ffmpeg).is_file() if ffmpeg else shutil.which("ffmpeg")):
             reasons.append("ffmpeg is not on PATH (or V2R_FFMPEG is not a file); the review film needs it")
-        if not blender or not Path(blender).is_file():
+        if not blender or not (Path(blender).is_file() or shutil.which(blender)):
             reasons.append("Blender was not found; set tools.blender or BLENDER_BIN")
     probe = subprocess.run([str(python), "-c", _PROBE, *IMPORTS], cwd=checkout, env=environment(checkout),
                            capture_output=True, text=True, check=False)

@@ -24,27 +24,31 @@ fi
 uv pip install -q --python "$P" "transformers==5.20.1" huggingface_hub numpy scipy opencv-python threadpoolctl \
   networkx scikit-image
 # The backbone at a pinned revision in this install's own cache; SlopForge runs the tool with HF_HUB_OFFLINE=1 against
-# it, so the tool's unpinned load resolves to this snapshot (refs/main points at it).
-HF_HOME=$DIR/hf "$P" - "$DINOV2_REVISION" <<'EOF'
+# it, so the tool's unpinned load resolves to this snapshot (refs/main points at it). HF_HUB_CACHE and the older cache
+# variables outrank HF_HOME, and PYTHONPATH could shadow the venv: none of the caller's reach the tool.
+v2r_env() { env -u HUGGINGFACE_HUB_CACHE -u TRANSFORMERS_CACHE -u PYTHONPATH HF_HOME="$DIR/hf" \
+  HF_HUB_CACHE="$DIR/hf/hub" "$@"; }
+v2r_env "$P" - "$DINOV2_REVISION" <<'EOF'
 import os, sys
 from pathlib import Path
 from huggingface_hub import snapshot_download
 revision = sys.argv[1]
 snapshot_download("facebook/dinov2-small", revision=revision,
                   allow_patterns=["config.json", "model.safetensors", "preprocessor_config.json"])
-ref = Path(os.environ["HF_HOME"]) / "hub/models--facebook--dinov2-small/refs/main"
+ref = Path(os.environ["HF_HUB_CACHE"]) / "models--facebook--dinov2-small/refs/main"
 ref.parent.mkdir(parents=True, exist_ok=True)
 ref.write_text(revision)
 EOF
 cd "$DIR/video2rig"
-HF_HOME=$DIR/hf HF_HUB_OFFLINE=1 "$P" -c "
-import sys, torch
+v2r_env HF_HUB_OFFLINE=1 "$P" -c "
+import torch
 import video2rig.check, video2rig.creature, video2rig.reader.net, video2rig.reader.train
 from transformers import Dinov2Model
 Dinov2Model.from_pretrained('facebook/dinov2-small')
-if sys.platform.startswith('linux'):
-    assert torch.cuda.is_available() and torch.cuda.is_bf16_supported(), 'no CUDA card with bfloat16'
-print('video2rig environment ready:', torch.__version__, 'cuda' if torch.cuda.is_available() else 'cpu')"
+cuda = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+print('video2rig environment ready:', torch.__version__, 'cuda' if cuda else 'cpu')
+if not cuda:
+    print('note: no CUDA card with bfloat16, so this machine cannot train readers; reading and fitting run here')"
 command -v ffmpeg >/dev/null || echo "warning: ffmpeg is not on PATH (the review film needs it; or set V2R_FFMPEG)"
 echo "On the SlopForge machine:  tools.video2rig_python: $P"
 echo "                           tools.video2rig_checkout: $DIR/video2rig"

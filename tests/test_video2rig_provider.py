@@ -28,7 +28,8 @@ def stub_install(root, *, net=True, cuda=False):
         f"    is_bf16_supported = staticmethod(lambda: {cuda})\n")
     (checkout / "transformers.py").write_text(
         "import os\n__version__ = '5.20.1'\nclass Dinov2Model:\n    @staticmethod\n"
-        "    def from_pretrained(name):\n        assert os.environ['HF_HUB_OFFLINE'] == '1', 'online load'\n")
+        "    def from_pretrained(name):\n        assert os.environ['HF_HUB_OFFLINE'] == '1', 'online load'\n"
+        "        assert os.environ['HF_HUB_CACHE'] == os.path.join(os.environ['HF_HOME'], 'hub'), 'another cache'\n")
     git = ["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@example.com"]
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
     subprocess.run(git + ["add", "."], check=True)
@@ -53,6 +54,8 @@ def install(tmp_path, monkeypatch):
     ffmpeg.write_text("#!/bin/sh\n")
     ffmpeg.chmod(0o755)
     monkeypatch.setenv("V2R_FFMPEG", str(ffmpeg))
+    # A user's own cache setting outranks HF_HOME in huggingface_hub; the tool must still read the pinned snapshot.
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "elsewhere/hub"))
     blender = tmp_path / "blender"
     blender.write_text("#!/bin/sh\n")
     blender.chmod(0o755)
@@ -73,6 +76,21 @@ def test_preflight_passes_on_a_clean_checkout_at_the_pinned_commit(install):
     assert (report["torch"], report["transformers"], report["device"]) == ("2.7.0", "5.20.1", "cpu")
 
 
+def test_environment_pins_the_backbone_cache_and_drops_inherited_paths(install, monkeypatch, tmp_path):
+    for key in ("HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE", "PYTHONPATH"):
+        monkeypatch.setenv(key, str(tmp_path / "other"))
+    env = runtime.environment(install.checkout)
+    hf = install.checkout.parent.resolve() / "hf"
+    assert (env["HF_HOME"], env["HF_HUB_CACHE"], env["HF_HUB_OFFLINE"]) == (str(hf), str(hf / "hub"), "1")
+    assert not {"HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE", "PYTHONPATH"} & set(env)
+
+
+def test_blender_named_without_a_path_is_found_on_path(install, monkeypatch):
+    monkeypatch.setenv("PATH", str(Path(install.blender).parent) + os.pathsep + os.environ["PATH"])
+    install.blender = "blender"
+    assert check(install)["status"] == "ready"
+
+
 def test_preflight_refuses_another_commit(install, monkeypatch):
     monkeypatch.setattr(runtime, "VIDEO2RIG_REVISION", "0" * 40)
     report = check(install)
@@ -86,9 +104,9 @@ def test_preflight_refuses_a_changed_checkout(install, change):
         (install.checkout / "video2rig/check.py").write_text("patched = True\n")
     else:
         (install.checkout / "video2rig/extra.py").write_text("")
-    report = check(install)
-    assert report["status"] == "unverified"
-    assert any("modified or untracked" in reason for reason in report["reasons"])
+    reasons = " ".join(check(install)["reasons"])
+    assert "modified or untracked" in reasons
+    assert f"video2rig/{'check' if change == 'modified' else 'extra'}.py" in reasons  # names what to clean up
 
 
 def test_preflight_refuses_a_missing_import(tmp_path, monkeypatch):
@@ -137,6 +155,12 @@ def test_preflight_reports_missing_settings(tmp_path):
     assert "tools.video2rig_python" in " ".join(report["local"]["reasons"])
 
 
+def ready():  # a training machine's reply, for the pins in force (the fixtures swap them)
+    return {"status": "ready", "reasons": [], "revision": runtime.VIDEO2RIG_REVISION,
+            "dinov2_revision": runtime.DINOV2_REVISION, "dinov2_sha256": runtime.DINOV2_SHA256,
+            "torch": "2.7.0+cu128", "transformers": "5.20.1", "device": "cuda"}
+
+
 def config(stub, **tools):
     return {"asset_pipeline": {"tools": {"video2rig_python": sys.executable,
                                          "video2rig_checkout": str(stub.checkout),
@@ -153,13 +177,13 @@ def test_training_preflight_runs_the_runtime_on_the_gpu_provider_over_ssh(instal
         calls.append((argv, kwargs))
         # The standard-library runtime is streamed to the provider's own Python, never imported there.
         assert kwargs["input"] == Path(runtime.__file__).read_text()
-        return SimpleNamespace(returncode=0, stdout='banner\n{"status": "ready", "reasons": []}\n', stderr="")
+        return SimpleNamespace(returncode=0, stdout="banner\n" + json.dumps(ready()) + "\n", stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
     settings = config(install, video2rig_train_host="gpu-box", video2rig_train_python="/opt/v2r/.venv/bin/python",
                       video2rig_train_checkout="/opt/v2r/video2rig")
     report = video2rig.preflight(settings, tmp_path)
     assert report["local"]["status"] == "ready", report["local"]["reasons"]
-    assert report["train"] == {"status": "ready", "reasons": [], "host": "gpu-box"}
+    assert report["train"] == {**ready(), "host": "gpu-box"}
     (argv, _), = calls
     assert argv[:4] == ["ssh", "-o", "BatchMode=yes", "gpu-box"]
     assert argv[4].startswith("/opt/v2r/.venv/bin/python - preflight ")
@@ -167,11 +191,29 @@ def test_training_preflight_runs_the_runtime_on_the_gpu_provider_over_ssh(instal
         "python": "/opt/v2r/.venv/bin/python", "checkout": "/opt/v2r/video2rig", "role": "train"}
 
 
-def test_remote_paths_must_be_absolute(install, tmp_path):
-    settings = config(install, video2rig_train_host="gpu-box", video2rig_train_python="venv/bin/python",
-                      video2rig_train_checkout="/opt/v2r/video2rig")
-    with pytest.raises(ValueError, match="absolute"):
-        video2rig.preflight(settings, tmp_path)
+def test_one_bad_setting_or_reply_never_hides_the_other_machine(install, tmp_path, monkeypatch):
+    def train(**tools):
+        report = video2rig.preflight(config(install, video2rig_train_host="gpu-box", **tools), tmp_path)
+        assert report["local"]["status"] == "ready", report["local"]["reasons"]
+        return report["train"]["status"], " ".join(report["train"]["reasons"])
+    assert train(video2rig_train_checkout="/opt/v") == ("unavailable", "Set tools.video2rig_train_python")
+    status, reason = train(video2rig_train_python="venv/bin/python", video2rig_train_checkout="/opt/v")
+    assert status == "unavailable" and "absolute" in reason
+    real_run = subprocess.run
+    replies = iter(["", "not json\n", json.dumps({**ready(), "revision": "0" * 40}), json.dumps({"status": "fine"})])
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kwargs: real_run(argv, **kwargs) if argv[0] != "ssh" else
+                        SimpleNamespace(returncode=0, stdout=next(replies), stderr=""))
+    for _ in range(4):  # empty, not JSON, "ready" for another commit, an unknown status
+        status, reason = train(video2rig_train_python="/opt/v/python", video2rig_train_checkout="/opt/v/video2rig")
+        assert status in ("unavailable", "unverified") and "gpu-box" in reason
+    monkeypatch.setattr(subprocess, "run", real_run)
+
+    def no_blender(*_):
+        raise FileNotFoundError("Blender executable not found")
+    monkeypatch.setattr(video2rig, "blender_executable", no_blender)
+    report = video2rig.preflight(config(install), tmp_path)
+    assert report["local"] == {"status": "unavailable", "reasons": ["Blender executable not found"]}
+    assert report["train"]["status"] == "unverified"  # still checked: no CUDA in the stub
 
 
 def test_identity_records_the_tool_backbone_reader_and_output_rights(install, tmp_path):
@@ -183,6 +225,8 @@ def test_identity_records_the_tool_backbone_reader_and_output_rights(install, tm
     assert record["dinov2_revision"]["value"] == runtime.DINOV2_REVISION
     assert record["output_rights"]["status"] == "cleared"
     assert {"terms", "terms_version", "read_on"} <= set(record["output_rights"])
+    assert record["environment"] == {"status": "known",
+                                     "value": {"torch": "2.7.0", "transformers": "5.20.1", "device": "cpu"}}
     reader = tmp_path / "reader.pt"
     reader.write_bytes(b"reader")
     assert video2rig.identity(report, reader)["weights_sha256"] == {
@@ -196,27 +240,30 @@ def test_project_folder_lives_under_the_candidate(tmp_path):
     assert project == tmp_path / "candidate_01/video2rig"
     assert json.loads((project / "creature.json").read_text()) == {"name": "wolf"}
     assert json.loads((video2rig.project_folder(tmp_path / "other") / "creature.json").read_text()) == {}
+    assert video2rig.project_folder(tmp_path / "candidate_01", {"name": "wolf"}) == project
+    with pytest.raises(StageFailure, match="creature.json"):  # a stale setting would read every clip wrongly
+        video2rig.project_folder(tmp_path / "candidate_01", {"name": "fox"})
 
 
 def test_commands_are_the_documented_command_lines(install, tmp_path):
     settings, project = config(install), tmp_path / "wolf"
     (project / "reader").mkdir(parents=True)
     (project / "reader/reader.pt").write_bytes(b"reader")
-    py, blender = sys.executable, install.blender
-    script = lambda name: [blender, "wolf.blend", "--background", "--python-exit-code", "1", "--python",
+    py, blender, blend, save = sys.executable, install.blender, str(tmp_path / "wolf.blend"), str(tmp_path / "walk.blend")
+    script = lambda name: [blender, blend, "--background", "--python-exit-code", "1", "--python",
                            str(install.checkout / "blender" / name), "--"]
     expected = {
-        "export_rig": (script("export_rig.py") + ["--out", str(project / "rig")], {"blend": "wolf.blend"}),
-        "render_start": (script("render_start.py") + ["--out", str(project / "start")], {"blend": "wolf.blend"}),
-        "prepare": ([py, "-m", "video2rig.reader.prepare", str(project), "--blend", "wolf.blend",
-                     "--blender", blender, "--poses", "3000", "--skip-train"], {"blend": "wolf.blend"}),
+        "export_rig": (script("export_rig.py") + ["--out", str(project / "rig")], {"blend": blend}),
+        "render_start": (script("render_start.py") + ["--out", str(project / "start")], {"blend": blend}),
+        "prepare": ([py, "-m", "video2rig.reader.prepare", str(project), "--blend", blend,
+                     "--blender", blender, "--poses", "3000", "--skip-train"], {"blend": blend}),
         "train": ([py, "-m", "video2rig.reader.train", str(project), "--steps", "9000"], {"steps": 9000}),
         "check": ([py, "-m", "video2rig", "check", str(project), "walk"], {"clip": "walk"}),
         "run": ([py, "-m", "video2rig", "run", str(project), "walk", "--cpu"], {"clip": "walk"}),
         "review": ([py, "-m", "video2rig", "review", str(project), "walk"], {"clip": "walk"}),
         "import_motion": (script("import_motion.py") + ["--motion", str(project / "out/walk.npz"),
-                                                         "--save", "walk.blend"],
-                          {"blend": "wolf.blend", "clip": "walk", "save": "walk.blend"}),
+                                                         "--save", save],
+                          {"blend": blend, "clip": "walk", "save": save}),
     }
     for step, (argv, options) in expected.items():
         assert video2rig.command(settings, tmp_path, step, project, **options) == argv, step
@@ -228,6 +275,10 @@ def test_run_refuses_the_older_road_without_a_reader(install, tmp_path):
     assert failure.value.category == "configuration"
     with pytest.raises(ValueError, match="unknown video2rig step"):
         video2rig.command(config(install), tmp_path, "track", tmp_path / "wolf", clip="walk")
+    with pytest.raises(ValueError, match="steps"):  # the tool's default trains for 8 minutes: as many steps as
+        video2rig.command(config(install), tmp_path, "train", tmp_path / "wolf")  # the card manages
+    with pytest.raises(ValueError, match="save"):
+        video2rig.command(config(install), tmp_path, "import_motion", tmp_path / "wolf", blend="w.blend", clip="walk")
 
 
 FAKE_TOOL = """#!{python}
@@ -247,6 +298,8 @@ elif module == "video2rig":
     work = Path(project) / "work" / clip
     work.mkdir(parents=True, exist_ok=True)
     if command == "check":
+        if os.environ.get("CRASH_CHECK"):
+            sys.exit(1)  # what an uncaught exception or SystemExit("clip not found") gives
         (work / "check.json").write_text(json.dumps({{"verdict": "FAIL", "messages": ["FAIL views differ"]}}))
         sys.exit(1)
     if command == "run":
@@ -284,6 +337,43 @@ def test_run_spawns_the_providers_python_in_its_checkout_offline(install, tmp_pa
     assert {call["hf_home"] for call in seen} == {str(install.checkout.parent.resolve() / "hf")}
 
 
+@pytest.fixture
+def fake_tool(install, tmp_path, monkeypatch):
+    tool = tmp_path / "python"
+    tool.write_text(FAKE_TOOL.format(python=sys.executable))
+    tool.chmod(0o755)
+    monkeypatch.setenv("CALLS", str(tmp_path / "calls.jsonl"))
+    return config(install, video2rig_python=str(tool))
+
+
+def test_a_crashed_check_never_returns_an_earlier_verdict(fake_tool, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "candidate")
+    (project / "work/walk").mkdir(parents=True)
+    (project / "work/walk/check.json").write_text('{"verdict": "OK"}')  # the clip's previous take
+    monkeypatch.setenv("CRASH_CHECK", "1")
+    with pytest.raises(StageFailure, match="check") as failure:
+        video2rig.run(fake_tool, tmp_path, "check", project, tmp_path / "log", clip="walk")
+    assert failure.value.category == "environment"
+
+
+def test_relative_paths_never_land_in_the_pinned_checkout(install, fake_tool, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    video2rig.project_folder("candidate")
+    video2rig.run(fake_tool, tmp_path, "train", "candidate/video2rig", "log", steps=1)
+    assert (tmp_path / "candidate/video2rig/reader/reader.pt").is_file() and (tmp_path / "log").is_file()
+    argv = video2rig.command(fake_tool, tmp_path, "import_motion", "candidate/video2rig", blend="wolf.blend",
+                             clip="walk", save="walk.blend")
+    assert argv[1] == str(tmp_path / "wolf.blend") and argv[-1] == str(tmp_path / "walk.blend")
+    assert check(install)["status"] == "ready"  # nothing was written into the checkout
+
+
+def test_training_is_refused_here_while_a_train_host_is_set(fake_tool, tmp_path):
+    fake_tool["asset_pipeline"]["tools"]["video2rig_train_host"] = "gpu-box"
+    with pytest.raises(StageFailure, match="gpu-box") as failure:
+        video2rig.run(fake_tool, tmp_path, "train", video2rig.project_folder(tmp_path / "c"), tmp_path / "log", steps=1)
+    assert failure.value.category == "configuration"
+
+
 def test_run_reports_a_missing_or_invalid_output(install, tmp_path):
     project = video2rig.project_folder(tmp_path / "candidate")
     (project / "work/walk").mkdir(parents=True)
@@ -302,9 +392,11 @@ def _imports_video2rig(tree):
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and node.level == 0:
             names = [node.module or ""]
-        elif isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) and \
-                getattr(node.func, "attr", getattr(node.func, "id", "")) in {"import_module", "__import__"}:
-            names = [str(node.args[0].value)]
+        elif isinstance(node, ast.Call) and node.args and \
+                getattr(node.func, "attr", getattr(node.func, "id", "")) in {"import_module", "__import__", "run_module"}:
+            first = node.args[0].values[0] if isinstance(node.args[0], ast.JoinedStr) and node.args[0].values else \
+                node.args[0]
+            names = [str(first.value)] if isinstance(first, ast.Constant) else []
         if any(name == "video2rig" or name.startswith("video2rig.") for name in names):
             return True
     return False
@@ -314,12 +406,15 @@ def test_import_guard_catches_imports_but_not_command_lines():
     assert _imports_video2rig(ast.parse("import video2rig.check"))
     assert _imports_video2rig(ast.parse("from video2rig.reader import net"))
     assert _imports_video2rig(ast.parse("importlib.import_module('video2rig.check')"))
+    assert _imports_video2rig(ast.parse("importlib.import_module(f'video2rig.{name}')"))
+    assert _imports_video2rig(ast.parse("runpy.run_module('video2rig', run_name='__main__')"))
     assert not _imports_video2rig(ast.parse("argv = ['-m', 'video2rig', 'run']\nPROBE = 'import video2rig.check'"))
     assert not _imports_video2rig(ast.parse("from . import video2rig_runtime"))
 
 
 def test_slopforge_never_imports_or_vendors_video2rig():
-    """video2rig is AGPL-3.0: SlopForge (MIT) runs it as a separate program and exchanges files with it only."""
+    """video2rig is AGPL-3.0: SlopForge (MIT) runs it as a separate program and exchanges files with it only. This
+    catches imports and a copied package folder; a patched checkout is the preflight's to refuse."""
     offenders = [str(path.relative_to(REPO)) for folder in ("slopforge", "processing", "blender", "scripts")
                  for path in sorted((REPO / folder).rglob("*.py"))
                  if _imports_video2rig(ast.parse(path.read_text(), str(path)))]
