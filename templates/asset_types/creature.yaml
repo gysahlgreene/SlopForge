@@ -25,8 +25,8 @@ avoid: [humanoid, rider, saddle or harness, multiple creatures, action pose, cro
 # only for now (owner decision D12); a leg TRELLIS.2 paints on the body has no geometry to rig and fails B1.
 limbs:
   ground_contact: 4
-# Twin legs' joints must mirror within this share of the creature's height. Proposed for the owner's ruling from the
-# bounded check: the passing wolf seed mirrored within 0.005, a failing seed 0.28.
+# Twin legs' joints must mirror within this share of the creature's height (owner ruling, 2026-10-27; a value per
+# type). Bounded check #129: the passing wolf seed mirrored within 0.005, a failing seed 0.28; B1's live wolf 0.025-0.05.
 max_rig_asymmetry: 0.05
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).

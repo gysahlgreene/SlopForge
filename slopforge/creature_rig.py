@@ -265,10 +265,11 @@ def bone_names(report, rig):
     return {name: rename[name] for name in names}
 
 
-def fit_bones(names):
+def fit_bones(names, skin_share):
     """The bones video2rig fits (#139), declared rather than left to its auto rule, which drops bones leading under
-    0.4 % of the skin (a generated wolf's paws and a shin): every named bone but the ends."""
-    return [name for name in names.values() if not _END.search(name)]
+    0.4 % of the skin (a generated wolf's paws and a shin): every named bone, and every end bone that leads any skin
+    (owner ruling, 2026-10-27: a five-bone hind leg's last bone carries the floor skin)."""
+    return [name for raw, name in names.items() if not _END.search(name) or skin_share.get(raw, 0) > 0]
 
 
 # The deformation review's poses (degrees about each bone's local axes: X across the body, pointing to the creature's
@@ -316,5 +317,5 @@ def check_rig(rig, limbs, limits):
         except ValueError as exc:
             report.update(status="failed", errors=[f"the rig cannot be named: {exc}"], failure_codes=["rig_structure"])
         else:
-            report["fit_bones"] = fit_bones(report["names"])
+            report["fit_bones"] = fit_bones(report["names"], report["skin_share"])
     return report

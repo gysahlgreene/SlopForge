@@ -53,7 +53,9 @@ a hypothesis, not a measurement. The seed is recorded, but it does not reproduce
   - the body: `Hips`, `Spine1-3`, `Chest`, `Neck1-3`, `Head`, `Tail1-6`;
   - each front leg: `Scapula`, `UpperArm`, `Forearm`, `FrontPaw`, `FrontToes`, plus a sixth bone, `FrontToesEnd`;
   - each hind leg: `Thigh`, `Shin`, `HindPaw`, `HindToes`, plus a fifth bone, `HindToesEnd`.
-- **`fit_bones`.** 33 bones, every named bone but the five ends. In this rig, `HindToes.L` (0.19 % of the skin),
+- **`fit_bones`.** All 38 bones. The first rule left out the five `…End` bones (33). Under the owner's ruling, every
+  end bone that leads skin is fitted, and all five do: `HeadEnd` 3.7 %, `FrontToesEnd` 0.45–0.47 % and
+  `HindToesEnd` 0.40–0.46 % of the skin. In this rig, `HindToes.L` (0.19 % of the skin),
   `HindToes.R` (0.25 %), `FrontToes.R` (0.26 %), `HindPaw.R` (0.26 %) and `FrontToes.L` (0.30 %) all lead under 0.4 % of
   the skin. Video2rig's auto rule would not fit them; the declaration does
   ([#139](https://github.com/gysahlgreene/SlopForge/issues/139)).

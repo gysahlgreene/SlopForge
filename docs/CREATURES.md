@@ -32,8 +32,8 @@ for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md))
   the height above the floor. A leg whose skin follows a torso bone has no chain, as with a leg TRELLIS.2 painted onto
   the body. So does a foot that shares another foot's chain.
 - **Twin legs are symmetric.** They have the same bone count, leave the body at the same bone, and mirror within
-  `max_rig_asymmetry` of the height across that bone. The type's 0.05 is a proposal awaiting the owner's ruling. In the
-  bounded check, the passing wolf seed mirrored within 0.005 and a failing seed 0.28.
+  `max_rig_asymmetry` of the height across that bone: 0.05 for the `creature` type (owner ruling, 2026-10-27; a value
+  per type). In the bounded check, the passing wolf seed mirrored within 0.005 and a failing seed 0.28.
 - **Every joint is inside the skin,** by generalized winding number above 0.5.
 - **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
 - **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
@@ -58,8 +58,8 @@ The best passing seed is finished. Best means it mirrors most closely; on a tie,
   registered as the pending `rig` artifact. Next to it are `Review/seed_sheet.png`, with every seed's views and verdict,
   and `Review/contact_sheet.png`, with six poses: rest, left foreleg lifted, right hind leg lifted, head up and turned,
   tail up and aside, and spine bent.
-- **`fit_bones`.** The manifest records the bones video2rig must fit (`rigging.fit_bones`): every named bone but the
-  ends, declared rather than left to the tool's auto rule. That rule drops bones leading under 0.4 % of the skin, such
+- **`fit_bones`.** The manifest records the bones video2rig must fit (`rigging.fit_bones`): every named bone, and every
+  `…End` bone that leads any skin (owner ruling, 2026-10-27), declared rather than left to the tool's auto rule. That rule drops bones leading under 0.4 % of the skin, such
   as a generated wolf's paws ([#139](https://github.com/gysahlgreene/SlopForge/issues/139)). Each bone's share of the
   skin is in its structure report.
 
