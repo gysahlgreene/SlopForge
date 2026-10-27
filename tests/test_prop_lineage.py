@@ -68,7 +68,7 @@ avoid: [environment]
         self.manifest = {"schema_version": 4, "assets": {"prop:relay": self.record}}
         # The fake materializers below record no material stages; delivery's rights gate is tested on recorded
         # lineage in test_texture_approval.OutputRightsGateTests, so publication here sees a cleared lineage.
-        rights = patch("slopforge.pipelines.model.lineage_rights",
+        rights = patch("slopforge.pipelines.model._delivery_rights",
                        return_value={"status": "cleared", "notices": [], "reasons": [], "sources": []})
         rights.start()
         self.addCleanup(rights.stop)
@@ -180,6 +180,24 @@ avoid: [environment]
                          ["background_removal"])
         self.assertEqual(stages["mesh_workflow_execution"]["provenance"]["output_rights"],
                          MESH_RIGHTS + [{"source": "blender", **BUILTIN_RIGHTS["blender"]}])
+
+    def test_the_real_lineage_of_a_mesh_reaches_its_concept_through_the_approved_copy(self):
+        # PR #133 review: approve() copies the concept to approved-concept:<execution>, the conditioning stage's input,
+        # and no stage lists that copy as an output; the walk must follow a byte copy to its source, or every
+        # model-pipeline delivery reads unknown. (The publication tests above stub lineage_rights; this one does not.)
+        from slopforge import providers
+        self._concept_candidates()
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"),
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "output_rights": MESH_RIGHTS}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        mesh = next(stage for execution in record["executions"] for stage in execution["stages"]
+                    if stage["name"] == "mesh_workflow_execution" and stage["status"] == "succeeded")
+        rights = providers.lineage_rights(record, mesh["outputs"])
+        self.assertEqual(rights["status"], "attribution_required", rights["reasons"])
+        self.assertEqual(rights["notices"], ["Built with DINOv3."])
+        self.assertIn("z_image_turbo_bf16.safetensors", {item["source"] for item in rights["sources"]})
 
     def test_a_mesh_worker_that_records_no_rights_leaves_the_mesh_stage_unrecorded(self):
         self._concept_candidates()

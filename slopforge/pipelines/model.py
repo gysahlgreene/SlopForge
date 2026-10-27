@@ -22,7 +22,8 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
-from ..providers import lineage_rights, require_shippable, rights_of, write_notices, NOTICES_FILE
+from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable,
+                         rights_of, write_notices)
 from ..provenance import generator_provenance, file_sha256, tool_sha256
 from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
@@ -1912,8 +1913,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
     candidate_artifacts = candidate.get("artifacts", [])
-    # Delivery: the weakest rights over the candidate's whole lineage (docs/COMFYUI.md, Output rights)
-    rights = lineage_rights(asset, candidate_artifacts)
+    rights = _delivery_rights(root, asset, candidate_artifacts, mesh_source)
     try:
         require_shippable(rights, asset["name"], "approve-texture")
     except StageFailure as exc:
@@ -2035,6 +2035,21 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     asset["unity_import"] = {"logical_id": key, **unity_import}
     save_manifest(root / pipeline["manifest"], manifest)
     return validation
+
+
+def _delivery_rights(root, asset, candidate_artifacts, mesh_source):
+    """The weakest rights over the candidate's whole lineage and the GLB it ships, whose producer the candidate's
+    lineage may bypass (the hybrid route's split surface; a retextured asset's published mesh)."""
+    digest = file_sha256(root / mesh_source)
+    mesh_refs = [output for execution in asset.get("executions") or [] if isinstance(execution, dict)
+                 for stage in execution.get("stages") or [] if isinstance(stage, dict)
+                 for output in stage.get("outputs") or [] if isinstance(output, dict)
+                 and output.get("path") == mesh_source and output.get("sha256") == digest]
+    rights = lineage_rights(asset, candidate_artifacts + mesh_refs)
+    if mesh_refs:
+        return rights
+    return merge_rights(rights, combine_rights([{"source": mesh_source, "status": "unknown",
+                                                 "reason": "no stage records producing the mesh it ships"}]))
 
 
 def _require_stable_unity_identity(previous, current):

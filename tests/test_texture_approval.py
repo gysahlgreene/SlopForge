@@ -26,7 +26,7 @@ class PublicationTestCase(unittest.TestCase):
     def setUp(self):
         super().setUp()
         if self.stub_rights:
-            rights = patch("slopforge.pipelines.model.lineage_rights", return_value=CLEARED)
+            rights = patch("slopforge.pipelines.model._delivery_rights", return_value=CLEARED)
             rights.start()
             self.addCleanup(rights.stop)
         stub = patch("slopforge.pipelines.model.build_weapon_prefab",
@@ -436,16 +436,27 @@ class OutputRightsGateTests(PublicationTestCase):
     DINO = {"source": "dino_v3_vit_l.safetensors", "status": "attribution_required", "terms": "DINOv3 License",
             "terms_version": "2025-08-19", "read_on": "2026-10-27", "notice": "Built with DINOv3."}
 
-    def _with_lineage(self, root, manifest, rights):
+    MESH_CLEARED = [{"source": "trellis_2_bf16.safetensors", "status": "cleared", "terms": "MIT",
+                     "terms_version": "LICENSE", "read_on": "2026-10-27"}]
+
+    def _with_lineage(self, root, manifest, rights, mesh_rights=None, mesh_recorded=True):
+        """The candidate's maps from an assembly stage; the GLB delivery copies (retained.glb) from a mesh stage the
+        candidate's lineage does not pass through, as on the hybrid route's worker sub-stages."""
         from slopforge.provenance import file_sha256
         asset = manifest["assets"]["prop:relic"]
         candidate = asset["material_candidates"]["items"][0]
         ref = {"id": "material:1:basecolor", "type": "texture.basecolor", "path": candidate["outputs"]["basecolor"],
                "sha256": file_sha256(root / candidate["outputs"]["basecolor"]), "stage": "material_assembly_export",
                "attempt": 1, "derived_from": []}
-        asset["executions"] = [{"id": "made", "status": "succeeded", "stages": [{
-            "id": "assembly", "name": "material_assembly_export", "attempt": 1, "status": "succeeded", "inputs": [],
-            "outputs": [ref], "settings": {}, "provenance": {"output_rights": rights}}]}]
+        mesh = {"id": "mesh:1", "type": "mesh.glb", "path": "retained.glb", "sha256": file_sha256(root / "retained.glb"),
+                "stage": "mesh_workflow_execution", "attempt": 1, "derived_from": []}
+        stages = [{"id": "assembly", "name": "material_assembly_export", "attempt": 1, "status": "succeeded",
+                   "inputs": [], "outputs": [ref], "settings": {}, "provenance": {"output_rights": rights}}]
+        if mesh_recorded:
+            stages.insert(0, {"id": "mesh", "name": "mesh_workflow_execution", "attempt": 1, "status": "succeeded",
+                              "inputs": [], "outputs": [mesh], "settings": {},
+                              "provenance": {"output_rights": self.MESH_CLEARED if mesh_rights is None else mesh_rights}})
+        asset["executions"] = [{"id": "made", "status": "succeeded", "stages": stages}]
         candidate["artifacts"] = [ref]
 
     def _publish(self, root, config, manifest):
@@ -477,6 +488,20 @@ class OutputRightsGateTests(PublicationTestCase):
             self._publish(root, config, manifest)
             self.assertFalse(notices.exists())
 
+    def test_the_delivered_mesh_is_gated_even_where_the_candidates_lineage_bypasses_it(self):
+        # PR #133 review: on the hybrid route the maps come from the worker's sub-stages, but the GLB approve-texture
+        # ships is the OmniPart-split surface of the mesh stage, whose rights are restricted.
+        omnipart = [{"source": "omnipart", "status": "restricted", "terms": "NVIDIA SCL", "terms_version": "3.3",
+                     "read_on": "2026-10-27", "reason": "non-commercial"}]
+        for mesh_rights, recorded, message in ((omnipart, True, "restricted"), (None, False, "retained.glb")):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, manifest = self._setup(root)
+                self._with_lineage(root, manifest, [self.DINO], mesh_rights, mesh_recorded=recorded)
+                with self.assertRaisesRegex(StageFailure, message):
+                    self._publish(root, config, manifest)
+                self.assertFalse(model.model_paths(root, config, "relic")["fbx"].exists())
+
     def test_unknown_or_restricted_rights_stop_delivery_before_any_file_changes(self):
         for rights, status in (([{"source": "z_image", "status": "unknown", "reason": "terms unread"}], "unknown"),
                                ([], "unknown"),  # a lineage that records nothing is not cleared
@@ -491,7 +516,8 @@ class OutputRightsGateTests(PublicationTestCase):
                     pass  # the candidate has no lineage at all
                 elif rights == []:
                     self._with_lineage(root, manifest, [])
-                    manifest["assets"]["prop:relic"]["executions"][0]["stages"][0]["provenance"] = {}
+                    next(stage for stage in manifest["assets"]["prop:relic"]["executions"][0]["stages"]
+                         if stage["name"] == "material_assembly_export")["provenance"] = {}
                 else:
                     self._with_lineage(root, manifest, rights)
                 with self.assertRaises(StageFailure) as failure:

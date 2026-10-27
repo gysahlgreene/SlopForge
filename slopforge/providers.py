@@ -237,6 +237,12 @@ def lineage_rights(asset, refs):
             continue
         seen.add((item["id"], item["sha256"]))
         found = producers.get((item["id"], item["sha256"]), [])
+        parents = item.get("derived_from")
+        if not found and isinstance(parents, list) and len(parents) == 1 and isinstance(parents[0], dict) and \
+                parents[0].get("sha256") == item["sha256"] and isinstance(parents[0].get("artifact_id"), str):
+            # a byte copy (approve's approved-concept:<execution>): the same content, so the same rights as its source
+            queue.append({"id": parents[0]["artifact_id"], "sha256": parents[0]["sha256"]})
+            continue
         if not found:
             parts.append(_unknown(f"no stage records producing {item['id']} with this content"))
             continue
@@ -258,6 +264,10 @@ def lineage_rights(asset, refs):
             parts.append(_unknown(f"{label} has malformed output rights"))
         else:
             parts.append(combine_rights(entries))
+        if "delivered_rights" in (producer.get("provenance") or {}):
+            # final_publication: what it published carries what delivery decided, the delivered mesh's rights included
+            parts.append(_combined(producer["provenance"]["delivered_rights"]) or
+                         _unknown(f"{label} has malformed delivered rights"))
         inputs = producer.get("inputs")
         if isinstance(inputs, list):
             queue.extend(inputs)
@@ -266,18 +276,23 @@ def lineage_rights(asset, refs):
     return merge_rights(*parts)
 
 
+def _combined(record):
+    """A checked copy of a combined rights record (what delivery decided), or None."""
+    if (not isinstance(record, dict) or record.get("status") not in RIGHTS or
+            not all(isinstance(record.get(key), list) for key in ("notices", "reasons", "sources")) or
+            not all(isinstance(item, str) for item in record["notices"] + record["reasons"])):
+        return None
+    return {key: list(record[key]) if isinstance(record[key], list) else record[key]
+            for key in ("status", "notices", "reasons", "sources")}
+
+
 def published_rights(asset):
     """The rights recorded on an asset when it was delivered (a combined record), or unknown."""
     record = asset.get("output_rights") if isinstance(asset, dict) else None
     name = asset.get("name", "an asset") if isinstance(asset, dict) else "an asset"
     if record is None:
         return _unknown(f"{name} was delivered before output rights were recorded: deliver it again")
-    if (not isinstance(record, dict) or record.get("status") not in RIGHTS or
-            not all(isinstance(record.get(key), list) for key in ("notices", "reasons", "sources")) or
-            not all(isinstance(item, str) for item in record["notices"] + record["reasons"])):
-        return _unknown(f"{name}'s recorded output rights are malformed")
-    return {key: list(record[key]) if isinstance(record[key], list) else record[key]
-            for key in ("status", "notices", "reasons", "sources")}
+    return _combined(record) or _unknown(f"{name}'s recorded output rights are malformed")
 
 
 def artifact_rights(manifest, selector, artifact_id):

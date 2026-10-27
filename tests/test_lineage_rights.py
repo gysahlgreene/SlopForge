@@ -161,3 +161,29 @@ def test_a_registered_artifact_that_is_a_published_output_reads_the_delivery_rec
     assert artifact_rights(manifest, "character:pilot", "rig")["status"] == "attribution_required"
     del character["output_rights"]  # delivered before rights were recorded
     assert artifact_rights(manifest, "character:pilot", "rig")["status"] == "unknown"
+
+
+def test_a_byte_copy_is_followed_to_its_source_and_nothing_else_is():
+    asset, refs = baseline()
+    concept = _stages(asset)[0]["outputs"][0]
+    copy_ref = ref("approved-concept", "c", [concept])  # same bytes as the concept: approve's copy
+    _stages(asset)[1]["inputs"] = [copy_ref]
+    assert lineage_rights(asset, refs)["status"] == "attribution_required"
+    for parents in ([ref("concept", "z")], [concept, ref("other", "c")]):  # other content, or two parents
+        _stages(asset)[1]["inputs"] = [ref("approved-concept", "c", parents)]
+        assert "no stage records producing approved-concept" in " ".join(lineage_rights(asset, refs)["reasons"])
+
+
+def test_what_a_publication_delivered_carries_the_rights_it_was_delivered_with():
+    """retexture's mesh is the published GLB: its producer is final_publication, whose own record is empty (it only
+    copies) and whose delivered_rights hold the whole lineage the gate read, the mesh's included."""
+    asset, refs = baseline()
+    delivered = {"status": "restricted", "notices": [], "reasons": ["omnipart: non-commercial"],
+                 "sources": [{"source": "omnipart", "status": "restricted"}]}
+    glb = ref("published:glb", "g")
+    asset["executions"].append({"id": "publication", "stages": [{
+        "id": "pub", "name": "final_publication", "attempt": 1, "status": "succeeded", "inputs": refs,
+        "outputs": [glb], "settings": {}, "provenance": {"output_rights": [], "delivered_rights": delivered}}]})
+    assert lineage_rights(asset, [glb])["status"] == "restricted"
+    asset["executions"][-1]["stages"][0]["provenance"]["delivered_rights"] = {"status": "fine"}
+    assert "malformed" in " ".join(lineage_rights(asset, [glb])["reasons"])
