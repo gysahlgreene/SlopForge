@@ -35,6 +35,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
 - [Creatures](CREATURES.md): the creature asset type and its rig (`creature rig`, B1), and video2rig as the creature-motion provider (install, preflight, what runs where, licence; M5)
 - [Creature rig, live](media/creature-rig-b1-2026-10/README.md): a generated wolf rigged by `creature rig` three times; seed verdicts, the kept rig's names and `fit_bones`, and its contact sheet (deformation review pending)
+- [Creature views, live](media/creature-views-b2-2026-10/README.md): the generated wolf's start frame, training pictures and a known motion rendered through its cameras (B2)
 - [Unity delivery](UNITY.md)
 
 ## Examples and qualification evidence
