@@ -140,3 +140,24 @@ def test_delivery_refuses_unknown_and_restricted_and_names_the_remedy():
     assert failure.value.category == "configuration"
     assert "z_image: terms unread" in str(failure.value) and "approve-texture" in str(failure.value)
     assert "output_rights" in failure.value.remedy
+
+
+def test_a_registered_artifact_that_is_a_published_output_reads_the_delivery_record():
+    """A character's `model` artifact is the file approve-texture delivered: its own record (say, the concept's
+    rights copied from the generator) must not hide the mesh's, which the delivery record holds."""
+    published = {"status": "attribution_required", "notices": ["Built with DINOv3."], "reasons": [],
+                 "sources": [{"source": "dino_v3", "status": "attribution_required"}]}
+    character = {"id": "character-1", "name": "pilot", "published_artifacts": [{"path": "Assets/pilot.fbx"}],
+                 "outputs": {"fbx": "Assets/pilot.fbx", "rig": "Assets/rig.fbx"}, "output_rights": published,
+                 "artifacts": {
+                     "model": {"id": "model", "path": "Assets/pilot.fbx", "derived_from": [],
+                               "provenance": {"output_rights": [{"source": "z_image", **CLEARED}]}},
+                     "rig": {"id": "rig", "derived_from": [{"asset_id": "character-1", "output_id": "model"}],
+                             "provenance": {"output_rights": [{"source": "skintokens", **CLEARED}]}}}}
+    manifest = {"assets": {"character:pilot": character}}
+    rights = artifact_rights(manifest, "character:pilot", "rig")
+    assert rights["status"] == "attribution_required" and rights["notices"] == ["Built with DINOv3."]
+    del character["artifacts"]["model"]["provenance"]["output_rights"]  # the delivery record alone covers it
+    assert artifact_rights(manifest, "character:pilot", "rig")["status"] == "attribution_required"
+    del character["output_rights"]  # delivered before rights were recorded
+    assert artifact_rights(manifest, "character:pilot", "rig")["status"] == "unknown"

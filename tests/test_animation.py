@@ -11,6 +11,10 @@ from slopforge.cli import parse_args
 from slopforge.manifest import new_record, register_artifact
 
 
+RIG_RIGHTS = {"source": "skintokens", "status": "attribution_required", "terms": "MIT", "terms_version": "LICENSE",
+              "read_on": "2026-10-27", "notice": "Rigged with a fixture."}
+
+
 class AnimationLibraryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -79,7 +83,8 @@ class AnimationLibraryTests(unittest.TestCase):
                                {"strategy": "text_only"})
         manifest = {"assets": {"character:pilot": character}}
         register_artifact(manifest, "character:pilot", "rig", "model.fbx",
-                          "Assets/Characters/pilot/rig.fbx", status="ready", approval_status=approval)
+                          "Assets/Characters/pilot/rig.fbx", status="ready", approval_status=approval,
+                          provenance={"output_rights": [RIG_RIGHTS]})
         return character, manifest
 
     def test_retarget_records_reviewable_clip_and_measured_provenance(self):
@@ -176,7 +181,7 @@ class AnimationLibraryTests(unittest.TestCase):
         clip.write_bytes(b"retargeted clip")
         register_artifact(manifest, "character:pilot", "animation.walk", "animation.fbx",
                           "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx", status="ready",
-                          approval_status="approved")
+                          approval_status="approved", provenance={"output_rights": [RIG_RIGHTS]})
         with patch("slopforge.unity_animation.unity_cli", return_value="unity"), \
                 patch("slopforge.unity_animation.subprocess.run", side_effect=lambda *args, **kwargs: (
                     (self.root / "Assets/Art/Generated/Characters/pilot/Unity/pilot.controller").write_bytes(b"controller"),
@@ -186,6 +191,30 @@ class AnimationLibraryTests(unittest.TestCase):
         self.assertEqual(result["status"], "review_required")
         self.assertEqual(character["artifacts"]["unity.animator_controller"]["approval"]["status"], "pending")
         self.assertEqual(character["artifacts"]["unity.character_prefab"]["approval"]["status"], "pending")
+        # delivered into Unity with the notices its rig and clips owe, beside the prefab
+        notices = self.root / "Assets/Art/Generated/Characters/pilot/Unity/SlopForge-NOTICES.txt"
+        self.assertIn("Rigged with a fixture.", notices.read_text())
+        self.assertEqual(character["artifacts"]["unity.character_prefab"]["provenance"]["delivered_rights"]["status"],
+                         "attribution_required")
+
+    def test_unity_setup_refuses_a_clip_whose_rights_are_unknown_before_running_unity(self):
+        from slopforge.failures import StageFailure
+        from slopforge.unity_animation import build_character_animator
+        character, manifest = self._character_manifest()
+        clip = self.root / "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"retargeted clip")
+        register_artifact(manifest, "character:pilot", "animation.walk", "animation.fbx",
+                          "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx", status="ready",
+                          approval_status="approved", provenance={"output_rights": [
+                              {"source": "animation library base, clip walk", "status": "unknown",
+                               "reason": "animation library base declares no output_rights"}]})
+        with patch("slopforge.unity_animation.unity_cli", return_value="unity"), \
+                patch("slopforge.unity_animation.subprocess.run") as unity, \
+                self.assertRaisesRegex(StageFailure, "declares no output_rights"):
+            build_character_animator(self.root, {"asset_pipeline": {"output_root": "Assets/Art/Generated"}},
+                                     manifest, "pilot", rig_type="generic")
+        unity.assert_not_called()
 
     def test_humanoid_setup_requires_and_applies_provider_bone_mapping(self):
         from slopforge.unity_animation import build_character_animator
@@ -203,7 +232,7 @@ class AnimationLibraryTests(unittest.TestCase):
         clip.write_bytes(b"retargeted clip")
         register_artifact(manifest, "character:pilot", "animation.walk", "animation.fbx",
                           "Assets/Art/Generated/Characters/pilot/Animations/walk.fbx", status="ready",
-                          approval_status="approved")
+                          approval_status="approved", provenance={"output_rights": [RIG_RIGHTS]})
         scripts = []
 
         def run_unity(command, check):

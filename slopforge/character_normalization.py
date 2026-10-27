@@ -10,6 +10,7 @@ from .character_readiness import _character_asset, _project_file, readiness_allo
 from .provenance import file_sha256
 from .manifest import register_artifact, set_artifact_approval
 from .paths import blender_executable, tool_root
+from .providers import rights_of
 
 
 def _require_successful_report(report, directory):
@@ -113,7 +114,8 @@ def normalize_character(project_root, config, manifest, character_selector, *, s
                           output.relative_to(root).as_posix(), status="candidate",
                           derived_from=[{"asset_id": character["id"], "output_id": source_output}],
                           provenance={"source_sha256": source_hash, "normalized_sha256": report["normalized"]["sha256"],
-                                      "report_path": report["report_path"]}, approval_status="pending")
+                                      "report_path": report["report_path"],
+                                      "output_rights": rights_of(config, "blender")}, approval_status="pending")
         character["normalization"] = report
         character.setdefault("pipeline_status", {})["normalization_status"] = "pending_review"
         return report

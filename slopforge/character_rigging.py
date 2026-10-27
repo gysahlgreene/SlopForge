@@ -13,6 +13,7 @@ from .manifest import register_artifact
 from .paths import blender_executable, tool_root
 from .character_readiness import readiness_allows_rigging
 from .validation import validate_image
+from .providers import artifact_rights, require_shippable, rights_of
 
 from . import skintokens_runtime as runtime
 from .skintokens_runtime import SKINTOKENS_REVISION, SKINTOKENS_SETTINGS as _SKINTOKENS_SETTINGS
@@ -273,6 +274,7 @@ def rigify_character(project_root, config, manifest, character_selector, *, sour
                 raise RuntimeError("Blender Rigify failed: " + str(result.get("error", "provider did not complete")))
             result["rigged_model"] = rigged_model.relative_to(root).as_posix()
             result["source_output"] = source_output
+            result["output_rights"] = rights_of(config, "blender")  # Rigify is Blender's add-on
             result["evidence"] = {pose: path.relative_to(root).as_posix() for pose, path in evidence.items()
                                   if path.is_file()}
             if len(result["evidence"]) != len(RECOMMENDED_POSES):
@@ -367,7 +369,8 @@ def skintokens_character(project_root, config, manifest, character_selector, *, 
               "unity_humanoid_mapping": {name: name for name in report.get("bone_names", []) if name in _UNITY_BODY_BONES},
               "deformation_evidence": report.get("deformation_evidence", {}),
               "structural_report": structural, "postprocess_report": report_path.relative_to(root).as_posix(),
-              "contact_sheet": contact.relative_to(root).as_posix()}
+              "contact_sheet": contact.relative_to(root).as_posix(),
+              "output_rights": rights_of(config, "skintokens") + rights_of(config, "blender")}
     return record_rigging_result(root, manifest, character["id"], result)
 
 
@@ -386,8 +389,11 @@ def approve_deformation(project_root, manifest, character_selector, *, confirmed
         raise ValueError("Canonical contact sheet is required")
     for key in ("rig_contact_sheet", *(f"rig_pose.{pose}" for pose in SKINTOKENS_POSES)):
         _project_file(root, artifacts[key]["path"], key)
+    # Approved deformation makes the rig deliverable: its rights over the whole lineage decide (docs/COMFYUI.md)
+    rights = require_shippable(artifact_rights(manifest, character_selector, "rig"), character["name"],
+                               "character approve-deformation")
     character.setdefault("pipeline_status", {})["deformation_status"] = "approved"
-    rigging["deformation_approval"] = {"status": "approved"}
+    rigging["deformation_approval"] = {"status": "approved", "output_rights": rights}
     return {"status": "approved"}
 
 
@@ -454,6 +460,8 @@ def record_rigging_result(project_root, manifest, character_selector, result):
     for key in ("model", "model_license", "source_revision", "checkpoint_sha256"):
         if key in provider:
             provenance[key] = provider[key]
+    if isinstance(result.get("output_rights"), list):  # what the provider's terms allow (docs/COMFYUI.md)
+        provenance["output_rights"] = result["output_rights"]
     derived = [{"asset_id": character["id"], "output_id": source_output}]
     validation = {"status": "not_run", "errors": [],
                   "warnings": ["Structural export checks passed; deformation quality requires manual review."],

@@ -304,8 +304,14 @@ def artifact_rights(manifest, selector, artifact_id):
         if not isinstance(artifact, dict):
             return _unknown(f"{asset.get('name')} has no artifact {name}")
         entries = (artifact.get("provenance") or {}).get("output_rights")
-        parts = [combine_rights(entries) if isinstance(entries, list) else
-                 _unknown(f"{asset.get('name')} {name} recorded no output rights")]
+        # A file the asset delivered (approve-texture's published_artifacts) carries the delivery record, the rights
+        # over its whole lineage. (`outputs` is no test: it maps every registered artifact's path.)
+        delivered = artifact.get("path") in {item.get("path") for item in asset.get("published_artifacts") or []
+                                             if isinstance(item, dict)}
+        parts = [combine_rights(entries)] if isinstance(entries, list) else [] if delivered else [
+            _unknown(f"{asset.get('name')} {name} recorded no output rights")]
+        if delivered:
+            parts.append(published_rights(asset))
         for source in artifact.get("derived_from") or []:
             parents = by_id.get(source.get("asset_id")) if isinstance(source, dict) else None
             if not parents or len(parents) != 1:
