@@ -31,7 +31,7 @@ def test_a_fixture_quadruped_is_checked_named_and_finished(tmp_path):
     fixture = {"vertices": rig["vertices"].tolist(), "triangles": rig["triangles"].tolist(), "bones": rig["bones"],
                "parents": rig["parents"], "heads": rig["heads"].tolist(),
                "leads": [rig["bones"][k] for k in rig["weights"].argmax(1)]}
-    source, raw = str(tmp_path / "source.glb"), str(tmp_path / "raw.glb")
+    source, raw = str(tmp_path / "source.fbx"), str(tmp_path / "raw.glb")   # creature rig's source is the published FBX
     blender(tmp_path, {"action": "fixture", "fixture": fixture, "source": source, "raw": raw})
 
     views = {view: str(tmp_path / f"{view}.png") for view in ("front", "side")}

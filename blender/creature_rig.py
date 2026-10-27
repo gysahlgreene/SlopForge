@@ -25,7 +25,7 @@ from mathutils import Quaternion, Vector
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.creature_rig import check_rig  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from skintokens_character import sha, transfer, weld_coincident_vertices  # noqa: E402
+from skintokens_character import imported, sha, transfer, weld_coincident_vertices  # noqa: E402
 
 LEG_COLOURS = {("front", "L"): (0.9, 0.2, 0.2, 1), ("front", "R"): (0.2, 0.4, 0.95, 1),
                ("hind", "L"): (0.95, 0.6, 0.1, 1), ("hind", "R"): (0.2, 0.8, 0.9, 1)}
@@ -217,7 +217,7 @@ def render_poses(rig, meshes, poses, images, forward, left):
 
 
 def finish(request):
-    source_meshes = [obj for obj in import_rig(request["source"])[1]]
+    source_meshes = [obj for obj in imported(request["source"]) if obj.type == "MESH"]   # FBX or GLB
     for obj in source_meshes:
         obj.name = "Source_" + obj.name
     armatures, meshes = import_rig(request["raw"])
@@ -257,6 +257,9 @@ def fixture(request):
         uv.data[loop.index].uv = (co.x + 0.5, co.y + 0.5)
     image = bpy.data.images.new("fixture_basecolor", width=16, height=16)
     image.pixels[:] = [0.6, 0.5, 0.4, 1.0] * 256
+    image.filepath_raw = str(Path(request["source"]).with_name("fixture_basecolor.png"))   # an FBX embeds files
+    image.file_format = "PNG"
+    image.save()
     material = bpy.data.materials.new("Fur")
     material.use_nodes = True
     texture = material.node_tree.nodes.new("ShaderNodeTexImage")
@@ -268,7 +271,10 @@ def fixture(request):
     bpy.context.scene.collection.objects.link(body)
     bpy.ops.object.select_all(action="DESELECT")
     body.select_set(True)
-    bpy.ops.export_scene.gltf(filepath=request["source"], export_format="GLB", use_selection=True)
+    if request["source"].lower().endswith(".fbx"):
+        bpy.ops.export_scene.fbx(filepath=request["source"], use_selection=True, path_mode="COPY", embed_textures=True)
+    else:
+        bpy.ops.export_scene.gltf(filepath=request["source"], export_format="GLB", use_selection=True)
     rig = bpy.data.objects.new("Armature", bpy.data.armatures.new("Armature"))
     bpy.context.scene.collection.objects.link(rig)
     bpy.context.view_layer.objects.active = rig
