@@ -654,6 +654,8 @@ class SlopForgeTests(unittest.TestCase):
                                          "selected": None}
 
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.lineage_rights",  # rights: test_texture_approval.OutputRightsGateTests
+                      return_value={"status": "cleared", "notices": [], "reasons": [], "sources": []}), \
                 patch("slopforge.pipelines.model.build_unity_material") as build_material:
             result = model.approve_texture(self.root, config, manifest, "prop:relic", 1)
         build_material.assert_called_once()

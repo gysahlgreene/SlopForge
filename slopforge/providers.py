@@ -9,6 +9,7 @@ the weakest across its lineage; delivery refuses `restricted` and `unknown`, exp
 import json
 import os
 import re
+from pathlib import Path
 
 from .failures import StageFailure
 
@@ -341,3 +342,18 @@ def rights_of(config, name):
     if not record:
         return [{"source": name, "status": "unknown", "reason": f"provider {name} states no output rights"}]
     return [{"source": name, **record}]
+
+
+NOTICES_FILE = "SlopForge-NOTICES.txt"
+
+
+def write_notices(directory, what, rights):
+    """The notices a delivered asset owes, in a file beside it so they ship with it; a stale one is removed."""
+    path = Path(directory) / NOTICES_FILE
+    if not rights["notices"]:
+        path.unlink(missing_ok=True)
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{what}: notices owed under the terms of the models and tools that made it (recorded by "
+                    "SlopForge). Ship them with it.\n\n" + "\n".join(rights["notices"]) + "\n")
+    return path

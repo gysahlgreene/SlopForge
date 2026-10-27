@@ -14,12 +14,21 @@ from slopforge.initializer import init_project
 from slopforge.pipelines import model
 
 
+CLEARED = {"status": "cleared", "notices": [], "reasons": [], "sources": []}
+
+
 class PublicationTestCase(unittest.TestCase):
     """These tests exercise publication's rollback and identity rules; the prefab a prop type publishes (unity_weapon,
-    a separate Unity run) is stood in by a clean report."""
+    a separate Unity run) is stood in by a clean report, and the rights in the candidate's lineage by a cleared one
+    (OutputRightsGateTests checks them)."""
+    stub_rights = True
 
     def setUp(self):
         super().setUp()
+        if self.stub_rights:
+            rights = patch("slopforge.pipelines.model.lineage_rights", return_value=CLEARED)
+            rights.start()
+            self.addCleanup(rights.stop)
         stub = patch("slopforge.pipelines.model.build_weapon_prefab",
                      return_value={"errors": [], "prefab": "Assets/stub.prefab", "controller": "Assets/stub.controller",
                                    "motions": [], "tip_forward": True, "root_inside": True})
@@ -417,3 +426,80 @@ class UnityIdentityTests(PublicationTestCase):
             self.assertEqual(published.read_bytes(), b"first fbx")
             self.assertEqual(asset["unity_import"], first_import)
             self.assertEqual(asset["executions"][-1]["status"], "failed")
+
+
+class OutputRightsGateTests(PublicationTestCase):
+    """Delivery reads the rights over the candidate's whole lineage: unknown and restricted stop it before a file
+    changes; what ships carries the notices it owes."""
+    stub_rights = False
+    KEYS, _setup, _unity = UnityIdentityTests.KEYS, UnityIdentityTests._setup, UnityIdentityTests._unity
+    DINO = {"source": "dino_v3_vit_l.safetensors", "status": "attribution_required", "terms": "DINOv3 License",
+            "terms_version": "2025-08-19", "read_on": "2026-10-27", "notice": "Built with DINOv3."}
+
+    def _with_lineage(self, root, manifest, rights):
+        from slopforge.provenance import file_sha256
+        asset = manifest["assets"]["prop:relic"]
+        candidate = asset["material_candidates"]["items"][0]
+        ref = {"id": "material:1:basecolor", "type": "texture.basecolor", "path": candidate["outputs"]["basecolor"],
+               "sha256": file_sha256(root / candidate["outputs"]["basecolor"]), "stage": "material_assembly_export",
+               "attempt": 1, "derived_from": []}
+        asset["executions"] = [{"id": "made", "status": "succeeded", "stages": [{
+            "id": "assembly", "name": "material_assembly_export", "attempt": 1, "status": "succeeded", "inputs": [],
+            "outputs": [ref], "settings": {}, "provenance": {"output_rights": rights}}]}]
+        candidate["artifacts"] = [ref]
+
+    def _publish(self, root, config, manifest):
+        guids = {role: f"{index:032x}" for index, role in
+                 enumerate(("fbx", "material", "basecolor", "normal", "metallic_gloss", "emission"))}
+        with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
+                patch("slopforge.pipelines.model.build_unity_material", side_effect=self._unity(guids)):
+            return model.approve_texture(root, config, manifest, "prop:relic", 1, force=True)
+
+    def test_delivery_records_the_rights_and_ships_the_notices_it_owes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, manifest = self._setup(root)
+            self._with_lineage(root, manifest, [self.DINO])
+            self._publish(root, config, manifest)
+            asset = load_manifest(root / config["asset_pipeline"]["manifest"])["assets"]["prop:relic"]
+            self.assertEqual(asset["output_rights"]["status"], "attribution_required")
+            self.assertEqual(asset["output_rights"]["notices"], ["Built with DINOv3."])
+            publication = next(stage for stage in asset["executions"][-1]["stages"]
+                               if stage["name"] == "final_publication")
+            self.assertEqual(publication["provenance"]["delivered_rights"]["status"], "attribution_required")
+            notices = model.model_paths(root, config, "relic")["directory"] / "SlopForge-NOTICES.txt"
+            self.assertIn("Built with DINOv3.", notices.read_text())
+            # Republished with cleared rights, the notices file it no longer owes goes.
+            manifest = {"assets": {"prop:relic": asset}}
+            self._with_lineage(root, manifest, [{"source": "trellis", "status": "cleared", "terms": "MIT",
+                                                 "terms_version": "LICENSE", "read_on": "2026-10-27"}])
+            asset["material_candidates"]["items"][0]["status"] = "candidate"
+            self._publish(root, config, manifest)
+            self.assertFalse(notices.exists())
+
+    def test_unknown_or_restricted_rights_stop_delivery_before_any_file_changes(self):
+        for rights, status in (([{"source": "z_image", "status": "unknown", "reason": "terms unread"}], "unknown"),
+                               ([], "unknown"),  # a lineage that records nothing is not cleared
+                               ("missing", "unknown"),
+                               ([{"source": "omnipart", "status": "restricted", "terms": "NVIDIA SCL",
+                                  "terms_version": "3.3", "read_on": "2026-10-27", "reason": "non-commercial"}],
+                                "restricted")):
+            with self.subTest(status=status, rights=rights), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config, manifest = self._setup(root)
+                if rights == "missing":
+                    pass  # the candidate has no lineage at all
+                elif rights == []:
+                    self._with_lineage(root, manifest, [])
+                    manifest["assets"]["prop:relic"]["executions"][0]["stages"][0]["provenance"] = {}
+                else:
+                    self._with_lineage(root, manifest, rights)
+                with self.assertRaises(StageFailure) as failure:
+                    self._publish(root, config, manifest)
+                self.assertEqual(failure.exception.category, "configuration")
+                self.assertIn(status, str(failure.exception))
+                asset = manifest["assets"]["prop:relic"]
+                self.assertEqual(asset["last_failure"]["operation"], "approve-texture")
+                self.assertEqual([item["id"] for item in asset.get("executions", [])],
+                                 ["made"] if rights != "missing" else [])  # no publication started
+                self.assertFalse(model.model_paths(root, config, "relic")["fbx"].exists())

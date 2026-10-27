@@ -22,7 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
-from ..providers import rights_of
+from ..providers import lineage_rights, require_shippable, rights_of, write_notices, NOTICES_FILE
 from ..provenance import generator_provenance, file_sha256, tool_sha256
 from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
 from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
@@ -1912,6 +1912,14 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     if not isinstance(mesh_source, str) or not (root / mesh_source).is_file():
         raise ValueError("Qualified material candidate has no retained source mesh")
     candidate_artifacts = candidate.get("artifacts", [])
+    # Delivery: the weakest rights over the candidate's whole lineage (docs/COMFYUI.md, Output rights)
+    rights = lineage_rights(asset, candidate_artifacts)
+    try:
+        require_shippable(rights, asset["name"], "approve-texture")
+    except StageFailure as exc:
+        asset["last_failure"] = failure_record(exc, stage="preflight", attempt=None, operation=exc.operation)
+        save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
+        raise
     pipeline = config["asset_pipeline"]
     execution = start_execution(asset, {
         "asset_type": asset.get("type"), "candidate_artifacts": [
@@ -1919,13 +1927,15 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
         "publication_roles": ["surface", "fbx", "blend", "maps", "previews", "unity_material", "validation"],
     }, parent_execution_id=candidate.get("execution_id"))
     publication_stage = start_stage(execution, "final_publication", 1, candidate_artifacts,
-                                    {"approval": "selected material candidate"}, {"output_rights": []})
+                                    {"approval": "selected material candidate"},
+                                    {"output_rights": [], "delivered_rights": rights})
     save_manifest(root / pipeline["manifest"], manifest)
     begin_stage(publication_stage)
     from .. import SCHEMA_VERSION
     manifest.setdefault("schema_version", SCHEMA_VERSION)
     save_manifest(root / pipeline["manifest"], manifest)
     publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material", "validation")]
+    publication_paths.append(paths["directory"] / NOTICES_FILE)
     publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
     with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
         backups = {}
@@ -1950,6 +1960,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             if (root / mesh_source).resolve() != paths["glb"].resolve():
                 paths["glb"].parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / mesh_source, paths["glb"])
+            write_notices(paths["directory"], asset["name"], rights)
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
                                                 {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")},
@@ -2020,6 +2031,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     finish_stage(publication_stage, "succeeded", published)
     finish_execution(execution, "succeeded")
     asset["published_artifacts"] = published
+    asset["output_rights"] = rights  # what registered artifacts made from it (a rig, a clip) read
     asset["unity_import"] = {"logical_id": key, **unity_import}
     save_manifest(root / pipeline["manifest"], manifest)
     return validation

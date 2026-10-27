@@ -66,6 +66,12 @@ avoid: [environment]
         self.config["asset_pipeline"]["defaults"]["material_candidates"] = 1
         self.record = new_record("prop", "relay", "Copper relay", self.style, {"strategy": "text_only"})
         self.manifest = {"schema_version": 4, "assets": {"prop:relay": self.record}}
+        # The fake materializers below record no material stages; delivery's rights gate is tested on recorded
+        # lineage in test_texture_approval.OutputRightsGateTests, so publication here sees a cleared lineage.
+        rights = patch("slopforge.pipelines.model.lineage_rights",
+                       return_value={"status": "cleared", "notices": [], "reasons": [], "sources": []})
+        rights.start()
+        self.addCleanup(rights.stop)
 
     def tearDown(self):
         self.temp.cleanup()
