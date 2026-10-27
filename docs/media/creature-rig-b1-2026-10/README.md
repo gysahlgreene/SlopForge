@@ -39,6 +39,18 @@ took 5 to 6 minutes.
 | 3 | 1 joint outside the skin | 1 joint outside the skin | hind legs mirror within 0.0501 of the height (limit 0.05) |
 | 4 | cannot be named: its hind legs leave the body away from the root | the same | 1 joint outside the skin |
 
+**Two later runs (2026-10-27, after the rulings).**
+- Run 4, with the fix below: 0 of 4 seeds passed. Three had one joint outside the skin, and one had a chain off the
+  spine.
+- Run 5, with 8 seeds: 5 passed, and seed 2 was kept.
+- Over the five runs, 9 of 24 seeds passed.
+- Nine of the rejections were one joint outside the skin, and every one was at the front right wrist, 4–7 mm outside a
+  thin part of the skin, 2–3.5 cm above the floor.
+
+**The kept rigs of runs 1–3 had a see-through material.** Blender's FBX import wired the published base colour's
+Color into the material's Alpha. Cycles, which video2rig's studio renders with, drew the wolf see-through. The finish
+now makes the skin opaque (run 4 on). The contact sheet below, from run 3, was rendered with EEVEE, which hid it.
+
 **SkinTokens is not reproducible per seed.** The same seed on the same model gave a different skeleton every run: seed
 1 had 36 bones in run 1 and 40 in run 2, and every raw rig's hash differs. The runtime seeds Python, NumPy, torch and
 CUDA. The likely cause is nondeterministic GPU sampling, where one changed token changes every token after it. That is
