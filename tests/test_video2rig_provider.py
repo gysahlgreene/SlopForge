@@ -30,7 +30,8 @@ def stub_install(root, *, net=True, cuda=False):
         "import os\n__version__ = '5.20.1'\nclass Dinov2Model:\n    @staticmethod\n"
         "    def from_pretrained(name):\n        assert os.environ['HF_HUB_OFFLINE'] == '1', 'online load'\n"
         "        assert os.environ['HF_HUB_CACHE'] == os.path.join(os.environ['HF_HOME'], 'hub'), 'another cache'\n")
-    git = ["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    (checkout / ".gitignore").write_text("__pycache__/\n*.pyc\n")  # as upstream's: the probe's imports leave bytecode
+    git =["git", "-C", str(checkout), "-c", "user.name=t", "-c", "user.email=t@example.com"]
     subprocess.run(["git", "init", "-q", str(checkout)], check=True)
     subprocess.run(git + ["add", "."], check=True)
     subprocess.run(git + ["commit", "-qm", "stub"], check=True)
