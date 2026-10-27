@@ -187,3 +187,40 @@ def test_what_a_publication_delivered_carries_the_rights_it_was_delivered_with()
     assert lineage_rights(asset, [glb])["status"] == "restricted"
     asset["executions"][-1]["stages"][0]["provenance"]["delivered_rights"] = {"status": "fine"}
     assert "malformed" in " ".join(lineage_rights(asset, [glb])["reasons"])
+
+
+@pytest.mark.parametrize("change", [
+    lambda a, r: _stages(a)[0]["outputs"][0].update(sha256=["not", "text"]),
+    lambda a, r: _stages(a)[1].update(inputs=5),
+])
+def test_wrongly_typed_execution_records_reject_with_a_reason(change):
+    rights = _mutate(change)
+    assert rights["status"] == "unknown" and rights["reasons"]
+
+
+@pytest.mark.parametrize("change", [
+    lambda rig: rig.update(derived_from=5),
+    lambda rig: rig.update(derived_from=[{"asset_id": "character-1", "output_id": ["model"]}]),
+    lambda rig: rig.update(path=["a", "list"]),
+    lambda rig: rig.update(provenance="not a mapping"),
+])
+def test_wrongly_typed_registered_artifacts_reject_with_a_reason(change):
+    manifest = character_manifest({"status": "cleared", "notices": [], "reasons": [], "sources": []},
+                                  [{"source": "skintokens", **CLEARED}])
+    change(manifest["assets"]["character:pilot"]["artifacts"]["rig"])
+    rights = artifact_rights(manifest, "character:pilot", "rig")
+    assert rights["status"] == "unknown" and rights["reasons"]
+    broken = character_manifest(None, [])
+    broken["assets"]["character:pilot"]["artifacts"] = "not a mapping"
+    assert artifact_rights(broken, "character:pilot", "rig")["status"] == "unknown"
+
+
+def test_every_producer_of_an_artifact_is_walked_not_only_the_first():
+    asset, refs = baseline()
+    copy_stage = copy.deepcopy(_stages(asset)[1])  # the same mesh, adopted with the same rights...
+    copy_stage["inputs"] = [ref("orphan", "o")]   # ...but recorded with an input nothing produced
+    asset["executions"].append({"id": "adopted", "stages": [copy_stage]})
+    assert "no stage records producing orphan" in " ".join(lineage_rights(asset, refs)["reasons"])
+    copy_stage["inputs"] = _stages(asset)[1]["inputs"]
+    copy_stage["status"] = "failed"
+    assert "did not succeed" in " ".join(lineage_rights(asset, refs)["reasons"])

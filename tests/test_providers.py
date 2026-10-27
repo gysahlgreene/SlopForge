@@ -167,3 +167,14 @@ def test_swapped_part_mask_models_are_not_the_ones_whose_terms_were_read():
     assert providers.rights_of(config(tools), "part_masks")[0]["status"] == "cleared"
     swapped = providers.rights_of(config({**tools, "parts_models": {"sam": "someone/sam-finetune"}}), "part_masks")[0]
     assert swapped["status"] == "unknown" and "parts_models" in swapped["reason"]
+
+
+@pytest.mark.parametrize("block", [
+    {"type": "hosted_api", "key_env": "TOKEN", "api_token": "r8_abc"},
+    {"type": "hosted_api", "key_env": "TOKEN", "apikey": "r8_abc"},
+    {"type": "hosted_api", "key_env": "TOKEN", "headers": {"Authorization": "Bearer r8_abc"}},
+    {"type": "hosted_api", "key_env": "TOKEN", "models": [{"walk": "x", "access_token": "r8"}]},
+])
+def test_credentials_anywhere_in_a_provider_block_are_refused(block):
+    with pytest.raises(ValueError, match="credentials never go in the project file"):
+        providers.load_providers(config(declared={"video_cloud": block}))

@@ -69,7 +69,26 @@ def combine_rights(entries):
 PROVIDER_TYPES = ("comfyui", "hosted_api", "ssh_gpu", "local_tool")
 _NAME = re.compile(r"[a-z][a-z0-9_]*\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
-_CREDENTIAL_FIELDS = {"api_key", "key", "token", "secret", "password", "credentials"}
+_CREDENTIAL_WORDS = {"key", "apikey", "token", "secret", "password", "passwd", "auth", "authorization", "bearer",
+                     "credential", "credentials"}
+
+
+def _credential_field(value, where):
+    """The first field anywhere in a provider block whose name says it holds a credential (key_env names one)."""
+    if isinstance(value, dict):
+        for name, item in value.items():
+            words = set(re.split(r"[^a-z0-9]+", str(name).lower())) | {str(name).lower()}
+            if name != "key_env" and words & _CREDENTIAL_WORDS:
+                return f"{where}.{name}"
+            found = _credential_field(item, f"{where}.{name}")
+            if found:
+                return found
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            found = _credential_field(item, f"{where}[{index}]")
+            if found:
+                return found
+    return None
 # Terms of the providers SlopForge configures through tools.* keys, and of its own local tools: read on 2026-10-27 from
 # the publishers' licence files and cards (docs/COMFYUI.md, Output rights).
 BUILTIN_RIGHTS = {
@@ -149,10 +168,10 @@ def _checked(name, block, builtin):
     kind = block.get("type")
     if kind not in PROVIDER_TYPES:
         raise ValueError(f"{where}.type must be one of {', '.join(PROVIDER_TYPES)}, not {kind!r}")
-    credentials = sorted(_CREDENTIAL_FIELDS & set(block))
-    if credentials:
-        raise ValueError(f"{where}.{credentials[0]}: credentials never go in the project file; name the environment "
-                         "variable that holds them with key_env")
+    credential = _credential_field(block, where)
+    if credential:
+        raise ValueError(f"{credential}: credentials never go in the project file; name the environment variable "
+                         "that holds them with key_env")
     if kind == "hosted_api" and not (isinstance(block.get("key_env"), str) and _ENV_NAME.fullmatch(block["key_env"])):
         raise ValueError(f"{where}.key_env must name the environment variable holding the API key (e.g. "
                          "REPLICATE_API_TOKEN), never the key itself")
@@ -225,7 +244,7 @@ def lineage_rights(asset, refs):
         for item in stages:
             outputs = item.get("outputs")
             if not isinstance(outputs, list) or not all(isinstance(output, dict) and isinstance(output.get("id"), str)
-                                                        for output in outputs):
+                                                        and isinstance(output.get("sha256"), str) for output in outputs):
                 return _unknown(f"stage {item.get('name')} attempt {item.get('attempt')} has malformed outputs")
             for output in outputs:  # identity is the id with the content: concept candidates reuse ids
                 producers.setdefault((output["id"], output.get("sha256")), []).append(item)
@@ -250,8 +269,9 @@ def lineage_rights(asset, refs):
         if not found:
             parts.append(_unknown(f"no stage records producing {item['id']} with this content"))
             continue
-        recorded = {json.dumps((producer.get("provenance") or {}).get("output_rights") if
-                               isinstance(producer.get("provenance"), dict) else "malformed", sort_keys=True)
+        recorded = {json.dumps([(producer.get("provenance") or {}).get(key) for key in ("output_rights",
+                                                                                       "delivered_rights")]
+                               if isinstance(producer.get("provenance"), dict) else "malformed", sort_keys=True)
                     for producer in found}
         if len(recorded) != 1:  # adopted copies of one stage must agree
             parts.append(_unknown(f"the stages recording {item['id']} disagree about its rights"))
@@ -260,7 +280,7 @@ def lineage_rights(asset, refs):
         label = f"{producer.get('name')} attempt {producer.get('attempt')}"
         entries = (producer.get("provenance") or {}).get("output_rights") if isinstance(
             producer.get("provenance"), dict) else "malformed"
-        if producer.get("status") != "succeeded":
+        if any(each.get("status") != "succeeded" for each in found):
             parts.append(_unknown(f"{label} did not succeed"))
         elif entries is None:
             parts.append(_unknown(f"{label} recorded no output rights (made before they were recorded: regenerate it)"))
@@ -272,11 +292,11 @@ def lineage_rights(asset, refs):
             # final_publication: what it published carries what delivery decided, the delivered mesh's rights included
             parts.append(_combined(producer["provenance"]["delivered_rights"]) or
                          _unknown(f"{label} has malformed delivered rights"))
-        inputs = producer.get("inputs")
-        if isinstance(inputs, list):
-            queue.extend(inputs)
-        else:
-            parts.append(_unknown(f"{label} has malformed inputs"))
+        for each in found:  # every producer's inputs: complete lineage, not the first copy's
+            if isinstance(each.get("inputs"), list):
+                queue.extend(each["inputs"])
+            else:
+                parts.append(_unknown(f"{label} has malformed inputs"))
     return merge_rights(*parts)
 
 
@@ -341,7 +361,10 @@ def artifact_rights(manifest, selector, artifact_id):
             else:
                 parts.append(published_rights(parents[0]))
         return merge_rights(*parts)
-    return walk(start, artifact_id)
+    try:
+        return walk(start, artifact_id)
+    except (TypeError, AttributeError) as exc:  # a wrongly typed record rejects; it never raises (provenance skill)
+        return _unknown(f"{selector} {artifact_id}: a lineage record is malformed ({exc})")
 
 
 def require_shippable(rights, what, operation):
