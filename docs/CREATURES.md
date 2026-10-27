@@ -64,9 +64,18 @@ The best passing seed is finished. Best means it mirrors most closely; on a tie,
   skin is in its structure report.
 
 The structure checks are structural evidence only. Deformation is judged by a person: `approve-rig --confirm` records
-that review. It refuses a rig changed since it was made, or one whose lineage's output rights are `unknown` or
-`restricted`. The facing comes from the highest skin (the head end), so check the sheet's left and right legs: a raised
-tail higher than the head would swap them.
+that review. It refuses a rig changed since it was made, a rig made from a model that was published again since, and a
+rig whose lineage's output rights are `unknown` or `restricted`.
+
+**Facing.** The head end is read from the highest skin. A creature whose tail stands above its head reads the wrong
+way round. Its hind legs then seem to leave the body away from the root, so it is refused, with that reason. One case
+is not refused: a rig that SkinTokens roots at the chest, on a creature whose tail stands above its head, would be named
+back to front. The review poses show it, because the wrong leg lifts.
+
+**Lighting and logs.** Every stage's identity carries the hashes of `blender/creature_rig.py` (with its helpers) and of
+`slopforge/creature_rig.py`. Each seed's SkinTokens log is kept as `skintokens.log` beside its candidate. A creature is
+published without lightmap UVs (`lightmap_uvs: false` in its type). It deforms, so Unity lights it with light probes,
+and Unity's lightmap unwrap of a 57,000-face wolf aborted.
 
 **Verified (2026-10-27):** offline tests on a four-legged box fixture and a local Blender test of the fixture through
 the check, the names and the finish. The live gate runs a configured project's published creature:
