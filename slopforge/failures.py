@@ -36,6 +36,21 @@ _CANDIDATE_QUALITY_CODES = frozenset({
     "part_fit",
 })
 
+# ── Codes of candidates that are not meshes, by validation["artifact_kind"] ─
+# A rig, a video clip or an extracted motion has no mesh metrics; its codes name their own metric and limit
+# (code: (metric, limit); a min_ limit rejects below it, any other above it). AI motion sources plan, section 8.
+_KIND_CODES: Dict[str, Dict[str, tuple[str, str]]] = {
+    "rig": {"rig_limb_missing": ("rig_limbs_missing", "max_rig_limbs_missing"),
+            "rig_asymmetric": ("rig_asymmetry", "max_rig_asymmetry"),
+            "rig_bone_outside": ("rig_bones_outside", "max_rig_bones_outside")},
+    "video": {"video_frame_rate": ("video_distinct_fps", "min_video_distinct_fps"),
+              "video_views_disagree": ("video_view_disagreement", "max_video_view_disagreement"),
+              "video_cut": ("video_cuts", "max_video_cuts")},
+    "motion": {"motion_joint_lost": ("motion_joints_lost", "max_motion_joints_lost"),
+               "motion_limit_exceeded": ("motion_limit_violations", "max_motion_limit_violations"),
+               "exam_failed": ("exam_bone_error_degrees", "max_exam_bone_error_degrees")},
+}
+
 # ── Retryable categories (subset of all categories) ───────────────────
 _RETRYABLE_CATEGORIES = frozenset({"candidate_quality"})
 
@@ -275,14 +290,25 @@ def candidate_quality_rejection(validation: dict) -> bool:
     if len(codes) != len(errors):
         return False
 
-    # Every code must be in the allowlist (no missing/legacy codes).
-    for code in codes:
-        if not isinstance(code, str) or code not in _CANDIDATE_QUALITY_CODES:
-            return False
-
     # Every error member must be a string.
     for error_member in errors:
         if not isinstance(error_member, str):
+            return False
+
+    # The inspected artifact's kind selects the codes; a mesh by default (every inspection before kinds existed).
+    kind = validation.get("artifact_kind", "mesh")
+    if kind != "mesh":
+        table = _KIND_CODES.get(kind) if isinstance(kind, str) else None
+        if table is None or not all(isinstance(code, str) and code in table for code in codes):
+            return False
+        measured, limits = validation.get("measured"), validation.get("limits")
+        if not isinstance(measured, dict) or not isinstance(limits, dict):
+            return False
+        return _codes_exceed_limits(codes, measured, limits, table)
+
+    # Every code must be in the allowlist (no missing/legacy codes).
+    for code in codes:
+        if not isinstance(code, str) or code not in _CANDIDATE_QUALITY_CODES:
             return False
 
     # ── Complete-inspection check mirroring validate_model_outputs ──────
@@ -405,8 +431,13 @@ def candidate_quality_rejection(validation: dict) -> bool:
         "part_fit": ("open_part_stretch", "max_open_part_stretch"),
     }
 
+    return _codes_exceed_limits(codes, measured, limits, _CODE_LIMIT)
+
+
+def _codes_exceed_limits(codes, measured, limits, table) -> bool:
+    """Every code's metric is a finite number past its declared finite, non-negative limit."""
     for code in codes:
-        metric_key, limit_key = _CODE_LIMIT.get(code, (None, None))
+        metric_key, limit_key = table.get(code, (None, None))
         if metric_key is None:
             return False
         threshold = limits.get(limit_key)
