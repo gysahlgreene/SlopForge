@@ -201,3 +201,21 @@ def test_the_cli_calibrates_and_synthesizes(rigged, tool, capsys):
     assert "gait.mp4" in capsys.readouterr().out
     motion = load_manifest(root / "ai/assets/manifest.json")["assets"]["creature:wolf"]["motion"]
     assert motion["status"] == "calibrated" and motion["clips"]["gait"]["frames"] == 24
+
+
+@pytest.mark.skipif(__import__("os").environ.get("SLOPFORGE_RUN_VIDEO2RIG") != "1", reason="opt-in external runtime")
+def test_external_creature_calibration():
+    """The live gate: calibrate a rigged creature of a configured project with the real video2rig and Blender, and
+    render one known motion through its start cameras."""
+    import os
+    from slopforge.config import load_project
+    from slopforge.manifest import load_manifest
+    project, name = os.environ.get("SLOPFORGE_PROJECT_ROOT"), os.environ.get("SLOPFORGE_CREATURE")
+    if not (project and name):
+        pytest.skip("blocked: set SLOPFORGE_PROJECT_ROOT and SLOPFORGE_CREATURE (a creature with a rig)")
+    config = load_project(project)
+    manifest = load_manifest(Path(project) / config["asset_pipeline"]["manifest"])
+    result = pipeline.calibrate_creature(project, config, manifest, name)
+    assert result["status"] == "calibrated"
+    clip = pipeline.synthesize_motion(project, config, manifest, name, "random_s0", kind="random", seed=0)
+    assert (Path(project) / clip["clip"]).stat().st_size and clip["frames"] == 96
