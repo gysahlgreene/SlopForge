@@ -18,7 +18,7 @@ from slopforge.backends.blender import blender_environment
 from slopforge.provenance import workflow_sha256, file_sha256, canonical_workflow_identity
 from slopforge.backends.comfyui import backend_provenance, _write_failure_report
 from slopforge.quality import apply_workflow_inputs
-from slopforge.workflow_requirements import workflow_requirements_identity
+from slopforge.workflow_requirements import workflow_output_rights, workflow_requirements_identity
 from slopforge.validation import validate_image
 from slopforge.manifest import (load_manifest, save_manifest, find_asset, begin_stage,
                                 start_stage, finish_stage)
@@ -653,6 +653,11 @@ def main():
                                         "model_filenames": [{"status": "known", "value": value} for value in model_filenames],
                                         "outputs": output_records,
                                         "workflow_requirements": workflow_requirements,
+                                        # the legacy inline Hunyuan3D graph names no models: its terms are unread
+                                        "output_rights": workflow_output_rights(args.workflow) if args.workflow else [
+                                            {"source": "legacy Hunyuan3D 2.0 graph", "status": "unknown",
+                                             "reason": "the inline graph has no requirements sidecar; Tencent's "
+                                                       "community licence was not checked for this use"}],
                                         "mesh_preparation": mesh_preparation,
                                         "prompt_id": prompt_id, "shape_prompt_id": shape_prompt_id,
                                         "textured": textured, "textures": textures,

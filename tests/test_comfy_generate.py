@@ -56,6 +56,8 @@ def test_effective_workflow_hash_is_after_all_image_bindings(monkeypatch):
         assert saved["effective_bindings"]["uploaded_inputs"]["4.image"] == __import__("hashlib").sha256(b"reference bytes").hexdigest()
         assert "random-upload.png" not in json.dumps(saved["effective_bindings"])
         assert saved["outputs"][0]["sha256"] == __import__("hashlib").sha256(b"generated image").hexdigest()
+        assert saved["output_rights"] == [{"source": "workflow.json", "status": "unknown",
+                                           "reason": "workflow.json has no requirements sidecar naming its models"}]
 
 
 def test_downloads_saved_output_not_a_preview(monkeypatch, tmp_path):

@@ -265,6 +265,8 @@ class MeshPBRTests(unittest.TestCase):
             self.assertEqual(saved["prompt_id"], "prompt-2")
             self.assertNotEqual(saved["shape_prompt_id"], saved["prompt_id"])
             self.assertEqual(saved["model_filenames"][0]["value"], "configured.safetensors")
+            # No requirements sidecar: the models' terms are unknown, and recorded so.
+            self.assertEqual([item["status"] for item in saved["output_rights"]], ["unknown"])
             self.assertEqual(saved["provenance"]["model_weights"]["status"], "unavailable")
             self.assertEqual(saved["provenance"]["custom_node_revisions"]["status"], "unavailable")
             self.assertEqual(len(client.queued_facts), 2)

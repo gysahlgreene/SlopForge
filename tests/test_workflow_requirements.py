@@ -73,6 +73,21 @@ class WorkflowRequirementsTests(unittest.TestCase):
                 workflow = json.loads(path.read_text())
                 self.assertEqual(validate_workflow_requirements(path, workflow, manifest), [])
 
+    def test_model_output_rights_are_optional_and_checked(self):
+        from slopforge.workflow_requirements import workflow_output_rights
+        self.write_manifest()
+        self.assertEqual(workflow_output_rights(self.workflow_path), [{
+            "source": "model.safetensors", "status": "unknown",
+            "reason": "test.image v1 states no output_rights for this model"}])
+        rights = {"status": "cleared", "terms": "Apache-2.0", "terms_version": "LICENSE", "read_on": "2026-10-27"}
+        self.manifest["models"][0]["output_rights"] = rights
+        self.write_manifest()
+        self.assertEqual(workflow_output_rights(self.workflow_path), [{"source": "model.safetensors", **rights}])
+        self.manifest["models"][0]["output_rights"] = {"status": "cleared", "terms": "Apache-2.0"}
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, "model.safetensors.*terms_version"):
+            load_workflow_requirements(self.workflow_path)
+
     def test_legacy_workflow_without_sidecar_returns_unknown(self):
         self.assertFalse(requirements_path(self.workflow_path).exists())
         self.assertIsNone(load_workflow_requirements(self.workflow_path))

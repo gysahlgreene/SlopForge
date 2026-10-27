@@ -5,6 +5,7 @@ import yaml
 
 from .backends.comfyui import ComfyUIClient, workflow_mask_errors
 from .provenance import workflow_sha256
+from .providers import validate_output_rights
 
 
 def requirements_path(workflow_path):
@@ -70,7 +71,23 @@ def load_workflow_requirements(workflow_path):
     models = [model["name"] for model in manifest["models"]]
     if len(models) != len(set(models)):
         raise ValueError("Workflow requirements models contain duplicate names")
+    for model in manifest["models"]:  # optional: the rights in the model's outputs (docs/COMFYUI.md)
+        if "output_rights" in model:
+            validate_output_rights(model["output_rights"], f"Workflow requirements model {model['name']} output_rights")
     return manifest
+
+
+def workflow_output_rights(workflow_path):
+    """The rights in each model's outputs, as the workflow's sidecar states them: [{source: model, **record}].
+    A model the sidecar states nothing for, or a workflow without a sidecar, is unknown."""
+    manifest = load_workflow_requirements(workflow_path)
+    name = Path(workflow_path).name
+    if manifest is None:
+        return [{"source": name, "status": "unknown", "reason": f"{name} has no requirements sidecar naming its models"}]
+    return [{"source": model["name"], **model["output_rights"]} if "output_rights" in model else
+            {"source": model["name"], "status": "unknown",
+             "reason": f"{manifest['id']} v{manifest['version']} states no output_rights for this model"}
+            for model in manifest["models"]]
 
 
 def validate_workflow_requirements(workflow_path, workflow, manifest):
