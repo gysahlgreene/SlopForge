@@ -184,21 +184,26 @@ def set_bones(rig, meshes, names, left):
 
 
 def render_poses(rig, meshes, poses, images, forward, left):
-    from rigify_character import setup_render   # the character review's key, fill and rim lights
     scene = bpy.context.scene
     low = np.min([obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box], axis=0)
     high = np.max([obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box], axis=0)
     centre = Vector(((low + high) / 2).tolist())
+    camera = ortho_camera(low, high, 1.35)
+    # lit as the material previews are (blender/prepare_model.py render_previews), turned to the creature's facing:
+    # one sun left the wolf's near side dark (mean luminance 64), the character review's lights blew it out (218)
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.view_settings.view_transform = "AgX"
     scene.world = scene.world or bpy.data.worlds.new("ReviewWorld")
-    setup_render(Vector(low.tolist()), Vector(high.tolist()))
-    # its lights face a character facing -Y: turn them to this creature's facing
+    scene.world.use_nodes = True
+    scene.world.node_tree.nodes["Background"].inputs["Color"].default_value = (0.18, 0.18, 0.18, 1.0)
+    scene.world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.5
     turn = Vector((0, -1, 0)).rotation_difference(forward)
-    for light in [obj for obj in scene.objects if obj.type == "LIGHT"]:
-        light.location = centre + turn @ (light.location - centre)
+    for offset, energy, size in (((-3, -4, 4), 450, 4), ((3, -1, 2), 220, 3), ((0, 2, 3), 300, 3)):
+        light = bpy.data.objects.new("ReviewLight", bpy.data.lights.new("ReviewLight", "AREA"))
+        scene.collection.objects.link(light)
+        light.data.energy, light.data.shape, light.data.size = energy, "DISK", size
+        light.location = centre + turn @ Vector(offset)
         light.rotation_euler = (centre - light.location).to_track_quat("-Z", "Y").to_euler()
-    camera = scene.camera
-    camera.rotation_mode = "QUATERNION"
-    camera.data.ortho_scale = max(high - low) * 1.35
     scene.render.resolution_x, scene.render.resolution_y = 640, 480
     for pose, image in zip(poses, images):
         for bone in rig.pose.bones:

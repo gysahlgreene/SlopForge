@@ -53,7 +53,8 @@ def test_a_fixture_quadruped_is_checked_named_and_finished(tmp_path):
     assert finished["material_coverage"]["base_color"] > 0
     assert (tmp_path / "rig.fbx").stat().st_size and (tmp_path / "rig.blend").stat().st_size
     assert all(Path(path).stat().st_size for path in images)
-    # the review is lit like the character route's: one sun from the side left the near side dark (luminance ~60)
+    # lit as the material previews (the wolf's: mean luminance 138): one sun left its near side dark (64), the
+    # character review's lights, made for a 1.8 m humanoid, blew it out (218)
     rest = np.asarray(Image.open(images[0]).convert("RGB"), float)
     creature_pixels = np.abs(rest - rest[2, 2]).sum(2) > 12
-    assert (rest[creature_pixels] @ (0.2126, 0.7152, 0.0722)).mean() > 100
+    assert 100 < (rest[creature_pixels] @ (0.2126, 0.7152, 0.0722)).mean() < 190
