@@ -35,12 +35,13 @@ rig_seeds: 4
 # start frame the video route was proven from (#149): front and side in equal panels. In three-quarter + side, Wan 2.2
 # turned the creature in 3 of 4 clips; in front + side with the split-screen prompt, in none. The reader reads a lifted
 # front paw better from three-quarter, which a dead-front view stacks on the hind leg (#140: trunk joints read
-# 0.99-1.0 against 0.65-0.69), so declare that pair where no video is generated. #149 rendered with no wide margin;
-# margin_wide keeps a long creature inside its side panel (#142), which frames the wolf about a fifth smaller.
+# 0.99-1.0 against 0.65-0.69), so declare that pair where no video is generated. margin_wide keeps a long creature
+# inside its side panel (#142). At 1.45 it set the wolf's scale (344 px tall) and all four clips that reached video2rig's
+# check failed it; at 1.2 the height margin sets it, as in #149 (400 px), and the same seeds passed (B5's live gate).
 views: [front, side]
 widths: [960, 960]
 margin: 1.8
-margin_wide: 1.45
+margin_wide: 1.2
 # Pictures the reader trains on (video2rig's reader.prepare --poses).
 training_poses: 3000
 # Joint ranges (#140), degrees from the start pose, by the role of B1's generic names. video2rig applies each to the

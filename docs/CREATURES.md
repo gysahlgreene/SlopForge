@@ -137,7 +137,16 @@ facing (#142). Passed as `--facing=-Y`, the facing is never guessed from foot an
 - **Widths.** The type declares equal panels (960 + 960), as #149's clips had. Without declared widths, render_start's
   one scale for both panels decides: the 1920 px frame is split by each view's span across its panel (three-quarter:
   0.77 length + 0.64 width; side: the length), so neither panel wastes resolution.
-- **Margins.** `margin` 1.8 and `margin_wide` 1.45 come from the type.
+- **Margins.** `margin` 1.8 and `margin_wide` 1.2 come from the type. render_start's orthographic height is the
+  larger of the creature's height × `margin` and its length × `margin_wide` across the side panel. The scale decides
+  whether video2rig's check passes:
+  - At 1.45 the length margin framed the wolf 344 px tall; all four clips that reached the check failed it (body
+    1.7–3.0 %, limbs 3.2 %).
+  - At 1.2 the height margin frames it 400 px tall, as in #149; the same seeds and prompt passed (seed 2: body 1.2 %,
+    seed 3: 0.9 %).
+
+  Reader error is roughly fixed in pixels, so a smaller creature disagrees more as a share of its height. Scaling
+  alone did not explain the failures, though: Wan may also draw a smaller creature's two views less alike.
 - **Check.** The calibration refuses a start frame from which any of the skin falls outside a panel.
 
 **The reader's training pictures** are rendered with `reader.prepare --skip-train`: the type's `training_poses`, 3000.

@@ -49,7 +49,7 @@ def test_panel_widths_follow_each_views_span():
     assert chosen["views"] == ["three-quarter", "side"] and sum(chosen["widths"]) == 1920
     assert chosen["widths"][0] / chosen["widths"][1] == pytest.approx((0.77 + 0.64 * 0.35) / 1.0, rel=0.01)
     assert framing({"views": ["front", "side"]}, length=1.0, width=0.35)["widths"][0] < 600
-    assert chosen["margin_wide"] == 1.45 and chosen["margin"] == 1.8
+    assert chosen["margin_wide"] == 1.2 and chosen["margin"] == 1.8      # the creature type's (B5's live gate)
 
 
 def test_declared_widths_and_views_are_checked():

@@ -61,7 +61,7 @@ def framing(settings, length, width):
     views = list(settings.get("views") or ("three-quarter", "side"))
     if len(views) != 2 or len(set(views)) != 2 or not set(views) <= set(VIEWS):
         raise ValueError(f"views must be two different of {', '.join(VIEWS)}, got {views!r}")
-    margin, margin_wide = float(settings.get("margin", 1.8)), float(settings.get("margin_wide", 1.45))
+    margin, margin_wide = float(settings.get("margin", 1.8)), float(settings.get("margin_wide", 1.2))
     if not 1 <= margin <= 4 or not 0 <= margin_wide <= 4:
         raise ValueError(f"margin must be 1 to 4 and margin_wide 0 to 4, got {margin} and {margin_wide}")
     widths = settings.get("widths")

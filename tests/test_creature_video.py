@@ -78,3 +78,15 @@ def test_bad_or_missing_declarations_are_refused(change, message):
 def test_a_view_without_wording_is_refused():
     with pytest.raises(ValueError, match="top"):
         video_prompt(video_settings(TYPE, "walk"), description="wolf", name="wolf", views=["top", "side"], side="left")
+
+
+def test_the_types_framing_keeps_the_wolf_at_149s_scale():
+    """B5's live gate: at margin_wide 1.45 the side panel's length margin set the scale, the wolf 344 px tall, and the
+    four clips that reached video2rig's check all failed it (body 1.7-3.0 %, limbs 3.2 %); at #149's scale, the height
+    margin setting it and the wolf 400 px tall, the same seeds passed (seed 2 body 1.2 %, seed 3 0.9 %). render_start
+    sets the orthographic height to the larger of height x margin and length x margin_wide x 1080 / panel width."""
+    height, length = 0.780, 1.000                       # the B1 wolf's skin
+    panel = TYPE["widths"][TYPE["views"].index("side")]
+    ortho = max(height * TYPE["margin"], length * TYPE["margin_wide"] * 1080 / panel)
+    assert ortho == pytest.approx(height * TYPE["margin"])
+    assert TYPE["margin_wide"] >= 1.2                  # a longer creature still keeps a fifth of room in its side panel
