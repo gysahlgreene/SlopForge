@@ -379,6 +379,11 @@ Compute: the configured ComfyUI and `ssh_gpu` providers (mesh generation; SkinTo
 **Ruled by the owner on 2026-10-28, after #149's batches:**
 - **D9: in place.** A delivered creature clip is in place, whatever travel video2rig's `steps` read into a walk on the spot. The bake records the stride length and the period, so the Unity Generic controller sets the speed (R3).
 - **Order.** B5 → B6 → B7 next, so the generated wolf reaches Unity. Then B3 and B4 as the repeatability work, then B8.
+- **The second creature is the rabbit.** It is the repeatability run after the wolf reaches Unity, alongside B3 and B4.
+  - Fantasy creatures come later: dragons, wings, flight.
+  - Humanoids (an orc, for example) stay on Track A's shared-skeleton route.
+  - A rabbit hops, so the creature type declares a hop motion beside the walk. Its prompt wording is data, not code.
+  - The intake and check limits were set from walks; a hop has not been tested against them.
 
 **Reason ([#149](https://github.com/gysahlgreene/SlopForge/issues/149)).** One AI video of the wolf already reaches a believable walk on its own rig, on our own hardware:
 - Wan 2.2, the split-screen continuous-walk prompt, 121 frames;
