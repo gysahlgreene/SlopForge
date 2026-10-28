@@ -188,7 +188,7 @@ def test_the_cli_extracts_reports_the_gait_and_approves(extracted, capsys):
     save_manifest(root / "ai/assets/manifest.json", manifest)
     assert main(["--project", str(root), "creature", "extract", "wolf", "walk_s11"]) == 0
     out = capsys.readouterr().out
-    assert "stride 0.50 m every 1.25 s (0.40 m/s)" in out and "review.png" in out
+    assert "stride 0.50 m every 1.25 s (0.40 m/s); a loop of 1 period, seam 3.1 deg" in out and "review.png" in out
     assert "slopforge animation approve wolf walk_s11 --confirm" in out
     assert main(["--project", str(root), "animation", "approve", "wolf", "walk_s11", "--confirm"]) == 0
     assert "walk_s11: approved" in capsys.readouterr().out

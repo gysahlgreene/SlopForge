@@ -956,7 +956,8 @@ def extract_creature(project_root, config, manifest, name, clip):
                       outputs={output["type"]: output["sha256"] for output in outputs})
     save_manifest(manifest_path, manifest)
     return {"status": "review_required", "fbx": relative["animation.fbx"],
-            "review_sheet": relative["image.motion_review"], "warnings": extraction["warnings"], **gait}
+            "review_sheet": relative["image.motion_review"], "warnings": extraction["warnings"],
+            "window": baked["window"], **gait}
 
 
 def approve_motion(project_root, manifest, name, clip, *, confirmed=False):
