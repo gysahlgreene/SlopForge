@@ -238,6 +238,63 @@ verdict: it refuses every turning, still and drifting clip and passes every clip
     pose covered frame 0 only 0.78.
   - **Steps.** video2rig's `steps` turns a walk on the spot into a walk forward. D9 delivers in place; B6 removes it.
 
+## Extraction and bake (B6)
+
+A clip that passed intake becomes a looping, in-place animation on the creature's rig:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature extract wolf walk_s4
+slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --confirm   # after the review sheet
+```
+
+- **Extraction (`motion_extraction`).** video2rig's `run` reads the clip with the creature's reader and fits the rig.
+  Only the reader road is used; a missing `reader.pt` is refused. The fit (`out/<clip>.npz`) is checked before
+  anything bakes it:
+  - its bones are creature.json's;
+  - it has one fit per clip frame, at the intake's measured times (`timing.json`);
+  - every number is finite.
+
+  video2rig's report (outline match, frames under the floor, joints at their limit, warnings) is recorded in
+  `motion.clips.<clip>.extraction`, not gated: D8's limits are not set. The review sheet shows the frames.
+- **Bake (`motion_bake`).** video2rig's `import_motion` puts the fit on the rig .blend as an Action at the clip's
+  real times. `blender/bake_extracted_motion.py` then samples every key in world space, and
+  `slopforge/creature_gait.py` measures:
+  - **Plants per leg.** The foot is the lower tail of each declared leg's last two bones (B1's structure report). A
+    swing passes 3 % of the height and plants under 1 %, measured from that foot's own resting height (its 10th
+    percentile). On #149's g2 the fit sinks one foot 8 mm under the floor and the hind feet's lowest bone tails rest
+    about 1 cm up, so a shared floor saw no hind plants at all.
+  - **Period.** The median interval between successive plants of one leg, over every leg. A leg that plants fewer
+    than twice has none: the clip is refused as `motion_no_cycle` (retryable: generate another) and kept with its fit.
+  - **Stride.** The root's mean horizontal speed over the delivered window, times the period. This is the travel
+    video2rig's `steps` reads into a walk on the spot.
+  - **In place (D9).** The root's horizontal travel is removed: a least-squares cubic through its track, re-keyed
+    in the root bone's own axes. g2's travel sped up from 20 to 29 mm a frame, so a straight line left the root
+    surging 21 cm; the cubic leaves 5.5 cm and keeps the step's 6.6 cm sideways sway.
+  - **Loop.** The most whole periods that fit, starting where the seam's pose matches best (mean bone angle,
+    recorded as `seam_deg`, with the root's gap as `seam_root_m`).
+  - **Stance slide.** The median speed of planted feet once the controller moves the clip at its speed. A foot that
+    stays where it was set down reads 0.
+
+  The armature is exported as `<clip>.fbx`, cut to the window, with the rig FBX's settings. It is registered as the
+  candidate `animation.<clip>` with `loop: true`, `root_motion: false`, `stride_m`, `period_s` and `speed_mps`, so
+  the Unity Generic controller moves the creature at stride / period (B7). Its rights are the clip's model files,
+  video2rig and Blender, plus the rig's lineage.
+- **Review sheet (`review.png`).** One row per phase across one cycle (8 phases). Each row shows the clip's two
+  panels at that frame beside the baked Action rendered through the same start cameras.
+- **Approval.** `animation approve` refuses:
+  - without `--confirm`;
+  - before the creature's rig is approved;
+  - when the FBX, bake report or sheet changed since the bake;
+  - when the rights are not shippable.
+- **Refused before any work:** an uncalibrated creature; a clip intake did not accept, or one changed since; a missing
+  reader or rig .blend; creature.json changed since calibration; a clip extracted before (move its folder first).
+- **Not covered yet:**
+  - D8's limits on the fit report;
+  - the foot-slide limit;
+  - Unity playback, which is B7;
+  - a cubic leaves some surge in a walk whose speed changes faster than it follows; the bake records the residual
+    (`residual_travel_m`).
+
 ## video2rig
 
 [video2rig](https://github.com/canitcode/video2rig) reads a creature's motion from a generated two-view video (front
