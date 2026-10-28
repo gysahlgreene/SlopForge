@@ -61,6 +61,15 @@ No broad category/workflow/profile is claimed Qualified here.
 | Providers and output rights (M5 package B0) | Implemented; offline tests only | `asset_pipeline.providers` names every provider (the old `tools.*` keys read in); every stage records the rights of what it ran, and delivery (`approve-texture`, the image pipeline's `approve`, `character approve-deformation`, `animation unity-setup`) refuses an `unknown` or `restricted` lineage and ships owed notices in `SlopForge-NOTICES.txt` ([ComfyUI, Providers and output rights](docs/COMFYUI.md#providers-and-output-rights)). Terms read on 2026-10-27: the default concept and TRELLIS.2 routes are deliverable ("Built with DINOv3."); **OmniPart is `restricted`** (its part synthesis runs NVIDIA FlexiCubes and nvdiffrast, non-commercial only), so the OmniPart and hybrid part routes cannot deliver; the evidence assets made through them (pistol, rifle and chest P2, R2, C2; hybrid pistol HP13) are kept as M3 evidence and recorded restricted, to be regenerated on a cleared route ([#134](https://github.com/gysahlgreene/SlopForge/issues/134)); the open-lid chest (OPEN7) never ran OmniPart; the tiling upscaler is xinntao's release `.pth` converted by `scripts/convert-realesrgan.py` (byte-identical to the H100's installed file and to Comfy-Org's `Real-ESRGAN_repackaged`, sha256 `37f9a931`), so tiling materials are cleared. Assets made before 2026-10-27 have no recorded rights and must be generated again to deliver. Not built yet: a uniform provider identity record (video2rig only), a `hosted_api` client, output rights in the qualification protocol record; the notices file does not reach a game build by itself (it belongs in the credits). No live run has exercised the gates |
 | Complete readiness/qualification claims | Props and modular kits: thresholds declared; other categories blocked | The owner declared prop thresholds on 2026-10-21 (parts, UV area, emitter, metallic, colour, runtime budget); the pipeline enforces parts and colour. Modular kits have the owner-accepted M2 criteria (#94, [M2-v3 record](docs/media/kits-provisional-2026-10-v3/QUALIFICATION-RECORD.md)). Other categories still lack declared requirements; `ready` and `qualified` runtime labels do not imply readiness |
 
+**Video sources for creature motion (owner, 2026-10-28).** This project buys no
+video clips, now or later: it runs open weights on its own H100, and the budget is
+GPU time. Hosted video APIs stay in the provider model only for other users of
+SlopForge; the motion plan's D2 step "then one `hosted_api` adapter" and D11's
+reading of hosted video terms are struck for this project. A clip that fails
+video2rig's `check` is regenerated within a bounded batch, with `check` as the
+filter, never repaired
+([#149](https://github.com/gysahlgreene/SlopForge/issues/149)).
+
 The recovery report historically described qualification of a failure class. Under
 the quality contract this is bounded regression/recovery evidence, not a complete
 category qualification record. Older Unity measurements establish only the stated
