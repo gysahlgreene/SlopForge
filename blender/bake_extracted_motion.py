@@ -189,8 +189,7 @@ def main():
     try:
         report = run(request)
     except GaitError as exc:
-        report = {"status": "error", "errors": [str(exc)], "failure_code": exc.code,
-                  "measured": getattr(exc, "measured", {})}
+        report = {"status": "error", "errors": [str(exc)], "failure_code": exc.code, "measured": exc.measured}
     except Exception as exc:  # noqa: BLE001 - the report carries every failure to the pipeline
         report = {"status": "error", "errors": [f"{type(exc).__name__}: {exc}"], "traceback": traceback.format_exc()}
     Path(request["report"]).write_text(json.dumps(report, indent=1))

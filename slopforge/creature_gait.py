@@ -9,14 +9,15 @@ bake"). Pure NumPy, so blender/bake_extracted_motion.py samples the rig and call
 import numpy as np
 
 SWING, PLANT = 0.03, 0.01   # a foot's lift as a share of the body height: a swing passes SWING, a plant is under PLANT
+MIN_PLANTS = 2              # a leg's period is the interval between two of its plants
 
 
 class GaitError(ValueError):
-    """A motion that has no measurable cycle; `code` is its failure code (failures._KIND_CODES["motion"])."""
+    """A motion that has no measurable cycle; `code` and `measured` are B0's (failures._KIND_CODES["motion"])."""
 
-    def __init__(self, message, code="motion_no_cycle"):
+    def __init__(self, message, measured, code="motion_no_cycle"):
         super().__init__(message)
-        self.code = code
+        self.code, self.measured = code, measured
 
 
 def swings(lift, *, swing=SWING, plant=PLANT):
@@ -68,10 +69,11 @@ def gait(feet, times, height, *, root=None):
         heights = np.asarray(heights, float)
         found[leg] = swings((heights - np.percentile(heights, REST)) / height)
     plants = {leg: [end for _, end, _ in steps] for leg, steps in found.items()}
-    short = sorted(leg for leg, frames in plants.items() if len(frames) < 2)
+    short = sorted(leg for leg, frames in plants.items() if len(frames) < MIN_PLANTS)
     if short:
         raise GaitError(f"no walk cycle: {', '.join(short)} planted fewer than twice "
-                        f"({', '.join(f'{leg} {len(plants[leg])}' for leg in short)})")
+                        f"({', '.join(f'{leg} {len(plants[leg])}' for leg in short)})",
+                        {"motion_min_plants": min(len(frames) for frames in plants.values())})
     intervals = np.concatenate([np.diff(times[frames]) for frames in plants.values()])
     result = {"plants": plants, "swings": found, "period_s": round(float(np.median(intervals)), 4),
               "cycles": min(len(frames) for frames in plants.values())}
@@ -96,7 +98,7 @@ def loop_window(rotations, times, period):
     cycles = int((times[-1] - times[0]) // period)
     if cycles < 1:
         raise GaitError(f"no walk cycle: the motion lasts {times[-1] - times[0]:.2f} s, under one period "
-                        f"({period:.2f} s)")
+                        f"({period:.2f} s)", {"motion_min_plants": 0})
     best = None
     for start, t in enumerate(times):
         if t + cycles * period > times[-1] + 1e-9:

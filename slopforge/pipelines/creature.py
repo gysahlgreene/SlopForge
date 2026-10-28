@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw
 from ..backends import comfyui, video2rig
 from ..backends.blender import blender_environment
 from ..character_rigging import _project_file, run_skintokens_inference, skintokens_preflight
-from .. import creature_rig, creature_views, video_intake
+from .. import creature_gait, creature_rig, creature_views, video_intake
 from ..creature_rig import deformation_poses, rig_settings
 from ..creature_video import video_prompt, video_settings
 from ..creature_views import creature_config, framing, motion_settings, outside_panels
@@ -749,3 +749,236 @@ def video_creature(project_root, config, manifest, name, motion, *, count=1, see
     finish_execution(execution, "succeeded")
     save_manifest(manifest_path, manifest)
     return {"status": "accepted", "clips": accepted, "rejected": rejected}
+
+
+# B6: extraction, bake and review (docs/CREATURES.md, "Extraction and bake")
+
+BAKE = "blender/bake_extracted_motion.py"
+REVIEW_SAMPLES = 8   # one cycle's phases in the review sheet
+
+
+def _bake(config, root, source, request):
+    """blender/bake_extracted_motion.py on the .blend import_motion saved; its report (complete, or an error with
+    its failure code), RuntimeError when Blender wrote none."""
+    with tempfile.TemporaryDirectory(prefix="slopforge-bake-") as temporary:
+        path = Path(temporary) / "request.json"
+        path.write_text(json.dumps(request, default=str))
+        subprocess.run([blender_executable(config, root), str(source), "--background", "--factory-startup",
+                        "--python", str(tool_root() / BAKE), "--", str(path)], check=False, env=blender_environment())
+    if not Path(request["report"]).is_file():
+        raise RuntimeError("Blender's motion bake wrote no report")
+    return json.loads(Path(request["report"]).read_text())
+
+
+def _accepted_clip(root, asset, clip):
+    """(the clip's entry in motion.clips, its video_generation output as intake accepted it); ValueError otherwise."""
+    entry = ((asset.get("motion") or {}).get("clips") or {}).get(clip)
+    if not isinstance(entry, dict) or entry.get("kind") != "video":
+        raise ValueError(f"creature {asset['name']} has no accepted clip {clip!r}: extract a clip that passed "
+                         f"`slopforge creature video` (see motion.videos for each candidate's verdict)")
+    path = root / entry["clip"]
+    digest = file_sha256(path) if path.is_file() else None
+    refs = [output for stage in _stages(asset) if stage.get("name") == "video_generation"
+            and stage.get("status") == "succeeded" for output in stage.get("outputs") or []
+            if output.get("path") == entry["clip"] and output.get("sha256") == digest]
+    if not refs:
+        raise ValueError(f"clip {clip} is missing or changed since intake accepted it: {entry['clip']}")
+    rights = next(stage["provenance"].get("output_rights") or [] for stage in _stages(asset)
+                  if stage.get("name") == "video_generation" and refs[-1] in (stage.get("outputs") or []))
+    return entry, refs[-1], rights
+
+
+def _legs(root, asset):
+    """{front.L: [the leg's last two bones]}: each declared leg's chain from B1's structure report, by final name;
+    the bake takes the lower of the two bones' tails as the foot."""
+    structure = json.loads((root / asset["rigging"]["structure"]).read_text())
+    names = structure["names"]
+    return {f"{limb['end']}.{limb['side']}": [names[bone] for bone in limb["chain"][-2:]]
+            for limb in structure["limbs"]}
+
+
+def _check_fit(motion, creature, frames, times):
+    """B8's boundary: the fit's bones are the creature's, one fit per clip frame at the clip's measured times (the
+    intake's timing.json; video2rig's own cadence read Wan's 16 fps as 24, #149), and every number finite."""
+    fit = np.load(motion)
+    problems = []
+    if set(map(str, fit["bones"])) != set(creature["fit_bones"]) or str(fit["root"]) != creature["root_bone"]:
+        problems.append(f"the fit's bones ({len(fit['bones'])}, root {fit['root']}) are not creature.json's "
+                        f"({len(creature['fit_bones'])}, root {creature['root_bone']})")
+    if len(fit["times"]) != frames or not np.allclose(fit["times"], times, atol=1e-6):
+        problems.append(f"the fit's frame times are not the clip's measured ones ({len(fit['times'])} frames, "
+                        f"{len(times)} expected): video2rig did not read work/<clip>/timing.json")
+    if not all(np.isfinite(fit[key]).all() for key in ("quaternions", "root_location", "times")):
+        problems.append("the fit's rotations or root positions are not finite")
+    if problems:
+        raise StageFailure("processing_validation", "; ".join(problems), operation="creature extract",
+                           remedy="read video2rig.log and work/<clip>/report.json; the clip and the fit are kept")
+
+
+def _review_sheet(root, mp4, cameras, renders, path):
+    """Each sampled phase as a row: the clip's two panels at that frame, then the baked Action in the same views."""
+    frames, _ = _read_clip(mp4)
+    by_index = {}
+    for item in renders:
+        by_index.setdefault(item["index"], {})[item["view"]] = item
+    tiles = []
+    for index in sorted(by_index):
+        row = by_index[index]
+        frame = next(iter(row.values()))["clip_frame"]
+        for view in cameras["views"]:
+            panel = frames[frame][:, view["x0_px"] * frames.shape[2] // cameras["frame_px"][0]:
+                                  (view["x0_px"] + view["width_px"]) * frames.shape[2] // cameras["frame_px"][0]]
+            tiles.append((Image.fromarray(panel), f"clip frame {frame}, {view['name'][4:]}"))
+        for view in cameras["views"]:
+            with Image.open(row[view["name"]]["path"]) as image:
+                tiles.append((image.convert("RGB"), f"baked, {view['name'][4:]}"))
+    _sheet(tiles, path, columns=2 * len(cameras["views"]))
+
+
+def extract_creature(project_root, config, manifest, name, clip):
+    """One clip that passed intake through video2rig's run (the reader road) and import_motion, then baked in place
+    and cut to its loop (B6): the FBX is registered as a candidate animation with its stride, period and review
+    sheet; `animation approve` is the human gate. A fit that does not match the clip stops before the bake; a clip
+    with no walk cycle is refused (candidate_quality: generate another) and kept with its fit."""
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    record = asset.get("motion") or {}
+    if record.get("status") != "calibrated":
+        raise ValueError(f"creature {name} is not calibrated: run `slopforge creature calibrate {name}` first")
+    entry, clip_ref, clip_rights = _accepted_clip(root, asset, clip)
+    project = root / record["project"]
+    folder = project.parent / clip
+    if folder.exists() or (project / "out" / f"{clip}.npz").exists():
+        raise FileExistsError(f"Clip {clip} was extracted before; inspect or move {folder} and "
+                              f"{project / 'out' / f'{clip}.npz'} before extracting it again")
+    if not (project / "reader/reader.pt").is_file():
+        raise ValueError(f"creature {name}'s reader is missing ({project / 'reader/reader.pt'}): run reads the clip "
+                         "with it")
+    blend, blend_ref = _rig_blend(root, asset)
+    creature = json.loads((project / "creature.json").read_text())
+    if creature != record["creature"]:
+        raise ValueError(f"{project / 'creature.json'} changed since calibration; calibrate {name} again")
+    times = json.loads((project / "work" / clip / "timing.json").read_text())["times"]
+    legs = _legs(root, asset)
+    provider = _video2rig_identity(config, root)
+    rights = clip_rights + [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
+    reader = file_sha256(project / "reader/reader.pt")
+    tool = tool_sha256(tool_root() / BAKE)
+    execution = start_execution(asset, {"stage": "motion_extraction", "clip": clip, "clip_sha256": clip_ref["sha256"],
+                                        "reader_sha256": reader, "rig_blend_sha256": blend_ref["sha256"],
+                                        "creature": creature, "legs": legs, "bake_tool_sha256": tool,
+                                        "gait_sha256": file_sha256(creature_gait.__file__),
+                                        "video2rig": video2rig.runtime.VIDEO2RIG_REVISION})
+    manifest_path = root / config["asset_pipeline"]["manifest"]
+    log = project.parent / "video2rig.log"
+    stage = start_stage(execution, "motion_extraction", 1, [clip_ref], {"clip": clip},
+                        {"provider": provider, "output_rights": rights, "reader_sha256": reader})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    extraction = entry["extraction"] = {"status": "extracting"}
+    try:
+        fit = _v2r(config, root, "run", project, log, clip=clip)
+        _check_fit(fit["motion"], creature, entry["frames"], times)
+    except (Exception, KeyboardInterrupt) as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, extraction)
+        raise
+    work = project / "work" / clip
+    fit_refs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "motion_extraction", 1, [clip_ref])
+                for label, kind, path in (("fit", "data.motion_extraction", fit["motion"]),
+                                          ("report", "report.motion_extraction", work / "report.json"))
+                if path.is_file()]
+    finish_stage(stage, "succeeded", fit_refs)
+    extraction.update(fit=Path(fit["motion"]).relative_to(root).as_posix(), warnings=fit["report"].get("warnings", []),
+                      fit_report={key: value for key, value in fit["report"].items() if key != "warnings"})
+
+    folder.mkdir(parents=True)
+    request = {"legs": legs, "root_bone": creature["root_bone"], "fit_bones": creature["fit_bones"],
+               "fbx": str(folder / f"{clip}.fbx"), "blend": str(folder / f"{clip}_baked.blend"),
+               "renders": str(folder / "renders"), "cameras": str(project / "start/cameras.json"),
+               "samples": REVIEW_SAMPLES, "report": str(folder / "bake.json")}
+    stage = start_stage(execution, "motion_bake", 1, [fit_refs[0], blend_ref],
+                        {"legs": legs, "samples": REVIEW_SAMPLES, "tool_sha256": tool},
+                        {"output_rights": rights})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    try:
+        _v2r(config, root, "import_motion", project, log, blend=blend, clip=clip, save=folder / "source.blend")
+        if not (folder / "source.blend").is_file():
+            raise RuntimeError("video2rig's import_motion saved no .blend")
+        baked = _bake(config, root, folder / "source.blend", request)
+        if baked.get("status") == "error" and baked.get("failure_code"):
+            validation = {"status": "failed", "errors": baked["errors"], "failure_codes": [baked["failure_code"]],
+                          "artifact_kind": "motion", "measured": baked.get("measured") or {},
+                          "limits": {"min_motion_plants": creature_gait.MIN_PLANTS}}
+            raise StageFailure("candidate_quality", "; ".join(baked["errors"]), operation="creature extract",
+                               remedy="the clip and its fit are kept; generate another clip of the motion",
+                               evidence={"validation": validation})
+        if baked.get("status") != "complete":
+            raise RuntimeError("the motion bake failed: " + "; ".join(baked.get("errors") or ["no reason"]))
+        cameras = json.loads((project / "start/cameras.json").read_text())
+        _review_sheet(root, root / entry["clip"], cameras, baked["renders"], folder / "review.png")
+    except StageFailure as exc:
+        if exc.category == "candidate_quality":
+            failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=1,
+                                     operation="creature extract")
+            finish_stage(stage, "failed", error=str(exc), failure=failure)
+            finish_execution(execution, "failed", failure=failure)
+            extraction.update(status="rejected", codes=exc.evidence["validation"]["failure_codes"],
+                              reasons=exc.evidence["validation"]["errors"])
+            save_manifest(manifest_path, manifest)
+        else:
+            _fail(root, config, manifest, asset, execution, stage, exc, extraction)
+        raise
+    except (Exception, KeyboardInterrupt) as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, extraction)
+        raise
+    parents = [fit_refs[0], blend_ref]
+    outputs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "motion_bake", 1, parents)
+               for label, kind, path in (("fbx", "animation.fbx", folder / f"{clip}.fbx"),
+                                         ("bake", "report.motion_bake", folder / "bake.json"),
+                                         ("blend", "project.blend", folder / f"{clip}_baked.blend"),
+                                         ("review", "image.motion_review", folder / "review.png"))]
+    finish_stage(stage, "succeeded", outputs)
+    finish_execution(execution, "succeeded")
+    gait = {key: baked[key] for key in ("stride_m", "period_s", "speed_mps", "cycles", "residual_travel_m",
+                                        "stance_slide_mps")}
+    relative = {output["type"]: output["path"] for output in outputs}
+    register_artifact(manifest, asset["id"], f"animation.{clip}", "animation.fbx", relative["animation.fbx"],
+                      status="candidate", derived_from=[{"asset_id": asset["id"], "output_id": "rig"}],
+                      provenance={"provider": provider, "source_clip": entry["clip"], "loop": True,
+                                  "root_motion": False, **gait, "window": baked["window"], "fps": baked["fps"],
+                                  "output_rights": rights},
+                      approval_status="pending", validation={"measured": {**gait, "plants": baked["plants"]}})
+    extraction.update(status="review_required", fbx=relative["animation.fbx"], bake=relative["report.motion_bake"],
+                      review_sheet=relative["image.motion_review"], window=baked["window"], **gait,
+                      outputs={output["type"]: output["sha256"] for output in outputs})
+    save_manifest(manifest_path, manifest)
+    return {"status": "review_required", "fbx": relative["animation.fbx"],
+            "review_sheet": relative["image.motion_review"], **gait}
+
+
+def approve_motion(project_root, manifest, name, clip, *, confirmed=False):
+    """Record the human review of a baked creature clip (B6's gate): its rig approved first, its FBX, bake report and
+    review sheet unchanged since the bake, and the rights over its whole lineage shippable."""
+    if not confirmed:
+        raise ValueError("Explicit human confirmation is required: review the clip's review sheet, then pass --confirm")
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    entry = ((asset.get("motion") or {}).get("clips") or {}).get(clip) or {}
+    extraction = entry.get("extraction") or {}
+    if extraction.get("status") not in ("review_required", "approved") or f"animation.{clip}" not in asset["artifacts"]:
+        raise ValueError(f"creature {name} has no baked clip {clip!r}: run `slopforge creature extract {name} {clip}`")
+    if (asset.get("rigging") or {}).get("status") != "approved":
+        raise ValueError(f"creature {name}'s rig is not approved: review its contact sheet and run "
+                         f"`slopforge creature approve-rig {name} --confirm` first")
+    for kind, digest in extraction["outputs"].items():
+        path = root / {"animation.fbx": extraction["fbx"], "report.motion_bake": extraction["bake"],
+                       "image.motion_review": extraction["review_sheet"]}.get(kind, "")
+        if kind in ("animation.fbx", "report.motion_bake", "image.motion_review") and (
+                not path.is_file() or file_sha256(path) != digest):
+            raise ValueError(f"clip {clip}'s {kind} is missing or changed since the bake; extract it again")
+    rights = require_shippable(artifact_rights(manifest, asset["id"], f"animation.{clip}"), f"{name} {clip}",
+                               "animation approve")
+    set_artifact_approval(manifest, asset["id"], f"animation.{clip}", "approved")
+    extraction.update(status="approved", approved_at=datetime.now(timezone.utc).isoformat(), output_rights=rights)
+    return {"status": "approved", "output_rights": rights}

@@ -146,6 +146,11 @@ def parser():
     retarget_animation_clip.add_argument("name", help="Animation library name")
     retarget_animation_clip.add_argument("clip", help="Clip id in the animation library")
     retarget_animation_clip.add_argument("--character", required=True, help="Tracked character with an approved rig")
+    approve_animation = animation_commands.add_parser(
+        "approve", help="Approve a creature's baked clip after reviewing its review sheet (docs/CREATURES.md)")
+    approve_animation.add_argument("name", help="Tracked creature asset name")
+    approve_animation.add_argument("clip", help="A clip baked by `creature extract`, such as walk_s4")
+    approve_animation.add_argument("--confirm", action="store_true", help="Confirm human review of the review sheet")
     unity_animation_setup = animation_commands.add_parser("unity-setup", help="Create a Unity controller and character prefab")
     unity_animation_setup.add_argument("character", help="Tracked character name")
     unity_animation_setup.add_argument("--rig-type", choices=("generic", "humanoid"), default="generic")
@@ -220,6 +225,11 @@ def parser():
     video_cmd.add_argument("motion", help="A motion the creature type declares under video_motions, such as walk")
     video_cmd.add_argument("--count", type=int, default=1, help="Clips to keep, 1 to 8 (default 1)")
     video_cmd.add_argument("--seed", type=int, default=1, help="The first seed; each further try adds one (default 1)")
+    extract_cmd = creature_commands.add_parser(
+        "extract", help="Read an accepted clip's motion with video2rig, bake it in place and cut to its loop, and "
+                        "make its review sheet (docs/CREATURES.md)")
+    extract_cmd.add_argument("name", help="Tracked creature asset name")
+    extract_cmd.add_argument("clip", help="A clip `creature video` accepted, such as walk_s4")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -638,6 +648,13 @@ def _run(args):
             for clip in library["clips"]:
                 print(f"  {clip['name']}\t{clip['resolved_path'].relative_to(root).as_posix()}\tloop={clip['loop']}\troot_motion={clip['root_motion']}")
             return 0
+        if args.animation_action == "approve":
+            from .pipelines.creature import approve_motion
+            result = approve_motion(root, manifest, args.name, args.clip, confirmed=args.confirm)
+            save_manifest(manifest_path, manifest)
+            print(f"Creature {args.name} {args.clip}: {result['status']} (output rights "
+                  f"{result['output_rights']['status']})")
+            return 0
         if args.animation_action == "unity-setup":
             from .unity_animation import build_character_animator
             result = build_character_animator(root, config, manifest, args.character, rig_type=args.rig_type)
@@ -740,6 +757,15 @@ def _run(args):
                 print(f"  {item['clip']}: {item['status']}" + (f" ({'; '.join(item['reasons'])})"
                                                               if item.get("reasons") else ""))
         print(f"Creature {args.name}: {len(result['clips'])} {args.motion} clip(s) accepted: {', '.join(result['clips'])}")
+        return 0
+    if args.command == "creature" and args.creature_action == "extract":
+        from .pipelines.creature import extract_creature
+        result = extract_creature(root, config, manifest, args.name, args.clip)
+        print(f"Creature {args.name} {args.clip}: {result['status']}; stride {result['stride_m']:.2f} m every "
+              f"{result['period_s']:.2f} s ({result['speed_mps']:.2f} m/s), {result['cycles']} cycles")
+        print(f"FBX: {result['fbx']}")
+        print(f"Review sheet: {result['review_sheet']}")
+        print(f"Review the sheet, then: slopforge animation approve {args.name} {args.clip} --confirm")
         return 0
     if args.command == "creature" and args.creature_action in ("calibrate", "synth"):
         from .pipelines.creature import calibrate_creature, synthesize_motion
