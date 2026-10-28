@@ -18,20 +18,22 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from ..backends import video2rig
+from ..backends import comfyui, video2rig
 from ..backends.blender import blender_environment
 from ..character_rigging import _project_file, run_skintokens_inference, skintokens_preflight
-from .. import creature_rig, creature_views
+from .. import creature_rig, creature_views, creature_video, video_intake
 from ..creature_rig import deformation_poses, rig_settings
+from ..creature_video import video_prompt, video_settings
 from ..creature_views import creature_config, framing, motion_settings, outside_panels
-from ..failures import StageFailure, failure_record
+from ..failures import StageFailure, failure_record, should_retry
 from ..manifest import (begin_stage, find_asset, finish_execution, finish_stage, register_artifact, save_manifest,
                         set_artifact_approval, start_execution, start_stage)
-from ..paths import blender_executable, tool_root
+from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import file_sha256, tool_sha256
 from ..providers import artifact_rights, require_shippable, rights_of
 from ..skintokens_runtime import SKINTOKENS_SETTINGS
 from ..taxonomy import load_taxonomy, output_path
+from ..workflow_requirements import workflow_output_rights, workflow_requirements_identity
 from .model import _artifact_ref
 
 SCRIPT = "blender/creature_rig.py"
@@ -323,12 +325,8 @@ def _encode(frames, mp4):
                     "-c:v", "libx264", "-crf", "12", "-pix_fmt", "yuv420p", str(mp4)], check=True)
 
 
-def _rig_blend(root, asset):
-    """The rig .blend B1 finished, and the stage output that produced it as it is now; every execution record is
-    checked before one is selected."""
-    rigging = asset.get("rigging") or {}
-    if rigging.get("status") not in ("review_required", "approved") or "rig_blend" not in asset.get("artifacts", {}):
-        raise ValueError(f"creature {asset['name']} has no rig: run `slopforge creature rig {asset['name']}` first")
+def _stages(asset):
+    """Every stage of the asset's execution records; ValueError when a record is malformed."""
     executions = asset.get("executions")
     stages = [stage for item in executions for stage in item.get("stages", [])] if (
         isinstance(executions, list) and all(isinstance(item, dict) and isinstance(item.get("stages", []), list)
@@ -337,6 +335,16 @@ def _rig_blend(root, asset):
                                  and all(isinstance(output, dict) for output in stage.get("outputs") or [])
                                  for stage in stages):
         raise ValueError(f"creature {asset['name']}'s execution records are malformed")
+    return stages
+
+
+def _rig_blend(root, asset):
+    """The rig .blend B1 finished, and the stage output that produced it as it is now; every execution record is
+    checked before one is selected."""
+    rigging = asset.get("rigging") or {}
+    if rigging.get("status") not in ("review_required", "approved") or "rig_blend" not in asset.get("artifacts", {}):
+        raise ValueError(f"creature {asset['name']} has no rig: run `slopforge creature rig {asset['name']}` first")
+    stages = _stages(asset)
     path, blend = _project_file(root, asset["artifacts"]["rig_blend"].get("path"), "The rig .blend")
     blend = Path(blend)
     digest = file_sha256(blend) if blend.is_file() else None
@@ -530,3 +538,185 @@ def synthesize_motion(project_root, config, manifest, name, clip, *, kind, seed=
                              "clip": mp4.relative_to(root).as_posix(), "exam": exam.relative_to(root).as_posix()}
     save_manifest(manifest_path, manifest)
     return {"status": "rendered", "clip": record["clips"][clip]["clip"], "frames": count}
+
+
+# B5: video generation and intake (docs/CREATURES.md, "Video generation")
+
+VIDEO_TIMEOUT = 3600   # seconds for one clip; #149's 121-frame clips took 1,300-1,600 s on an 80 GB H100
+
+
+def _generate_video(config, root, workflow, prompt, negative, image, destination, seed, metadata, **options):
+    return comfyui.generate_video(root, config, workflow, prompt, negative, image, destination, seed, metadata,
+                                  **options)
+
+
+def _read_clip(path):
+    return video_intake.read_clip(path)
+
+
+def _start_frame(root, asset, project):
+    """The calibrated start frame as the calibration stage made it; ValueError when it changed since."""
+    path = (project / "start/start.png").relative_to(root).as_posix()
+    digest = file_sha256(project / "start/start.png") if (project / "start/start.png").is_file() else None
+    refs = [output for stage in _stages(asset) if stage.get("name") == "creature_calibration"
+            and stage.get("status") == "succeeded" for output in stage.get("outputs") or []
+            if output.get("path") == path and output.get("sha256") == digest]
+    if not refs:
+        raise ValueError(f"creature {asset['name']}'s start frame is missing or changed since calibration; calibrate "
+                         "it again")
+    return project / "start/start.png", refs[-1]
+
+
+def _intake(config, root, project, clip, mp4, start, cameras, limits, log):
+    """B0's validation of one clip: video_intake's checks first, then, only for a clip that passes them, video2rig's
+    check of the two views read with the trained reader (its body and limb disagreement against D7's limits), the
+    clip's measured frame times given to video2rig before it reads anything."""
+    frames, fps = _read_clip(mp4)
+    measured = video_intake.measure(frames, fps, start, cameras)
+    validation = video_intake.judge(measured, limits)
+    work = project / "work" / clip
+    work.mkdir(parents=True, exist_ok=True)
+    if validation["status"] == "passed":
+        video_intake.write_timing(work, measured["video_frames"], measured["video_content_fps"], container_fps=fps)
+        check = _v2r(config, root, "check", project, log, clip=clip)
+        measured.update(video_view_disagreement=check["body"], video_limb_disagreement=check["limbs"],
+                        video_check_verdict=check["verdict"], video_check_failures=int(check["verdict"] == "FAIL"))
+        cross = (("video_views_disagree", "video_view_disagreement", "max_video_view_disagreement",
+                  "the views disagree on the body by {:.1%} of its height"),
+                 ("video_limbs_disagree", "video_limb_disagreement", "max_video_limb_disagreement",
+                  "the views disagree on the limbs by {:.1%} of its height"))
+        for code, metric, limit, words in cross:
+            if measured[metric] > limits[limit]:
+                validation["errors"].append(words.format(measured[metric]))
+                validation["failure_codes"].append(code)
+        if check["verdict"] == "FAIL" and not validation["failure_codes"]:
+            validation["errors"].append("video2rig's check failed the clip: " + "; ".join(check.get("messages") or []))
+            validation["failure_codes"].append("video_check_failed")
+        validation["limits"].update({key: limits[key] for key in ("max_video_view_disagreement",
+                                                                    "max_video_limb_disagreement")},
+                                    max_video_check_failures=0)
+        validation["status"] = "failed" if validation["errors"] else "passed"
+        validation["check"] = check
+    (work / "intake.json").write_text(json.dumps(validation, indent=1))
+    return validation
+
+
+def video_creature(project_root, config, manifest, name, motion, *, count=1, seed=1):
+    """`count` clips of `motion` from the calibrated creature's start frame (B5): seeded candidates on the type's
+    image-to-video graph, each through the intake before anything reads it; a refused clip is kept with its reason and
+    the next seed is tried while failures.should_retry allows (count + the motion's retries tries in all)."""
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    record = asset.get("motion") or {}
+    if record.get("status") != "calibrated":
+        raise ValueError(f"creature {name} is not calibrated: run `slopforge creature calibrate {name}` first")
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 8:
+        raise ValueError(f"count must be 1 to 8, got {count!r}")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError(f"seed must be a whole number of 0 or more, got {seed!r}")
+    settings = video_settings(load_taxonomy(root)[asset["type"]], motion)
+    project = root / record["project"]
+    if not (project / "reader/reader.pt").is_file():
+        raise ValueError(f"creature {name}'s reader is not trained ({project / 'reader/reader.pt'}): intake reads "
+                         "each clip's two views with it; train it with video2rig's reader.train on the GPU provider")
+    start, start_ref = _start_frame(root, asset, project)
+    cameras = json.loads((project / "start/cameras.json").read_text())
+    framed = record.get("framing") or {}
+    prompt, negative = video_prompt(settings, description=asset.get("description") or name,
+                                    name=name.replace("_", " "), views=framed.get("views") or [],
+                                    side=framed.get("side", "left"))
+    workflow = resolve_workflow(root, settings["workflow"])
+    graph = json.loads(workflow.read_text())
+    length = [node_id for node_id, node in graph.items() if node.get("class_type") in ("WanImageToVideo",
+                                                                                        "WanFirstLastFrameToVideo")]
+    if len(length) != 1:
+        raise ValueError(f"{workflow.name} needs one Wan image-to-video node to set the clip's length")
+    workflow_inputs = {length[0]: {"length": settings["frames"]}}
+    models = sorted({value for node in graph.values() for value in node.get("inputs", {}).values()
+                     if isinstance(value, str) and value.endswith(".safetensors")})
+    provider = {"name": "comfyui", "workflow": workflow.name, "workflow_sha256": file_sha256(workflow),
+                "requirements": workflow_requirements_identity(workflow, graph)}
+    rights = workflow_output_rights(workflow, models)
+    start_array = np.asarray(Image.open(start).convert("RGB"))
+    budget = count + settings["retries"]
+    manifest_path = root / config["asset_pipeline"]["manifest"]
+    execution = start_execution(asset, {"stage": "video_generation", "motion": motion, "count": count, "seed": seed,
+                                        "prompt": prompt, "negative": negative, "frames": settings["frames"],
+                                        "workflow_sha256": provider["workflow_sha256"], "limits": settings["limits"],
+                                        "intake_sha256": file_sha256(video_intake.__file__),
+                                        "start_sha256": start_ref["sha256"],
+                                        "video2rig": video2rig.runtime.VIDEO2RIG_REVISION})
+    candidates = record.setdefault("videos", {}).setdefault(motion, [])
+    log = project.parent / "video2rig.log"
+    accepted, rejected, attempt = [], [], 0
+    while len(accepted) < count and attempt < budget:
+        attempt += 1
+        clip_seed = seed + attempt - 1
+        clip = f"{motion}_s{clip_seed}"
+        mp4, meta = project / "clips" / f"{clip}.mp4", project / "clips" / f"{clip}.generation.json"
+        if mp4.exists() or (project / "work" / clip).exists():
+            raise FileExistsError(f"Clip {clip} exists; inspect or move it before generating that seed again: {mp4}")
+        mp4.parent.mkdir(parents=True, exist_ok=True)
+        parameters = {"motion": motion, "seed": clip_seed, "prompt": prompt, "negative": negative,
+                      "frames": settings["frames"], "workflow_inputs": workflow_inputs}
+        stage = start_stage(execution, "video_generation", attempt, [start_ref], parameters,
+                            {"provider": provider, "output_rights": rights})
+        begin_stage(stage)
+        save_manifest(manifest_path, manifest)
+        candidate = {"clip": clip, "seed": clip_seed, "prompt": prompt, "frames": settings["frames"]}
+        try:
+            _generate_video(config, root, workflow, prompt, negative, start, mp4, clip_seed, meta,
+                            workflow_inputs=workflow_inputs, timeout=VIDEO_TIMEOUT)
+            generation = json.loads(meta.read_text()) if meta.is_file() else {}
+            candidate.update(path=mp4.relative_to(root).as_posix(), generation=generation)
+            validation = _intake(config, root, project, clip, mp4, start_array, cameras, settings["limits"], log)
+        except StageFailure as exc:
+            failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=attempt,
+                                     operation="video_generation")
+            if not failure["retryable"]:
+                _fail(root, config, manifest, asset, execution, stage, exc, {})
+                raise
+            validation = exc.evidence["validation"]
+        except Exception as exc:
+            _fail(root, config, manifest, asset, execution, stage, exc, {})
+            raise
+        candidate.update(status=validation["status"] == "passed" and "accepted" or "rejected",
+                         codes=list(validation["failure_codes"]), reasons=list(validation["errors"]),
+                         intake={key: value for key, value in validation.get("measured", {}).items()
+                                 if key != "panels"},
+                         panels=validation.get("measured", {}).get("panels"), check=validation.get("check"))
+        candidates.append(candidate)
+        if candidate["status"] == "accepted":
+            accepted.append(clip)
+            outputs = [_artifact_ref(root, mp4, f"{execution['id']}:{clip}", "video.generated_clip",
+                                     "video_generation", attempt, [start_ref]),
+                       _artifact_ref(root, project / "work" / clip / "intake.json", f"{execution['id']}:{clip}:intake",
+                                     "data.video_intake", "video_generation", attempt, [start_ref])]
+            finish_stage(stage, "succeeded", outputs)
+            record.setdefault("clips", {})[clip] = {
+                "kind": "video", "motion": motion, "seed": clip_seed, "clip": mp4.relative_to(root).as_posix(),
+                "frames": validation["measured"]["video_frames"], "fps": validation["measured"]["video_content_fps"]}
+            save_manifest(manifest_path, manifest)
+            continue
+        rejected.append(clip)
+        refusal = StageFailure("candidate_quality", "; ".join(validation["errors"]), operation="video_intake",
+                               remedy="the clip is kept; the next seed is tried", evidence={"validation": validation})
+        failure = failure_record(refusal, stage=stage["name"], stage_id=stage["id"], attempt=attempt,
+                                 operation="video_intake")
+        finish_stage(stage, "failed", error="; ".join(validation["errors"]), failure=failure)
+        save_manifest(manifest_path, manifest)
+        if not should_retry(failure, used=attempt, limit=budget):
+            break
+    if len(accepted) < count:
+        exhausted = StageFailure("candidate_quality", f"{len(accepted)} of {count} {motion} clips passed intake in "
+                                 f"{attempt} tries (seeds {seed}-{seed + attempt - 1})", operation="creature video",
+                                 remedy="read the rejected clips' reasons in the manifest and their intake.json; "
+                                        "try other seeds with --seed, or change the motion's prompt",
+                                 evidence={"rejected": rejected})
+        finish_execution(execution, "failed", failure=failure_record(exhausted, stage="video_generation",
+                                                                       attempt=attempt, operation="creature video"))
+        save_manifest(manifest_path, manifest)
+        raise exhausted
+    finish_execution(execution, "succeeded")
+    save_manifest(manifest_path, manifest)
+    return {"status": "accepted", "clips": accepted, "rejected": rejected}

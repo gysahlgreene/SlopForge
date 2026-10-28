@@ -213,6 +213,13 @@ def parser():
     synth_cmd.add_argument("--seed", type=int, default=0)
     synth_cmd.add_argument("--frames", type=int, default=96)
     synth_cmd.add_argument("--action", help="The authored action to loop (--kind action)")
+    video_cmd = creature_commands.add_parser(
+        "video", help="Generate a motion clip from the creature's start frame on the video provider; every clip "
+                      "passes intake before it is kept (docs/CREATURES.md)")
+    video_cmd.add_argument("name", help="Tracked creature asset name")
+    video_cmd.add_argument("motion", help="A motion the creature type declares under video_motions, such as walk")
+    video_cmd.add_argument("--count", type=int, default=1, help="Clips to keep, 1 to 8 (default 1)")
+    video_cmd.add_argument("--seed", type=int, default=1, help="The first seed; each further try adds one (default 1)")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -719,6 +726,21 @@ def _run(args):
         print("Review the rig and six pose images before approving it.")
         return 0
 
+    if args.command == "creature" and args.creature_action == "video":
+        from .pipelines.creature import video_creature
+
+        def candidates():
+            motion = (manifest.get("assets", {}).get(f"creature:{args.name}") or {}).get("motion") or {}
+            return (motion.get("videos") or {}).get(args.motion, [])
+        before = len(candidates())
+        try:
+            result = video_creature(root, config, manifest, args.name, args.motion, count=args.count, seed=args.seed)
+        finally:   # this run's candidates, the refused ones too, whether or not enough passed
+            for item in candidates()[before:]:
+                print(f"  {item['clip']}: {item['status']}" + (f" ({'; '.join(item['reasons'])})"
+                                                              if item.get("reasons") else ""))
+        print(f"Creature {args.name}: {len(result['clips'])} {args.motion} clip(s) accepted: {', '.join(result['clips'])}")
+        return 0
     if args.command == "creature" and args.creature_action in ("calibrate", "synth"):
         from .pipelines.creature import calibrate_creature, synthesize_motion
         if args.creature_action == "calibrate":
