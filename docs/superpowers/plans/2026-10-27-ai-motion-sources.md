@@ -325,7 +325,7 @@ Each package: objective, dependencies, files, offline tests (fixtures, no GPU), 
 | **B8 M5 protocol** | Three creature briefs, two independent runs each (seeds and fresh executions recorded), per the quality contract | evidence page | — | all gates | `CURRENT_STATE.md`, `ROADMAP.md` (owner) | Provisional claim at most; "six runs do not qualify" |
 | **A1 Kimodo source (Track A, M4)** | The `kimodo_host` provider, BVH candidates, `SOMA_TO_CMU` alias, per-frame limb-direction metric, FBX export from `retarget_mocap.py`. Depends on D10, D11 (Llama 3 reading), #15 amendment | `processing/kimodo_runner.py`, `scripts/install-motion-tools.sh`, `blender/retarget_mocap.py`, `slopforge/animation.py`, `slopforge/cli.py` | Fixture BVH with Kimodo-style names retargets through the alias table; limb-direction metric on a known rotation; unseeded candidate recorded `not_recorded` | `SLOPFORGE_RUN_KIMODO=1` | `docs/CHARACTER-ANIMATIONS.md`, notices (Kimodo, Llama) | **D**/**V**/**U** as the humanoid gates already define |
 
-Order: B0 → V0 → B1 → B2 → B3 (spike stops here) → B4 → B5 → B6 → B7 → B8; A1 after M5 unless the owner directs otherwise. If the spike fails the exam or the tool cannot be driven headlessly on Linux (D14's fallback), B2, B3 and B6 revert to the own-reader design of the previous revision (`blender/two_view_render.py`, `processing/joint_detector.py`), which this plan keeps as the fallback package set.
+Order (revised 2026-10-28 after #149): B0 → V0 → B1 → B2 → B5 → B6 → B7 → B3 → B4 → B8 (originally B3 → B4 before B5); A1 after M5 unless the owner directs otherwise. If the spike fails the exam or the tool cannot be driven headlessly on Linux (D14's fallback), B2, B3 and B6 revert to the own-reader design of the previous revision (`blender/two_view_render.py`, `processing/joint_detector.py`), which this plan keeps as the fallback package set.
 
 ## 10. First spike
 
@@ -376,6 +376,16 @@ Compute: the configured ComfyUI and `ssh_gpu` providers (mesh generation; SkinTo
 
 **Ruled by the owner on 2026-10-28 ([#149](https://github.com/gysahlgreene/SlopForge/issues/149)):** no paid clips, now or later. This project runs open weights on its own GPU provider (the H100); hosted APIs stay in the provider model (section 3) only for other users of SlopForge. D2's "then one `hosted_api` adapter" is struck for this project: its video source is the `comfyui` provider. D11's hosted video terms (BytePlus/Seedance, Kling, MiniMax API) need no reading for this project; they stay `unknown` for anyone who configures them. The budget is GPU time: a clip that fails video2rig's `check` is regenerated within a bounded batch (seeds and setup variants, `check` as the filter, nothing repaired), never replaced by a bought one.
 
+**Ruled by the owner on 2026-10-28, after #149's batches:**
+- **D9: in place.** A delivered creature clip is in place, whatever travel video2rig's `steps` read into a walk on the spot. The bake records the stride length and the period, so the Unity Generic controller sets the speed (R3).
+- **Order.** B5 → B6 → B7 next, so the generated wolf reaches Unity. Then B3 and B4 as the repeatability work, then B8.
+
+**Reason ([#149](https://github.com/gysahlgreene/SlopForge/issues/149)).** One AI video of the wolf already reaches a believable walk on its own rig, on our own hardware:
+- Wan 2.2, the split-screen continuous-walk prompt, 121 frames;
+- full cycles in every 121-frame clip whose `check` ran.
+
+The open problems are intake and delivery (B5–B7), not the reader (B3) or a procedural fallback (B4). Until B3 lands, B6 runs on a reader trained as #149's was: B2's training set, with video2rig's `reader.train` run on the H100.
+
 ### Exam v1 (D5, D7)
 
 **Scope:** synthetic motion only (a known motion rendered through video2rig's own cameras and studio, no video model), the best case; set from the spike's four clips; revisable with evidence; not a qualification claim. Recorded with definitions in `docs/CREATURES.md` ("The motion exam, v1"); evidence: [the spike page](https://github.com/gysahlgreene/SlopForge/blob/main/docs/media/creature-motion-spike-2026-10/README.md).
@@ -406,7 +416,7 @@ Only the Fox walk fails; it fails the same way with the paws' range declared at 
 - **D6** Video retry budget per motion type (the bound for `candidate_quality` retries) and the per-creature spend cap.
 - **D7** Intake limits: cross-view disagreement as a fraction of height; true-fps tolerance. *Cross-view limits ruled: exam v1 above; true-fps tolerance open.*
 - **D8** Track A per-frame limb-direction limit (the developer saw 3° worst **[reported]**).
-- **D9** Root motion vs in-place delivery for creature clips, and the foot-sliding limit.
+- **D9** Root motion vs in-place delivery for creature clips, and the foot-sliding limit. *Ruled 2026-10-28: in place; the bake records the stride length and period for the controller; the foot-sliding limit is still open.*
 - **D10** Track A timing: wait for M4 as the roadmap orders, or allow A1 earlier as a licensed-source package? Recommended: wait; it also needs D11's Llama 3 reading and an amendment to #15's non-goal.
 - **D11** Output-rights clearances, in the three-question terms of section 7. (a) Confirm the principle replaces the MIT/Apache rule, with the proxy kept as the default `cleared` for MIT/Apache weights. (b) Q2, what the user runs: accept that gated (Llama 3) and non-MIT (Kimodo, DINOv3) components may run on the user's providers when their terms permit, as authoring-time tools never distributed with the game. (c) Q3, output rights to set after reading: Kimodo weights `cleared` (terms read, quoted above); Wan 2.2 `cleared`; Replicate `cleared` subject to the model; fal per badge; Llama 3 **[legal reading]** between `cleared` and `attribution_required` ("Built with Meta Llama 3"); DINOv3 `attribution_required` if used; BytePlus/Seedance, Kling and MiniMax API `unknown` until their terms are read on an account that can see them, which the owner or a lawyer must do. *Ruled 2026-10-28: this project uses no hosted video API, so their terms are not read for it; they stay `unknown` for other users.*
 - **D13** The `docs/ARCHITECTURE.md` provider wording in section 3, replacing "the single inference-service boundary for HTTP", and the `providers:` config map. Recommended: accept; B0 implements it additively.
