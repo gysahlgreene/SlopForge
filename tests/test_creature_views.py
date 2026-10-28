@@ -90,7 +90,7 @@ def test_the_creature_type_declares_its_views_framing_and_every_role_a_quadruped
     from slopforge.creature_views import motion_settings
     template = yaml.safe_load((Path(__file__).resolve().parents[1] / "templates/asset_types/creature.yaml").read_text())
     settings = motion_settings(template)
-    assert settings["views"] == ["three-quarter", "side"] and settings["training_poses"] == 3000
+    assert settings["views"] == ["front", "side"] and settings["training_poses"] == 3000
     rigging = {**RIGGING, "fit_bones": list(NAMES.values()) + ["FrontToesEnd.L", "HindToesEnd.R", "Spine3", "Neck2"]}
     creature_config("wolf", rigging, settings["joint_limits"])         # every generic role has a declared limit
     assert framing(settings, 1.0, 0.35)["widths"][0] > 900

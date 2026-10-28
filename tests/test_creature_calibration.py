@@ -36,7 +36,7 @@ def cameras(views, widths, ortho=1.8):
 @pytest.fixture
 def tool(monkeypatch):
     """video2rig's steps, Blender's synth_motion and ffmpeg as stubs that write what the real ones write."""
-    calls = {"steps": [], "ortho": 1.8, "label_offset": 0.0}
+    calls = {"steps": [], "ortho": None, "label_offset": 0.0}
     rig = creature(extra=0)
 
     def run(config, root, step, project, log, **options):
@@ -49,8 +49,14 @@ def tool(monkeypatch):
         elif step == "render_start":
             (project / "start").mkdir(parents=True)
             framing = options["framing"]
+            # render_start's frame height: the body's height x margin, or wider where a view's span x margin_wide
+            # across its panel needs it (the fixture: 0.95 high, 1.65 long, 0.3 wide); a test may fix it
+            across = {"front": 0.3, "side": 1.65, "three-quarter": 0.77 * 1.65 + 0.64 * 0.3, "top": 0.3}
+            ortho = calls["ortho"] or max([0.95 * framing["margin"]] + [
+                across[view] * framing["margin_wide"] * 1080 / width
+                for view, width in zip(framing["views"], framing["widths"])])
             (project / "start/cameras.json").write_text(json.dumps(cameras(framing["views"], framing["widths"],
-                                                                            calls["ortho"])))
+                                                                            ortho)))
             Image.new("RGB", (1920, 1080)).save(project / "start/start.png")
         elif step == "prepare":
             (project / "reader").mkdir()
@@ -103,9 +109,8 @@ def test_calibration_writes_creature_json_frames_the_views_and_renders_the_train
     steps = [step for step, _ in tool["steps"]]
     assert steps == ["export_rig", "render_start", "prepare"]
     framing = dict(tool["steps"])["render_start"]["framing"]
-    assert framing["views"] == ["three-quarter", "side"] and sum(framing["widths"]) == 1920
-    # the fixture is 1.65 long and 0.3 wide: three-quarter spans .77 x 1.65 + .64 x 0.3, side 1.65
-    assert framing["widths"][0] / framing["widths"][1] == pytest.approx((0.77 * 1.65 + 0.64 * 0.3) / 1.65, rel=0.01)
+    # the type's start frame is #149's view pair in equal panels (B5); the span split is creature_views' own test
+    assert framing["views"] == ["front", "side"] and framing["widths"] == [960, 960]
     assert dict(tool["steps"])["prepare"]["poses"] == 3000
     assert result["status"] == asset["motion"]["status"] == "calibrated"
     execution = asset["executions"][-1]
