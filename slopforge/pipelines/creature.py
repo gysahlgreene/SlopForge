@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw
 from ..backends import comfyui, video2rig
 from ..backends.blender import blender_environment
 from ..character_rigging import _project_file, run_skintokens_inference, skintokens_preflight
-from .. import creature_rig, creature_views, creature_video, video_intake
+from .. import creature_rig, creature_views, video_intake
 from ..creature_rig import deformation_poses, rig_settings
 from ..creature_video import video_prompt, video_settings
 from ..creature_views import creature_config, framing, motion_settings, outside_panels
