@@ -277,23 +277,36 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
     in the root bone's own axes. g2's travel sped up from 20 to 29 mm a frame, so a straight line left the root
     surging 21 cm; the cubic leaves 5.5 cm and keeps the step's 6.6 cm sideways sway.
   - **Loop.** The most whole periods that fit, starting where the seam's pose matches best (mean bone angle,
-    recorded as `seam_deg`, with the root's gap as `seam_root_m`).
+    recorded as `seam_deg`, with the root's gap as `seam_root_m`). Both ends are keys on whole scene frames:
+    import_motion keys a 16 fps clip on every 1.5 frames at 24 fps, and the FBX bakes whole frames, so a window between
+    half frames exported one frame short with a worse seam than the one measured.
   - **Stance slide.** The median speed of planted feet once the controller moves the clip at its speed. A foot that
     stays where it was set down reads 0.
 
-  The armature is exported as `<clip>.fbx`, cut to the window, with the rig FBX's settings. It is registered as the
-  candidate `animation.<clip>` with `loop: true`, `root_motion: false`, `stride_m`, `period_s` and `speed_mps`, so
-  the Unity Generic controller moves the creature at stride / period (B7). Its rights are the clip's model files,
+  Before measuring, the bake refuses an Action whose keys are not the clip's frames at its measured times; at
+  video2rig's own cadence the period would be ⅔ of the truth and the Unity speed 1.5×. The armature is exported as
+  `<clip>.fbx`, cut to the window, with the rig FBX's settings. It is registered as the candidate `animation.<clip>`
+  with `loop: true`, `root_motion: false`, `stride_m`, `period_s`, `speed_mps`, `loop_periods` (the window's) and
+  `min_plants` (the fewest plants of any leg), so the Unity Generic controller moves the creature at stride / period
+  (B7). Its rights are the clip's model files,
   video2rig and Blender, plus the rig's lineage.
 - **Review sheet (`review.png`).** One row per phase across one cycle (8 phases). Each row shows the clip's two
-  panels at that frame beside the baked Action rendered through the same start cameras.
+  panels at that frame beside the baked Action rendered through the same start cameras. The last row is the loop's
+  seam: the window's last frame beside its first, as the game plays it.
 - **Approval.** `animation approve` refuses:
   - without `--confirm`;
-  - before the creature's rig is approved;
+  - before the creature's rig is approved, or when the approved rig is not the one the clip was baked on;
   - when the FBX, bake report or sheet changed since the bake;
   - when the rights are not shippable.
-- **Refused before any work:** an uncalibrated creature; a clip intake did not accept, or one changed since; a missing
-  reader or rig .blend; creature.json changed since calibration; a clip extracted before (move its folder first).
+- **Refused before any work:**
+  - an uncalibrated creature;
+  - a clip intake did not accept, or one changed since;
+  - a missing reader or rig .blend;
+  - creature.json or the start cameras changed since calibration;
+  - a rig .blend other than the one calibration used: the start frame and the reader belong to that rig;
+  - a clip extracted before (move its folder first).
+- **Lineage.** The bake's inputs are the fit, the rig .blend, the clip and the start cameras (the sheet's crops and
+  renders). Its provenance names the reader that made the fit.
 - **Not covered yet:**
   - D8's limits on the fit report;
   - the foot-slide limit;

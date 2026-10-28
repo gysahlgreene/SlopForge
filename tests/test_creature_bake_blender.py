@@ -65,8 +65,28 @@ def cameras(path):
     return path
 
 
-@pytest.mark.skipif(not Path(BLENDER).is_file(), reason="Blender is not installed")
-def test_an_imported_walk_is_measured_made_in_place_cut_to_its_loop_and_exported(tmp_path):
+def bake(folder, walk, times):
+    """blender/bake_extracted_motion.py on the keyed walk; its report and request."""
+    folder.mkdir()
+    request = {"legs": {leg: chain[-2:] for leg, chain in walk["chains"].items()}, "root_bone": "Hips",
+               "fit_bones": sorted(NAMES.values()), "fbx": str(folder / "walk_s2.fbx"),
+               "blend": str(folder / "walk_s2.blend"), "renders": str(folder / "renders"),
+               "cameras": str(cameras(folder / "cameras.json")), "samples": 4, "times": times,
+               "report": str(folder / "bake.json")}
+    (folder / "request.json").write_text(json.dumps(request))
+    done = subprocess.run([BLENDER, str(walk["blend"]), "--background", "--factory-startup", "--python",
+                           str(ROOT / "blender/bake_extracted_motion.py"), "--", str(folder / "request.json")],
+                          capture_output=True, text=True)
+    assert Path(request["report"]).is_file(), done.stdout[-2000:] + done.stderr[-2000:]
+    return json.loads(Path(request["report"]).read_text()), request
+
+
+@pytest.fixture(scope="module")
+def walk(tmp_path_factory):
+    """The B1 fixture quadruped, rigged through blender/creature_rig.py, with KEY_WALK's walk on it."""
+    if not Path(BLENDER).is_file():
+        pytest.skip("Blender is not installed")
+    tmp_path = tmp_path_factory.mktemp("walk")
     rig = creature(extra=0)
     fixture = {"vertices": rig["vertices"].tolist(), "triangles": rig["triangles"].tolist(), "bones": rig["bones"],
                "parents": rig["parents"], "heads": rig["heads"].tolist(),
@@ -81,7 +101,6 @@ def test_an_imported_walk_is_measured_made_in_place_cut_to_its_loop_and_exported
                        "blend": str(tmp_path / "rig.blend"), "poses": poses,
                        "pose_images": [str(tmp_path / f"pose_{k}.png") for k in range(len(poses))]})
     chains = {f"{limb['end']}.{limb['side']}": [NAMES[bone] for bone in limb["chain"]] for limb in checked["limbs"]}
-
     keyed = tmp_path / "key.json"
     keyed.write_text(json.dumps({"legs": chains, "save": str(tmp_path / "walk.blend")}))
     script = tmp_path / "key_walk.py"
@@ -89,19 +108,12 @@ def test_an_imported_walk_is_measured_made_in_place_cut_to_its_loop_and_exported
     done = subprocess.run([BLENDER, str(tmp_path / "rig.blend"), "--background", "--factory-startup", "--python",
                            str(script), "--", str(keyed)], capture_output=True, text=True)
     assert done.returncode == 0 and (tmp_path / "walk.blend").is_file(), done.stdout[-2000:] + done.stderr[-2000:]
+    return {"blend": tmp_path / "walk.blend", "chains": chains, "root": tmp_path}
 
-    request = {"legs": {leg: chain[-2:] for leg, chain in chains.items()}, "root_bone": "Hips",
-               "fit_bones": sorted(NAMES.values()), "fbx": str(tmp_path / "out/walk_s2.fbx"),
-               "blend": str(tmp_path / "out/walk_s2.blend"), "renders": str(tmp_path / "out/renders"),
-               "cameras": str(cameras(tmp_path / "cameras.json")), "samples": 4,
-               "report": str(tmp_path / "out/bake.json")}
-    (tmp_path / "out").mkdir()
-    (tmp_path / "bake.json").write_text(json.dumps(request))
-    baked = subprocess.run([BLENDER, str(tmp_path / "walk.blend"), "--background", "--factory-startup", "--python",
-                            str(ROOT / "blender/bake_extracted_motion.py"), "--", str(tmp_path / "bake.json")],
-                           capture_output=True, text=True)
-    report = json.loads(Path(request["report"]).read_text())
-    assert report["status"] == "complete", report.get("errors") or baked.stderr[-2000:]
+
+def test_an_imported_walk_is_measured_made_in_place_cut_to_its_loop_and_exported(walk):
+    report, request = bake(walk["root"] / "good", walk, [k / 16 for k in range(121)])
+    assert report["status"] == "complete", report.get("errors")
 
     assert report["period_s"] == pytest.approx(1.2, abs=0.07)
     assert report["window"]["cycles"] >= 4 and report["window"]["seam_deg"] < 5
@@ -109,16 +121,31 @@ def test_an_imported_walk_is_measured_made_in_place_cut_to_its_loop_and_exported
     assert report["stride_m"] == pytest.approx(report["speed_mps"] * report["period_s"], abs=0.002)
     assert report["residual_travel_m"] < 0.03                # 3.4 m of travel removed, the sway kept
     assert sorted(report["plants"]) == ["front.L", "front.R", "hind.L", "hind.R"]
-    assert len(report["renders"]) == 8 and all(Path(item["path"]).stat().st_size for item in report["renders"])
+    # the window's ends are keys on whole scene frames, so the FBX bakes exactly the measured loop (16 fps keys sit on
+    # every other 24 fps frame)
+    window = report["window"]
+    assert window["end_frame"] - window["start_frame"] == round((window["end_s"] - window["start_s"]) * 24)
+    phases = [item for item in report["renders"] if item["index"] != "seam"]
+    seam = [item for item in report["renders"] if item["index"] == "seam"]
+    assert len(phases) == 8 and len(seam) == 2 and all(Path(item["path"]).stat().st_size for item in report["renders"])
+    assert {item["clip_frame"] for item in seam} == {window["end"]}
     # the review steps through one cycle's phases, not the same phase several cycles apart
-    frames = sorted({item["clip_frame"] for item in report["renders"]})
+    frames = sorted({item["clip_frame"] for item in phases})
     assert len(frames) == 4 and (frames[-1] - frames[0]) / 16 < report["period_s"]
     assert Path(request["blend"]).is_file()
 
-    probe = tmp_path / "probe.py"
+    probe = walk["root"] / "probe.py"
     probe.write_text(PROBE)
     seen = subprocess.run([BLENDER, "--background", "--factory-startup", "--python", str(probe), "--",
                            request["fbx"]], capture_output=True, text=True).stdout
     bones, frames = next(line.split()[1:] for line in seen.splitlines() if line.startswith("PROBED_FBX"))
     assert int(bones) == len(NAMES)
-    assert int(frames) == report["window"]["end_frame"] - report["window"]["start_frame"]
+    assert int(frames) == window["end_frame"] - window["start_frame"]
+
+
+def test_keys_that_are_not_the_clips_frame_times_are_refused(walk):
+    """video2rig keyed at its own cadence (#149: Wan's 16 fps read as 24) would make the period 2/3 of the truth and the
+    Unity speed 1.5x."""
+    report, _ = bake(walk["root"] / "wrong", walk, [k / 24 for k in range(121)])
+    assert report["status"] == "error" and "clip's frame times" in report["errors"][0]
+    assert "failure_code" not in report                       # the tool's timing, not the clip, is wrong

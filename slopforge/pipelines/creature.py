@@ -298,8 +298,8 @@ def _v2r(config, root, step, project, log, **options):
     return video2rig.run(config, root, step, project, log, **options)
 
 
-def _video2rig_identity(config, root):
-    return video2rig.identity(video2rig.preflight(config, root)["local"])
+def _video2rig_identity(config, root, reader=None):
+    return video2rig.identity(video2rig.preflight(config, root)["local"], reader)
 
 
 def _synth(config, root, blend, request):
@@ -797,17 +797,21 @@ def _legs(root, asset):
             for limb in structure["limbs"]}
 
 
-def _check_fit(motion, creature, frames, times):
+def _check_fit(motion, creature, times):
     """B8's boundary: the fit's bones are the creature's, one fit per clip frame at the clip's measured times (the
-    intake's timing.json; video2rig's own cadence read Wan's 16 fps as 24, #149), and every number finite."""
+    intake's rate; video2rig's own cadence read Wan's 16 fps as 24, #149), and every number finite."""
     fit = np.load(motion)
     problems = []
     if set(map(str, fit["bones"])) != set(creature["fit_bones"]) or str(fit["root"]) != creature["root_bone"]:
         problems.append(f"the fit's bones ({len(fit['bones'])}, root {fit['root']}) are not creature.json's "
                         f"({len(creature['fit_bones'])}, root {creature['root_bone']})")
-    if len(fit["times"]) != frames or not np.allclose(fit["times"], times, atol=1e-6):
+    if len(fit["times"]) != len(times) or not np.allclose(fit["times"], times, atol=1e-6):
         problems.append(f"the fit's frame times are not the clip's measured ones ({len(fit['times'])} frames, "
                         f"{len(times)} expected): video2rig did not read work/<clip>/timing.json")
+    if (fit["quaternions"].shape[:2] != (len(fit["times"]), len(fit["bones"]))
+            or fit["root_location"].shape != (len(fit["times"]), 3)):
+        problems.append(f"the fit has not one rotation per frame and bone and one root position per frame "
+                        f"(rotations {fit['quaternions'].shape}, root {fit['root_location'].shape})")
     if not all(np.isfinite(fit[key]).all() for key in ("quaternions", "root_location", "times")):
         problems.append("the fit's rotations or root positions are not finite")
     if problems:
@@ -815,14 +819,29 @@ def _check_fit(motion, creature, frames, times):
                            remedy="read video2rig.log and work/<clip>/report.json; the clip and the fit are kept")
 
 
+def _calibration_output(root, asset, relative):
+    """(the file calibration made, its stage output and that stage's rig .blend input) as it is now; ValueError when
+    the file changed since."""
+    path = root / relative
+    digest = file_sha256(path) if path.is_file() else None
+    found = [(output, stage) for stage in _stages(asset) if stage.get("name") == "creature_calibration"
+             and stage.get("status") == "succeeded" for output in stage.get("outputs") or []
+             if output.get("path") == Path(relative).as_posix() and output.get("sha256") == digest]
+    if not found:
+        raise ValueError(f"{path} is missing or changed since calibration; calibrate {asset['name']} again")
+    output, stage = found[-1]
+    return path, output, (stage.get("inputs") or [{}])[0]
+
+
 def _review_sheet(root, mp4, cameras, renders, path):
-    """Each sampled phase as a row: the clip's two panels at that frame, then the baked Action in the same views."""
+    """Each sampled phase as a row: the clip's two panels at that frame, then the baked Action in the same views; the
+    last row is the loop's seam, the window's last frame beside its first, as the game plays it."""
     frames, _ = _read_clip(mp4)
     by_index = {}
     for item in renders:
         by_index.setdefault(item["index"], {})[item["view"]] = item
     tiles = []
-    for index in sorted(by_index):
+    for index in sorted(key for key in by_index if key != "seam"):
         row = by_index[index]
         frame = next(iter(row.values()))["clip_frame"]
         for view in cameras["views"]:
@@ -832,6 +851,11 @@ def _review_sheet(root, mp4, cameras, renders, path):
         for view in cameras["views"]:
             with Image.open(row[view["name"]]["path"]) as image:
                 tiles.append((image.convert("RGB"), f"baked, {view['name'][4:]}"))
+    first = by_index[min(key for key in by_index if key != "seam")]
+    for view in cameras["views"]:
+        for item, words in ((by_index["seam"][view["name"]], "loop's last frame"), (first[view["name"]], "its first")):
+            with Image.open(item["path"]) as image:
+                tiles.append((image.convert("RGB"), f"seam: {words}, {view['name'][4:]}"))
     _sheet(tiles, path, columns=2 * len(cameras["views"]))
 
 
@@ -858,14 +882,21 @@ def extract_creature(project_root, config, manifest, name, clip):
     creature = json.loads((project / "creature.json").read_text())
     if creature != record["creature"]:
         raise ValueError(f"{project / 'creature.json'} changed since calibration; calibrate {name} again")
-    times = json.loads((project / "work" / clip / "timing.json").read_text())["times"]
+    cameras_path, cameras_ref, calibrated_on = _calibration_output(
+        root, asset, (project / "start/cameras.json").relative_to(root))
+    if calibrated_on.get("sha256") != blend_ref["sha256"]:
+        raise ValueError(f"creature {name} was calibrated on another rig .blend than its rig now; calibrate it again "
+                         "(its start frame and reader belong to that rig)")
+    # the intake's rate, as its timing.json gave it to video2rig (video_intake.write_timing)
+    times = video_intake.timing(entry["frames"], entry["fps"], container_fps=entry["fps"])["times"]
     legs = _legs(root, asset)
-    provider = _video2rig_identity(config, root)
+    provider = _video2rig_identity(config, root, reader=project / "reader/reader.pt")
     rights = clip_rights + [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
     reader = file_sha256(project / "reader/reader.pt")
     tool = tool_sha256(tool_root() / BAKE)
     execution = start_execution(asset, {"stage": "motion_extraction", "clip": clip, "clip_sha256": clip_ref["sha256"],
                                         "reader_sha256": reader, "rig_blend_sha256": blend_ref["sha256"],
+                                        "cameras_sha256": cameras_ref["sha256"], "fps": entry["fps"],
                                         "creature": creature, "legs": legs, "bake_tool_sha256": tool,
                                         "gait_sha256": file_sha256(creature_gait.__file__),
                                         "video2rig": video2rig.runtime.VIDEO2RIG_REVISION})
@@ -878,7 +909,7 @@ def extract_creature(project_root, config, manifest, name, clip):
     extraction = entry["extraction"] = {"status": "extracting"}
     try:
         fit = _v2r(config, root, "run", project, log, clip=clip)
-        _check_fit(fit["motion"], creature, entry["frames"], times)
+        _check_fit(fit["motion"], creature, times)
     except (Exception, KeyboardInterrupt) as exc:
         _fail(root, config, manifest, asset, execution, stage, exc, extraction)
         raise
@@ -894,9 +925,10 @@ def extract_creature(project_root, config, manifest, name, clip):
     folder.mkdir(parents=True)
     request = {"legs": legs, "root_bone": creature["root_bone"], "fit_bones": creature["fit_bones"],
                "fbx": str(folder / f"{clip}.fbx"), "blend": str(folder / f"{clip}_baked.blend"),
-               "renders": str(folder / "renders"), "cameras": str(project / "start/cameras.json"),
+               "renders": str(folder / "renders"), "cameras": str(cameras_path), "times": times,
                "samples": REVIEW_SAMPLES, "report": str(folder / "bake.json")}
-    stage = start_stage(execution, "motion_bake", 1, [fit_refs[0], blend_ref],
+    parents = [fit_refs[0], blend_ref, clip_ref, cameras_ref]      # the clip and cameras make the review sheet
+    stage = start_stage(execution, "motion_bake", 1, parents,
                         {"legs": legs, "samples": REVIEW_SAMPLES, "tool_sha256": tool},
                         {"output_rights": rights})
     begin_stage(stage)
@@ -915,12 +947,12 @@ def extract_creature(project_root, config, manifest, name, clip):
                                evidence={"validation": validation})
         if baked.get("status") != "complete":
             raise RuntimeError("the motion bake failed: " + "; ".join(baked.get("errors") or ["no reason"]))
-        cameras = json.loads((project / "start/cameras.json").read_text())
+        cameras = json.loads(cameras_path.read_text())
         _review_sheet(root, root / entry["clip"], cameras, baked["renders"], folder / "review.png")
     except StageFailure as exc:
-        if exc.category == "candidate_quality":
-            failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=1,
-                                     operation="creature extract")
+        failure = failure_record(exc, stage=stage["name"], stage_id=stage["id"], attempt=1,
+                                 operation="creature extract")
+        if failure["retryable"]:   # a clip B0 accepts as a measured clip failure; anything else fails the run
             finish_stage(stage, "failed", error=str(exc), failure=failure)
             finish_execution(execution, "failed", failure=failure)
             extraction.update(status="rejected", codes=exc.evidence["validation"]["failure_codes"],
@@ -932,7 +964,6 @@ def extract_creature(project_root, config, manifest, name, clip):
     except (Exception, KeyboardInterrupt) as exc:
         _fail(root, config, manifest, asset, execution, stage, exc, extraction)
         raise
-    parents = [fit_refs[0], blend_ref]
     outputs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "motion_bake", 1, parents)
                for label, kind, path in (("fbx", "animation.fbx", folder / f"{clip}.fbx"),
                                          ("bake", "report.motion_bake", folder / "bake.json"),
@@ -940,8 +971,9 @@ def extract_creature(project_root, config, manifest, name, clip):
                                          ("review", "image.motion_review", folder / "review.png"))]
     finish_stage(stage, "succeeded", outputs)
     finish_execution(execution, "succeeded")
-    gait = {key: baked[key] for key in ("stride_m", "period_s", "speed_mps", "cycles", "residual_travel_m",
-                                        "stance_slide_mps")}
+    gait = {**{key: baked[key] for key in ("stride_m", "period_s", "speed_mps", "residual_travel_m",
+                                           "stance_slide_mps")},
+            "loop_periods": baked["window"]["cycles"], "min_plants": baked["cycles"]}
     weak = [f"{leg} planted once: its steps barely lift; watch it in the review sheet" for leg in baked["weak_legs"]]
     extraction["warnings"] = extraction["warnings"] + weak
     relative = {output["type"]: output["path"] for output in outputs}
@@ -953,6 +985,7 @@ def extract_creature(project_root, config, manifest, name, clip):
                       approval_status="pending", validation={"measured": {**gait, "plants": baked["plants"]}})
     extraction.update(status="review_required", fbx=relative["animation.fbx"], bake=relative["report.motion_bake"],
                       review_sheet=relative["image.motion_review"], window=baked["window"], **gait,
+                      rig_blend_sha256=blend_ref["sha256"],
                       outputs={output["type"]: output["sha256"] for output in outputs})
     save_manifest(manifest_path, manifest)
     return {"status": "review_required", "fbx": relative["animation.fbx"],
@@ -974,6 +1007,8 @@ def approve_motion(project_root, manifest, name, clip, *, confirmed=False):
     if (asset.get("rigging") or {}).get("status") != "approved":
         raise ValueError(f"creature {name}'s rig is not approved: review its contact sheet and run "
                          f"`slopforge creature approve-rig {name} --confirm` first")
+    if _rig_blend(root, asset)[1]["sha256"] != extraction.get("rig_blend_sha256"):
+        raise ValueError(f"clip {clip} was baked on another rig than {name}'s approved one; extract it again")
     for kind, digest in extraction["outputs"].items():
         path = root / {"animation.fbx": extraction["fbx"], "report.motion_bake": extraction["bake"],
                        "image.motion_review": extraction["review_sheet"]}.get(kind, "")

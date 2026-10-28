@@ -41,7 +41,7 @@ def extracted(video, monkeypatch):  # noqa: F811
             fit, n = calls["fit"], len(calls["fit"]["times"])
             out = Path(project_) / "out" / f"{options['clip']}.npz"
             out.parent.mkdir(exist_ok=True)
-            quaternions = np.tile([1.0, 0, 0, 0], (n, len(fit["bones"]), 1))
+            quaternions = np.tile([1.0, 0, 0, 0], (n - int(fit.get("short", 0)), len(fit["bones"]), 1))
             if fit.get("nan"):
                 quaternions[3, 0, 0] = np.nan
             np.savez(out, bones=np.array(fit["bones"]), root=np.array(creature["root_bone"]), quaternions=quaternions,
@@ -68,14 +68,18 @@ def extracted(video, monkeypatch):  # noqa: F811
                     path = Path(request["renders"]) / f"{view}_{index:02d}.png"
                     Image.new("RGB", (96, 108), (90, 80, 70)).save(path)
                     report["renders"].append({"view": view, "index": index, "clip_frame": 2 + index, "path": str(path)})
+                path = Path(request["renders"]) / f"{view}_seam.png"
+                Image.new("RGB", (96, 108), (70, 80, 90)).save(path)
+                report["renders"].append({"view": view, "index": "seam", "clip_frame": 22, "path": str(path)})
         Path(request["report"]).write_text(json.dumps(report))
         return report
 
     monkeypatch.setattr(pipeline, "_v2r", v2r)
     monkeypatch.setattr(pipeline, "_bake", bake)
     # the terms read for video2rig, as its real identity records them: animation approve's rights gate is real code
-    monkeypatch.setattr(pipeline, "_video2rig_identity",
-                        lambda config_, root_: {"name": "video2rig", "output_rights": video2rig.OUTPUT_RIGHTS})
+    monkeypatch.setattr(pipeline, "_video2rig_identity", lambda config_, root_, reader=None: {
+        "name": "video2rig", "output_rights": video2rig.OUTPUT_RIGHTS,
+        "weights_sha256": __import__("hashlib").sha256(Path(reader).read_bytes()).hexdigest() if reader else None})
     return root, config, manifest, calls, project
 
 
@@ -90,8 +94,11 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
     animation = asset["artifacts"]["animation.walk_s11"]
     assert animation["type"] == "animation.fbx" and animation["status"] == "candidate"
     assert animation["approval"]["status"] == "pending"
-    assert {"loop": True, "root_motion": False, "stride_m": 0.5, "period_s": 1.25, "speed_mps": 0.4}.items() \
-        <= animation["provenance"].items()
+    assert {"loop": True, "root_motion": False, "stride_m": 0.5, "period_s": 1.25, "speed_mps": 0.4,
+            "loop_periods": 1, "min_plants": 2}.items() <= animation["provenance"].items()
+    assert "cycles" not in animation["provenance"]                   # B7 reads loop_periods; min_plants is the gait's
+    reader = __import__("hashlib").sha256(b"trained reader").hexdigest()
+    assert animation["provenance"]["provider"]["weights_sha256"] == reader
     assert animation["derived_from"] == [{"asset_id": asset["id"], "output_id": "rig"}]
     sources = {item["source"] for item in animation["provenance"]["output_rights"]}
     assert {"video2rig", "blender"} <= sources and any(source.endswith(".safetensors") for source in sources)
@@ -101,18 +108,24 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
                                       "hind.L planted once: its steps barely lift; watch it in the review sheet"]
     sheet = root / extraction["review_sheet"]
     assert sheet.is_file() and Image.open(sheet).size[0] > 4 * 200     # clip front | clip side | baked front | side
+    assert Image.open(sheet).size[1] == (8 + 1) * 334                  # one cycle's 8 phases, then the loop's seam
+    assert request["times"] == pytest.approx([k / 16 for k in range(len(WALK))])
     stages = {stage["name"]: stage for stage in asset["executions"][-1]["stages"]}
     assert stages["motion_extraction"]["status"] == stages["motion_bake"]["status"] == "succeeded"
     assert {output["type"] for output in stages["motion_bake"]["outputs"]} >= {
         "animation.fbx", "report.motion_bake", "image.motion_review"}
     clip_input = stages["motion_extraction"]["inputs"][0]
     assert clip_input["type"] == "video.generated_clip" and clip_input["stage"] == "video_generation"
+    assert stages["motion_extraction"]["provenance"]["provider"]["weights_sha256"] == reader
+    assert {item["type"] for item in stages["motion_bake"]["inputs"]} == {
+        "data.motion_extraction", "project.blend", "video.generated_clip", "data.cameras"}
 
 
 @pytest.mark.parametrize("change, words", [
     (lambda fit: fit.update(times=[k / 24 for k in range(len(fit["times"]))]), "frame times"),
     (lambda fit: fit.update(bones=fit["bones"][:-1]), "bones"),
     (lambda fit: fit.update(nan=True), "not finite"),
+    (lambda fit: fit.update(short=1), "one rotation per frame"),
 ])
 def test_a_fit_that_does_not_match_the_clip_or_the_creature_stops_before_the_bake(extracted, change, words):
     root, config, manifest, calls, project = extracted
@@ -194,3 +207,60 @@ def test_the_cli_extracts_reports_the_gait_and_approves(extracted, capsys):
     assert "walk_s11: approved" in capsys.readouterr().out
     saved = load_manifest(root / "ai/assets/manifest.json")["assets"]["creature:wolf"]
     assert saved["artifacts"]["animation.walk_s11"]["approval"]["status"] == "approved"
+
+
+def test_a_malformed_gait_refusal_is_a_failed_extraction_not_a_rejected_clip(extracted):
+    root, config, manifest, calls, project = extracted
+    calls["bake"] = {"status": "error", "errors": ["no full walk cycle: hind.L never planted"],
+                     "failure_code": "motion_no_cycle"}                 # no measure: B0 cannot call it a clip failure
+    with pytest.raises(StageFailure):
+        pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    asset = manifest["assets"]["creature:wolf"]
+    assert asset["executions"][-1]["stages"][-1]["failure"]["retryable"] is False
+    assert asset["motion"]["clips"]["walk_s11"]["extraction"]["status"] == "failed"
+
+
+def test_the_start_cameras_must_be_the_calibrated_ones(extracted):
+    root, config, manifest, calls, project = extracted
+    cameras = json.loads((project / "start/cameras.json").read_text())
+    cameras["views"][0]["ortho_width"] *= 1.1
+    (project / "start/cameras.json").write_text(json.dumps(cameras))
+    with pytest.raises(ValueError, match="cameras.json.*changed since calibration"):
+        pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    assert calls["steps"] == []
+
+
+def test_a_clip_is_extracted_only_on_the_rig_it_was_calibrated_on(extracted):
+    root, config, manifest, calls, project = extracted
+    calibration = next(stage for item in manifest["assets"]["creature:wolf"]["executions"] for stage in item["stages"]
+                       if stage["name"] == "creature_calibration")
+    calibration["inputs"][0]["sha256"] = "0" * 64                     # calibrated on another rig .blend
+    with pytest.raises(ValueError, match="calibrated on another rig"):
+        pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+
+
+def test_a_clip_baked_on_one_rig_is_not_approved_on_another(extracted):
+    root, config, manifest, calls, project = extracted
+    pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    asset = manifest["assets"]["creature:wolf"]
+    blend = root / asset["artifacts"]["rig_blend"]["path"]
+    blend.write_bytes(blend.read_bytes() + b" re-rigged")             # a new rig, recorded as B1 records one
+    for item in asset["executions"]:
+        for stage in item["stages"]:
+            for output in stage.get("outputs") or []:
+                if stage["name"] == "rig_postprocess" and output["path"] == asset["artifacts"]["rig_blend"]["path"]:
+                    output["sha256"] = __import__("hashlib").sha256(blend.read_bytes()).hexdigest()
+    pipeline.approve_rig(root, manifest, "wolf", confirmed=True)
+    with pytest.raises(ValueError, match="baked on another rig"):
+        pipeline.approve_motion(root, manifest, "wolf", "walk_s11", confirmed=True)
+
+
+@pytest.mark.parametrize("name", ["bake.json", "review.png"])
+def test_animation_approve_refuses_a_changed_bake_report_or_sheet(extracted, name):
+    root, config, manifest, calls, project = extracted
+    pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    pipeline.approve_rig(root, manifest, "wolf", confirmed=True)
+    path = project.parent / "walk_s11" / name
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(ValueError, match="changed since the bake"):
+        pipeline.approve_motion(root, manifest, "wolf", "walk_s11", confirmed=True)

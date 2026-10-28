@@ -124,8 +124,21 @@ def test_the_loop_window_is_whole_periods_starting_where_the_seam_matches_best()
     assert window["seam_deg"] < 2.0
 
 
-def test_no_whole_period_fits_is_refused():
+def test_no_whole_period_fits_is_an_error_not_a_clip_measure():
+    """gait() refuses a clip with no period first; a window shorter than one period is a caller's error."""
     times = np.arange(10) / FPS
-    with pytest.raises(GaitError) as caught:
+    with pytest.raises(ValueError, match="under one period") as caught:
         loop_window(np.tile([1.0, 0, 0, 0], (10, 1, 1)), times, 1.2)
-    assert caught.value.code == "motion_no_period"
+    assert not isinstance(caught.value, GaitError)
+
+
+def test_the_loop_window_starts_and_ends_on_keys_the_export_can_hit():
+    """import_motion keys a 16 fps clip at a 24 fps scene's frames 0, 1.5, 3, ...: the FBX bakes whole frames, so a
+    window from key 5.5 to 176.5 exported as 6-176, one frame short, with a worse seam than the one measured."""
+    times = np.arange(121) / FPS
+    rotations = np.zeros((121, 2, 4))
+    angle = 0.5 * np.sin(2 * np.pi * times / 1.2)
+    rotations[:, :, 0], rotations[:, :, 3] = np.cos(angle / 2)[:, None], np.sin(angle / 2)[:, None]
+    whole = (np.arange(121) * 1.5) % 1 == 0                       # every other key is on a whole scene frame
+    window = loop_window(rotations, times, 1.2, allowed=whole)
+    assert whole[window["start"]] and whole[window["end"]]

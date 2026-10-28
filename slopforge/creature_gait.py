@@ -98,20 +98,28 @@ def _seam_deg(rotations, a, b):
     return float(np.degrees(2 * np.arccos(dot)).mean())
 
 
-def loop_window(rotations, times, period):
+def loop_window(rotations, times, period, *, allowed=None):
     """{start, end, cycles, seam_deg}: the most whole periods that fit in the motion, starting at the frame whose pose
-    the frame a whole number of periods later matches best (bones' rotations as quaternions, [frames, bones, 4])."""
+    the frame a whole number of periods later matches best (bones' rotations as quaternions, [frames, bones, 4]).
+    `allowed` marks the frames a window may start and end on (the keys on whole scene frames, which the FBX export
+    bakes exactly); every frame by default."""
     rotations, times = np.asarray(rotations, float), np.asarray(times, float)
+    allowed = np.ones(len(times), bool) if allowed is None else np.asarray(allowed, bool)
+    ends = np.flatnonzero(allowed)
     cycles = int((times[-1] - times[0]) // period)
     if cycles < 1:
-        raise GaitError(f"no walk cycle: the motion lasts {times[-1] - times[0]:.2f} s, under one period "
-                        f"({period:.2f} s)", {"motion_max_plants": 1}, code="motion_no_period")
+        raise ValueError(f"no loop window: the motion lasts {times[-1] - times[0]:.2f} s, under one period "
+                         f"({period:.2f} s)")
     best = None
     for start, t in enumerate(times):
         if t + cycles * period > times[-1] + 1e-9:
             break
-        end = int(np.argmin(np.abs(times - (t + cycles * period))))
+        if not allowed[start]:
+            continue
+        end = int(ends[np.argmin(np.abs(times[ends] - (t + cycles * period)))])
         seam = _seam_deg(rotations, start, end)
         if best is None or seam < best["seam_deg"]:
             best = {"start": start, "end": end, "cycles": cycles, "seam_deg": round(seam, 3)}
+    if best is None:
+        raise ValueError(f"no loop window: no key on a whole scene frame starts {cycles} periods")
     return best

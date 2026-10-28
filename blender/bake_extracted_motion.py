@@ -102,9 +102,9 @@ def render(scene, request, frames):
         scene.camera = camera(scene, view)
         scene.render.resolution_x = round(view["width_px"] * request.get("render_scale", 0.5))
         scene.render.resolution_y = round(view["height_px"] * request.get("render_scale", 0.5))
-        for index, (key, clip_frame) in enumerate(frames):
+        for index, key, clip_frame in frames:
             scene.frame_set(int(key), subframe=key - int(key))
-            scene.render.filepath = str(out / f"{view['name']}_{index:02d}.png")
+            scene.render.filepath = str(out / f"{view['name']}_{index if index == 'seam' else f'{index:02d}'}.png")
             bpy.ops.render.render(write_still=True)
             images.append({"view": view["name"], "index": index, "clip_frame": clip_frame,
                            "path": scene.render.filepath})
@@ -130,14 +130,20 @@ def run(request):
     if len(keys) < 2:
         raise ValueError(f"the Action keys the root {root} {len(keys)} times; import_motion keys every clip frame")
     fps = scene.render.fps / scene.render.fps_base
-    times = (np.array(keys) - keys[0]) / fps           # import_motion keyed the clip's real times at the scene's rate
+    times = (np.array(keys) - keys[0]) / fps           # import_motion keys the clip's real times at the scene's rate
+    clip = np.asarray(request["times"], float)
+    if len(keys) != len(clip) or np.abs(times - (clip - clip[0])).max() > 0.5 / fps:
+        raise ValueError(f"the Action's {len(keys)} keys are not the clip's frame times ({len(clip)} frames at "
+                         f"{1 / np.median(np.diff(clip)):.3g} fps): import_motion did not key the fit's times")
     corners = [obj.matrix_world @ Vector(corner) for obj in scene.objects if obj.type == "MESH"
                for corner in obj.bound_box]
     height = max(c.z for c in corners) - min(c.z for c in corners)
 
     feet, before, rotations = sample(scene, rig, keys, legs, root, bones)
     measured = gait(feet, times, height, root=before)
-    window = loop_window(rotations, times, measured["period_s"])
+    # the loop's ends on keys at whole scene frames: the FBX export bakes whole frames, so it delivers this window
+    whole = np.abs(np.array(keys) - np.round(keys)) < 1e-3
+    window = loop_window(rotations, times, measured["period_s"], allowed=whole)
     start, end = window["start"], window["end"]
     after, _ = in_place(before, times)
     span = slice(start, end + 1)
@@ -158,7 +164,7 @@ def run(request):
     direction = velocity / speed if speed else np.zeros(2)
     surge = baked[span, :2] @ direction
 
-    scene.frame_start, scene.frame_end = round(keys[start]), round(keys[end])
+    scene.frame_start, scene.frame_end = int(round(keys[start])), int(round(keys[end]))
     bpy.ops.object.select_all(action="DESELECT")
     rig.select_set(True)
     bpy.context.view_layer.objects.active = rig
@@ -170,7 +176,9 @@ def run(request):
                              bake_anim_step=1.0, bake_anim_simplify_factor=0.0)
     count = request.get("samples", 8)   # one cycle's phases, from the window's start
     picks = [int(np.argmin(np.abs(times - (times[start] + k * measured["period_s"] / count)))) for k in range(count)]
-    images = render(scene, request, [(keys[k], k) for k in picks]) if request.get("renders") else []
+    # and the loop's seam: the window's last frame, shown beside its first in the review sheet
+    shots = [(index, keys[k], k) for index, k in enumerate(picks)] + [("seam", keys[end], end)]
+    images = render(scene, request, shots) if request.get("renders") else []
     bpy.ops.wm.save_as_mainfile(filepath=request["blend"], copy=True)
     return {"status": "complete", "fps": fps, "keys": len(keys), "height_m": round(height, 4),
             "plants": measured["plants"], "cycles": measured["cycles"], "period_s": measured["period_s"],
