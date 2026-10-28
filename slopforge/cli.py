@@ -763,6 +763,8 @@ def _run(args):
         result = extract_creature(root, config, manifest, args.name, args.clip)
         print(f"Creature {args.name} {args.clip}: {result['status']}; stride {result['stride_m']:.2f} m every "
               f"{result['period_s']:.2f} s ({result['speed_mps']:.2f} m/s), {result['cycles']} cycles")
+        for warning in result["warnings"]:
+            print(f"  warning: {warning}")
         print(f"FBX: {result['fbx']}")
         print(f"Review sheet: {result['review_sheet']}")
         print(f"Review the sheet, then: slopforge animation approve {args.name} {args.clip} --confirm")

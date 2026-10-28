@@ -9,7 +9,9 @@ bake"). Pure NumPy, so blender/bake_extracted_motion.py samples the rig and call
 import numpy as np
 
 SWING, PLANT = 0.03, 0.01   # a foot's lift as a share of the body height: a swing passes SWING, a plant is under PLANT
-MIN_PLANTS = 2              # a leg's period is the interval between two of its plants
+MIN_PLANTS = 2              # a leg's period is the interval between two of its plants; a full cycle needs one each
+# B0's limits for each refusal (failures._KIND_CODES["motion"]): every leg plants once; some leg plants twice
+GAIT_LIMITS = {"motion_no_cycle": {"min_motion_plants": 1}, "motion_no_period": {"min_motion_max_plants": MIN_PLANTS}}
 
 
 class GaitError(ValueError):
@@ -58,25 +60,30 @@ REST = 10   # percentile of a foot's own height taken as its resting height: a w
 
 
 def gait(feet, times, height, *, root=None):
-    """{plants, swings, period_s, cycles[, speed_mps, velocity, stride_m]} from each leg's foot height per frame (m).
-    Each foot's lift is measured from its own resting height, not a shared floor: a fit sinks a foot under the floor in
-    some frames, and a foot's lowest bone tail rests above the skin's sole (#149's g2). The period is the median
-    interval between successive plants of one leg, over every leg; a leg planting fewer than twice gives none, and the
-    motion is refused."""
+    """{plants, swings, period_s, cycles, weak_legs[, speed_mps, velocity, stride_m]} from each leg's foot height per
+    frame (m). Each foot's lift is measured from its own resting height, not a shared floor: a fit sinks a foot under
+    the floor in some frames, and a foot's lowest bone tail rests above the skin's sole (#149's g2). A full cycle is
+    every leg planting at least once (#149's plants per leg; `cycles` is the fewest plants of any leg); the period is
+    the median interval between successive plants of one leg, over the legs that plant twice or more. Legs planting
+    once are `weak_legs`: in g3, g4 and e1, walks by eye, one hind leg lifts under 2.5 % of the height in most steps.
+    A leg that never plants, or no leg planting twice, refuses the motion."""
     times = np.asarray(times, float)
     found = {}
     for leg, heights in feet.items():
         heights = np.asarray(heights, float)
         found[leg] = swings((heights - np.percentile(heights, REST)) / height)
     plants = {leg: [end for _, end, _ in steps] for leg, steps in found.items()}
-    short = sorted(leg for leg, frames in plants.items() if len(frames) < MIN_PLANTS)
-    if short:
-        raise GaitError(f"no walk cycle: {', '.join(short)} planted fewer than twice "
-                        f"({', '.join(f'{leg} {len(plants[leg])}' for leg in short)})",
-                        {"motion_min_plants": min(len(frames) for frames in plants.values())})
-    intervals = np.concatenate([np.diff(times[frames]) for frames in plants.values()])
-    result = {"plants": plants, "swings": found, "period_s": round(float(np.median(intervals)), 4),
-              "cycles": min(len(frames) for frames in plants.values())}
+    fewest = min(len(frames) for frames in plants.values())
+    never = sorted(leg for leg, frames in plants.items() if not frames)
+    if never:
+        raise GaitError(f"no full walk cycle: {', '.join(never)} never planted", {"motion_min_plants": fewest})
+    timed = [frames for frames in plants.values() if len(frames) >= MIN_PLANTS]
+    if not timed:
+        raise GaitError("no walk period: no leg planted twice",
+                        {"motion_max_plants": max(len(frames) for frames in plants.values())}, code="motion_no_period")
+    intervals = np.concatenate([np.diff(times[frames]) for frames in timed])
+    result = {"plants": plants, "swings": found, "period_s": round(float(np.median(intervals)), 4), "cycles": fewest,
+              "weak_legs": sorted(leg for leg, frames in plants.items() if len(frames) < MIN_PLANTS)}
     if root is not None:
         _, velocity = in_place(root, times)
         speed = float(np.hypot(*velocity))
@@ -98,7 +105,7 @@ def loop_window(rotations, times, period):
     cycles = int((times[-1] - times[0]) // period)
     if cycles < 1:
         raise GaitError(f"no walk cycle: the motion lasts {times[-1] - times[0]:.2f} s, under one period "
-                        f"({period:.2f} s)", {"motion_min_plants": 0})
+                        f"({period:.2f} s)", {"motion_max_plants": 1}, code="motion_no_period")
     best = None
     for start, t in enumerate(times):
         if t + cycles * period > times[-1] + 1e-9:

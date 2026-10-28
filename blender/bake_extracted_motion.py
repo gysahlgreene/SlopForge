@@ -174,6 +174,7 @@ def run(request):
     bpy.ops.wm.save_as_mainfile(filepath=request["blend"], copy=True)
     return {"status": "complete", "fps": fps, "keys": len(keys), "height_m": round(height, 4),
             "plants": measured["plants"], "cycles": measured["cycles"], "period_s": measured["period_s"],
+            "weak_legs": measured["weak_legs"],
             "speed_mps": round(speed, 4), "velocity": [round(float(v), 4) for v in velocity],
             "stride_m": round(speed * measured["period_s"], 4),
             "window": {**window, "start_frame": scene.frame_start, "end_frame": scene.frame_end,

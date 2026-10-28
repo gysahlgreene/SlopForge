@@ -906,10 +906,10 @@ def extract_creature(project_root, config, manifest, name, clip):
         if not (folder / "source.blend").is_file():
             raise RuntimeError("video2rig's import_motion saved no .blend")
         baked = _bake(config, root, folder / "source.blend", request)
-        if baked.get("status") == "error" and baked.get("failure_code"):
+        if baked.get("status") == "error" and baked.get("failure_code") in creature_gait.GAIT_LIMITS:
             validation = {"status": "failed", "errors": baked["errors"], "failure_codes": [baked["failure_code"]],
                           "artifact_kind": "motion", "measured": baked.get("measured") or {},
-                          "limits": {"min_motion_plants": creature_gait.MIN_PLANTS}}
+                          "limits": creature_gait.GAIT_LIMITS[baked["failure_code"]]}
             raise StageFailure("candidate_quality", "; ".join(baked["errors"]), operation="creature extract",
                                remedy="the clip and its fit are kept; generate another clip of the motion",
                                evidence={"validation": validation})
@@ -942,6 +942,8 @@ def extract_creature(project_root, config, manifest, name, clip):
     finish_execution(execution, "succeeded")
     gait = {key: baked[key] for key in ("stride_m", "period_s", "speed_mps", "cycles", "residual_travel_m",
                                         "stance_slide_mps")}
+    weak = [f"{leg} planted once: its steps barely lift; watch it in the review sheet" for leg in baked["weak_legs"]]
+    extraction["warnings"] = extraction["warnings"] + weak
     relative = {output["type"]: output["path"] for output in outputs}
     register_artifact(manifest, asset["id"], f"animation.{clip}", "animation.fbx", relative["animation.fbx"],
                       status="candidate", derived_from=[{"asset_id": asset["id"], "output_id": "rig"}],
@@ -954,7 +956,7 @@ def extract_creature(project_root, config, manifest, name, clip):
                       outputs={output["type"]: output["sha256"] for output in outputs})
     save_manifest(manifest_path, manifest)
     return {"status": "review_required", "fbx": relative["animation.fbx"],
-            "review_sheet": relative["image.motion_review"], **gait}
+            "review_sheet": relative["image.motion_review"], "warnings": extraction["warnings"], **gait}
 
 
 def approve_motion(project_root, manifest, name, clip, *, confirmed=False):

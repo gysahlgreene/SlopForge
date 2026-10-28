@@ -263,8 +263,14 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
     swing passes 3 % of the height and plants under 1 %, measured from that foot's own resting height (its 10th
     percentile). On #149's g2 the fit sinks one foot 8 mm under the floor and the hind feet's lowest bone tails rest
     about 1 cm up, so a shared floor saw no hind plants at all.
-  - **Period.** The median interval between successive plants of one leg, over every leg. A leg that plants fewer
-    than twice has none: the clip is refused as `motion_no_cycle` (retryable: generate another) and kept with its fit.
+  - **Full cycle and period.** A full cycle is every leg planting at least once, #149's plants per leg; `cycles` is
+    the fewest plants of any leg. The period is the median interval between successive plants of one leg, over the
+    legs that plant twice or more. A leg that plants only once is a warning (`weak_legs`): in #149's g3, g4 and e1,
+    walks by eye, and the B5 framing test's seed 2, one hind leg lifts under 2.5 % of the height in most steps.
+    Requiring two plants of every leg would have passed only g2 of #149's 18 imported walks. Refused, retryable
+    (generate another clip), and kept with the fit:
+    - a leg that never plants: `motion_no_cycle`;
+    - no leg planting twice: `motion_no_period`.
   - **Stride.** The root's mean horizontal speed over the delivered window, times the period. This is the travel
     video2rig's `steps` reads into a walk on the spot.
   - **In place (D9).** The root's horizontal travel is removed: a least-squares cubic through its track, re-keyed

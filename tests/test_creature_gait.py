@@ -45,12 +45,46 @@ def test_each_foot_is_measured_from_its_own_resting_height():
     assert min(len(plants) for plants in result["plants"].values()) >= 5
 
 
-def test_a_leg_that_never_plants_twice_has_no_period():
-    times, feet, root, height = walk(seconds=2.0)
+def test_a_full_cycle_is_every_leg_planting_once_and_the_period_comes_from_the_legs_that_plant_twice():
+    """#149's plants-per-leg rule: in g3, g4 and e1 (walks by eye) and the B5 framing test's seed 2, one hind leg lifts
+    under 2.5 % of the height in most steps and plants once; the other legs give the period."""
+    times, feet, root, height = walk()
+    feet["hind.L"] = np.where((times > 0.85) & (times < 1.3), feet["hind.L"], 0.0)   # one swing (0.9-1.26 s), then shuffles
+    result = gait(feet, times, height)
+    assert len(result["plants"]["hind.L"]) == 1 and result["cycles"] == 1
+    assert result["period_s"] == pytest.approx(1.2, abs=1 / FPS)
+    assert result["weak_legs"] == ["hind.L"]
+
+
+def test_a_leg_that_never_plants_means_no_full_cycle():
+    times, feet, root, height = walk()
     feet["hind.L"] = np.zeros_like(times)
-    with pytest.raises(GaitError, match="hind.L") as caught:
+    with pytest.raises(GaitError, match="hind.L never planted") as caught:
         gait(feet, times, height)
-    assert caught.value.code == "motion_no_cycle"
+    assert caught.value.code == "motion_no_cycle" and caught.value.measured == {"motion_min_plants": 0}
+
+
+def test_no_leg_planting_twice_means_no_period():
+    times, feet, root, height = walk(seconds=1.0)            # every leg plants once (hind.L at 0.06 s, mid-swing at 0)
+    with pytest.raises(GaitError, match="no leg planted twice") as caught:
+        gait(feet, times, height)
+    assert caught.value.code == "motion_no_period" and caught.value.measured == {"motion_max_plants": 1}
+
+
+def test_every_gait_refusal_states_a_limit_its_measure_breaks():
+    """B0: a candidate_quality refusal is retryable only when its codes' measures pass their declared limits."""
+    from slopforge.failures import candidate_quality_rejection
+    from slopforge.creature_gait import GAIT_LIMITS
+    for seconds, feet_change in ((7.5, lambda feet, t: feet.update({"hind.L": np.zeros_like(t)})),
+                                 (1.0, lambda feet, t: None)):
+        times, feet, root, height = walk(seconds=seconds)
+        feet_change(feet, times)
+        with pytest.raises(GaitError) as caught:
+            gait(feet, times, height)
+        error = caught.value
+        assert candidate_quality_rejection({"status": "failed", "errors": [str(error)], "failure_codes": [error.code],
+                                            "artifact_kind": "motion", "measured": error.measured,
+                                            "limits": GAIT_LIMITS[error.code]})
 
 
 def test_in_place_removes_the_travel_and_keeps_the_sway():
@@ -94,4 +128,4 @@ def test_no_whole_period_fits_is_refused():
     times = np.arange(10) / FPS
     with pytest.raises(GaitError) as caught:
         loop_window(np.tile([1.0, 0, 0, 0], (10, 1, 1)), times, 1.2)
-    assert caught.value.code == "motion_no_cycle"
+    assert caught.value.code == "motion_no_period"

@@ -18,7 +18,7 @@ from tests.test_creature_video_pipeline import WALK, video  # noqa: F401
 
 BAKED = {"status": "complete", "fps": 24.0, "keys": len(WALK), "height_m": 0.78,
          "plants": {"front.L": [5, 25], "front.R": [15, 35], "hind.L": [10, 30], "hind.R": [20, 40]},
-         "cycles": 2, "period_s": 1.25, "speed_mps": 0.4, "velocity": [0.0, -0.4], "stride_m": 0.5,
+         "cycles": 2, "weak_legs": ["hind.L"], "period_s": 1.25, "speed_mps": 0.4, "velocity": [0.0, -0.4], "stride_m": 0.5,
          "window": {"start": 2, "end": 22, "cycles": 1, "seam_deg": 3.1, "start_frame": 4, "end_frame": 34,
                     "start_s": 0.125, "end_s": 1.375, "seam_root_m": 0.004},
          "residual_travel_m": 0.03, "stance_slide_mps": 0.05}
@@ -97,7 +97,8 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
     assert {"video2rig", "blender"} <= sources and any(source.endswith(".safetensors") for source in sources)
     extraction = asset["motion"]["clips"]["walk_s11"]["extraction"]
     assert extraction["status"] == "review_required" and extraction["stride_m"] == 0.5
-    assert extraction["warnings"] == ["v2r_side view: outline weak in frames 4-20"]
+    assert extraction["warnings"] == ["v2r_side view: outline weak in frames 4-20",
+                                      "hind.L planted once: its steps barely lift; watch it in the review sheet"]
     sheet = root / extraction["review_sheet"]
     assert sheet.is_file() and Image.open(sheet).size[0] > 4 * 200     # clip front | clip side | baked front | side
     stages = {stage["name"]: stage for stage in asset["executions"][-1]["stages"]}
@@ -125,8 +126,8 @@ def test_a_fit_that_does_not_match_the_clip_or_the_creature_stops_before_the_bak
 
 def test_a_clip_with_no_walk_cycle_is_refused_as_a_retryable_clip_failure_and_kept(extracted):
     root, config, manifest, calls, project = extracted
-    calls["bake"] = {"status": "error", "errors": ["no walk cycle: hind.L planted fewer than twice (hind.L 1)"],
-                     "failure_code": "motion_no_cycle", "measured": {"motion_min_plants": 1}}
+    calls["bake"] = {"status": "error", "errors": ["no full walk cycle: hind.L never planted"],
+                     "failure_code": "motion_no_cycle", "measured": {"motion_min_plants": 0}}
     with pytest.raises(StageFailure) as caught:
         pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
     assert caught.value.category == "candidate_quality" and "hind.L" in str(caught.value)
