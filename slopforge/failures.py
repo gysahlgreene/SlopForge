@@ -46,6 +46,7 @@ _KIND_CODES: Dict[str, Dict[str, tuple[str, str]]] = {
     # B5's intake (slopforge/video_intake.py), then video2rig's check of the two views (D7, exam v1's limits)
     "video": {"video_frame_rate": ("video_duplicate_share", "max_video_duplicate_share"),
               "video_frame0": ("video_frame0_difference", "max_video_frame0_difference"),
+              "video_creature_missing": ("video_presence", "min_video_presence"),
               "video_backdrop_drift": ("video_backdrop_drift", "max_video_backdrop_drift"),
               "video_still": ("video_motion_share", "min_video_motion_share"),
               "video_turned": ("video_turn", "max_video_turn"),

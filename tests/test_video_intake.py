@@ -14,8 +14,8 @@ from slopforge.failures import candidate_quality_rejection
 W, H = 320, 180                      # the clip; the start frame and cameras are at twice this, as Wan's 1280 of 1920
 CAMERAS = {"frame_px": [2 * W, 2 * H], "views": [{"name": "v2r_front", "x0_px": 0, "width_px": W},
                                                  {"name": "v2r_side", "x0_px": W, "width_px": W}]}
-LIMITS = {"max_video_duplicate_share": 0.05, "max_video_frame0_difference": 12, "max_video_backdrop_drift": 10,
-          "min_video_motion_share": 0.02, "max_video_turn": 0.25}
+LIMITS = {"max_video_duplicate_share": 0.05, "max_video_frame0_difference": 12, "max_video_backdrop_drift": 11,
+          "min_video_motion_share": 0.02, "max_video_turn": 0.25, "min_video_presence": 0.98}
 GREY, BROWN = 150, (120, 85, 50)
 
 
@@ -121,3 +121,37 @@ def test_a_clip_is_read_back_with_its_container_rate(tmp_path):
     read, fps = intake.read_clip(path)
     assert fps == 16.0 and read.shape == frames.shape
     assert np.abs(read.astype(int) - frames).mean() < 3
+
+
+def test_gradual_darkening_is_refused():
+    """The 85th percentile of a clip that darkens steadily stays near frame 0; the largest change from frame 0
+    does not (the review of B5)."""
+    frames, start = clip()
+    n = len(frames)
+    dark = np.stack([np.clip(frame.astype(int) - round(20 * t / (n - 1)), 0, 255).astype(np.uint8)
+                     for t, frame in enumerate(frames)])
+    report = intake.judge(intake.measure(dark, 16.0, start, CAMERAS), LIMITS)
+    assert report["failure_codes"] == ["video_backdrop_drift"], report["errors"]
+
+
+def test_a_creature_that_leaves_a_panel_is_refused():
+    frames, start = clip()
+    gone = frames.copy()
+    gone[5:, :, :W // 2 - 1] = GREY                                         # the front panel empties from frame 5
+    report = intake.judge(intake.measure(gone, 16.0, start, CAMERAS), LIMITS)
+    assert report["failure_codes"] == ["video_creature_missing"], report["errors"]
+    assert report["measured"]["panels"]["v2r_front"]["presence"] < 0.1 and candidate_quality_rejection(report)
+
+
+def test_an_empty_clip_is_refused_not_raised():
+    _, start = clip()
+    report = intake.judge(intake.measure(np.zeros((20, H, W, 3), np.uint8), 16.0, start, CAMERAS), LIMITS)
+    assert {"video_frame0", "video_creature_missing"} <= set(report["failure_codes"])
+    json.dumps(report, allow_nan=False)                                      # the failure record's own test
+
+
+def test_a_clip_without_a_frame_rate_is_refused(monkeypatch, tmp_path):
+    monkeypatch.setattr(intake.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout=json.dumps({"streams": [{"width": W, "height": H, "r_frame_rate": "0/0"}]})))
+    with pytest.raises(ValueError, match="frame rate"):
+        intake.read_clip(tmp_path / "walk.mp4")

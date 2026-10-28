@@ -54,7 +54,10 @@ def video(rigged, tool, monkeypatch):  # noqa: F811
             calls["checked"].append(options["clip"])
             calls.setdefault("timing", {})[options["clip"]] = json.loads(
                 (Path(project) / "work" / options["clip"] / "timing.json").read_text())
-            return calls["checks"].get(options["clip"], GOOD_CHECK)
+            answer = calls["checks"].get(options["clip"], GOOD_CHECK)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         result = stub(config_, root_, step, project, log, **options)
         if step == "render_start":   # the start frame Wan begins from: the fixture's frame 0 at 1920 x 1080
             Image.fromarray(WALK[0]).resize((1920, 1080), Image.NEAREST).save(Path(project) / "start/start.png")
@@ -105,8 +108,12 @@ def test_an_accepted_clip_records_provider_seed_prompt_and_every_intake_number(v
     assert execution["status"] == "succeeded" and execution["identity_inputs"]["prompt"] == made["prompt"]
     stage = execution["stages"][-1]
     assert stage["name"] == "video_generation" and stage["status"] == "succeeded"
-    assert {output["type"] for output in stage["outputs"]} == {"video.generated_clip", "data.video_intake"}
+    assert {output["type"] for output in stage["outputs"]} == {"video.generated_clip", "data.video_intake",
+                                                               "data.video_generation"}
     assert stage["provenance"]["output_rights"][0]["status"] == "cleared"
+    assert "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors" in stage["provenance"]["models"]
+    assert stage["intake"]["measured"]["video_motion_share"] > 0.02 and stage["intake"]["check"]["verdict"] == "OK"
+    assert execution["identity_inputs"]["reader_sha256"] == __import__("hashlib").sha256(b"trained reader").hexdigest()
     assert stage["provenance"]["provider"]["workflow"] == "video_wan22_i2v_api.json"
 
 
@@ -154,7 +161,10 @@ def test_a_provider_fault_stops_at_once(video, monkeypatch):
     with pytest.raises(StageFailure, match="not reachable"):
         pipeline.video_creature(root, config, manifest, "wolf", "walk", count=1)
     assert len(calls["generated"]) == 1
-    assert manifest["assets"]["creature:wolf"]["executions"][-1]["stages"][-1]["status"] == "failed"
+    asset = manifest["assets"]["creature:wolf"]
+    assert asset["executions"][-1]["stages"][-1]["status"] == "failed" and asset["executions"][-1]["status"] == "failed"
+    candidate = asset["motion"]["videos"]["walk"][-1]
+    assert candidate["status"] == "failed" and "not reachable" in candidate["reasons"][0]
 
 
 @pytest.mark.parametrize("change, message", [
@@ -215,3 +225,78 @@ def test_external_creature_video():
                                      seed=int(os.environ.get("SLOPFORGE_VIDEO_SEED", "1")))
     clip = manifest["assets"][f"creature:{name}"]["motion"]["clips"][result["clips"][0]]
     assert (Path(project) / clip["clip"]).stat().st_size and clip["kind"] == "video"
+
+
+
+@pytest.mark.parametrize("answer", [
+    {"verdict": "FAIL", "body": None, "limbs": None, "messages": ["no frame read surely in both panels"]},
+    StageFailure("environment", "video2rig check exited with code 1", operation="video2rig check",
+                 remedy="Read the log"),
+])
+def test_a_check_without_a_reading_or_that_crashes_refuses_that_clip(video, answer):
+    """video2rig's check gives no body or limb value when no frame reads surely in both panels, and can crash on a
+    clip; either refuses the clip and the next seed is tried, as any refusal."""
+    root, config, manifest, calls, project = video
+    calls["plan"] = ["walk", "walk"]
+    calls["checks"]["walk_s1"] = answer
+    assert pipeline.video_creature(root, config, manifest, "wolf", "walk")["clips"] == ["walk_s2"]
+    first = manifest["assets"]["creature:wolf"]["motion"]["videos"]["walk"][0]
+    assert first["status"] == "rejected" and first["codes"] == ["video_check_failed"]
+
+
+def _graph(root, change):
+    graph = json.loads((Path(__file__).resolve().parents[1] / "workflows/video_wan22_i2v_api.json").read_text())
+    change(graph)
+    (root / "ai/workflows").mkdir(parents=True, exist_ok=True)
+    (root / "ai/workflows/video_wan22_i2v_api.json").write_text(json.dumps(graph))
+
+
+@pytest.mark.parametrize("prepare, message", [
+    (lambda root, mp: mp.setattr(pipeline, "_video2rig_identity", lambda *a: (_ for _ in ()).throw(
+        ValueError("video2rig preflight: the checkout is missing"))), "video2rig"),
+    (lambda root, mp: mp.setattr(pipeline.shutil, "which", lambda name: None), "ffprobe"),
+    (lambda root, mp: _graph(root, lambda g: g["10"]["inputs"].update(width=832, height=480)), "832x480"),
+    (lambda root, mp: _graph(root, lambda g: g.update({"16": {"class_type": "LoadImage", "inputs": {"image": "x"}}})),
+     "LoadImage"),
+])
+def test_prerequisites_refuse_before_any_generation(video, monkeypatch, prepare, message):
+    root, config, manifest, calls, project = video
+    executions = len(manifest["assets"]["creature:wolf"]["executions"])
+    prepare(root, monkeypatch)
+    with pytest.raises(ValueError, match=message):
+        pipeline.video_creature(root, config, manifest, "wolf", "walk")
+    assert calls["generated"] == [] and len(manifest["assets"]["creature:wolf"]["executions"]) == executions
+
+
+def test_a_seed_already_used_refuses_before_any_generation(video):
+    root, config, manifest, calls, project = video
+    (project / "clips").mkdir(exist_ok=True)
+    (project / "clips/walk_s3.mp4").write_bytes(b"an earlier clip")
+    executions = len(manifest["assets"]["creature:wolf"]["executions"])
+    with pytest.raises(FileExistsError, match="walk_s3"):
+        pipeline.video_creature(root, config, manifest, "wolf", "walk", seed=1)     # seeds 1-5 within the budget
+    assert calls["generated"] == [] and len(manifest["assets"]["creature:wolf"]["executions"]) == executions
+
+
+def test_an_interrupt_finishes_the_stage_and_the_execution(video, monkeypatch):
+    root, config, manifest, calls, project = video
+
+    def stop(*_args, **_kwargs):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(pipeline, "_generate_video", stop)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.video_creature(root, config, manifest, "wolf", "walk")
+    execution = manifest["assets"]["creature:wolf"]["executions"][-1]
+    assert execution["status"] == "failed" and execution["stages"][-1]["failure"]["category"] == "interruption"
+
+
+def test_the_run_stops_once_the_clips_asked_for_are_out_of_reach(video):
+    root, config, manifest, calls, project = video
+    path = root / "ai/asset_types/creature.yaml"
+    declared = yaml.safe_load(path.read_text())
+    declared["video_motions"]["walk"]["retries"] = 0
+    path.write_text(yaml.safe_dump(declared, allow_unicode=True))
+    calls["plan"] = ["still", "walk"]
+    with pytest.raises(StageFailure, match="0 of 2"):
+        pipeline.video_creature(root, config, manifest, "wolf", "walk", count=2)
+    assert len(calls["generated"]) == 1

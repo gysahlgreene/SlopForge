@@ -42,7 +42,7 @@ def test_walk_defaults_are_121_frames_the_wan_graph_and_every_intake_limit():
     settings = video_settings(TYPE, "walk")
     assert settings["frames"] == 121 and settings["workflow"] == "workflows/video_wan22_i2v_api.json"
     assert settings["retries"] >= 1
-    assert set(settings["limits"]) == {"max_video_duplicate_share", "max_video_frame0_difference",
+    assert set(settings["limits"]) == {"max_video_duplicate_share", "max_video_frame0_difference", "min_video_presence",
                                        "max_video_backdrop_drift", "min_video_motion_share", "max_video_turn",
                                        "max_video_view_disagreement", "max_video_limb_disagreement"}
 

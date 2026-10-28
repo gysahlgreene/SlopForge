@@ -2,7 +2,8 @@
 B5; docs/CREATURES.md, "Video generation"). The wording, the graph, the frames, the retry budget and the intake limits
 are the type's data; this module only checks them and fills the template. Pure Python.
 """
-INTAKE_LIMITS = ("max_video_duplicate_share", "max_video_frame0_difference", "max_video_backdrop_drift",
+INTAKE_LIMITS = ("max_video_duplicate_share", "max_video_frame0_difference", "min_video_presence",
+                 "max_video_backdrop_drift",
                  "min_video_motion_share", "max_video_turn", "max_video_view_disagreement",
                  "max_video_limb_disagreement")
 

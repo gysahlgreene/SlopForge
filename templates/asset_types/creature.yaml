@@ -101,13 +101,15 @@ video_motions:
       rotating body, changing direction, standing still, pausing, stopping, stops walking, standing, idle, frozen,
       static pose
 # Intake (slopforge/video_intake.py), fail-closed before anything reads a clip. Set from #149's 40 Wan clips (good:
-# backdrop drift 1-9.7, motion 0.048+, outline shape change 0.05-0.14, frame 0 3-6.5 grey levels from the start image;
-# refused: drift 10.7-22.7, still panels 0.0016-0.009, turning 0.31-1.4), and D7's cross-view limits from exam v1
+# the backdrop's largest change from frame 0 1-6.7 and 10.7 on the one whose check still ran, motion 0.048+, outline
+# shape change 0.05-0.14, frame 0 3-6.5 grey levels from the start image, the creature in every frame of every panel;
+# refused: backdrop 11.7-23.7, still panels 0.0016-0.009, turning 0.31-1.4), and D7's cross-view limits from exam v1
 # (video2rig's check: body 1.5 %, limbs 2 % of the height).
 video_intake:
   max_video_duplicate_share: 0.05
   max_video_frame0_difference: 12
-  max_video_backdrop_drift: 10
+  min_video_presence: 0.98
+  max_video_backdrop_drift: 11
   min_video_motion_share: 0.02
   max_video_turn: 0.25
   max_video_view_disagreement: 0.015

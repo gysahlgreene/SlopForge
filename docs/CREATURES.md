@@ -188,8 +188,14 @@ slopforge --project ~/UnityProjects/MyGame creature video wolf walk            #
     record, reasons and every intake number.
   - **Refused clips.** A refused clip stays in `clips/` with its `work/<clip>/intake.json`. An accepted one is
     registered in `motion.clips`.
-  - **Faults.** A provider fault that is not a refusal stops at once. A missing reader, an uncalibrated creature or
-    a start frame changed since calibration refuse before any generation.
+  - **Faults.** A provider fault that is not a refusal, or an interruption, stops at once; the candidate is still
+    recorded, as `failed`.
+  - **Refused before any GPU time:** a missing reader, an uncalibrated creature, a start frame changed since
+    calibration, video2rig not ready, ffprobe or ffmpeg missing, a graph without exactly one `WanImageToVideo` and
+    one `LoadImage` node or not at the start frame's aspect, and any seed in the run's range already used.
+  - **Stopping early.** The run stops early once the clips asked for are out of reach.
+  - **Stage records.** The stage records the model files, the reader's SHA-256, the intake numbers and the check's
+    result.
 - **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Until B3
   wraps training, train it with video2rig's `reader.train` on the GPU provider, as #149 did.
 
@@ -205,18 +211,20 @@ verdict: it refuses every turning, still and drifting clip and passes every clip
 | --- | --- | --- | --- |
 | Frame rate (`video_frame_rate`) | Share of frames that repeat the one before (a step under a tenth of the clip's large steps) | ≤ 0.05 | 0 on every Wan clip. A 24 fps clip in a 60 fps container repeats 60 % (fixture) |
 | Frame 0 (`video_frame0`) | Mean difference of frame 0 from the start image, grey levels | ≤ 12 | 3.0–6.5 on all 40 |
-| Backdrop (`video_backdrop_drift`) | Backdrop brightness at frame 0 against the clip's 85th percentile, worst panel | ≤ 10 | 1–9.7 where video2rig read the clip. 10.7–22.7 where it crashed (`IndexError` in its alignment), spun or misjudged |
+| Presence (`video_creature_missing`) | Share of frames that show the creature (50 silhouette pixels or more), least panel; 0 if frame 0 does not | ≥ 0.98 | 1.0 on all 40 |
+| Backdrop (`video_backdrop_drift`) | The backdrop's largest change in brightness from frame 0's, worst panel: a step and a steady drift alike | ≤ 11 | 1–6.7, and 10.7 on the one clip whose check still ran (e1). 11.7–23.7 where video2rig crashed (`IndexError` in its alignment), spun or misjudged |
 | Motion (`video_still`) | Share of a panel's pixels moved from frame 0 (median over frames), least panel | ≥ 0.02 | Walking 0.048–0.30. Frozen clips 0.0016–0.0035; a side panel that stood still 0.009 |
 | Facing (`video_turned`) | The outline's shape change: 90th percentile of the log change in width-to-height ratio, worst panel | ≤ 0.25 | Facing held 0.05–0.14. Turning 0.31–1.4 |
-| Views (`video_views_disagree`, `video_limbs_disagree`, `video_check_failed`) | video2rig `check`'s body and limb disagreement, and its verdict | ≤ 1.5 % and 2 % of the height (D7) | The identity-swapped clip h1: body 1.65 % |
+| Views (`video_views_disagree`, `video_limbs_disagree`, `video_check_failed`) | video2rig `check`'s body and limb disagreement, and its verdict; a check with no reading or that crashes on the clip refuses it | ≤ 1.5 % and 2 % of the height (D7) | The identity-swapped clip h1: body 1.65 % |
 
 - **Identity drift is recorded, not refused.** The creature's colour against frame 0 (90th percentile, worst panel)
   was 7–27 on clips that kept the look and 79–94 where Wan redrew the wolf as a photo-real one (#149 variant h).
-- **The clip's times.** The intake writes the clip's measured rate to `work/<clip>/timing.json` before video2rig reads
-  anything. Without that file video2rig assumes Seedance's cadences, reads Wan's 16 fps as 24, and the motion plays
+- **The clip's times.** The intake writes the clip's frame times, at its container rate, to `work/<clip>/timing.json`
+  before video2rig reads anything. A clip that repeats frames is refused, so every frame is a frame of motion. Without that file video2rig assumes Seedance's cadences, reads Wan's 16 fps as 24, and the motion plays
   1.5× fast.
 - **Not covered:**
   - **Cuts.** There is no check for a cut yet.
+  - **Frame 0's difference is over the whole frame.** A creature that is small in the frame dilutes it.
   - **Drift under the limit.** It can still erode frame 0's silhouette: at 12 levels video2rig warned that the start
     pose covered frame 0 only 0.78.
   - **Steps.** video2rig's `steps` turns a walk on the spot into a walk forward. D9 delivers in place; B6 removes it.

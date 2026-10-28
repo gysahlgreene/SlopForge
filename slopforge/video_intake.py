@@ -27,8 +27,10 @@ CHECKS = (  # (code, metric, limit, what failed) in the order a reviewer reads t
      "the clip repeats frames: {:.0%} duplicated (the container's rate is not the motion's)"),
     ("video_frame0", "video_frame0_difference", "max_video_frame0_difference",
      "frame 0 is not the start image (mean difference {:.1f} grey levels)"),
+    ("video_creature_missing", "video_presence", "min_video_presence",
+     "a panel loses the creature: it shows in frame 0 and {:.0%} of the frames at most"),
     ("video_backdrop_drift", "video_backdrop_drift", "max_video_backdrop_drift",
-     "the backdrop changes brightness after frame 0 by {:.1f} grey levels"),
+     "the backdrop's brightness moves up to {:.1f} grey levels from frame 0's"),
     ("video_still", "video_motion_share", "min_video_motion_share",
      "a panel stands still: {:.2%} of its pixels move"),
     ("video_turned", "video_turn", "max_video_turn",
@@ -42,6 +44,8 @@ def read_clip(path):
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,r_frame_rate",
          "-of", "json", str(path)], capture_output=True, text=True, check=True).stdout)["streams"][0]
     numerator, denominator = (float(v) for v in probe["r_frame_rate"].split("/"))
+    if not numerator or not denominator:
+        raise ValueError(f"{Path(path).name} states no frame rate ({probe['r_frame_rate']})")
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, np.uint8).reshape(-1, probe["height"], probe["width"], 3), numerator / denominator
@@ -68,7 +72,7 @@ def _panel(frames, x0, x1):
                              panel[:, :, -BORDER:].reshape(n, -1, 3)], 1)
     backdrop = np.median(strips, 1)                                          # per frame, so drift moves with it
     level = backdrop.mean(1)
-    drift = abs(float(level[0]) - float(np.percentile(level, 85)))
+    drift = float(np.abs(level - level[0]).max())          # a step after frame 0 and a steady darkening alike
     mask = np.abs(panel - backdrop[:, None, None, :]).max(3) > SILHOUETTE
     moved = (np.abs(panel - panel[0]).max(3) > MOVED).mean((1, 2))
     aspect, colour = np.full(n, np.nan), np.full((n, 3), np.nan)
@@ -78,13 +82,16 @@ def _panel(frames, x0, x1):
             (x_lo, x_hi), (y_lo, y_hi) = np.percentile(xs, [1, 99]), np.percentile(ys, [1, 99])
             aspect[t] = (x_hi - x_lo + 1) / (y_hi - y_lo + 1)
             colour[t] = panel[t][mask[t]].mean(0)
-    if np.isnan(aspect[0]):
-        raise ValueError("frame 0 shows no creature in a panel")
-    turn = np.abs(np.log(aspect / aspect[0]))
-    shift = np.linalg.norm(colour - colour[0], axis=1)
+    # frame 0 is every other measure's reference: a panel without the creature there has none to give
+    seen = ~np.isnan(aspect)
+    presence = float(seen.mean()) if seen[0] else 0.0
+    turn = np.abs(np.log(aspect / aspect[0])) if seen[0] else np.zeros(n)
+    shift = np.linalg.norm(colour - colour[0], axis=1) if seen[0] else np.zeros(n)
+    later = seen & (np.arange(n) > 0)
     return {"backdrop_drift": round(drift, 2), "motion_share": round(float(np.median(moved[1:])), 4),
-            "turn": round(float(np.nanpercentile(turn, 90)), 3),
-            "identity_drift": round(float(np.nanpercentile(shift, 90)), 2)}
+            "presence": round(presence, 4),
+            "turn": round(float(np.percentile(turn[later], 90)), 3) if later.any() else 0.0,
+            "identity_drift": round(float(np.percentile(shift[later], 90)), 2) if later.any() else 0.0}
 
 
 def measure(frames, container_fps, start, cameras):
@@ -102,6 +109,7 @@ def measure(frames, container_fps, start, cameras):
             "video_duplicate_share": round(duplicate, 4),
             "video_content_fps": round(float(container_fps) * (1 - duplicate), 3),
             "video_frame0_difference": round(float(np.abs(frames[0].astype(np.float32) - start).mean()), 2),
+            "video_presence": min(p["presence"] for p in panels.values()),
             "video_backdrop_drift": max(p["backdrop_drift"] for p in panels.values()),
             "video_motion_share": min(p["motion_share"] for p in panels.values()),
             "video_turn": max(p["turn"] for p in panels.values()),
