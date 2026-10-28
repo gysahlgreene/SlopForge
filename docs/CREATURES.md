@@ -129,12 +129,14 @@ slopforge --project ~/UnityProjects/MyGame creature synth wolf gait --kind gait
 
 **The start frame** comes from video2rig's `render_start.py` with the creature's view pair, framing and declared
 facing (#142). Passed as `--facing=-Y`, the facing is never guessed from foot and toe names:
-- **Views.** The `creature` type uses `three-quarter,side`. The three-quarter view sees the trunk, and keeps a lifted
-  front paw off the hind leg that a dead-front camera puts behind it (#140). `front,side` is a per-creature choice
-  (`--views`).
-- **Widths.** render_start fits one scale to both panels, so unless `--widths` declares them, the 1920 px frame is split
-  by each view's span across its panel (three-quarter: 0.77 length + 0.64 width; side: the length). Neither panel then
-  wastes resolution.
+- **Views.** The `creature` type uses `front,side`, the start frame B5's video route was proven from
+  ([#149](https://github.com/gysahlgreene/SlopForge/issues/149)). In three-quarter + side, Wan 2.2 turned the creature in
+  3 of 4 clips; in front + side with the split-screen prompt, in none. The three-quarter view reads a lifted front paw
+  better, since a dead-front camera puts it in front of the hind leg (#140), so `three-quarter,side` is the choice
+  (`--views`) for a creature whose motion does not come from video.
+- **Widths.** The type declares equal panels (960 + 960), as #149's clips had. Without declared widths, render_start's
+  one scale for both panels decides: the 1920 px frame is split by each view's span across its panel (three-quarter:
+  0.77 length + 0.64 width; side: the length), so neither panel wastes resolution.
 - **Margins.** `margin` 1.8 and `margin_wide` 1.45 come from the type.
 - **Check.** The calibration refuses a start frame from which any of the skin falls outside a panel.
 
@@ -156,6 +158,68 @@ because exam v1 counts a result only when the truth stays inside the reader's ra
 - with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
 
 A motion whose joints leave a panel is refused.
+
+## Video generation and intake (B5)
+
+A calibrated creature with a trained reader gets motion clips from its start frame with `creature video`:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature video wolf walk            # --count N --seed S
+```
+
+- **Provider.** Wan 2.2 image-to-video in ComfyUI: `workflows/video_wan22_i2v_api.json`, #149's graph.
+  - Two 14B fp8 experts, high noise to step 10, cfg 3.5, shift 5.
+  - 1280×720 at 16 fps.
+  - 121 frames took 1,300–1,600 s on an 80 GB H100.
+
+  Its sidecar names the four model files, their SHA-256 and their output rights: Apache-2.0, cleared. The image
+  worker runs it in its video mode (`--output video`): the start frame is bound to the graph's `LoadImage` node, the
+  `SaveVideo` result is downloaded, and the worker waits up to an hour.
+- **Prompt.** The prompt is the type's data, not code:
+  - `video_motions.walk`: #149's split-screen continuous-walk prompt, its negative list, 121 frames, 4 retries.
+  - `video_views`: how the prompt names each view of the start frame.
+
+  `{subject}` is the asset's description and `{name}` its name. Front and side are #149's wording; the three-quarter
+  line is untried.
+- **Candidates.**
+  - **Seeds.** Each try uses the next seed from `--seed`. The tries are the clips asked for plus the motion's
+    retries (D6), decided by `failures.should_retry`.
+  - **Records.** Every candidate is kept in `motion.videos.<motion>`: its seed, prompt, the provider's generation
+    record, reasons and every intake number.
+  - **Refused clips.** A refused clip stays in `clips/` with its `work/<clip>/intake.json`. An accepted one is
+    registered in `motion.clips`.
+  - **Faults.** A provider fault that is not a refusal stops at once. A missing reader, an uncalibrated creature or
+    a start frame changed since calibration refuse before any generation.
+- **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Until B3
+  wraps training, train it with video2rig's `reader.train` on the GPU provider, as #149 did.
+
+### Video intake
+
+Fail-closed, before anything reads the clip (`slopforge/video_intake.py`). A clip that fails a check is refused with
+its code, and the refusal is retryable. video2rig's check runs only on a clip that passed the first five.
+
+The limits come from #149's 40 Wan clips, whose verdicts are known. On those clips the intake reproduces every
+verdict: it refuses every turning, still and drifting clip and passes every clip that walked.
+
+| Check (code) | Measure | Limit | #149's clips |
+| --- | --- | --- | --- |
+| Frame rate (`video_frame_rate`) | Share of frames that repeat the one before (a step under a tenth of the clip's large steps) | ≤ 0.05 | 0 on every Wan clip. A 24 fps clip in a 60 fps container repeats 60 % (fixture) |
+| Frame 0 (`video_frame0`) | Mean difference of frame 0 from the start image, grey levels | ≤ 12 | 3.0–6.5 on all 40 |
+| Backdrop (`video_backdrop_drift`) | Backdrop brightness at frame 0 against the clip's 85th percentile, worst panel | ≤ 10 | 1–9.7 where video2rig read the clip. 10.7–22.7 where it crashed (`IndexError` in its alignment), spun or misjudged |
+| Motion (`video_still`) | Share of a panel's pixels moved from frame 0 (median over frames), least panel | ≥ 0.02 | Walking 0.048–0.30. Frozen clips 0.0016–0.0035; a side panel that stood still 0.009 |
+| Facing (`video_turned`) | The outline's shape change: 90th percentile of the log change in width-to-height ratio, worst panel | ≤ 0.25 | Facing held 0.05–0.14. Turning 0.31–1.4 |
+| Views (`video_views_disagree`, `video_limbs_disagree`, `video_check_failed`) | video2rig `check`'s body and limb disagreement, and its verdict | ≤ 1.5 % and 2 % of the height (D7) | The identity-swapped clip h1: body 1.65 % |
+
+- **Identity drift is recorded, not refused.** The creature's colour against frame 0 (90th percentile, worst panel)
+  was 7–27 on clips that kept the look and 79–94 where Wan redrew the wolf as a photo-real one (#149 variant h).
+- **The clip's times.** The intake writes the clip's measured rate to `work/<clip>/timing.json` before video2rig reads
+  anything. Without that file video2rig assumes Seedance's cadences, reads Wan's 16 fps as 24, and the motion plays
+  1.5× fast.
+- **Not covered:**
+  - **Cuts.** There is no check for a cut yet.
+  - **Drift under the limit.** It can still erode frame 0's silhouette: at 12 levels video2rig warned that the start
+    pose covered frame 0 only 0.78.
+  - **Steps.** video2rig's `steps` turns a walk on the spot into a walk forward. D9 delivers in place; B6 removes it.
 
 ## video2rig
 
