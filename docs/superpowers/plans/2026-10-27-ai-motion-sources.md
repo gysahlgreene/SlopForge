@@ -97,8 +97,8 @@ Every provider record has the same identity shape, `{name, model_id, revision | 
 ```yaml
 providers:
   h100_comfy:   {type: comfyui, url_env: COMFYUI_URL}                      # today's default, named
-  rig_host:     {type: ssh_gpu, host: h100-vps-vpn, python: /home/.../bin/python, checkout: /home/.../SkinTokens}
-  motion_host:  {type: ssh_gpu, host: h100-vps-vpn, python: /home/.../motion/bin/python, checkout: /home/.../motion}
+  rig_host:     {type: ssh_gpu, host: h100-vps-vpn, python: /home/<user>/bin/python, checkout: /home/<user>/SkinTokens}
+  motion_host:  {type: ssh_gpu, host: h100-vps-vpn, python: /home/<user>/motion/bin/python, checkout: /home/<user>/motion}
   video_cloud:  {type: hosted_api, vendor: replicate, key_env: REPLICATE_API_TOKEN,
                  models: {walk: wan-video/wan-2.2-i2v-fast}, output_rights: {status: cleared, terms: "Replicate ToS", terms_version: "2026-04-01", read_on: "2026-10-27"}}
 ```
@@ -374,6 +374,8 @@ Compute: the configured ComfyUI and `ssh_gpu` providers (mesh generation; SkinTo
 
 **Ruled by the owner on 2026-10-27, after the spike (#129):** D5, and D7's cross-view limits, as **exam v1 for synthetic motion** (below). D7's frame-rate tolerance, D6, D8 and D9 are still open. The remaining Fox-walk paw failure is the fit's weighting of two views when one is along the line of sight: it goes upstream, with SlopForge's own fit as B3's fallback (#140); it does not block B1.
 
+**Ruled by the owner on 2026-10-28 ([#149](https://github.com/gysahlgreene/SlopForge/issues/149)):** no paid clips, now or later. This project runs open weights on its own GPU provider (the H100); hosted APIs stay in the provider model (section 3) only for other users of SlopForge. D2's "then one `hosted_api` adapter" is struck for this project: its video source is the `comfyui` provider. D11's hosted video terms (BytePlus/Seedance, Kling, MiniMax API) need no reading for this project; they stay `unknown` for anyone who configures them. The budget is GPU time: a clip that fails video2rig's `check` is regenerated within a bounded batch (seeds and setup variants, `check` as the filter, nothing repaired), never replaced by a bought one.
+
 ### Exam v1 (D5, D7)
 
 **Scope:** synthetic motion only (a known motion rendered through video2rig's own cameras and studio, no video model), the best case; set from the spike's four clips; revisable with evidence; not a qualification claim. Recorded with definitions in `docs/CREATURES.md` ("The motion exam, v1"); evidence: [the spike page](https://github.com/gysahlgreene/SlopForge/blob/main/docs/media/creature-motion-spike-2026-10/README.md).
@@ -397,7 +399,7 @@ Only the Fox walk fails; it fails the same way with the paws' range declared at 
 
 - **D0** Accept package B0 (failure-code split, library licence fields, remote-tool timeout) as groundwork that can land now, since it changes no stage behaviour? Recommended: yes.
 - **D1** The M5 roadmap wording in section 1 (gait as first gate, video route as second package, gait kept as fallback). Recommended: accept.
-- **D2** First video provider: Wan 2.2 on the `comfyui` provider (cleared, seeded), then one `hosted_api` adapter (Replicate first, since its output grant is read and cleared) once a hosted model's own terms are cleared? Recommended: yes, in that order.
+- **D2** First video provider: Wan 2.2 on the `comfyui` provider (cleared, seeded), then one `hosted_api` adapter (Replicate first, since its output grant is read and cleared) once a hosted model's own terms are cleared? Recommended: yes, in that order. *Ruled 2026-10-28: Wan 2.2 on `comfyui` only for this project; the `hosted_api` step is struck (no paid clips).*
 - **D3** Rig provider for creatures: SkinTokens first, UniRig as fallback with its own preflight? Recommended: yes.
 - **D4** Detector backbone: DINOv2 (Apache-2.0, verified, not gated) or DINOv3 (already excepted, but gated and with two conflicting licence texts)? Recommended: DINOv2.
 - **D5** Exam thresholds (per-bone position and rotation limits, detection rate, swap rate): set after the spike reports numbers; no limit is invented here. *Ruled: exam v1 above.*
@@ -406,7 +408,7 @@ Only the Fox walk fails; it fails the same way with the paws' range declared at 
 - **D8** Track A per-frame limb-direction limit (the developer saw 3° worst **[reported]**).
 - **D9** Root motion vs in-place delivery for creature clips, and the foot-sliding limit.
 - **D10** Track A timing: wait for M4 as the roadmap orders, or allow A1 earlier as a licensed-source package? Recommended: wait; it also needs D11's Llama 3 reading and an amendment to #15's non-goal.
-- **D11** Output-rights clearances, in the three-question terms of section 7. (a) Confirm the principle replaces the MIT/Apache rule, with the proxy kept as the default `cleared` for MIT/Apache weights. (b) Q2, what the user runs: accept that gated (Llama 3) and non-MIT (Kimodo, DINOv3) components may run on the user's providers when their terms permit, as authoring-time tools never distributed with the game. (c) Q3, output rights to set after reading: Kimodo weights `cleared` (terms read, quoted above); Wan 2.2 `cleared`; Replicate `cleared` subject to the model; fal per badge; Llama 3 **[legal reading]** between `cleared` and `attribution_required` ("Built with Meta Llama 3"); DINOv3 `attribution_required` if used; BytePlus/Seedance, Kling and MiniMax API `unknown` until their terms are read on an account that can see them, which the owner or a lawyer must do.
+- **D11** Output-rights clearances, in the three-question terms of section 7. (a) Confirm the principle replaces the MIT/Apache rule, with the proxy kept as the default `cleared` for MIT/Apache weights. (b) Q2, what the user runs: accept that gated (Llama 3) and non-MIT (Kimodo, DINOv3) components may run on the user's providers when their terms permit, as authoring-time tools never distributed with the game. (c) Q3, output rights to set after reading: Kimodo weights `cleared` (terms read, quoted above); Wan 2.2 `cleared`; Replicate `cleared` subject to the model; fal per badge; Llama 3 **[legal reading]** between `cleared` and `attribution_required` ("Built with Meta Llama 3"); DINOv3 `attribution_required` if used; BytePlus/Seedance, Kling and MiniMax API `unknown` until their terms are read on an account that can see them, which the owner or a lawyer must do. *Ruled 2026-10-28: this project uses no hosted video API, so their terms are not read for it; they stay `unknown` for other users.*
 - **D13** The `docs/ARCHITECTURE.md` provider wording in section 3, replacing "the single inference-service boundary for HTTP", and the `providers:` config map. Recommended: accept; B0 implements it additively.
 - **D14** Adopt versus build for the reader and fit: adopt video2rig as a pinned, unmodified `local_tool` provider with the exam as its acceptance test, building SlopForge's own reader only if it fails the exam or cannot run headlessly on Linux; or build our own from the start. Recommended: adopt, because it already implements what section 4 specified, with the AGPL kept at arm's length as section 3 describes and the own-reader design retained as the fallback.
 - **D15** Where video2rig's Blender steps run: (a) renders on the SlopForge machine, training on the configured GPU provider, reading and fitting on the SlopForge machine (keeps the architecture rule; the two coincide on a single NVIDIA workstation); or (b) headless Blender on the GPU provider's machine for this provider. Recommended: (a).
