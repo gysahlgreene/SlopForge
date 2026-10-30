@@ -1,7 +1,8 @@
 # Creatures
 
 M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
-video2rig views and render known motions (B2). It generates walk clips with Wan 2.2 (B5), reads them onto the rig
+video2rig views and render known motions (B2), train its joint reader and examine it on a known motion (B3). It
+generates walk clips with Wan 2.2 (B5), reads them onto the rig
 in place as looping animations for review (B6), and delivers the approved ones to Unity as a Generic controller and
 prefab played in Play mode (B7). This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
@@ -157,7 +158,10 @@ Training them on the GPU provider is B3.
 **A known motion** comes from `blender/synth_motion.py`, promoted from the spike's exam motion. It is seeded, and the
 same seed writes the same file. Each kind starts at the start pose and keeps the skin on the floor:
 - `random`: every fitted bone follows smooth noise, inside 0.9 of its declared range.
-- `gait`: an in-place walk.
+- `gait`: an in-place walk. Each leg swings from one bone (`Thigh`, `UpperArm`), its knee or elbow folds, and its
+  paw and toes flex. The spine, neck, head and tail sway. A scapula and the end bones stay still: on B1's wolf,
+  swinging the scapula as well kicked a front leg level, and curling the toes' end bones flicked them out of the
+  frame (found by B3's exam, 2026-10-30).
 - `action`: an authored action, looped.
 
 A motion is checked channel by channel, as video2rig bounds a bone (its turns about X, Y and Z, intrinsic XYZ, each
@@ -169,6 +173,61 @@ because exam v1 counts a result only when the truth stays inside the reader's ra
 - with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
 
 A motion whose joints leave a panel is refused.
+
+## Reader training and the exam (B3)
+
+The creature's joint reader is trained on the pictures calibration rendered, then examined on a motion SlopForge
+already knows, before it reads any generated clip:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature train wolf      # --steps 9000 by default
+slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gait --seed 0 --frames 96 by default
+```
+
+- **Training (`detector_training`).** It runs video2rig's `reader.train` for the given steps. With
+  `providers.video2rig.train_host` set, it runs on that machine:
+  - the project goes to a fresh folder there with `rsync`. An earlier reader, clips, readings and fits are not sent;
+  - the runtime module is piped over SSH and trains with the host's own install, offline against the pinned
+    backbone, as its preflight does;
+  - `reader.pt` and `reader-train.json` come back, and the folder is removed whatever happened. The host keeps
+    nothing between trainings.
+
+  Without a `train_host` it trains on this machine's CUDA card. The stage's parents are the training set calibration
+  made (`reader/poses.npz`, `visible.npz`) as it is now. It records the steps, the video2rig and DINOv2 revisions,
+  where it trained, the minutes and the held-out error per view. The held-out error is recorded, not gated: no limit
+  is set. GPU training is not bit-repeatable, and the record says so.
+- **Refused:** a creature not calibrated; a training set changed since calibration; an existing `reader/reader.pt`.
+  A reader is never replaced, because the clips extracted with it name its hash. Move it aside to train another.
+  A failed training leaves no reader, since a partial one would pass for a trained one, and is recorded.
+- **The exam (`reader_exam`).** It takes these steps:
+  1. A known motion is rendered through the start cameras, as `creature synth` does (B2). The clip is
+     `exam_<kind>_s<seed>`, made once and reused by later exams, since its truth does not change.
+  2. video2rig's `check` and `run` read it with the reader.
+  3. `blender/exam_pose.py` poses the truth and the fit on the rig and reads back every bone's head and tail per
+     frame, with the creature's height along up and its facing.
+  4. `slopforge/creature_exam.py` measures them and judges exam v1's twelve limits (`EXAM_V1`; their definitions and
+     the spike's numbers are in [#145](https://github.com/gysahlgreene/SlopForge/pull/145)).
+
+  The limb-end tips are each declared leg's last bone. The reader names keypoints after bones (`FrontToes.L.tip` on
+  the wolf), so the spike's filter on "Hand" and "Foot" in a label found none on a B1-named rig.
+  - An exam counts only when every frame is compared and the truth matches the render's labels. Otherwise it is an
+    error, not a verdict.
+  - A failed exam is an answer: it is recorded with every measure and the names of the measures past their limits,
+    and `creature exam` exits 1.
+  - The stage's parents are the reader and the known motion. Its outputs are `exam/<clip>/exam-<reader>.json` (the
+    verdict and every number), the posed frames, the fit and the check.
+- **Extraction needs a passed exam.** `creature extract` refuses a reader whose exam has not passed, or one that is not
+  the reader the exam saw.
+- **On the generated wolf (2026-10-30):** the reader trained on the H100 in 11.3 minutes (held-out median 5.6 px
+  front, 4.07 px side, as the hand-trained reader's 5.6 and 4.04). Its exam passes 11 of the 12 limits, most with room
+  (bone median 1.9°, worst body p95 9.5°, joint error 0.006 of the height), and fails the swap rate: 0.66 on the
+  scapulae, while every limb pair is at most 0.033. The spike's rig had no scapulae. The gait's 3° chest sway parts
+  the shoulders by up to 5.3 % of the height, and the fit reads that sway on the wrong side. Whether exam v1's swap
+  rate counts shoulders is the owner's decision; until then the exam fails and this reader extracts no clip.
+- **The port reproduces the spike.** On the spike's own data the measures match its `exam_compare.py` to 0.001: 471
+  numbers on the wolf gait, and 365 on the Fox walk with the paw-range reader, the failing exam, detection and swap
+  rate included. `tests/test_creature_exam_blender.py` poses a known motion on the fixture quadruped as its own fit
+  and reads no error, at the fixture's height and facing.
 
 ## Video generation and intake (B5)
 
@@ -207,8 +266,8 @@ slopforge --project ~/UnityProjects/MyGame creature video wolf walk            #
   - **Stopping early.** The run stops early once the clips asked for are out of reach.
   - **Stage records.** The stage records the model files, the reader's SHA-256, the intake numbers and the check's
     result.
-- **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Until B3
-  wraps training, train it with video2rig's `reader.train` on the GPU provider, as #149 did.
+- **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Train
+  it with `creature train` ([B3](#reader-training-and-the-exam-b3)).
 
 ### Video intake
 
@@ -304,6 +363,7 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
   - an uncalibrated creature;
   - a clip intake did not accept, or one changed since;
   - a missing reader or rig .blend;
+  - a reader that has not passed the motion exam, or is not the reader the exam saw (B3);
   - creature.json or the start cameras changed since calibration;
   - a rig .blend other than the one calibration used: the start frame and the reader belong to that rig;
   - a clip extracted before (move its folder first).
@@ -438,9 +498,8 @@ transformers ahead of the venv's.
   of the motion also run there.
 - On the GPU provider: `reader.train`, in bfloat16.
 
-Sending a project to the GPU provider for `reader.train` and bringing the reader back is not built yet; it belongs
-to package B3. Until then the client runs `train` only on a machine with no `train_host` set, and
-refuses it otherwise.
+With a `train_host` set, the client sends the project there for `reader.train` and brings the reader back
+([B3](#reader-training-and-the-exam-b3)).
 
 The client builds each documented command line and runs it with the provider's Python in its checkout. It makes
 every path absolute first, because a relative one would land inside the pinned checkout. `train` requires a step
