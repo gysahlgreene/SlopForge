@@ -6,7 +6,9 @@ finishes the best passing one: generic names, each bone's local X across the bod
 .blend, and the review poses. Nothing is approved here: `approve_rig` records the human review of the contact sheet,
 behind the delivery-rights gate.
 """
+import copy
 import json
+import math
 import os
 import re
 import shutil
@@ -25,7 +27,7 @@ from .. import (creature_exam, creature_gait, creature_rig, creature_views, unit
                video_intake)
 from ..creature_rig import deformation_poses, rig_settings
 from ..creature_video import video_prompt, video_settings
-from ..creature_views import creature_config, framing, motion_settings, outside_panels
+from ..creature_views import _role, creature_config, framing, motion_settings, outside_panels
 from ..failures import StageFailure, failure_record, should_retry
 from ..manifest import (begin_stage, find_asset, finish_execution, finish_stage, register_artifact, save_manifest,
                         set_artifact_approval, start_execution, start_stage)
@@ -593,7 +595,11 @@ def exam_creature(project_root, config, manifest, name, *, kind="gait", seed=0, 
     log = project.parent / "video2rig.log"
     try:
         check = _v2r(config, root, "check", project, log, clip=clip)
-        fit = _v2r(config, root, "run", project, log, clip=clip)
+        _v2r(config, root, "run", project, log, clip=clip)
+        # the exam measures what is delivered: the reading fitted again as extraction fits a walk
+        walk = video_settings(load_taxonomy(root)[asset["type"]], "walk")["fit_joint_limits"]
+        fit = _refit(config, root, project, log, clip, fps=json.loads((folder / "truth.json").read_text())["fps"],
+                     limits=walk, creature=record["creature"])
         # each reader's exam keeps its own fit and check: the next reader's run overwrites the project's
         shutil.copy(fit["motion"], paths["fit"])
         shutil.copy(project / "work" / clip / "check.json", paths["check"])
@@ -1049,6 +1055,26 @@ def _review_sheet(root, mp4, cameras, renders, path):
     _sheet(tiles, path, columns=2 * len(cameras["views"]))
 
 
+FIT_TAG = "-slopforge"   # the reading fitted again with SlopForge's settings: out/<clip>-slopforge.npz
+
+
+def _fit_creature(creature, limits):
+    """creature.json as the motion's fit sees it: each joint whose role the motion declares (fit_joint_limits) within
+    that range; the reader keeps the ranges it trained on."""
+    fitted = copy.deepcopy(creature)
+    for bone, joint in fitted.get("joints", {}).items():
+        if _role(bone) in limits:
+            joint["range"] = math.radians(limits[_role(bone)])
+    return fitted
+
+
+def _refit(config, root, project, log, clip, *, fps, limits, creature):
+    """video2rig's reader fit again on the clip's saved reading, with its per-frame settings for the clip's rate and the
+    motion's joint ranges: those settings are reached only this way (docs/CREATURES.md, the refit)."""
+    return _v2r(config, root, "fit", project, log, clip=clip, tag=FIT_TAG, settings=video2rig.fit_settings(fps),
+                creature=_fit_creature(creature, limits))
+
+
 def extract_creature(project_root, config, manifest, name, clip):
     """One clip that passed intake through video2rig's run (the reader road) and import_motion, then baked in place
     and cut to its loop (B6): the FBX is registered as a candidate animation with its stride, period and review
@@ -1088,6 +1114,7 @@ def extract_creature(project_root, config, manifest, name, clip):
     # the intake's rate, as its timing.json gave it to video2rig (video_intake.write_timing)
     times = video_intake.timing(entry["frames"], entry["fps"], container_fps=entry["fps"])["times"]
     legs = _legs(root, asset)
+    limits = video_settings(load_taxonomy(root)[asset["type"]], entry["motion"])["fit_joint_limits"]
     provider = _video2rig_identity(config, root, reader=project / "reader/reader.pt")
     rights = clip_rights + [{"source": "video2rig", **provider["output_rights"]}] + rights_of(config, "blender")
     reader = file_sha256(project / "reader/reader.pt")
@@ -1097,6 +1124,8 @@ def extract_creature(project_root, config, manifest, name, clip):
                                         "cameras_sha256": cameras_ref["sha256"], "fps": entry["fps"],
                                         "creature": creature, "legs": legs, "bake_tool_sha256": tool,
                                         "gait_sha256": file_sha256(creature_gait.__file__),
+                                        "fit_settings": video2rig.fit_settings(entry["fps"]),
+                                        "fit_joint_limits": limits,
                                         "video2rig": video2rig.runtime.VIDEO2RIG_REVISION})
     manifest_path = root / config["asset_pipeline"]["manifest"]
     log = project.parent / "video2rig.log"
@@ -1106,7 +1135,8 @@ def extract_creature(project_root, config, manifest, name, clip):
     save_manifest(manifest_path, manifest)
     extraction = entry["extraction"] = {"status": "extracting"}
     try:
-        fit = _v2r(config, root, "run", project, log, clip=clip)
+        read = _v2r(config, root, "run", project, log, clip=clip)    # the reading, its own fit and its warnings
+        fit = _refit(config, root, project, log, clip, fps=entry["fps"], limits=limits, creature=creature)
         _check_fit(fit["motion"], creature, times)
     except (Exception, KeyboardInterrupt) as exc:
         _fail(root, config, manifest, asset, execution, stage, exc, extraction)
@@ -1114,11 +1144,14 @@ def extract_creature(project_root, config, manifest, name, clip):
     work = project / "work" / clip
     fit_refs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "motion_extraction", 1, [clip_ref])
                 for label, kind, path in (("fit", "data.motion_extraction", fit["motion"]),
-                                          ("report", "report.motion_extraction", work / "report.json"))
+                                          ("report", "report.motion_extraction", work / "report.json"),
+                                          ("refit_report", "report.motion_refit", work / f"fit{FIT_TAG}-report.json"))
                 if path.is_file()]
     finish_stage(stage, "succeeded", fit_refs)
-    extraction.update(fit=Path(fit["motion"]).relative_to(root).as_posix(), warnings=fit["report"].get("warnings", []),
-                      fit_report={key: value for key, value in fit["report"].items() if key != "warnings"})
+    misses = [item["median_miss_px"] for item in fit["report"] if isinstance(item, dict) and "median_miss_px" in item]
+    extraction.update(fit=Path(fit["motion"]).relative_to(root).as_posix(), warnings=read["report"].get("warnings", []),
+                      fit_report={key: value for key, value in read["report"].items() if key != "warnings"},
+                      fit_median_miss_px=round(float(np.median(misses)), 2) if misses else None)
 
     folder.mkdir(parents=True)
     request = {"legs": legs, "root_bone": creature["root_bone"], "fit_bones": creature["fit_bones"],
@@ -1132,7 +1165,8 @@ def extract_creature(project_root, config, manifest, name, clip):
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
     try:
-        _v2r(config, root, "import_motion", project, log, blend=blend, clip=clip, save=folder / "source.blend")
+        _v2r(config, root, "import_motion", project, log, blend=blend, clip=clip, save=folder / "source.blend",
+             motion=fit["motion"])
         if not (folder / "source.blend").is_file():
             raise RuntimeError("video2rig's import_motion saved no .blend")
         baked = _bake(config, root, folder / "source.blend", request)

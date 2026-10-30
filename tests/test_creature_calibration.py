@@ -79,7 +79,7 @@ def tool(monkeypatch):
     def synth(config, root, blend, request):
         calls["synth"] = request
         np.savez(request["out"], quats=np.zeros((request.get("frames", 96), 3, 4)))
-        Path(request["truth"]).write_text(json.dumps({"kind": request["kind"], "seed": request["seed"]}))
+        Path(request["truth"]).write_text(json.dumps({"kind": request["kind"], "seed": request["seed"], "fps": 24}))
         return {"status": "complete"}
 
     monkeypatch.setattr(pipeline, "_v2r", run)
@@ -110,7 +110,7 @@ def test_calibration_writes_creature_json_frames_the_views_and_renders_the_train
     assert steps == ["export_rig", "render_start", "prepare"]
     framing = dict(tool["steps"])["render_start"]["framing"]
     # the type's start frame is #149's view pair in equal panels (B5); the span split is creature_views' own test
-    assert framing["views"] == ["front", "side"] and framing["widths"] == [960, 960]
+    assert framing["views"] == ["front", "side"] and framing["widths"] == [640, 1280]
     assert dict(tool["steps"])["prepare"]["poses"] == 3000
     assert result["status"] == asset["motion"]["status"] == "calibrated"
     execution = asset["executions"][-1]

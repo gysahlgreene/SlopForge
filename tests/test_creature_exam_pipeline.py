@@ -46,6 +46,12 @@ def trained(calibrated, monkeypatch):  # noqa: F811
     inner = pipeline._v2r
 
     def v2r(config_, root_, step, project_, log, **options):
+        if step == "fit":       # the reading fitted again, as extraction fits a clip
+            calls["exam_steps"].append(("fit", options["clip"]))
+            calls["fit_options"] = options
+            motion = Path(project_) / "out" / f"{options['clip']}{options['tag']}.npz"
+            np.savez(motion, times=np.arange(24) / 24.0)
+            return {"report": [{"frame": 0, "median_miss_px": 2.0}], "motion": motion}
         if step not in ("check", "run"):
             return inner(config_, root_, step, project_, log, **options)
         calls["exam_steps"].append((step, options["clip"]))
@@ -79,7 +85,8 @@ def test_a_trained_reader_passes_exam_v1_on_a_known_walk_as_a_recorded_stage(tra
     result = pipeline.exam_creature(root, config, manifest, "wolf")
     assert result["status"] == "passed" and result["failures"] == []
     assert calls["synth"]["kind"] == "gait" and calls["exam_steps"] == [("check", "exam_gait_s0"),
-                                                                        ("run", "exam_gait_s0")]
+                                                                        ("run", "exam_gait_s0"),
+                                                                        ("fit", "exam_gait_s0")]
     assert calls["pose_request"]["facing"] == "-Y"
     asset = manifest["assets"]["creature:wolf"]
     stage = asset["executions"][-1]["stages"][-1]
@@ -221,3 +228,17 @@ def test_the_posing_never_reads_an_earlier_report(tmp_path, monkeypatch):
 def test_a_legs_tip_is_its_last_fitted_bone():
     legs = {"front.L": ["FrontPaw.L", "FrontToes.L"], "hind.L": ["HindToes.L", "HindToesEnd.L"]}
     assert pipeline._limb_ends(legs, ["FrontPaw.L", "FrontToes.L", "HindToes.L"]) == ["FrontToes.L", "HindToes.L"]
+
+
+def test_the_exam_fits_the_reading_as_extraction_fits_a_walk(trained):
+    """The exam measures what is delivered: the reading fitted again with the clip's rate (B2 renders known motions at
+    24 fps, video2rig's own tuning) and the walk's fit ranges."""
+    import math
+    from slopforge.backends import video2rig
+    root, config, manifest, calls, project = trained
+    pipeline.exam_creature(root, config, manifest, "wolf")
+    options = calls["fit_options"]
+    assert options["tag"] == "-slopforge" and options["settings"] == video2rig.fit_settings(24)
+    paws = {bone: joint["range"] for bone, joint in options["creature"]["joints"].items() if "FrontPaw" in bone}
+    assert paws and all(value == math.radians(90) for value in paws.values())
+    assert Path(calls["pose_request"]["fit"]).name.startswith("fit-")         # the exam's copy of the refit

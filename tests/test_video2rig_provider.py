@@ -294,6 +294,13 @@ if module == "video2rig.reader.train":
     reader.mkdir(exist_ok=True)
     (reader / "reader.pt").write_bytes(b"reader")
     (reader / "reader-train.json").write_text(json.dumps({{"held_out": {{"v2r_front": {{"median_px": 3.1}}}}}}))
+elif module == "video2rig.reader.fit":
+    project, clip = Path(rest[0]), rest[1]
+    tag = next(arg.split("=", 1)[1] for arg in rest if arg.startswith("--tag="))
+    sets = [rest[i + 1] for i, arg in enumerate(rest) if arg == "--set"]
+    (project / "out" / (clip + tag + ".npz")).write_bytes(b"refit")
+    (project / "work" / clip / ("fit" + tag + "-report.json")).write_text(json.dumps({{
+        "sets": sets, "creature": json.loads((project / "creature.json").read_text()), "project": str(project)}}))
 elif module == "video2rig":
     command, project, clip = rest[:3]
     work = Path(project) / "work" / clip
@@ -579,3 +586,41 @@ def test_a_folder_left_on_the_host_is_named_in_the_log(install, tmp_path, monkey
     remote_training(project, monkeypatch, fail="remove")
     video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
     assert "/tmp/slopforge-reader-a1b2 was not removed from gpu-box" in (tmp_path / "log").read_text()
+
+
+def test_the_reader_fits_per_frame_settings_follow_the_clips_frame_rate():
+    """video2rig tuned its reader fit on Seedance's 24 fps content (fit.py SETTINGS @55d51b3): a threshold or window
+    counted in frames means 1.5x as long in time at Wan's 16 fps. At 24 fps the settings are the tool's own."""
+    assert video2rig.fit_settings(24) == {"despike_deg": 6.0, "w_smooth": 30.0, "lock_frames": 3, "lock_blend": 3,
+                                          "bridge_max": 24, "twin_switch": 6.0}
+    assert video2rig.fit_settings(16) == {"despike_deg": 9.0, "w_smooth": 20.0, "lock_frames": 2, "lock_blend": 2,
+                                          "bridge_max": 16, "twin_switch": 4.0}
+    with pytest.raises(ValueError, match="fps"):
+        video2rig.fit_settings(0)
+
+
+def test_a_refit_uses_its_settings_and_ranges_on_the_saved_reading(fake_tool, tmp_path):
+    """The reader fit's settings are not read from creature.json and `run --set` does not reach them (docs/CONFIG.md):
+    `reader.fit --set` refits the saved reading. Ranges for the fit alone come from an overlay of the project whose
+    creature.json is replaced; the reader trained on the project's own."""
+    project = video2rig.project_folder(tmp_path / "wolf")
+    for folder in ("out", "work/walk", "reader", "start"):
+        (project / folder).mkdir(parents=True)
+    trained = {"name": "wolf", "joints": {"FrontPaw.L": {"range": 2.6}}}
+    (project / "creature.json").write_text(json.dumps(trained))
+    narrower = {"name": "wolf", "joints": {"FrontPaw.L": {"range": 1.57}}}
+    result = video2rig.run(fake_tool, tmp_path, "fit", project, tmp_path / "log", clip="walk", tag="-slopforge",
+                           settings={"despike_deg": 9.0, "foot_lock": False}, creature=narrower)
+    assert result["motion"] == project / "out/walk-slopforge.npz" and result["motion"].read_bytes() == b"refit"
+    report = result["report"]
+    assert report["sets"] == ["despike_deg=9.0", "foot_lock=false"]        # JSON values: false, not False
+    assert report["creature"] == narrower and report["project"] != str(project)
+    assert json.loads((project / "creature.json").read_text()) == trained   # the project's own is untouched
+    assert sorted(path.name for path in project.parent.iterdir()) == ["video2rig"]   # the overlay is gone
+
+
+def test_import_motion_takes_the_chosen_fit(fake_tool, tmp_path):
+    argv = video2rig.command(fake_tool, tmp_path, "import_motion", video2rig.project_folder(tmp_path / "wolf"),
+                             blend="rig.blend", clip="walk", save="walk.blend",
+                             motion=tmp_path / "wolf/video2rig/out/walk-slopforge.npz")
+    assert argv[argv.index("--motion") + 1] == str(tmp_path / "wolf/video2rig/out/walk-slopforge.npz")
