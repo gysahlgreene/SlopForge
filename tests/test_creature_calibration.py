@@ -177,6 +177,9 @@ def test_a_synthetic_clip_is_rendered_through_the_start_cameras_with_its_truth(r
     assert tool["synth"]["fps"] == tool["encoded_fps"] == asset["motion"]["clips"]["random_s0"]["fps"] == 24
     pipeline.synthesize_motion(root, config, manifest, "wolf", "gait_16", kind="gait", frames=24, fps=16)
     assert tool["synth"]["fps"] == tool["encoded_fps"] == asset["motion"]["clips"]["gait_16"]["fps"] == 16
+    # video2rig reads a clip's frame times from work/<clip>/timing.json; without it it assumes 24 fps (#149)
+    times = json.loads((project / "work/gait_16/timing.json").read_text())["times"]
+    assert times[:3] == pytest.approx([0, 1 / 16, 2 / 16]) and len(times) == 24
     assert asset["executions"][-1]["stages"][-1]["name"] == "synthetic_motion"
     with pytest.raises(FileExistsError, match="inspect or move it"):
         pipeline.synthesize_motion(root, config, manifest, "wolf", "random_s0", kind="random", seed=0, frames=24)

@@ -745,6 +745,11 @@ def synthesize_motion(project_root, config, manifest, name, clip, *, kind, seed=
             Image.fromarray(frame).save(exam / "frames" / f"{index:04d}.png")
         mp4.parent.mkdir(exist_ok=True)
         _encode(exam / "frames", mp4, fps)
+        # video2rig reads a clip's frame times from here; without them it assumes 24 fps (#149)
+        timing = video_intake.timing(count, fps, container_fps=fps)
+        (project / "work" / clip).mkdir(parents=True, exist_ok=True)
+        (project / "work" / clip / "timing.json").write_text(json.dumps(
+            {**timing, "content": f"{fps:g}fps, rendered by creature synth", "source": "slopforge.creature_synth"}))
     except Exception as exc:
         _fail(root, config, manifest, asset, execution, stage, exc, {})
         raise
