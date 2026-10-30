@@ -183,7 +183,9 @@ within the range). A knee or elbow is checked against video2rig's own hinge limi
 because exam v1 counts a result only when the truth stays inside the reader's ranges. Bad views, widths, kinds or
 `--action` refuse before anything is made. The clip is rendered with video2rig's `render_poses.py` through the start cameras:
 - each panel at its own size, one pose a picture;
-- joined as render_start joins panels, at 24 fps, into `clips/<clip>.mp4`;
+- joined as render_start joins panels into `clips/<clip>.mp4`, at 24 fps unless asked otherwise (the exam asks for
+  the rate clips are delivered at). A random motion and the gait keep their timing in seconds at any rate; an
+  authored action is sampled key by key, so it is rendered at 24 fps only;
 - with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
 
 A motion whose joints leave a panel is refused.
@@ -218,12 +220,15 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   training would delete the old report. Move both aside to train another.
   A failed training leaves no reader, since a partial one would pass for a trained one, and is recorded.
 - **The exam (`reader_exam`).** It takes these steps:
-  1. A known motion is rendered through the start cameras, as `creature synth` does (B2). The clip is
-     `exam_<kind>_s<seed>`, made once and reused by later readers' exams. A clip made with other frames, or by
-     another `synth_motion.py` than today's, is refused: a changed gait is another truth.
+  1. A known motion is rendered through the start cameras, as `creature synth` does (B2), at the rate the type's
+     video graph delivers clips at: its one `CreateVideo` node's fps, 16 for Wan (`--fps` sets another). The clip
+     is `exam_<kind>_s<seed>`, made once and reused by later readers' exams. A clip made with other frames, at
+     another rate, or by another `synth_motion.py` than today's, is refused: a changed gait is another truth. Move
+     its `exam/<clip>/` folder and `clips/<clip>.mp4` aside, and the next exam renders it again.
   2. video2rig's `check` and `run` read it with the reader. The reading is then fitted again as extraction refits a
-     walk ([B6](#extraction-and-bake-b6)): with settings for the clip's frame rate and within the walk's fit ranges.
-     The exam judges that refit, the fit a delivered clip gets.
+     walk ([B6](#extraction-and-bake-b6)): with settings for that rate and within the walk's fit ranges. The exam
+     judges that refit, the fit a delivered clip gets, and records it (`fit`: the rate, the settings and the
+     ranges) in its stage identity and under the reader.
   3. `blender/exam_pose.py` poses the truth and the fit on the rig and reads back every bone's head and tail per
      frame, with the creature's height along up and its facing.
   4. `slopforge/creature_exam.py` measures them and judges exam v1's twelve limits (`EXAM_V1`; their definitions and
@@ -240,8 +245,10 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   - The stage's parents are the reader and the known motion. Its outputs are kept per reader in `exam/<clip>/`:
     `exam-<reader>.json` (the verdict and every number), the posed frames, and copies of the fit and the check. The
     verdict is recorded per clip under the reader (`motion.reader.exams`).
-- **Extraction needs a passed exam.** `creature extract` refuses a reader with no exam, with any exam that did not
-  pass (a pass on another seed does not outweigh a failure), or that is not the reader the exams saw.
+- **Extraction needs a passed exam of the clip's fit.** `creature extract` counts only the exams that judged the
+  clip's own fit: the settings for its frame rate and its motion's fit ranges. It refuses a reader with no such exam,
+  with any such exam that did not pass (a pass on another seed does not outweigh a failure), or that is not the
+  reader the exams saw. An exam of another fit, such as one at 24 fps or before the ranges changed, is not counted.
 - **On the generated wolf (2026-10-30):** the reader trained on the H100 in 11.3 minutes (held-out median 5.6 px
   front, 4.07 px side, as the hand-trained reader's 5.6 and 4.04). Its exam passes 11 of the 12 limits, most with room
   (bone median 1.9°, worst body p95 9.5°, joint error 0.006 of the height), and fails the swap rate: 0.66 on the
@@ -343,7 +350,9 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
   cannot change:
   - **Frame rate.** The fit's per-frame thresholds are tuned for Seedance's 24 fps. A Wan clip runs at 16 fps, so
     they are converted to the clip's rate (`video2rig.fit_settings`): at 16 fps `despike_deg` 6 → 9, `w_smooth`
-    30 → 20, `lock_frames` and `lock_blend` 3 → 2, `bridge_max` 24 → 16 and `twin_switch` 6 → 4.
+    30 → 20, `lock_frames` and `lock_blend` 3 → 2, `bridge_max` 24 → 16 and `twin_switch` 6 → 4. `w_smooth` also
+    weights three solves that stay near one frame's own pose (the floor bend, the self-pass and the foot lock); the
+    conversion loosens those too, and the owner's chosen fit included that.
   - **The motion's ranges.** The reader trains on the type's wide `joint_limits`. A motion can fit within narrower
     ones (`video_motions.<motion>.fit_joint_limits`, by role, each above 0 and within the type's limit); the walk's
     are FrontPaw 90° and FrontToes 60°. The tool reads ranges only from creature.json and takes no option for them.

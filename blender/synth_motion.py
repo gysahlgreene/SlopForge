@@ -31,7 +31,7 @@ from mathutils import Quaternion, Vector
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.creature_views import range_violations  # noqa: E402
 
-FPS = 24
+FPS = 24   # unless the request asks for another rate: a motion keeps its timing in seconds
 # degrees about X (across the body), Y (twist) and Z, by the role of B1's generic names
 AMPLITUDES = (("Tail", (25, 6, 25)), ("Spine|Chest|Hips", (8, 5, 6)), ("Neck|Head", (18, 8, 18)),
               ("Thigh|UpperArm|Scapula", (25, 5, 8)), ("", (25, 5, 5)))
@@ -53,13 +53,13 @@ def lowest(meshes):
     return z
 
 
-def ease(frames):
-    t = np.clip(np.arange(frames) / (FPS * 0.5), 0, 1)
+def ease(frames, fps):
+    t = np.clip(np.arange(frames) / (fps * 0.5), 0, 1)
     return t * t * (3 - 2 * t)
 
 
-def noise(rng, frames):
-    t = np.arange(frames) / FPS
+def noise(rng, frames, fps):
+    t = np.arange(frames) / fps
     x = sum(rng.uniform(0.4, 1) * np.sin(2 * np.pi * rng.uniform(0.25, 1.2) * t + rng.uniform(0, 2 * np.pi))
             for _ in range(3))
     x = x - x[0]                                   # start at the start pose
@@ -111,7 +111,7 @@ def make(request):
     root = rig.pose.bones[root_name]
     root_frame = (world @ root.bone.matrix_local).to_3x3()
     floor = lowest(meshes)
-    frames = request.get("frames", 96)
+    frames, fps = request.get("frames", 96), request.get("fps", FPS)
     rng = np.random.default_rng(request.get("seed", 0))
     kind = request["kind"]
     quats = np.tile(np.array([1, 0, 0, 0], np.float32), (frames, len(names), 1))
@@ -125,13 +125,13 @@ def make(request):
         locs[frame] = tuple(root.location)
 
     if kind == "random":
-        e = ease(frames)
+        e = ease(frames, fps)
         curves = {}
         for name in moved:
             degrees = (10, 6, 4) if name == root_name else amplitude(name)
-            curves[name] = [np.radians(d) * noise(rng, frames) * e for d in degrees]
+            curves[name] = [np.radians(d) * noise(rng, frames, fps) * e for d in degrees]
             if name in hinges:                     # one way only: 0 .. 40 degrees folded
-                curves[name][0] = folds[name] * np.radians(40) * (noise(rng, frames) + 1) / 2 * e
+                curves[name][0] = folds[name] * np.radians(40) * (noise(rng, frames, fps) + 1) / 2 * e
                 curves[name][1] = curves[name][2] = np.zeros(frames)
         for f in range(frames):
             for name in moved:
@@ -141,7 +141,7 @@ def make(request):
                 quats[f, names.index(name)] = tuple(q)
             settle(f)
     elif kind == "gait":
-        t, e = np.arange(frames) / FPS, ease(frames)
+        t, e = np.arange(frames) / fps, ease(frames, fps)
         phase = {("hind", "L"): 0.0, ("front", "L"): 0.25, ("hind", "R"): 0.5, ("front", "R"): 0.75}
         for f in range(frames):
             for name in moved:
@@ -172,7 +172,7 @@ def make(request):
     elif kind == "action":
         action = bpy.data.actions[request["action"]]
         cycle = list(range(int(action.frame_range[0]), int(action.frame_range[1])))   # the last key repeats the first
-        lead_in = FPS // 2
+        lead_in = int(fps) // 2
         frames = lead_in + request.get("loops", 4) * len(cycle)
         quats = np.tile(np.array([1, 0, 0, 0], np.float32), (frames, len(names), 1))
         locs = np.zeros((frames, 3), np.float32)
@@ -187,7 +187,7 @@ def make(request):
             pose[root_name] = basis.to_quaternion()
             sampled.append((pose, basis.to_translation()))
         rig.animation_data.action = None
-        e = ease(lead_in)
+        e = ease(lead_in, fps)
         for f in range(frames):
             if f < lead_in:
                 pose, loc = sampled[0]
@@ -214,7 +214,7 @@ def make(request):
     if violations:
         raise ValueError(f"the {kind} motion turns bones past their declared ranges: {json.dumps(violations)}")
     np.savez_compressed(request["out"], bones=np.array(names), root=root_name, quats=quats, root_location=locs)
-    truth = {"kind": kind, "seed": request.get("seed", 0), "frames": int(frames), "fps": FPS,
+    truth = {"kind": kind, "seed": request.get("seed", 0), "frames": int(frames), "fps": fps,
              "action": request.get("action"), "root": root_name, "moved_bones": moved, "hinges": hinges,
              "fold_signs": folds, "facing": config["facing"], "lift_world_units": float(sink),
              "max_turn_degrees": {name: [round(float(value), 3) for value in np.abs(series).max(0)]

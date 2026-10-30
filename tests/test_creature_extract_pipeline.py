@@ -36,7 +36,8 @@ def extracted(video, monkeypatch):  # noqa: F811
     # the reader passed exam v1 (B3), as extraction needs
     manifest["assets"]["creature:wolf"]["motion"]["reader"] = {
         "status": "trained", "sha256": file_sha256(project / "reader/reader.pt"),
-        "exams": {"exam_gait_s0": {"status": "passed"}}}
+        "exams": {"exam_gait_s0": {"status": "passed", "fit": {"fps": 16.0, "settings": video2rig.fit_settings(16),
+                                                                "joint_limits": {"FrontPaw": 90, "FrontToes": 60}}}}}
     creature = json.loads((project / "creature.json").read_text())
     timing = json.loads((project / "work/walk_s11/timing.json").read_text())["times"]
     calls.update(fit={"bones": list(creature["fit_bones"]), "times": timing}, bake=dict(BAKED), steps=[])
@@ -65,7 +66,9 @@ def extracted(video, monkeypatch):  # noqa: F811
             if len(arrays["quaternions"]) > 5:   # the refit snaps its second bone 78 degrees about X into frame 5
                 arrays["quaternions"][5, 1] = [math.cos(math.radians(39)), math.sin(math.radians(39)), 0, 0]
             np.savez(motion, **arrays)
-            return {"report": [{"frame": 0, "median_miss_px": 3.2}, {"frame": 1, "median_miss_px": 3.6}], "motion": motion}
+            # video2rig writes no miss for a frame in which no keypoint is seen
+            return {"report": [{"frame": 0, "median_miss_px": 3.2}, {"frame": 1, "median_miss_px": 3.6},
+                               {"frame": 2, "median_miss_px": None}], "motion": motion}
         if step == "import_motion":
             calls["steps"].append("import_motion")
             calls["import_options"] = options
@@ -287,6 +290,10 @@ def test_animation_approve_refuses_a_changed_bake_report_or_sheet(extracted, nam
 @pytest.mark.parametrize("change", [
     lambda reader, project: reader["exams"]["exam_gait_s0"].update(status="failed"),
     lambda reader, project: reader.pop("exams"),
+    # a pass on another fit is not a pass on this clip's: the 24 fps settings, other ranges, no record of its fit
+    lambda reader, project: reader["exams"]["exam_gait_s0"]["fit"].update(settings=video2rig.fit_settings(24)),
+    lambda reader, project: reader["exams"]["exam_gait_s0"]["fit"].update(joint_limits={"FrontPaw": 150}),
+    lambda reader, project: reader["exams"]["exam_gait_s0"].pop("fit"),
     # review 2026-10-30: a pass on another seed does not outweigh a failed exam (no seed shopping)
     lambda reader, project: reader["exams"].update(exam_gait_s0={"status": "failed"}, exam_gait_s1={"status": "passed"}),
     lambda reader, project: (project / "reader/reader.pt").write_bytes(b"a reader the exam never saw"),
@@ -329,3 +336,13 @@ def test_the_clip_is_fitted_again_with_settings_for_its_rate_and_the_walks_range
     identity = asset["executions"][-1]["identity_inputs"]
     assert identity["fit_settings"] == options["settings"] and identity["fit_joint_limits"] == {"FrontPaw": 90,
                                                                                                 "FrontToes": 60}
+
+
+def test_an_end_bone_is_fitted_within_its_chains_fit_range():
+    """Review 2026-10-30: a fitted end bone takes its chain's range for training (creature_views._limit); the fit's
+    narrower ranges reach it the same way."""
+    creature = {"joints": {"FrontToes.L": {"range": 1.5}, "FrontToesEnd.L": {"range": 1.5},
+                           "HindToesEnd.L": {"range": 1.5}}}
+    fitted = pipeline._fit_creature(creature, {"FrontPaw": 90, "FrontToes": 60})["joints"]
+    assert fitted["FrontToes.L"]["range"] == fitted["FrontToesEnd.L"]["range"] == pytest.approx(math.radians(60))
+    assert fitted["HindToesEnd.L"]["range"] == 1.5 and creature["joints"]["FrontToesEnd.L"]["range"] == 1.5

@@ -221,6 +221,8 @@ def parser():
     exam_cmd.add_argument("--kind", default="gait", choices=("random", "gait"))
     exam_cmd.add_argument("--seed", type=int, default=0)
     exam_cmd.add_argument("--frames", type=int, default=96)
+    exam_cmd.add_argument("--fps", type=float, help="The known motion's rate (default: the rate the type's video "
+                          "graph delivers clips at)")
     synth_cmd = creature_commands.add_parser("synth", help="Render a known motion through the creature's start cameras")
     synth_cmd.add_argument("name", help="Tracked creature asset name")
     synth_cmd.add_argument("clip", help="Clip name: lower-case letters, digits and underscores")
@@ -795,7 +797,8 @@ def _run(args):
         return 0
     if args.command == "creature" and args.creature_action == "exam":
         from .pipelines.creature import exam_creature
-        result = exam_creature(root, config, manifest, args.name, kind=args.kind, seed=args.seed, frames=args.frames)
+        result = exam_creature(root, config, manifest, args.name, kind=args.kind, seed=args.seed, frames=args.frames,
+                               fps=args.fps)
         print(f"Creature {args.name}: exam v1 {result['status']} on {result['clip']}")
         for key, (op, limit) in result["limits"].items():
             value = result["measured"][key]
