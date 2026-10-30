@@ -43,12 +43,25 @@ _KIND_CODES: Dict[str, Dict[str, tuple[str, str]]] = {
     "rig": {"rig_limb_missing": ("rig_limbs_missing", "max_rig_limbs_missing"),
             "rig_asymmetric": ("rig_asymmetry", "max_rig_asymmetry"),
             "rig_bone_outside": ("rig_bones_outside", "max_rig_bones_outside")},
-    "video": {"video_frame_rate": ("video_distinct_fps", "min_video_distinct_fps"),
+    # B5's intake (slopforge/video_intake.py), then video2rig's check of the two views (D7, exam v1's limits)
+    "video": {"video_frame_rate": ("video_duplicate_share", "max_video_duplicate_share"),
+              "video_frame0": ("video_frame0_difference", "max_video_frame0_difference"),
+              "video_creature_missing": ("video_presence", "min_video_presence"),
+              "video_backdrop_drift": ("video_backdrop_drift", "max_video_backdrop_drift"),
+              "video_still": ("video_motion_share", "min_video_motion_share"),
+              "video_turned": ("video_turn", "max_video_turn"),
               "video_views_disagree": ("video_view_disagreement", "max_video_view_disagreement"),
+              "video_limbs_disagree": ("video_limb_disagreement", "max_video_limb_disagreement"),
+              "video_check_failed": ("video_check_failures", "max_video_check_failures"),
+              "video_refused": ("video_refusals", "max_video_refusals"),
               "video_cut": ("video_cuts", "max_video_cuts")},
     "motion": {"motion_joint_lost": ("motion_joints_lost", "max_motion_joints_lost"),
                "motion_limit_exceeded": ("motion_limit_violations", "max_motion_limit_violations"),
-               "exam_failed": ("exam_bone_error_degrees", "max_exam_bone_error_degrees")},
+               "exam_failed": ("exam_bone_error_degrees", "max_exam_bone_error_degrees"),
+               # B6's bake (slopforge/creature_gait.py): a full cycle plants every leg once; a period needs a leg
+               # planting twice
+               "motion_no_cycle": ("motion_min_plants", "min_motion_plants"),
+               "motion_no_period": ("motion_max_plants", "min_motion_max_plants")},
 }
 
 # ── Retryable categories (subset of all categories) ───────────────────

@@ -579,6 +579,27 @@ def generate_image(project_root, config, workflow, prompt, destination, prefix, 
     raise failed
 
 
+def generate_video(project_root, config, workflow, prompt, negative, image, destination, seed, metadata, *,
+                   workflow_inputs=None, timeout=3600):
+    """An image-to-video clip (B5): the image worker in its video mode, the start image bound to the graph's
+    LoadImage node, its SaveVideo result downloaded. A run with no video raises a retryable candidate_quality
+    StageFailure (the worker's refusal report); any other failure keeps its own category."""
+    root = Path(project_root).resolve()
+    report_path = str(Path(destination).parent / f".comfy_failure_{uuid.uuid4().hex}.json")
+    command = [python_executable(root, config), str(tool_root() / "processing/comfy_generate.py"),
+               "--workflow", str(resolve_workflow(root, str(workflow))), "--output", "video", "--image", str(image),
+               "--timeout", str(int(timeout)), "--prompt", prompt, "--negative", negative, "--dest", str(destination),
+               "--prefix", f"video/{Path(destination).stem}", "--seed", str(seed), "--metadata", str(metadata),
+               "--failure-report", report_path]
+    if workflow_inputs:
+        command.extend(["--workflow-inputs", json.dumps(workflow_inputs)])
+    Path(destination).parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(command, check=False, env=comfy_environment(config, root))
+    if result.returncode == 0:
+        return result
+    raise _build_failure_from_report(report_path)
+
+
 def _build_failure_from_report(report_path, default_category="unknown"):
     """Read and validate an invocation failure report, returning StageFailure.
 

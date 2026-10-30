@@ -102,7 +102,8 @@ def test_bundled_workflows_state_every_models_rights():
     from slopforge.workflow_requirements import workflow_output_rights
     expected = {"image_text2img_api.json": "cleared", "image_character_pose_api.json": "cleared",
                 "image_seamless_inpaint_api.json": "cleared", "image_edit_qwen_api.json": "cleared",
-                "image_views_qwen_edit_api.json": "cleared", "image_upscale_esrgan_api.json": "cleared"}
+                "image_views_qwen_edit_api.json": "cleared", "image_upscale_esrgan_api.json": "cleared",
+                "video_wan22_i2v_api.json": "cleared"}   # Wan 2.2, umT5-XXL and the Wan VAE: Apache-2.0 (2026-10-28)
     for path in sorted((tool_root() / "workflows").glob("*_api.json")):
         entries = workflow_output_rights(path)
         assert all("states no output_rights" not in entry.get("reason", "") for entry in entries), path.name

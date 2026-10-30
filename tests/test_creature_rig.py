@@ -204,7 +204,9 @@ def test_bones_past_a_chains_names_are_unfitted_ends():
     names = named(bones, legs)
     assert names["hindLx"] == "HindToesEnd.L" and names["hindRx"] == "HindToesEnd.R"
     assert {names["bone_6"], names["bone_9"]} == {"HeadEnd", "HeadEnd1"}
-    assert not {"HindToesEnd.L", "HeadEnd", "HeadEnd1"} & set(fit_bones(names))
+    rig = creature(bones, legs)
+    shares = structure(rig, LIMBS, LIMITS)["skin_share"]           # these ends lead no skin
+    assert not {"HindToesEnd.L", "HeadEnd", "HeadEnd1"} & set(fit_bones(names, shares))
 
 
 def test_a_rig_rooted_away_from_the_hind_legs_cannot_be_named():
@@ -232,7 +234,7 @@ def test_fit_bones_declare_thin_paws_the_auto_rule_would_drop():
     report = structure(rig, LIMBS, LIMITS)
     paws = [raw for raw in rig["bones"] if NAMES[raw].startswith(("FrontPaw", "HindPaw", "FrontToes", "HindToes"))]
     assert paws and all(report["skin_share"][raw] < 0.004 for raw in paws)
-    fit = fit_bones(bone_names(report, rig))
+    fit = fit_bones(bone_names(report, rig), report["skin_share"])
     assert set(fit) == set(NAMES.values()) - {"HeadEnd"}
     assert {name[:-2] for name in fit if name.endswith(".L")} == {name[:-2] for name in fit if name.endswith(".R")}
 
@@ -269,7 +271,8 @@ def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
 def test_a_checked_rig_carries_its_names_and_fit_bones_or_why_it_has_none():
     report = check_rig(creature(), LIMBS, LIMITS)
     assert report["status"] == "passed" and report["names"] == NAMES
-    assert report["fit_bones"] == fit_bones(report["names"]) and set(report["fit_bones"]) == set(fit_bones(NAMES))
+    assert report["fit_bones"] == fit_bones(report["names"], report["skin_share"])
+    assert set(report["fit_bones"]) == set(NAMES.values()) - {"HeadEnd"}
     bones = dict(BONES)
     bones["wing"] = ((0, -0.3, 0.68), "bone_3")
     report = check_rig(creature(bones), LIMBS, LIMITS)
@@ -312,3 +315,15 @@ def test_a_tail_standing_above_the_head_is_refused_not_mislabelled():
     assert report["status"] == "failed" and report["failure_codes"] == ["rig_structure"]
     assert "highest skin" in report["errors"][0] and "+Y" in report["errors"][0]
     assert rig["vertices"][:, 2].argmax() // 8 == 2 and tail     # the highest skin is the tail's
+
+
+def test_an_end_bone_that_leads_skin_is_fitted():
+    """Owner ruling (2026-10-27): fit_bones includes every bone that leads skin, end bones included. A five-bone hind
+    leg's last bone is HindToesEnd and carries the floor skin, as on the B1 wolf (0.40 % of its skin)."""
+    bones = {**BONES, "hindLx": ((0.1, 0.37, 0.02), "hindL3"), "hindRx": ((-0.1, 0.37, 0.02), "hindR3")}
+    legs = default_legs()
+    legs.update({f"hind{s}": ((x, 0.4), f"hind{s}x", f"hind{s}0") for s, x in (("L", 0.1), ("R", -0.1))})
+    report = check_rig(creature(bones, legs), LIMBS, LIMITS)
+    assert report["status"] == "passed"
+    assert {"HindToesEnd.L", "HindToesEnd.R"} <= set(report["fit_bones"])
+    assert "HeadEnd" not in report["fit_bones"]          # an end that leads no skin stays out
