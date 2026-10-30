@@ -33,7 +33,8 @@ def extracted(video, monkeypatch):  # noqa: F811
     pipeline.video_creature(root, config, manifest, "wolf", "walk", count=1, seed=11)
     # the reader passed exam v1 (B3), as extraction needs
     manifest["assets"]["creature:wolf"]["motion"]["reader"] = {
-        "status": "trained", "sha256": file_sha256(project / "reader/reader.pt"), "exam": {"status": "passed"}}
+        "status": "trained", "sha256": file_sha256(project / "reader/reader.pt"),
+        "exams": {"exam_gait_s0": {"status": "passed"}}}
     creature = json.loads((project / "creature.json").read_text())
     timing = json.loads((project / "work/walk_s11/timing.json").read_text())["times"]
     calls.update(fit={"bones": list(creature["fit_bones"]), "times": timing}, bake=dict(BAKED), steps=[])
@@ -271,8 +272,10 @@ def test_animation_approve_refuses_a_changed_bake_report_or_sheet(extracted, nam
 
 
 @pytest.mark.parametrize("change", [
-    lambda reader, project: reader.update(exam={"status": "failed"}),
-    lambda reader, project: reader.pop("exam"),
+    lambda reader, project: reader["exams"]["exam_gait_s0"].update(status="failed"),
+    lambda reader, project: reader.pop("exams"),
+    # review 2026-10-30: a pass on another seed does not outweigh a failed exam (no seed shopping)
+    lambda reader, project: reader["exams"].update(exam_gait_s0={"status": "failed"}, exam_gait_s1={"status": "passed"}),
     lambda reader, project: (project / "reader/reader.pt").write_bytes(b"a reader the exam never saw"),
 ])
 def test_a_reader_that_has_not_passed_the_exam_reads_no_clip(extracted, change):

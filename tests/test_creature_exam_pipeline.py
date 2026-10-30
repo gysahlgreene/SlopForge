@@ -13,7 +13,7 @@ from tests.test_creature_pipeline import stubs  # noqa: F401
 from tests.test_creature_reader_pipeline import calibrated  # noqa: F401
 
 
-def posed_walk(ends, frames=24, turn=0.0):
+def posed_walk(ends, frames=24, turn=0.0, fit_fps=24.0):
     """The hips and each leg's last bone hanging from them, the legs swinging in pairs; `turn` degrees on the first
     leg's fit."""
     names, parents = ["Hips", *ends], ["", *["Hips"] * len(ends)]
@@ -31,7 +31,7 @@ def posed_walk(ends, frames=24, turn=0.0):
         fit_tails[:, 1] = heads[:, 1] + (tails[:, 1] - heads[:, 1]) @ rotate.T
     return {"names": np.array(names), "parents": np.array(parents), "root": "Hips", "fps": 24.0, "height": 1.0,
             "up": np.array([0, 0, 1.0]), "forward": np.array([0, -1.0, 0]), "true_heads": heads, "true_tails": tails,
-            "fit_heads": heads, "fit_tails": fit_tails, "times": np.arange(frames) / 24.0, "moved": np.array(names)}
+            "fit_heads": heads, "fit_tails": fit_tails, "times": np.arange(frames) / fit_fps, "moved": np.array(names)}
 
 
 @pytest.fixture
@@ -41,7 +41,8 @@ def trained(calibrated, monkeypatch):  # noqa: F811
     pipeline.train_creature(root, config, manifest, "wolf")
     asset = manifest["assets"]["creature:wolf"]
     ends = [chain[-1] for leg, chain in sorted(pipeline._legs(root, asset).items())]
-    calls.update(turn=0.0, check={"verdict": "OK", "body": 0.004, "limbs": 0.011}, exam_steps=[])
+    calls.update(turn=0.0, check={"verdict": "OK", "body": 0.004, "limbs": 0.011}, exam_steps=[], fit_fps=24.0,
+                 label_gap=0.0)
     inner = pipeline._v2r
 
     def v2r(config_, root_, step, project_, log, **options):
@@ -51,6 +52,8 @@ def trained(calibrated, monkeypatch):  # noqa: F811
         work = Path(project_) / "work" / options["clip"]
         work.mkdir(parents=True, exist_ok=True)
         if step == "check":
+            if calls.get("check_crashes"):
+                raise RuntimeError("video2rig check exited with code 1")
             (work / "check.json").write_text(json.dumps(calls["check"]))
             return dict(calls["check"])
         (Path(project_) / "out").mkdir(exist_ok=True)
@@ -62,9 +65,10 @@ def trained(calibrated, monkeypatch):  # noqa: F811
 
     def exam_pose(config_, root_, blend, request):
         calls["pose_request"] = request
-        np.savez(request["out"], **posed_walk(ends, turn=calls["turn"]))
-        Path(request["report"]).write_text(json.dumps({"status": "complete", "label_gap": 0.0}))
-        return {"status": "complete", "label_gap": 0.0}
+        np.savez(request["out"], **posed_walk(ends, turn=calls["turn"], fit_fps=calls["fit_fps"]))
+        report = {"status": "complete", "label_gap": calls["label_gap"]}
+        Path(request["report"]).write_text(json.dumps(report))
+        return report
     monkeypatch.setattr(pipeline, "_v2r", v2r)
     monkeypatch.setattr(pipeline, "_exam_pose", exam_pose)
     return root, config, manifest, calls, project
@@ -86,8 +90,8 @@ def test_a_trained_reader_passes_exam_v1_on_a_known_walk_as_a_recorded_stage(tra
         ("synthetic_motion", "data.motion_truth"), ("synthetic_motion", "data.motion_labels"),
         ("synthetic_motion", "video.synthetic_clip")}
     assert {ref["type"] for ref in stage["outputs"]} >= {"report.motion_exam", "data.motion_fit"}
-    exam = asset["motion"]["reader"]["exam"]
-    assert exam["status"] == "passed" and exam["clip"] == "exam_gait_s0"
+    exam = asset["motion"]["reader"]["exams"]["exam_gait_s0"]
+    assert exam["status"] == "passed"
     assert exam["measured"]["views_body_pct"] == pytest.approx(0.4)
     report = json.loads((root / exam["report"]).read_text())
     assert report["verdict"]["status"] == "passed" and report["exam"]["frames_compared"] == 24
@@ -99,7 +103,7 @@ def test_a_reader_that_reads_a_leg_wrong_fails_the_exam_by_name_and_is_recorded(
     result = pipeline.exam_creature(root, config, manifest, "wolf")
     assert result["status"] == "failed"
     assert "worst_body_median_deg" in result["failures"] and "worst_body_p95_deg" in result["failures"]
-    exam = manifest["assets"]["creature:wolf"]["motion"]["reader"]["exam"]
+    exam = manifest["assets"]["creature:wolf"]["motion"]["reader"]["exams"]["exam_gait_s0"]
     assert exam["status"] == "failed" and exam["failures"] == result["failures"]
     assert manifest["assets"]["creature:wolf"]["executions"][-1]["status"] == "succeeded"   # an answer, not an error
 
@@ -137,3 +141,82 @@ def test_the_cli_examines_and_exits_nonzero_on_a_failed_exam(trained, capsys):
     assert main(["--project", str(root), "creature", "exam", "wolf"]) == 1
     out = capsys.readouterr().out
     assert "exam v1 failed" in out and "worst_body_p95_deg" in out
+
+
+def test_the_exam_reads_only_the_reader_its_training_recorded(trained):
+    """Review 2026-10-30: reader A trained, moved aside, B trained, A put back: the exam must not read A and record
+    B as examined."""
+    root, config, manifest, calls, project = trained
+    first = (project / "reader/reader.pt").read_bytes()
+    for name in ("reader.pt", "reader-train.json"):
+        (project / "reader" / name).rename(project / "reader" / f"{name}.first")
+    pipeline.train_creature(root, config, manifest, "wolf")
+    (project / "reader/reader.pt").write_bytes(first)
+    with pytest.raises(ValueError, match="not the reader creature train last made"):
+        pipeline.exam_creature(root, config, manifest, "wolf")
+
+
+@pytest.mark.parametrize("change", [{"fit_fps": 30.0}, {"label_gap": float("nan")}, {"label_gap": 0.01}])
+def test_an_exam_counts_only_when_every_truth_frame_is_compared_with_the_truth_it_rendered(trained, change):
+    from slopforge.failures import StageFailure
+    root, config, manifest, calls, project = trained
+    calls.update(change)     # read at 30 fps, 24 pairs reach only 20 truth frames; a truth unlike its render
+    with pytest.raises(StageFailure, match="cannot count"):
+        pipeline.exam_creature(root, config, manifest, "wolf")
+    assert manifest["assets"]["creature:wolf"]["motion"]["reader"]["exams"]["exam_gait_s0"]["status"] == "error"
+
+
+def test_a_view_check_with_no_reading_fails_its_measures(trained):
+    root, config, manifest, calls, project = trained
+    calls["check"] = {"verdict": "FAIL", "body": None, "limbs": None}
+    result = pipeline.exam_creature(root, config, manifest, "wolf")
+    assert result["status"] == "failed" and {"views_body_pct", "views_limbs_pct"} <= set(result["failures"])
+
+
+def test_a_crashed_exam_is_an_error_not_a_verdict(trained):
+    root, config, manifest, calls, project = trained
+    calls["check_crashes"] = True
+    with pytest.raises(RuntimeError):
+        pipeline.exam_creature(root, config, manifest, "wolf")
+    assert manifest["assets"]["creature:wolf"]["motion"]["reader"]["exams"]["exam_gait_s0"]["status"] == "error"
+
+
+def test_each_readers_exam_keeps_its_own_fit_and_check(trained):
+    root, config, manifest, calls, project = trained
+    pipeline.exam_creature(root, config, manifest, "wolf")
+    tag = manifest["assets"]["creature:wolf"]["motion"]["reader"]["sha256"][:12]
+    stage = manifest["assets"]["creature:wolf"]["executions"][-1]["stages"][-1]
+    kept = {ref["type"]: ref["path"] for ref in stage["outputs"]}
+    assert kept["data.motion_fit"].endswith(f"exam/exam_gait_s0/fit-{tag}.npz")
+    assert kept["report.view_check"].endswith(f"exam/exam_gait_s0/check-{tag}.json")
+
+
+@pytest.mark.parametrize("change, words", [
+    (lambda clip, stage: clip.update(frames=48), "frames"),
+    (lambda clip, stage: stage["settings"].update(tool_sha256="an older synth_motion.py"), "synth_motion"),
+])
+def test_a_reused_exam_clip_must_be_the_known_motion_asked_for(trained, change, words):
+    """Review 2026-10-30: an exam clip is reused by name; one made with other frames, or by an older gait (this
+    package changed the gait), is not the same truth."""
+    root, config, manifest, calls, project = trained
+    pipeline.exam_creature(root, config, manifest, "wolf")
+    asset = manifest["assets"]["creature:wolf"]
+    synth = next(stage for execution in asset["executions"] for stage in execution["stages"]
+                 if stage["name"] == "synthetic_motion")
+    change(asset["motion"]["clips"]["exam_gait_s0"], synth)
+    with pytest.raises(ValueError, match=words):
+        pipeline.exam_creature(root, config, manifest, "wolf")
+
+
+def test_the_posing_never_reads_an_earlier_report(tmp_path, monkeypatch):
+    report = tmp_path / "pose.json"
+    report.write_text('{"status": "complete", "label_gap": 0.0}')         # a crashed Blender leaves the old one
+    monkeypatch.setattr(pipeline.subprocess, "run", lambda *args, **kwargs: None)
+    with pytest.raises(RuntimeError, match="wrote no report"):
+        pipeline._exam_pose({}, tmp_path, tmp_path / "rig.blend",
+                            {"report": str(report), "out": str(tmp_path / "posed.npz")})
+
+
+def test_a_legs_tip_is_its_last_fitted_bone():
+    legs = {"front.L": ["FrontPaw.L", "FrontToes.L"], "hind.L": ["HindToes.L", "HindToesEnd.L"]}
+    assert pipeline._limb_ends(legs, ["FrontPaw.L", "FrontToes.L", "HindToes.L"]) == ["FrontToes.L", "HindToes.L"]

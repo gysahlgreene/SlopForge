@@ -8,6 +8,7 @@ readers train on the configured GPU provider (providers.video2rig.train_host), o
 """
 import json
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -196,8 +197,11 @@ def read_output(project, step, clip=None):
     return result
 
 
-# what training does not read: an earlier reader, and the clips, readings and fits of the project
-_NOT_SENT = ("reader/reader*.pt", "work/", "out/", "clips/")
+# what training does not read: an earlier reader, and the clips, readings, fits and exams of the project
+_NOT_SENT = ("reader/reader*.pt", "work/", "out/", "clips/", "exam/")
+# rsync's own SSH keeps alive and gives up on a stalled link; training stops after three hours (readers took 11-58 min)
+_RSYNC = ["rsync", "-a", "-e", "ssh -o BatchMode=yes -o ServerAliveInterval=30", "--timeout=600"]
+TRAIN_TIMEOUT = 3 * 3600
 
 
 def _train_remote(tools, project, steps, log):
@@ -211,7 +215,11 @@ def _train_remote(tools, project, steps, log):
         with open(log, "a") as stream:
             stream.write("$ " + shlex.join(argv) + "\n")
             stream.flush()
-            done = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, text=True, check=False, **kwargs)
+            try:
+                done = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, text=True, check=False, **kwargs)
+            except subprocess.TimeoutExpired:
+                raise StageFailure("environment", f"video2rig train on {host}: {name} did not finish in "
+                                   f"{kwargs.get('timeout')} s", operation="video2rig train", remedy=f"Read {log}")
         if done.returncode != 0:
             raise StageFailure("environment", f"video2rig train on {host}: {name} exited with code {done.returncode}",
                                operation="video2rig train", remedy=f"Read {log}", evidence={"log": str(log)})
@@ -219,21 +227,25 @@ def _train_remote(tools, project, steps, log):
     made = subprocess.run(ssh + ["mktemp -d /tmp/slopforge-reader-XXXXXX"], capture_output=True, text=True,
                           check=False)
     remote = made.stdout.strip()
-    if made.returncode != 0 or not remote.startswith("/tmp/slopforge-reader-"):
+    if made.returncode != 0 or not re.fullmatch(r"/tmp/slopforge-reader-[A-Za-z0-9]+", remote):
         raise StageFailure("environment", f"video2rig train: no working folder on {host}: "
                            + ((made.stderr or "").strip().splitlines() or ["no reply"])[-1],
                            operation="video2rig train", remedy=f"Check that `ssh {host}` works without a prompt")
     try:
-        step("send", ["rsync", "-a", *[word for pattern in _NOT_SENT for word in ("--exclude", pattern)],
+        step("send", [*_RSYNC, *[word for pattern in _NOT_SENT for word in ("--exclude", pattern)],
                       f"{project}/", f"{host}:{remote}/"])
         payload = {"python": tools["train_python"], "checkout": tools["train_checkout"], "project": remote,
                    "steps": steps}
         step("train", ssh + [shlex.join([tools["train_python"], "-", "train", json.dumps(payload)])],
-             input=Path(runtime.__file__).read_text())
-        step("fetch", ["rsync", "-a", f"{host}:{remote}/reader/reader.pt", f"{host}:{remote}/reader/reader-train.json",
+             input=Path(runtime.__file__).read_text(), timeout=TRAIN_TIMEOUT)
+        step("fetch", [*_RSYNC, f"{host}:{remote}/reader/reader.pt", f"{host}:{remote}/reader/reader-train.json",
                        f"{project}/reader/"])
     finally:
-        subprocess.run(ssh + [f"rm -rf {shlex.quote(remote)}"], capture_output=True, check=False)
+        removed = subprocess.run(ssh + [f"rm -rf {shlex.quote(remote)}"], capture_output=True, text=True, check=False)
+        if removed.returncode != 0:
+            with open(log, "a") as stream:
+                stream.write(f"{remote} was not removed from {host}: "
+                             + ((removed.stderr or "").strip() or f"exit {removed.returncode}") + "\n")
 
 
 def run(config, project_root, step, project, log, **options):

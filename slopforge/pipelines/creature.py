@@ -301,8 +301,9 @@ def _v2r(config, root, step, project, log, **options):
     return video2rig.run(config, root, step, project, log, **options)
 
 
-def _video2rig_identity(config, root, reader=None):
-    return video2rig.identity(video2rig.preflight(config, root)["local"], reader)
+def _video2rig_identity(config, root, reader=None, role="local"):
+    """The provider record of the machine that runs the step: "local", or "train" (the GPU provider when set)."""
+    return video2rig.identity(video2rig.preflight(config, root)[role], reader)
 
 
 def _synth(config, root, blend, request):
@@ -452,7 +453,7 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
     return {"status": "calibrated", "project": record["project"], "framing": chosen, "training_poses": count}
 
 
-TRAIN_STEPS = 9000   # every reader so far (#149, B5): 19 to 58 minutes on the H100
+TRAIN_STEPS = 9000   # every reader so far (#149, B5, B3): 11 to 58 minutes on the H100
 
 
 def train_creature(project_root, config, manifest, name, *, steps=TRAIN_STEPS):
@@ -469,9 +470,10 @@ def train_creature(project_root, config, manifest, name, *, steps=TRAIN_STEPS):
         raise ValueError(f"creature {name} is not calibrated: run `slopforge creature calibrate {name}` first")
     project = root / record["project"]
     reader = project / "reader/reader.pt"
-    if reader.exists():
-        raise FileExistsError(f"{reader} exists and a reader is never replaced (its clips name its hash): move it "
-                              "aside to train another")
+    if reader.exists() or (project / "reader/reader-train.json").exists():
+        raise FileExistsError(f"{reader.parent} holds a reader, and a reader is never replaced (its clips and exams "
+                              "name its hash; training would delete its report): move reader.pt and "
+                              "reader-train.json aside to train another")
     made = [stage for stage in _stages(asset)
             if stage.get("name") == "detector_training_set" and stage.get("status") == "succeeded"]
     if not made:
@@ -484,7 +486,7 @@ def train_creature(project_root, config, manifest, name, *, steps=TRAIN_STEPS):
                                         "video2rig": video2rig.runtime.VIDEO2RIG_REVISION,
                                         "dinov2": video2rig.runtime.DINOV2_REVISION})
     stage = start_stage(execution, "detector_training", 1, parents, {"steps": steps},
-                        {"provider": _video2rig_identity(config, root), "trained_on": where,
+                        {"provider": _video2rig_identity(config, root, role="train"), "trained_on": where,
                          "reproducibility": provenance_fact("not_recorded", reason="GPU training is not bit-repeatable; "
                                                             "the same steps give a similar, not the same, reader")})
     begin_stage(stage)
@@ -517,9 +519,17 @@ def train_creature(project_root, config, manifest, name, *, steps=TRAIN_STEPS):
 EXAM_POSE = "blender/exam_pose.py"
 
 
+def _limb_ends(legs, fit_bones):
+    """Each declared leg's last fitted bone: its `.tip` is the leg's end the reader reads (a skinless end bone the fit
+    leaves out reads nothing)."""
+    return [[bone for bone in chain if bone in fit_bones][-1] for chain in legs.values()]
+
+
 def _exam_pose(config, root, blend, request):
     """blender/exam_pose.py on the rig .blend: the known motion's truth and the reader's fit posed; its report,
     RuntimeError when Blender wrote none."""
+    for stale in (request["report"], request["out"]):   # a Blender that dies must not leave an earlier answer
+        Path(stale).unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(prefix="slopforge-exam-") as temporary:
         path = Path(temporary) / "request.json"
         path.write_text(json.dumps(request, default=str))
@@ -543,6 +553,9 @@ def exam_creature(project_root, config, manifest, name, *, kind="gait", seed=0, 
     if record.get("status") != "calibrated" or entry.get("status") != "trained":
         raise ValueError(f"creature {name} has no trained reader: run `slopforge creature train {name}` first")
     reader, reader_ref = _made_by(root, asset, "detector_training", entry.get("path"), f"creature {name}'s reader")
+    if reader_ref["sha256"] != entry.get("sha256"):
+        raise ValueError(f"{reader} is not the reader creature train last made for {name} (its record names "
+                         f"{str(entry.get('sha256'))[:12]}): put that reader back, or train another")
     clip = f"exam_{kind}_s{seed}"
     if clip not in (record.get("clips") or {}):   # the truth is the same for every reader: rendered once
         synthesize_motion(root, config, manifest, name, clip, kind=kind, seed=seed, frames=frames)
@@ -551,10 +564,21 @@ def exam_creature(project_root, config, manifest, name, *, kind="gait", seed=0, 
     known = [_made_by(root, asset, "synthetic_motion", (folder / item).relative_to(root).as_posix(),
                       f"the known motion's {item}")[1] for item in ("poses.npz", "truth.json", "labels.npz")]
     known.append(_made_by(root, asset, "synthetic_motion", record["clips"][clip]["clip"], f"clip {clip}")[1])
+    # a reused clip must be the motion asked for, made by today's synth_motion.py (a changed gait is another truth)
+    made = record["clips"][clip]
+    synth = [stage for stage in _stages(asset) if stage.get("name") == "synthetic_motion"
+             and any(ref.get("path") == known[-1]["path"] for ref in stage.get("outputs") or [])]
+    if (made.get("kind"), made.get("seed"), made.get("frames")) != (kind, seed, frames):
+        raise ValueError(f"exam clip {clip} was made with {made.get('frames')} frames ({made.get('kind')}, seed "
+                         f"{made.get('seed')}), not {frames}: move {folder} aside to make it again")
+    if not synth or synth[-1]["settings"].get("tool_sha256") != tool_sha256(tool_root() / "blender/synth_motion.py"):
+        raise ValueError(f"exam clip {clip} was made by another synth_motion.py than this one: move {folder} and "
+                         f"{root / made['clip']} aside to make it again")
     blend, _ = _rig_blend(root, asset)
     parents, tag = [reader_ref, *known], entry["sha256"][:12]
     paths = {"report": folder / f"exam-{tag}.json", "posed": folder / f"posed-{tag}.npz",
-             "pose_report": folder / f"pose-{tag}.json"}
+             "pose_report": folder / f"pose-{tag}.json", "fit": folder / f"fit-{tag}.npz",
+             "check": folder / f"check-{tag}.json"}
     execution = start_execution(asset, {"stage": "reader_exam", "reader_sha256": entry["sha256"], "clip": clip,
                                         "known_motion": {ref["path"]: ref["sha256"] for ref in known}, "exam": "v1",
                                         "tools_sha256": {"creature_exam": file_sha256(creature_exam.__file__),
@@ -563,14 +587,17 @@ def exam_creature(project_root, config, manifest, name, *, kind="gait", seed=0, 
                         {"clip": clip, "limits": {key: list(rule) for key, rule in creature_exam.EXAM_V1.items()}},
                         {"provider": _video2rig_identity(config, root, reader=reader)})
     begin_stage(stage)
-    exam_record = entry["exam"] = {"status": "examining", "clip": clip}
+    exam_record = entry.setdefault("exams", {})[clip] = {"status": "examining"}
     manifest_path = root / config["asset_pipeline"]["manifest"]
     save_manifest(manifest_path, manifest)
     log = project.parent / "video2rig.log"
     try:
         check = _v2r(config, root, "check", project, log, clip=clip)
         fit = _v2r(config, root, "run", project, log, clip=clip)
-        posing = _exam_pose(config, root, blend, {"truth": str(folder), "fit": str(fit["motion"]),
+        # each reader's exam keeps its own fit and check: the next reader's run overwrites the project's
+        shutil.copy(fit["motion"], paths["fit"])
+        shutil.copy(project / "work" / clip / "check.json", paths["check"])
+        posing = _exam_pose(config, root, blend, {"truth": str(folder), "fit": str(paths["fit"]),
                                                   "facing": asset["rigging"]["facing"], "out": str(paths["posed"]),
                                                   "report": str(paths["pose_report"])})
         if posing.get("status") != "complete":
@@ -582,24 +609,27 @@ def exam_creature(project_root, config, manifest, name, *, kind="gait", seed=0, 
         exam = creature_exam.compare(posed, moved=posed["moved"], reader={
             "conf": reading["conf"], "views": [str(view) for view in reading["views"]],
             "keypoints": json.loads(str(reading["keypoints"]))})
-        # an exam counts only when every frame is compared and the truth is what was rendered (exam v1)
-        if exam["frames_compared"] != exam["frames_true"] or posing["label_gap"] > 1e-4 * posed["height"]:
-            raise StageFailure("processing_validation", f"the exam cannot count: {exam['frames_compared']} of "
-                               f"{exam['frames_true']} frames compared, the truth {posing['label_gap']:.3g} from the "
-                               "render's labels", operation="creature exam", remedy=f"Read {log}")
-        ends = [chain[-1] for chain in _legs(root, asset).values()]
+        # an exam counts only when every truth frame is compared and the truth is what was rendered (exam v1)
+        if (exam["truth_frames_compared"] != exam["frames_true"]
+                or not posing["label_gap"] <= 1e-4 * posed["height"]):
+            raise StageFailure("processing_validation", f"the exam cannot count: {exam['truth_frames_compared']} of "
+                               f"{exam['frames_true']} truth frames compared, the truth {posing['label_gap']:.3g} from "
+                               "the render's labels", operation="creature exam", remedy=f"Read {log}")
+        ends = _limb_ends(_legs(root, asset), record["creature"]["fit_bones"])
         verdict = creature_exam.judge(creature_exam.measures(exam, check, limb_ends=ends))
         paths["report"].write_text(json.dumps({"clip": clip, "reader_sha256": entry["sha256"], "verdict": verdict,
                                                "label_gap": posing["label_gap"], "check": check, "exam": exam},
                                               indent=2, default=float))
     except (Exception, KeyboardInterrupt) as exc:
         _fail(root, config, manifest, asset, execution, stage, exc, exam_record)
+        exam_record["status"] = "error"     # an exam that did not run to a verdict is not a failed reader
+        save_manifest(manifest_path, manifest)
         raise
     outputs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind_, "reader_exam", 1, parents)
                for label, kind_, path in (("report", "report.motion_exam", paths["report"]),
                                           ("posed", "data.exam_posed", paths["posed"]),
-                                          ("fit", "data.motion_fit", fit["motion"]),
-                                          ("check", "report.view_check", project / "work" / clip / "check.json"))]
+                                          ("fit", "data.motion_fit", paths["fit"]),
+                                          ("check", "report.view_check", paths["check"]))]
     finish_stage(stage, "succeeded", outputs)
     finish_execution(execution, "succeeded")
     exam_record.update(status=verdict["status"], failures=verdict["failures"], measured=verdict["measured"],
@@ -1040,8 +1070,10 @@ def extract_creature(project_root, config, manifest, name, clip):
                          "with it")
     # the plan's B6 gate: a reader reads clips into animation only once it has read a known motion well (exam v1)
     reader_record = record.get("reader") or {}
-    if (reader_record.get("sha256") != file_sha256(project / "reader/reader.pt")
-            or (reader_record.get("exam") or {}).get("status") != "passed"):
+    exams = reader_record.get("exams") or {}
+    # every exam it sat must have passed: a pass on another seed does not outweigh a failure
+    if (reader_record.get("sha256") != file_sha256(project / "reader/reader.pt") or not exams
+            or any(not isinstance(item, dict) or item.get("status") != "passed" for item in exams.values())):
         raise ValueError(f"creature {name}'s reader has not passed the motion exam: run `slopforge creature exam "
                          f"{name}` (on a reader `creature train {name}` made) first")
     blend, blend_ref = _rig_blend(root, asset)

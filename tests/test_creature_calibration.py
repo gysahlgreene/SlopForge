@@ -85,8 +85,8 @@ def tool(monkeypatch):
     monkeypatch.setattr(pipeline, "_v2r", run)
     monkeypatch.setattr(pipeline, "_synth", synth)
     monkeypatch.setattr(pipeline, "_encode", lambda frames, mp4: Path(mp4).write_bytes(b"mp4"))
-    monkeypatch.setattr(pipeline, "_video2rig_identity", lambda config, root, reader=None: {
-        "name": "video2rig", "output_rights": {"status": "cleared"}})
+    monkeypatch.setattr(pipeline, "_video2rig_identity", lambda config, root, reader=None, role="local": {
+        "name": "video2rig", "role": role, "output_rights": {"status": "cleared"}})
     return calls
 
 

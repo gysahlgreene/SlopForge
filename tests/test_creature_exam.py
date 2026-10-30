@@ -129,3 +129,9 @@ def test_the_measures_come_from_the_exam_and_videorigs_check():
     assert measured["worst_tail_p95_deg"] == 0.0          # no tail bones
     assert (measured["detection_side"], measured["detection_other"], measured["limb_tips_best_view"]) == (1.0, 1.0, 1.0)
     assert (measured["views_body_pct"], measured["views_limbs_pct"]) == (pytest.approx(0.4), pytest.approx(1.1))
+
+
+def test_a_fit_with_no_frame_in_the_truth_is_refused_plainly():
+    heads, tails = walk()
+    with pytest.raises(ValueError, match="no fitted frame"):
+        creature_exam.compare(posed(heads, tails, times=np.arange(10) / 24.0 + 10), moved=NAMES)

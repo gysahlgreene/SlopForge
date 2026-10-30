@@ -28,7 +28,8 @@ def calibrated(rigged, tool, monkeypatch):  # noqa: F811
         if step != "train":
             return inner(config_, root_, step, project_, log, **options)
         tool["steps"].append((step, options))
-        (Path(project_) / "reader/reader.pt").write_bytes(b"trained reader")
+        tool["trained"] = tool.get("trained", 0) + 1
+        (Path(project_) / "reader/reader.pt").write_bytes(f"trained reader {tool['trained']}".encode())
         if tool.get("train_fails"):
             raise StageFailure("environment", "video2rig train on gpu-box: train exited with code 1",
                                operation="video2rig train", remedy="Read the log")
@@ -54,6 +55,8 @@ def test_a_calibrated_creatures_reader_is_trained_as_a_recorded_stage(calibrated
     assert stage["settings"]["steps"] == 9000
     assert stage["provenance"]["held_out"] == TRAINED["held_out"]
     assert stage["provenance"]["reproducibility"]["status"] == "not_recorded"   # GPU training is not bit-repeatable
+    # review 2026-10-30: the machine that trains is the one checked and recorded, not this one
+    assert stage["provenance"]["provider"]["role"] == "train"
     reader = asset["motion"]["reader"]
     assert reader["status"] == "trained" and reader["sha256"] == file_sha256(project / "reader/reader.pt")
     assert reader["held_out_median_px"] == {"v2r_front": 5.6, "v2r_side": 4.04}
@@ -67,12 +70,13 @@ def test_a_reader_is_trained_only_for_a_calibrated_creature(rigged, tool):  # no
     assert not [step for step, _ in tool["steps"] if step == "train"]
 
 
-def test_an_existing_reader_is_not_replaced(calibrated):
+@pytest.mark.parametrize("left", ["reader.pt", "reader-train.json"])
+def test_an_existing_reader_or_its_report_is_not_replaced(calibrated, left):
     root, config, manifest, calls, project = calibrated
-    (project / "reader/reader.pt").write_bytes(b"a reader made by hand")
-    with pytest.raises(FileExistsError, match="move it aside"):
+    (project / "reader" / left).write_bytes(b"made by hand")
+    with pytest.raises(FileExistsError, match="move reader.pt and reader-train.json aside"):
         pipeline.train_creature(root, config, manifest, "wolf")
-    assert (project / "reader/reader.pt").read_bytes() == b"a reader made by hand"
+    assert (project / "reader" / left).read_bytes() == b"made by hand"
     assert not [step for step, _ in calls["steps"] if step == "train"]
 
 

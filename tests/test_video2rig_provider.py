@@ -368,7 +368,7 @@ def test_relative_paths_never_land_in_the_pinned_checkout(install, fake_tool, tm
     assert check(install)["status"] == "ready"  # nothing was written into the checkout
 
 
-def remote_training(project, monkeypatch, fail=None):
+def remote_training(project, monkeypatch, fail=None, mktemp_reply="/tmp/slopforge-reader-a1b2\n"):
     """subprocess.run on the GPU provider: a fresh folder, the project sent, the runtime training there, the reader
     brought back, the folder removed; `fail` names the step that exits 1."""
     calls = []
@@ -383,8 +383,8 @@ def remote_training(project, monkeypatch, fail=None):
         if step == "fetch":
             (project / "reader/reader.pt").write_bytes(b"trained")
             (project / "reader/reader-train.json").write_text('{"steps": 9000, "held_out": {}}')
-        return SimpleNamespace(returncode=0, stdout="/tmp/slopforge-reader-a1b2\n" if step == "mktemp" else "",
-                               stderr="")
+        reply = {"mktemp": mktemp_reply}.get(step, "")
+        return SimpleNamespace(returncode=0, stdout=reply, stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
     return calls
 
@@ -404,16 +404,20 @@ def test_a_reader_trains_on_the_gpu_provider_and_comes_back(install, tmp_path, m
     assert mktemp[:4] == ["ssh", "-o", "BatchMode=yes", "-o"] and "mktemp -d /tmp/slopforge-reader-" in mktemp[-1]
     # the training pictures go; an earlier reader, clips, readings and fits stay here (the hand-run recipe)
     assert send[:2] == ["rsync", "-a"] and send[-2:] == [f"{project}/", "gpu-box:/tmp/slopforge-reader-a1b2/"]
+    # review 2026-10-30: rsync's own SSH keeps alive and gives up on a stalled link; the exams' renders stay here
+    assert "--timeout=600" in send and send[send.index("-e") + 1] == "ssh -o BatchMode=yes -o ServerAliveInterval=30"
+    assert fetch[:5] == send[:5]
     assert [send[i + 1] for i, word in enumerate(send) if word == "--exclude"] == [
-        "reader/reader*.pt", "work/", "out/", "clips/"]
+        "reader/reader*.pt", "work/", "out/", "clips/", "exam/"]
     # the runtime trains there, offline against the pinned backbone, as its preflight runs there
     assert options["input"] == Path(runtime.__file__).read_text()
     assert train[-1].startswith("/opt/v2r/.venv/bin/python - train ")
     assert json.loads(train[-1].split(" train ", 1)[1].strip("'")) == {
         "python": "/opt/v2r/.venv/bin/python", "checkout": "/opt/v2r/video2rig",
         "project": "/tmp/slopforge-reader-a1b2", "steps": 9000}
-    assert fetch == ["rsync", "-a", "gpu-box:/tmp/slopforge-reader-a1b2/reader/reader.pt",
-                     "gpu-box:/tmp/slopforge-reader-a1b2/reader/reader-train.json", f"{project}/reader/"]
+    assert fetch[-3:] == ["gpu-box:/tmp/slopforge-reader-a1b2/reader/reader.pt",
+                          "gpu-box:/tmp/slopforge-reader-a1b2/reader/reader-train.json", f"{project}/reader/"]
+    assert options["timeout"] == video2rig.TRAIN_TIMEOUT                    # a hung GPU job does not hang the CLI
     assert remove[-1] == "rm -rf /tmp/slopforge-reader-a1b2"
 
 
@@ -559,3 +563,19 @@ def test_render_start_takes_the_declared_facing(install, tmp_path):
     argv = video2rig.command(config(install), tmp_path, "render_start", tmp_path / "wolf", blend="w.blend",
                              framing=framing)
     assert argv[-1] == "--facing=-Y"     # "--facing -Y" reads -Y as an option to argparse
+
+
+def test_an_odd_working_folder_reply_is_refused(install, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    remote_training(project, monkeypatch, mktemp_reply="/tmp/slopforge-reader-a1b2\n/tmp/slopforge-reader-x\n")
+    with pytest.raises(StageFailure, match="no working folder"):
+        video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+
+
+def test_a_folder_left_on_the_host_is_named_in_the_log(install, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    remote_training(project, monkeypatch, fail="remove")
+    video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+    assert "/tmp/slopforge-reader-a1b2 was not removed from gpu-box" in (tmp_path / "log").read_text()

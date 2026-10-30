@@ -49,6 +49,9 @@ def compare(posed, *, moved, reader=None, conf=CONFIDENCE):
     fit_heads, fit_tails = np.asarray(posed["fit_heads"], float), np.asarray(posed["fit_tails"], float)
     frame_of = np.rint(np.asarray(posed["times"], float) * float(posed["fps"])).astype(int)
     pairs = [(k, int(i)) for k, i in enumerate(frame_of) if 0 <= i < len(true_heads)]
+    if not pairs:
+        raise ValueError(f"no fitted frame falls in the truth's {len(true_heads)} frames: the fit's times are not the "
+                         "known motion's")
     root = index[posed["root"]]
     ends = [name for name in moved if not any(parent == name and child in moved
                                               for child, parent in zip(names, posed["parents"]))]
@@ -113,6 +116,7 @@ def compare(posed, *, moved, reader=None, conf=CONFIDENCE):
     worst = max(rotation, key=lambda name: rotation[name]["p95"])
     return {
         "frames_true": len(true_heads), "frames_fitted": len(frame_of), "frames_compared": len(pairs),
+        "truth_frames_compared": len({i for _, i in pairs}),
         "height_armature_units": round(height, 5),
         "summary": {"joint_position_error": _stats(all_position), "joint_position_error_root_relative": _stats(all_relative),
                     "root_travel": root_travel, "bone_rotation_error_degrees": _stats(all_rotation),
@@ -150,7 +154,9 @@ def measures(exam, check, *, limb_ends):
             "detection_side": side, "detection_other": other,
             "limb_tips_best_view": min(tips) if len(tips) == len(limb_ends) else None,
             "swap_worst": summary["near_far_swap_rate_max"],
-            "views_body_pct": check["body"] * 100, "views_limbs_pct": check["limbs"] * 100}
+            # a check that read no view disagreement has none to judge: unread, so failed
+            "views_body_pct": None if check.get("body") is None else check["body"] * 100,
+            "views_limbs_pct": None if check.get("limbs") is None else check["limbs"] * 100}
 
 
 def judge(measured):
