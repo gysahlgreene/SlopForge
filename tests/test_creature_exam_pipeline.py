@@ -212,6 +212,7 @@ def test_the_posing_never_reads_an_earlier_report(tmp_path, monkeypatch):
     report = tmp_path / "pose.json"
     report.write_text('{"status": "complete", "label_gap": 0.0}')         # a crashed Blender leaves the old one
     monkeypatch.setattr(pipeline.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pipeline, "blender_executable", lambda config, root: "blender")   # CI has no Blender
     with pytest.raises(RuntimeError, match="wrote no report"):
         pipeline._exam_pose({}, tmp_path, tmp_path / "rig.blend",
                             {"report": str(report), "out": str(tmp_path / "posed.npz")})
