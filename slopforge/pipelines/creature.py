@@ -1012,7 +1012,18 @@ def _check_fit(motion, creature, times):
         problems.append("the fit's rotations or root positions are not finite")
     if problems:
         raise StageFailure("processing_validation", "; ".join(problems), operation="creature extract",
-                           remedy="read video2rig.log and work/<clip>/report.json; the clip and the fit are kept")
+                           remedy="read video2rig.log and work/<clip>/fit-slopforge-report.json; the clip and the fit are kept")
+
+
+def _biggest_turn(motion):
+    """The fit's largest turn of one bone between successive frames, and the frame it lands on."""
+    with np.load(motion) as fit:
+        q, bones = fit["quaternions"], fit["bones"]
+    if len(q) < 2:
+        return {"deg": 0.0, "bone": "", "frame": 0}
+    turn = np.degrees(2 * np.arccos(np.clip(np.abs((q[1:] * q[:-1]).sum(axis=-1)), 0, 1)))
+    frame, bone = np.unravel_index(int(np.argmax(turn)), turn.shape)
+    return {"deg": round(float(turn[frame, bone]), 1), "bone": str(bones[bone]), "frame": int(frame) + 1}
 
 
 def _calibration_output(root, asset, relative):
@@ -1135,7 +1146,7 @@ def extract_creature(project_root, config, manifest, name, clip):
     save_manifest(manifest_path, manifest)
     extraction = entry["extraction"] = {"status": "extracting"}
     try:
-        read = _v2r(config, root, "run", project, log, clip=clip)    # the reading, its own fit and its warnings
+        _v2r(config, root, "run", project, log, clip=clip)   # the reading; run's own fit and report.json go unused
         fit = _refit(config, root, project, log, clip, fps=entry["fps"], limits=limits, creature=creature)
         _check_fit(fit["motion"], creature, times)
     except (Exception, KeyboardInterrupt) as exc:
@@ -1149,8 +1160,10 @@ def extract_creature(project_root, config, manifest, name, clip):
                 if path.is_file()]
     finish_stage(stage, "succeeded", fit_refs)
     misses = [item["median_miss_px"] for item in fit["report"] if isinstance(item, dict) and "median_miss_px" in item]
-    extraction.update(fit=Path(fit["motion"]).relative_to(root).as_posix(), warnings=read["report"].get("warnings", []),
-                      fit_report={key: value for key, value in read["report"].items() if key != "warnings"},
+    turn = _biggest_turn(fit["motion"])
+    extraction.update(fit=Path(fit["motion"]).relative_to(root).as_posix(), biggest_turn=turn,
+                      warnings=[f"{turn['bone']} turns {turn['deg']:.0f} degrees in one frame at frame {turn['frame']}"]
+                      if turn["deg"] > 45 else [],   # video2rig's own warning, for the fit that is delivered
                       fit_median_miss_px=round(float(np.median(misses)), 2) if misses else None)
 
     folder.mkdir(parents=True)

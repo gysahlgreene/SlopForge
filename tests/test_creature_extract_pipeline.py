@@ -60,7 +60,11 @@ def extracted(video, monkeypatch):  # noqa: F811
             calls["steps"].append("fit")
             calls["fit_options"] = options
             motion = Path(project_) / "out" / f"{options['clip']}{options['tag']}.npz"
-            shutil.copy(Path(project_) / "out" / f"{options['clip']}.npz", motion)
+            with np.load(Path(project_) / "out" / f"{options['clip']}.npz") as run_fit:
+                arrays = dict(run_fit)
+            if len(arrays["quaternions"]) > 5:   # the refit snaps its second bone 78 degrees about X into frame 5
+                arrays["quaternions"][5, 1] = [math.cos(math.radians(39)), math.sin(math.radians(39)), 0, 0]
+            np.savez(motion, **arrays)
             return {"report": [{"frame": 0, "median_miss_px": 3.2}, {"frame": 1, "median_miss_px": 3.6}], "motion": motion}
         if step == "import_motion":
             calls["steps"].append("import_motion")
@@ -118,7 +122,7 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
     assert {"video2rig", "blender"} <= sources and any(source.endswith(".safetensors") for source in sources)
     extraction = asset["motion"]["clips"]["walk_s11"]["extraction"]
     assert extraction["status"] == "review_required" and extraction["stride_m"] == 0.5
-    assert extraction["warnings"] == ["v2r_side view: outline weak in frames 4-20",
+    assert extraction["warnings"] == [f"{calls['fit']['bones'][1]} turns 78 degrees in one frame at frame 5",
                                       "hind.L planted once: its steps barely lift; watch it in the review sheet"]
     sheet = root / extraction["review_sheet"]
     assert sheet.is_file() and Image.open(sheet).size[0] > 4 * 200     # clip front | clip side | baked front | side
@@ -317,6 +321,11 @@ def test_the_clip_is_fitted_again_with_settings_for_its_rate_and_the_walks_range
     assert Path(calls["import_options"]["motion"]).name == "walk_s11-slopforge.npz"
     extraction = entry["extraction"]
     assert extraction["fit"].endswith("out/walk_s11-slopforge.npz") and extraction["fit_median_miss_px"] == 3.4
+    # its biggest one-frame turn is measured on the refit; run's report describes a fit nothing delivers
+    bone = calls["fit"]["bones"][1]
+    assert extraction["biggest_turn"] == {"deg": 78.0, "bone": bone, "frame": 5}
+    assert extraction["warnings"][0] == f"{bone} turns 78 degrees in one frame at frame 5"
+    assert "fit_report" not in extraction and not any("outline weak" in item for item in extraction["warnings"])
     identity = asset["executions"][-1]["identity_inputs"]
     assert identity["fit_settings"] == options["settings"] and identity["fit_joint_limits"] == {"FrontPaw": 90,
                                                                                                 "FrontToes": 60}

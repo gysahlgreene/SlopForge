@@ -137,19 +137,33 @@ facing (#142). Passed as `--facing=-Y`, the facing is never guessed from foot an
   3 of 4 clips; in front + side with the split-screen prompt, in none. The three-quarter view reads a lifted front paw
   better, since a dead-front camera puts it in front of the hind leg (#140), so `three-quarter,side` is the choice
   (`--views`) for a creature whose motion does not come from video.
-- **Widths.** The type declares equal panels (960 + 960), as #149's clips had. Without declared widths, render_start's
-  one scale for both panels decides: the 1920 px frame is split by each view's span across its panel (three-quarter:
-  0.77 length + 0.64 width; side: the length), so neither panel wastes resolution.
-- **Margins.** `margin` 1.8 and `margin_wide` 1.2 come from the type. render_start's orthographic height is the
+- **Widths.** The type declares a narrow front panel and a wide side panel (640 + 1280): a creature seen from the
+  front needs little width. Without declared widths, render_start's one scale for both panels decides: the 1920 px
+  frame is split by each view's span across its panel (three-quarter: 0.77 length + 0.64 width; side: the length), so
+  neither panel wastes resolution.
+- **Margins.** `margin` 1.4 and `margin_wide` 1.2 come from the type. render_start's orthographic height is the
   larger of the creature's height × `margin` and its length × `margin_wide` across the side panel. The scale decides
   whether video2rig's check passes:
   - At 1.45 the length margin framed the wolf 344 px tall; all four clips that reached the check failed it (body
     1.7–3.0 %, limbs 3.2 %).
   - At 1.2 the height margin frames it 400 px tall, as in #149; the same seeds and prompt passed (seed 2: body 1.2 %,
     seed 3: 0.9 %).
+  - With 640 + 1280 panels and `margin` 1.4 (2026-10-30), the wolf is about 1.3× larger again. Seed 2 passed the
+    check (body 1.37 %, limbs 0.92 %). The owner judged its fitted walk "significantly better but needs improvement"
+    than the walk from equal panels at 1.8.
 
   Reader error is roughly fixed in pixels, so a smaller creature disagrees more as a share of its height. Scaling
-  alone did not explain the failures, though: Wan may also draw a smaller creature's two views less alike.
+  alone did not explain the failures, though: Wan may also draw a smaller creature's two views less alike. A larger
+  creature barely raised the reader's confidence in Wan's front view (0.58 to 0.61–0.66).
+- **Two views, two blind spots.** video2rig's `check`, and one step of its fit, need exactly two views. Each pair
+  leaves part of a quadruped's walk unmeasured:
+  - Front + side: the side view hides the far legs (confidence 0.19), and the front view shows their swing end on.
+    The owner called the result "robotic".
+  - Three-quarter (front-left, the only three-quarter render_start draws) + right side: no view measures the right
+    legs' sideways place. The fit crossed the left and right paws in 34 of 109 frames (front) and 40 (hind), by up to
+    33 cm; front + side crossed them in 2 of 109.
+
+  The type keeps front + side, the pair the tool was designed for.
 - **Check.** The calibration refuses a start frame from which any of the skin falls outside a panel.
 
 **The reader's training pictures** are rendered with `reader.prepare --skip-train`: the type's `training_poses`, 3000.
@@ -207,7 +221,9 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   1. A known motion is rendered through the start cameras, as `creature synth` does (B2). The clip is
      `exam_<kind>_s<seed>`, made once and reused by later readers' exams. A clip made with other frames, or by
      another `synth_motion.py` than today's, is refused: a changed gait is another truth.
-  2. video2rig's `check` and `run` read it with the reader.
+  2. video2rig's `check` and `run` read it with the reader. The reading is then fitted again as extraction refits a
+     walk ([B6](#extraction-and-bake-b6)): with settings for the clip's frame rate and within the walk's fit ranges.
+     The exam judges that refit, the fit a delivered clip gets.
   3. `blender/exam_pose.py` poses the truth and the fit on the rig and reads back every bone's head and tail per
      frame, with the creature's height along up and its facing.
   4. `slopforge/creature_exam.py` measures them and judges exam v1's twelve limits (`EXAM_V1`; their definitions and
@@ -232,6 +248,9 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   scapulae, while every limb pair is at most 0.033. The spike's rig had no scapulae. The gait's 3° chest sway parts
   the shoulders by up to 5.3 % of the height, and the fit reads that sway on the wrong side. Whether exam v1's swap
   rate counts shoulders is the owner's decision; until then the exam fails and this reader extracts no clip.
+  With the larger start frame (640 + 1280, `margin` 1.4) and the refit, a newly trained reader's exam gives the same
+  picture: 11 of 12 limits pass (bone median 1.68°, worst body p95 9.2°, joint error 0.006 of the height, detection
+  0.88 side and 0.54 front), and the scapulae's swap rate is 0.54. Every limb pair is at most 0.033.
 - **The port reproduces the spike.** On the spike's own data the measures match its `exam_compare.py` to 0.001: 471
   numbers on the wolf gait, and 365 on the Fox walk with the paw-range reader, the failing exam, detection and swap
   rate included. That data is private (the spike's working folder), so no repository test pins this match; the
@@ -258,8 +277,9 @@ slopforge --project ~/UnityProjects/MyGame creature video wolf walk            #
   - `video_motions.walk`: #149's split-screen continuous-walk prompt, its negative list, 121 frames, 4 retries.
   - `video_views`: how the prompt names each view of the start frame.
 
-  `{subject}` is the asset's description and `{name}` its name. Front and side are #149's wording; the three-quarter
-  line is untried.
+  `{subject}` is the asset's description and `{name}` its name. Front and side are #149's wording. The three-quarter
+  line says "to its left", since render_start's three-quarter camera is always front-left. With it and a right side
+  view, Wan held the facing on the first seed (2026-10-30), but the fit crossed the legs (see the start frame, B2).
 - **Candidates.**
   - **Seeds.** Each try uses the next seed from `--seed`. The tries are the clips asked for plus the motion's
     retries (D6), decided by `failures.should_retry`.
@@ -318,14 +338,35 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 ```
 
 - **Extraction (`motion_extraction`).** video2rig's `run` reads the clip with the creature's reader and fits the rig.
-  Only the reader road is used; a missing `reader.pt` is refused. The fit (`out/<clip>.npz`) is checked before
+  Only the reader road is used; a missing `reader.pt` is refused. The reading is then fitted again with
+  `python -m video2rig.reader.fit <project> <clip> --tag=-slopforge`, because `run` fits with settings the project
+  cannot change:
+  - **Frame rate.** The fit's per-frame thresholds are tuned for Seedance's 24 fps. A Wan clip runs at 16 fps, so
+    they are converted to the clip's rate (`video2rig.fit_settings`): at 16 fps `despike_deg` 6 → 9, `w_smooth`
+    30 → 20, `lock_frames` and `lock_blend` 3 → 2, `bridge_max` 24 → 16 and `twin_switch` 6 → 4.
+  - **The motion's ranges.** The reader trains on the type's wide `joint_limits`. A motion can fit within narrower
+    ones (`video_motions.<motion>.fit_joint_limits`, by role, each above 0 and within the type's limit); the walk's
+    are FrontPaw 90° and FrontToes 60°. The tool reads ranges only from creature.json and takes no option for them.
+    The refit therefore sees the project through a temporary sibling folder (`.<project>-fit`): every entry is
+    linked, and creature.json is replaced. The folder is removed afterwards.
+  - **What it changed** on the generated wolf's walk (2026-10-30, the same reading): one-frame spikes smoothed
+    131 → 89; median keypoint miss 5.68 → 5.53 px; the worst one-frame paw turn 107–118° → 78°. Front paw and toe
+    turns over 30° in one frame fell from 32 to 24; the rest come from the toe readings, not from pinning the feet.
+    Shown side by side, the owner chose this fit ("i think d is best yeah").
+
+  The settings and ranges are part of the stage's identity. The refit (`out/<clip>-slopforge.npz`) is checked before
   anything bakes it:
   - its bones are creature.json's;
   - it has one fit per clip frame, at the intake's measured times (`timing.json`);
   - every number is finite.
 
-  video2rig's report (outline match, frames under the floor, joints at their limit, warnings) is recorded in
-  `motion.clips.<clip>.extraction`, not gated: D8's limits are not set. The review sheet shows the frames.
+  `motion.clips.<clip>.extraction` records the refit's median keypoint miss and its biggest one-frame turn of a bone
+  (`biggest_turn`: degrees, bone, frame), measured by SlopForge on the refit. Neither is gated, since D8's limits are
+  not set. Above 45° the turn is a warning in video2rig's own words. video2rig writes its summary report (outline
+  match, frames under the floor, joints at their limit) only for `run`'s fit, which is not delivered. That report is
+  kept as the stage's `report` file, not as the clip's warnings. Its outline match is not yet a usable measure on
+  these clips: the side view reads 0.08–0.12 even on B3's rendered exam clip, where the fit is known to within 2°.
+  The review sheet shows the frames.
 - **Bake (`motion_bake`).** video2rig's `import_motion` puts the fit on the rig .blend as an Action at the clip's
   real times. `blender/bake_extracted_motion.py` then samples every key in world space, and
   `slopforge/creature_gait.py` measures:
