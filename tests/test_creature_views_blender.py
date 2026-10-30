@@ -62,6 +62,33 @@ def test_a_seeded_motion_is_byte_stable_and_inside_its_ranges(rigged, tmp_path):
     assert report["status"] == "complete", process.stdout[-2000:]
 
 
+def test_the_gait_keeps_its_timing_in_seconds_at_another_frame_rate(rigged, tmp_path):
+    """Review 2026-10-30: the exam renders its gait at the rate clips are delivered at (Wan: 16 fps); frame 16 at
+    16 fps is the pose of frame 24 at 24 fps (one second in)."""
+    blend, config = rigged
+    for name, fps, frames in (("at24", 24, 48), ("at16", 16, 32)):
+        process, report = synth(tmp_path, blend, config, name, kind="gait", frames=frames, fps=fps)
+        assert report["status"] == "complete", process.stdout[-2000:] + process.stderr[-2000:]
+    assert json.loads((tmp_path / "at16.json").read_text())["fps"] == 16
+    at24, at16 = np.load(tmp_path / "at24.npz")["quats"], np.load(tmp_path / "at16.npz")["quats"]
+    assert len(at16) == 32 and np.allclose(at16[16], at24[24], atol=1e-5) and np.allclose(at16[30], at24[45], atol=1e-5)
+
+
+def test_the_gait_swings_one_bone_a_leg_and_curls_no_end_bone(rigged, tmp_path):
+    """2026-10-30, B3's exam on the B1 wolf: the gait swung both Scapula and UpperArm (B1's front legs have a scapula;
+    the spike's rig had none) and flexed HindToesEnd with HindToes (B1 fits skin-leading end bones; the spike moved
+    none), so a front leg kicked level and the toes flicked out of the frame."""
+    blend, config = rigged
+    config = {**config, "fit_bones": [*config["fit_bones"], "HeadEnd"]}      # an end bone fitted, as B1 fits the wolf's
+    process, report = synth(tmp_path, blend, config, "gait", kind="gait", frames=48)
+    assert report["status"] == "complete", process.stdout[-2000:] + process.stderr[-2000:]
+    turns = json.loads((tmp_path / "gait.json").read_text())["max_turn_degrees"]
+    assert turns["UpperArm.L"][0] > 10 and turns["Thigh.L"][0] > 10            # the leg swings, from the shoulder
+    assert turns["Scapula.L"] == [0.0, 0.0, 0.0] and turns["Scapula.R"] == [0.0, 0.0, 0.0]
+    ends = [name for name in turns if name.endswith(("ToesEnd.L", "ToesEnd.R", "HeadEnd"))]
+    assert ends and all(turns[name] == [0.0, 0.0, 0.0] for name in ends), {name: turns[name] for name in ends}
+
+
 def test_a_motion_past_a_declared_range_is_refused(rigged, tmp_path):
     blend, config = rigged
     tight = {**config, "joints": {**config["joints"], "Tail1": {"range": np.radians(5)}}}

@@ -294,6 +294,13 @@ if module == "video2rig.reader.train":
     reader.mkdir(exist_ok=True)
     (reader / "reader.pt").write_bytes(b"reader")
     (reader / "reader-train.json").write_text(json.dumps({{"held_out": {{"v2r_front": {{"median_px": 3.1}}}}}}))
+elif module == "video2rig.reader.fit":
+    project, clip = Path(rest[0]), rest[1]
+    tag = next(arg.split("=", 1)[1] for arg in rest if arg.startswith("--tag="))
+    sets = [rest[i + 1] for i, arg in enumerate(rest) if arg == "--set"]
+    (project / "out" / (clip + tag + ".npz")).write_bytes(b"refit")
+    (project / "work" / clip / ("fit" + tag + "-report.json")).write_text(json.dumps({{
+        "sets": sets, "creature": json.loads((project / "creature.json").read_text()), "project": str(project)}}))
 elif module == "video2rig":
     command, project, clip = rest[:3]
     work = Path(project) / "work" / clip
@@ -368,11 +375,80 @@ def test_relative_paths_never_land_in_the_pinned_checkout(install, fake_tool, tm
     assert check(install)["status"] == "ready"  # nothing was written into the checkout
 
 
-def test_training_is_refused_here_while_a_train_host_is_set(fake_tool, tmp_path):
-    fake_tool["asset_pipeline"]["tools"]["video2rig_train_host"] = "gpu-box"
-    with pytest.raises(StageFailure, match="gpu-box") as failure:
-        video2rig.run(fake_tool, tmp_path, "train", video2rig.project_folder(tmp_path / "c"), tmp_path / "log", steps=1)
-    assert failure.value.category == "configuration"
+def remote_training(project, monkeypatch, fail=None, mktemp_reply="/tmp/slopforge-reader-a1b2\n"):
+    """subprocess.run on the GPU provider: a fresh folder, the project sent, the runtime training there, the reader
+    brought back, the folder removed; `fail` names the step that exits 1."""
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        step = ("mktemp" if "mktemp" in argv[-1] else "remove" if argv[-1].startswith("rm -rf") else
+                "train" if " - train " in argv[-1] else "send" if argv[0] == "rsync" and argv[-1].startswith("gpu-box:")
+                else "fetch")
+        if step == fail:
+            return SimpleNamespace(returncode=1, stdout="", stderr="no route to host")
+        if step == "fetch":
+            (project / "reader/reader.pt").write_bytes(b"trained")
+            (project / "reader/reader-train.json").write_text('{"steps": 9000, "held_out": {}}')
+        reply = {"mktemp": mktemp_reply}.get(step, "")
+        return SimpleNamespace(returncode=0, stdout=reply, stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls
+
+
+def gpu_settings(install):
+    return config(install, video2rig_train_host="gpu-box", video2rig_train_python="/opt/v2r/.venv/bin/python",
+                  video2rig_train_checkout="/opt/v2r/video2rig")
+
+
+def test_a_reader_trains_on_the_gpu_provider_and_comes_back(install, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    calls = remote_training(project, monkeypatch)
+    result = video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+    assert result == {"steps": 9000, "held_out": {}} and (project / "reader/reader.pt").read_bytes() == b"trained"
+    (mktemp, _), (send, _), (train, options), (fetch, _), (remove, _) = calls
+    assert mktemp[:4] == ["ssh", "-o", "BatchMode=yes", "-o"] and "mktemp -d /tmp/slopforge-reader-" in mktemp[-1]
+    # the training pictures go; an earlier reader, clips, readings and fits stay here (the hand-run recipe)
+    assert send[:2] == ["rsync", "-a"] and send[-2:] == [f"{project}/", "gpu-box:/tmp/slopforge-reader-a1b2/"]
+    # review 2026-10-30: rsync's own SSH keeps alive and gives up on a stalled link; the exams' renders stay here
+    assert "--timeout=600" in send and send[send.index("-e") + 1] == "ssh -o BatchMode=yes -o ServerAliveInterval=30"
+    assert fetch[:5] == send[:5]
+    assert [send[i + 1] for i, word in enumerate(send) if word == "--exclude"] == [
+        "reader/reader*.pt", "work/", "out/", "clips/", "exam/"]
+    # the runtime trains there, offline against the pinned backbone, as its preflight runs there
+    assert options["input"] == Path(runtime.__file__).read_text()
+    assert train[-1].startswith("/opt/v2r/.venv/bin/python - train ")
+    assert json.loads(train[-1].split(" train ", 1)[1].strip("'")) == {
+        "python": "/opt/v2r/.venv/bin/python", "checkout": "/opt/v2r/video2rig",
+        "project": "/tmp/slopforge-reader-a1b2", "steps": 9000}
+    assert fetch[-3:] == ["gpu-box:/tmp/slopforge-reader-a1b2/reader/reader.pt",
+                          "gpu-box:/tmp/slopforge-reader-a1b2/reader/reader-train.json", f"{project}/reader/"]
+    assert options["timeout"] == video2rig.TRAIN_TIMEOUT                    # a hung GPU job does not hang the CLI
+    assert remove[-1] == "rm -rf /tmp/slopforge-reader-a1b2"
+
+
+@pytest.mark.parametrize("fail", ["send", "train", "fetch"])
+def test_a_failed_remote_training_leaves_no_reader_here_and_no_folder_there(install, tmp_path, monkeypatch, fail):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    calls = remote_training(project, monkeypatch, fail=fail)
+    with pytest.raises(StageFailure, match=fail) as failure:
+        video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+    assert failure.value.category == "environment"
+    assert calls[-1][0][-1] == "rm -rf /tmp/slopforge-reader-a1b2"
+    assert not (project / "reader/reader-train.json").exists() or fail == "fetch"
+
+
+def test_the_runtime_trains_with_the_pinned_offline_backbone(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(runtime.subprocess, "run", lambda argv, **kwargs: seen.update(argv=argv, **kwargs) or
+                        SimpleNamespace(returncode=0))
+    checkout = tmp_path / "video2rig"
+    assert runtime.train({"python": "/v/bin/python", "checkout": str(checkout), "project": "/tmp/p", "steps": 9000}) == 0
+    assert seen["argv"] == ["/v/bin/python", "-m", "video2rig.reader.train", "/tmp/p", "--steps", "9000"]
+    assert seen["cwd"] == checkout and seen["env"]["HF_HUB_OFFLINE"] == "1"
+    assert seen["env"]["HF_HOME"] == str(runtime.hf_home(checkout))
 
 
 def test_run_reports_a_missing_or_invalid_output(install, tmp_path):
@@ -494,3 +570,57 @@ def test_render_start_takes_the_declared_facing(install, tmp_path):
     argv = video2rig.command(config(install), tmp_path, "render_start", tmp_path / "wolf", blend="w.blend",
                              framing=framing)
     assert argv[-1] == "--facing=-Y"     # "--facing -Y" reads -Y as an option to argparse
+
+
+def test_an_odd_working_folder_reply_is_refused(install, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    remote_training(project, monkeypatch, mktemp_reply="/tmp/slopforge-reader-a1b2\n/tmp/slopforge-reader-x\n")
+    with pytest.raises(StageFailure, match="no working folder"):
+        video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+
+
+def test_a_folder_left_on_the_host_is_named_in_the_log(install, tmp_path, monkeypatch):
+    project = video2rig.project_folder(tmp_path / "wolf")
+    (project / "reader").mkdir(parents=True)
+    remote_training(project, monkeypatch, fail="remove")
+    video2rig.run(gpu_settings(install), tmp_path, "train", project, tmp_path / "log", steps=9000)
+    assert "/tmp/slopforge-reader-a1b2 was not removed from gpu-box" in (tmp_path / "log").read_text()
+
+
+def test_the_reader_fits_per_frame_settings_follow_the_clips_frame_rate():
+    """video2rig tuned its reader fit on Seedance's 24 fps content (fit.py SETTINGS @55d51b3): a threshold or window
+    counted in frames means 1.5x as long in time at Wan's 16 fps. At 24 fps the settings are the tool's own."""
+    assert video2rig.fit_settings(24) == {"despike_deg": 6.0, "w_smooth": 30.0, "lock_frames": 3, "lock_blend": 3,
+                                          "bridge_max": 24, "twin_switch": 6.0}
+    assert video2rig.fit_settings(16) == {"despike_deg": 9.0, "w_smooth": 20.0, "lock_frames": 2, "lock_blend": 2,
+                                          "bridge_max": 16, "twin_switch": 4.0}
+    with pytest.raises(ValueError, match="fps"):
+        video2rig.fit_settings(0)
+
+
+def test_a_refit_uses_its_settings_and_ranges_on_the_saved_reading(fake_tool, tmp_path):
+    """The reader fit's settings are not read from creature.json and `run --set` does not reach them (docs/CONFIG.md):
+    `reader.fit --set` refits the saved reading. Ranges for the fit alone come from an overlay of the project whose
+    creature.json is replaced; the reader trained on the project's own."""
+    project = video2rig.project_folder(tmp_path / "wolf")
+    for folder in ("out", "work/walk", "reader", "start"):
+        (project / folder).mkdir(parents=True)
+    trained = {"name": "wolf", "joints": {"FrontPaw.L": {"range": 2.6}}}
+    (project / "creature.json").write_text(json.dumps(trained))
+    narrower = {"name": "wolf", "joints": {"FrontPaw.L": {"range": 1.57}}}
+    result = video2rig.run(fake_tool, tmp_path, "fit", project, tmp_path / "log", clip="walk", tag="-slopforge",
+                           settings={"despike_deg": 9.0, "foot_lock": False}, creature=narrower)
+    assert result["motion"] == project / "out/walk-slopforge.npz" and result["motion"].read_bytes() == b"refit"
+    report = result["report"]
+    assert report["sets"] == ["despike_deg=9.0", "foot_lock=false"]        # JSON values: false, not False
+    assert report["creature"] == narrower and report["project"] != str(project)
+    assert json.loads((project / "creature.json").read_text()) == trained   # the project's own is untouched
+    assert sorted(path.name for path in project.parent.iterdir()) == ["video2rig"]   # the overlay is gone
+
+
+def test_import_motion_takes_the_chosen_fit(fake_tool, tmp_path):
+    argv = video2rig.command(fake_tool, tmp_path, "import_motion", video2rig.project_folder(tmp_path / "wolf"),
+                             blend="rig.blend", clip="walk", save="walk.blend",
+                             motion=tmp_path / "wolf/video2rig/out/walk-slopforge.npz")
+    assert argv[argv.index("--motion") + 1] == str(tmp_path / "wolf/video2rig/out/walk-slopforge.npz")
