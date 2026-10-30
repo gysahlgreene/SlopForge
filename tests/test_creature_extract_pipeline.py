@@ -3,6 +3,8 @@ and import_motion, bakes it in place and cut to its loop, and registers the FBX 
 stride, period and review sheet; `animation approve` is the human gate. video2rig and the Blender bake are stubs; the
 checks, records and decisions are the real code."""
 import json
+import math
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +36,8 @@ def extracted(video, monkeypatch):  # noqa: F811
     # the reader passed exam v1 (B3), as extraction needs
     manifest["assets"]["creature:wolf"]["motion"]["reader"] = {
         "status": "trained", "sha256": file_sha256(project / "reader/reader.pt"),
-        "exams": {"exam_gait_s0": {"status": "passed"}}}
+        "exams": {"exam_gait_s0": {"status": "passed", "fit": {"fps": 16.0, "settings": video2rig.fit_settings(16),
+                                                                "joint_limits": {"FrontPaw": 90, "FrontToes": 60}}}}}
     creature = json.loads((project / "creature.json").read_text())
     timing = json.loads((project / "work/walk_s11/timing.json").read_text())["times"]
     calls.update(fit={"bones": list(creature["fit_bones"]), "times": timing}, bake=dict(BAKED), steps=[])
@@ -54,8 +57,21 @@ def extracted(video, monkeypatch):  # noqa: F811
             report = {"frames": n, "warnings": ["v2r_side view: outline weak in frames 4-20"], "frames_under_floor": 2}
             (Path(project_) / "work" / options["clip"] / "report.json").write_text(json.dumps(report))
             return {"report": report, "motion": out}
+        if step == "fit":   # the reading fitted again: settings for the clip's rate, the walk's ranges
+            calls["steps"].append("fit")
+            calls["fit_options"] = options
+            motion = Path(project_) / "out" / f"{options['clip']}{options['tag']}.npz"
+            with np.load(Path(project_) / "out" / f"{options['clip']}.npz") as run_fit:
+                arrays = dict(run_fit)
+            if len(arrays["quaternions"]) > 5:   # the refit snaps its second bone 78 degrees about X into frame 5
+                arrays["quaternions"][5, 1] = [math.cos(math.radians(39)), math.sin(math.radians(39)), 0, 0]
+            np.savez(motion, **arrays)
+            # video2rig writes no miss for a frame in which no keypoint is seen
+            return {"report": [{"frame": 0, "median_miss_px": 3.2}, {"frame": 1, "median_miss_px": 3.6},
+                               {"frame": 2, "median_miss_px": None}], "motion": motion}
         if step == "import_motion":
             calls["steps"].append("import_motion")
+            calls["import_options"] = options
             Path(options["save"]).write_bytes(b"blend with the imported action")
             return None
         return inner(config_, root_, step, project_, log, **options)
@@ -92,7 +108,7 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
     root, config, manifest, calls, project = extracted
     result = pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
     asset = manifest["assets"]["creature:wolf"]
-    assert calls["steps"] == ["run", "import_motion"] and result["status"] == "review_required"
+    assert calls["steps"] == ["run", "fit", "import_motion"] and result["status"] == "review_required"
     request = calls["bake_request"]
     assert request["root_bone"] == "Hips" and set(request["legs"]) == {"front.L", "front.R", "hind.L", "hind.R"}
     assert all(len(bones) == 2 for bones in request["legs"].values())
@@ -109,7 +125,7 @@ def test_an_accepted_clip_is_extracted_baked_in_place_and_registered_as_a_candid
     assert {"video2rig", "blender"} <= sources and any(source.endswith(".safetensors") for source in sources)
     extraction = asset["motion"]["clips"]["walk_s11"]["extraction"]
     assert extraction["status"] == "review_required" and extraction["stride_m"] == 0.5
-    assert extraction["warnings"] == ["v2r_side view: outline weak in frames 4-20",
+    assert extraction["warnings"] == [f"{calls['fit']['bones'][1]} turns 78 degrees in one frame at frame 5",
                                       "hind.L planted once: its steps barely lift; watch it in the review sheet"]
     sheet = root / extraction["review_sheet"]
     assert sheet.is_file() and Image.open(sheet).size[0] > 4 * 200     # clip front | clip side | baked front | side
@@ -137,7 +153,7 @@ def test_a_fit_that_does_not_match_the_clip_or_the_creature_stops_before_the_bak
     change(calls["fit"])
     with pytest.raises(StageFailure, match=words):
         pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
-    assert calls["steps"] == ["run"]
+    assert calls["steps"] == ["run", "fit"]                     # the refit is what is checked
     stage = manifest["assets"]["creature:wolf"]["executions"][-1]["stages"][-1]
     assert stage["name"] == "motion_extraction" and stage["status"] == "failed"
 
@@ -274,6 +290,10 @@ def test_animation_approve_refuses_a_changed_bake_report_or_sheet(extracted, nam
 @pytest.mark.parametrize("change", [
     lambda reader, project: reader["exams"]["exam_gait_s0"].update(status="failed"),
     lambda reader, project: reader.pop("exams"),
+    # a pass on another fit is not a pass on this clip's: the 24 fps settings, other ranges, no record of its fit
+    lambda reader, project: reader["exams"]["exam_gait_s0"]["fit"].update(settings=video2rig.fit_settings(24)),
+    lambda reader, project: reader["exams"]["exam_gait_s0"]["fit"].update(joint_limits={"FrontPaw": 150}),
+    lambda reader, project: reader["exams"]["exam_gait_s0"].pop("fit"),
     # review 2026-10-30: a pass on another seed does not outweigh a failed exam (no seed shopping)
     lambda reader, project: reader["exams"].update(exam_gait_s0={"status": "failed"}, exam_gait_s1={"status": "passed"}),
     lambda reader, project: (project / "reader/reader.pt").write_bytes(b"a reader the exam never saw"),
@@ -284,3 +304,45 @@ def test_a_reader_that_has_not_passed_the_exam_reads_no_clip(extracted, change):
     with pytest.raises(ValueError, match="has not passed the motion exam.*creature exam wolf"):
         pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
     assert calls["steps"] == []
+
+
+def test_the_clip_is_fitted_again_with_settings_for_its_rate_and_the_walks_ranges(extracted):
+    """2026-10-30 (the owner's fit D): video2rig's reader fit counts its thresholds in frames tuned at 24 fps, and its
+    settings are reached only by refitting the reading (docs/CREATURES.md); the walk is fitted within its own paw
+    ranges while the reader keeps the ranges it trained on."""
+    from slopforge.backends import video2rig
+    root, config, manifest, calls, project = extracted
+    pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    assert calls["steps"][:3] == ["run", "fit", "import_motion"]
+    options = calls["fit_options"]
+    asset = manifest["assets"]["creature:wolf"]
+    entry = asset["motion"]["clips"]["walk_s11"]
+    assert options["tag"] == "-slopforge" and options["settings"] == video2rig.fit_settings(entry["fps"])
+    trained = asset["motion"]["creature"]["joints"]
+    for bone, joint in options["creature"]["joints"].items():
+        role = bone.split(".")[0]
+        expected = {"FrontPaw": math.radians(90), "FrontToes": math.radians(60)}.get(role, trained[bone]["range"])
+        assert joint["range"] == pytest.approx(expected), bone
+    assert json.loads((project / "creature.json").read_text())["joints"] == trained   # the reader's own, untouched
+    # the refit is what is checked, imported and recorded
+    assert Path(calls["import_options"]["motion"]).name == "walk_s11-slopforge.npz"
+    extraction = entry["extraction"]
+    assert extraction["fit"].endswith("out/walk_s11-slopforge.npz") and extraction["fit_median_miss_px"] == 3.4
+    # its biggest one-frame turn is measured on the refit; run's report describes a fit nothing delivers
+    bone = calls["fit"]["bones"][1]
+    assert extraction["biggest_turn"] == {"deg": 78.0, "bone": bone, "frame": 5}
+    assert extraction["warnings"][0] == f"{bone} turns 78 degrees in one frame at frame 5"
+    assert "fit_report" not in extraction and not any("outline weak" in item for item in extraction["warnings"])
+    identity = asset["executions"][-1]["identity_inputs"]
+    assert identity["fit_settings"] == options["settings"] and identity["fit_joint_limits"] == {"FrontPaw": 90,
+                                                                                                "FrontToes": 60}
+
+
+def test_an_end_bone_is_fitted_within_its_chains_fit_range():
+    """Review 2026-10-30: a fitted end bone takes its chain's range for training (creature_views._limit); the fit's
+    narrower ranges reach it the same way."""
+    creature = {"joints": {"FrontToes.L": {"range": 1.5}, "FrontToesEnd.L": {"range": 1.5},
+                           "HindToesEnd.L": {"range": 1.5}}}
+    fitted = pipeline._fit_creature(creature, {"FrontPaw": 90, "FrontToes": 60})["joints"]
+    assert fitted["FrontToes.L"]["range"] == fitted["FrontToesEnd.L"]["range"] == pytest.approx(math.radians(60))
+    assert fitted["HindToesEnd.L"]["range"] == 1.5 and creature["joints"]["FrontToesEnd.L"]["range"] == 1.5

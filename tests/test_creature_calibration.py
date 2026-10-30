@@ -79,12 +79,14 @@ def tool(monkeypatch):
     def synth(config, root, blend, request):
         calls["synth"] = request
         np.savez(request["out"], quats=np.zeros((request.get("frames", 96), 3, 4)))
-        Path(request["truth"]).write_text(json.dumps({"kind": request["kind"], "seed": request["seed"]}))
+        Path(request["truth"]).write_text(json.dumps({"kind": request["kind"], "seed": request["seed"],
+                                                      "fps": request["fps"]}))
         return {"status": "complete"}
 
     monkeypatch.setattr(pipeline, "_v2r", run)
     monkeypatch.setattr(pipeline, "_synth", synth)
-    monkeypatch.setattr(pipeline, "_encode", lambda frames, mp4: Path(mp4).write_bytes(b"mp4"))
+    monkeypatch.setattr(pipeline, "_encode",
+                        lambda frames, mp4, fps: (calls.update(encoded_fps=fps), Path(mp4).write_bytes(b"mp4")))
     monkeypatch.setattr(pipeline, "_video2rig_identity", lambda config, root, reader=None, role="local": {
         "name": "video2rig", "role": role, "output_rights": {"status": "cleared"}})
     return calls
@@ -110,7 +112,7 @@ def test_calibration_writes_creature_json_frames_the_views_and_renders_the_train
     assert steps == ["export_rig", "render_start", "prepare"]
     framing = dict(tool["steps"])["render_start"]["framing"]
     # the type's start frame is #149's view pair in equal panels (B5); the span split is creature_views' own test
-    assert framing["views"] == ["front", "side"] and framing["widths"] == [960, 960]
+    assert framing["views"] == ["front", "side"] and framing["widths"] == [640, 1280]
     assert dict(tool["steps"])["prepare"]["poses"] == 3000
     assert result["status"] == asset["motion"]["status"] == "calibrated"
     execution = asset["executions"][-1]
@@ -171,6 +173,13 @@ def test_a_synthetic_clip_is_rendered_through_the_start_cameras_with_its_truth(r
     assert np.abs(pixels[500, second + 20] - PANEL_COLOURS[1]).max() < 12  # then the second
     assert (pixels[500, second - 2:second + 2] == 8).all()                  # render_start's 4 px divider
     assert asset["motion"]["clips"]["random_s0"]["kind"] == "random" and result["clip"].endswith("random_s0.mp4")
+    # 24 fps unless asked: the motion is timed, the clip encoded and the record kept at that rate
+    assert tool["synth"]["fps"] == tool["encoded_fps"] == asset["motion"]["clips"]["random_s0"]["fps"] == 24
+    pipeline.synthesize_motion(root, config, manifest, "wolf", "gait_16", kind="gait", frames=24, fps=16)
+    assert tool["synth"]["fps"] == tool["encoded_fps"] == asset["motion"]["clips"]["gait_16"]["fps"] == 16
+    # video2rig reads a clip's frame times from work/<clip>/timing.json; without it it assumes 24 fps (#149)
+    times = json.loads((project / "work/gait_16/timing.json").read_text())["times"]
+    assert times[:3] == pytest.approx([0, 1 / 16, 2 / 16]) and len(times) == 24
     assert asset["executions"][-1]["stages"][-1]["name"] == "synthetic_motion"
     with pytest.raises(FileExistsError, match="inspect or move it"):
         pipeline.synthesize_motion(root, config, manifest, "wolf", "random_s0", kind="random", seed=0, frames=24)
@@ -252,7 +261,9 @@ def test_bad_framing_refuses_before_anything_is_made(rigged, tool, options):
 
 
 @pytest.mark.parametrize("options, message", [({"kind": "dance"}, "kind"), ({"kind": "action"}, "--action"),
-                                              ({"kind": "random", "frames": 0}, "frames")])
+                                              ({"kind": "random", "frames": 0}, "frames"),
+                                              ({"kind": "gait", "fps": 0}, "fps"), ({"kind": "gait", "fps": True}, "fps"),
+                                              ({"kind": "action", "action": "walk", "fps": 16}, "24 fps")])
 def test_a_bad_motion_request_refuses_before_a_clip_folder_exists(rigged, tool, options, message):
     root, config, manifest = rigged
     pipeline.calibrate_creature(root, config, manifest, "wolf")

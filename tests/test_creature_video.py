@@ -50,13 +50,15 @@ def test_walk_defaults_are_121_frames_the_wan_graph_and_every_intake_limit():
 def test_the_prompt_names_the_projects_own_view_pair():
     prompt, _ = video_prompt(video_settings(TYPE, "walk"), description="red fox", name="red fox",
                              views=["three-quarter", "side"], side="right")
-    assert "Left half: a fixed camera in front of the red fox and to its right" in prompt
+    # render_start's three-quarter camera is always at the creature's front left, whichever side the side camera takes
+    assert "Left half: a fixed camera in front of the red fox and to its left" in prompt
     assert "at the red fox's right side" in prompt and "{" not in prompt
 
 
-def test_the_types_start_frame_is_149s_view_pair():
-    """The views and panels the walks were generated from: front and side, equal panels."""
-    assert TYPE["views"] == ["front", "side"] and TYPE["widths"] == [960, 960]
+def test_the_types_start_frame_is_front_and_side_with_a_narrow_front_panel():
+    """2026-10-30: the owner judged front + side with the wolf drawn larger "significantly better" (three-quarter +
+    side crossed its legs). The front view needs little width, so the side panel takes two thirds."""
+    assert TYPE["views"] == ["front", "side"] and TYPE["widths"] == [640, 1280]
 
 
 @pytest.mark.parametrize("change, message", [
@@ -67,6 +69,9 @@ def test_the_types_start_frame_is_149s_view_pair():
     (lambda t: t["video_intake"].pop("max_video_turn"), "max_video_turn"),
     (lambda t: t["video_intake"].update(min_video_motion_share=True), "min_video_motion_share"),
     (lambda t: t.pop("video_workflow"), "video_workflow"),
+    (lambda t: t["video_motions"]["walk"].update(fit_joint_limits={"FrontPaw": 0}), "fit_joint_limits"),
+    (lambda t: t["video_motions"]["walk"].update(fit_joint_limits={"FrontPaw": 170}), "fit_joint_limits"),
+    (lambda t: t["video_motions"]["walk"].update(fit_joint_limits={"Wing": 30}), "fit_joint_limits"),
 ])
 def test_bad_or_missing_declarations_are_refused(change, message):
     asset_type = copy.deepcopy(TYPE)
@@ -80,13 +85,23 @@ def test_a_view_without_wording_is_refused():
         video_prompt(video_settings(TYPE, "walk"), description="wolf", name="wolf", views=["top", "side"], side="left")
 
 
-def test_the_types_framing_keeps_the_wolf_at_149s_scale():
-    """B5's live gate: at margin_wide 1.45 the side panel's length margin set the scale, the wolf 344 px tall, and the
-    four clips that reached video2rig's check all failed it (body 1.7-3.0 %, limbs 3.2 %); at #149's scale, the height
-    margin setting it and the wolf 400 px tall, the same seeds passed (seed 2 body 1.2 %, seed 3 0.9 %). render_start
-    sets the orthographic height to the larger of height x margin and length x margin_wide x 1080 / panel width."""
+def test_the_types_framing_draws_the_wolf_larger_than_149s():
+    """B5's live gate: at margin_wide 1.45 the side panel's length set the scale (the wolf 344 px tall) and four clips
+    failed video2rig's check; at #149's scale (margin 1.8) the same seeds passed. 2026-10-30: at margin 1.4, the wolf
+    about 1.3x larger again, the owner judged its walk "significantly better". render_start sets the orthographic
+    height to the larger of height x margin and length x margin_wide x 1080 / panel width: the height still sets it."""
     height, length = 0.780, 1.000                       # the B1 wolf's skin
     panel = TYPE["widths"][TYPE["views"].index("side")]
     ortho = max(height * TYPE["margin"], length * TYPE["margin_wide"] * 1080 / panel)
     assert ortho == pytest.approx(height * TYPE["margin"])
+    assert height * 1.8 / ortho == pytest.approx(1.29, abs=0.01)          # larger than #149's framing
     assert TYPE["margin_wide"] >= 1.2                  # a longer creature still keeps a fifth of room in its side panel
+
+
+def test_the_walk_is_fitted_within_walk_sized_paw_ranges():
+    """2026-10-30: the reader trains on the type's wide joint limits (a fox folds its front paws 148 deg), but a walk
+    fitted within them let noisy toe readings snap a front paw up to 118 deg in one frame; fitted within 90 / 60 deg,
+    at most 78 (the owner's choice, fit D). The ranges are the walk's alone, each within the type's own."""
+    settings = video_settings(TYPE, "walk")
+    assert settings["fit_joint_limits"] == {"FrontPaw": 90, "FrontToes": 60}
+    assert all(value <= TYPE["joint_limits"][role] for role, value in settings["fit_joint_limits"].items())

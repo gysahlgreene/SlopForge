@@ -135,3 +135,16 @@ def test_a_fit_with_no_frame_in_the_truth_is_refused_plainly():
     heads, tails = walk()
     with pytest.raises(ValueError, match="no fitted frame"):
         creature_exam.compare(posed(heads, tails, times=np.arange(10) / 24.0 + 10), moved=NAMES)
+
+
+def test_the_swap_rate_leaves_out_the_shoulder_blades_and_records_them():
+    """Owner ruling 2026-10-30: exam v1's swap rate ignores the shoulder blades. On B1's wolf they sit close together
+    and barely move, and the fit reads their 3-degree chest sway on the wrong side in about half the frames, while
+    every leg pair stays at 0.06 or under; their rate is still measured and recorded."""
+    heads, tails = walk()
+    exam = creature_exam.compare(posed(heads, tails), moved=NAMES)
+    exam["near_far_swap_rate"].update({"Scapula.L/Scapula.R": {"rate": 0.45, "frames_counted": 68},
+                                       "UpperArm.L/UpperArm.R": {"rate": 0.0532, "frames_counted": 92}})
+    measured = creature_exam.measures(exam, {"body": 0.004, "limbs": 0.011}, limb_ends=["Leg.L", "Leg.R"])
+    assert measured["swap_worst"] == 0.0532 and measured["swap_shoulder_blades"] == 0.45
+    assert "swap_shoulder_blades" not in creature_exam.EXAM_V1

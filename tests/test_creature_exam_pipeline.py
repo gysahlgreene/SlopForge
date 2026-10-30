@@ -46,6 +46,12 @@ def trained(calibrated, monkeypatch):  # noqa: F811
     inner = pipeline._v2r
 
     def v2r(config_, root_, step, project_, log, **options):
+        if step == "fit":       # the reading fitted again, as extraction fits a clip
+            calls["exam_steps"].append(("fit", options["clip"]))
+            calls["fit_options"] = options
+            motion = Path(project_) / "out" / f"{options['clip']}{options['tag']}.npz"
+            np.savez(motion, times=np.arange(24) / 24.0)
+            return {"report": [{"frame": 0, "median_miss_px": 2.0}], "motion": motion}
         if step not in ("check", "run"):
             return inner(config_, root_, step, project_, log, **options)
         calls["exam_steps"].append((step, options["clip"]))
@@ -79,7 +85,8 @@ def test_a_trained_reader_passes_exam_v1_on_a_known_walk_as_a_recorded_stage(tra
     result = pipeline.exam_creature(root, config, manifest, "wolf")
     assert result["status"] == "passed" and result["failures"] == []
     assert calls["synth"]["kind"] == "gait" and calls["exam_steps"] == [("check", "exam_gait_s0"),
-                                                                        ("run", "exam_gait_s0")]
+                                                                        ("run", "exam_gait_s0"),
+                                                                        ("fit", "exam_gait_s0")]
     assert calls["pose_request"]["facing"] == "-Y"
     asset = manifest["assets"]["creature:wolf"]
     stage = asset["executions"][-1]["stages"][-1]
@@ -138,7 +145,8 @@ def test_the_cli_examines_and_exits_nonzero_on_a_failed_exam(trained, capsys):
         "lighting: {}\nasset_rules: {}\nmaterial_generation: {rules: []}\n")
     save_manifest(root / "ai/assets/manifest.json", manifest)
     calls["turn"] = 40.0
-    assert main(["--project", str(root), "creature", "exam", "wolf"]) == 1
+    assert main(["--project", str(root), "creature", "exam", "wolf", "--fps", "24"]) == 1
+    assert calls["synth"]["fps"] == 24
     out = capsys.readouterr().out
     assert "exam v1 failed" in out and "worst_body_p95_deg" in out
 
@@ -193,6 +201,7 @@ def test_each_readers_exam_keeps_its_own_fit_and_check(trained):
 
 @pytest.mark.parametrize("change, words", [
     (lambda clip, stage: clip.update(frames=48), "frames"),
+    (lambda clip, stage: clip.update(fps=24), "fps"),
     (lambda clip, stage: stage["settings"].update(tool_sha256="an older synth_motion.py"), "synth_motion"),
 ])
 def test_a_reused_exam_clip_must_be_the_known_motion_asked_for(trained, change, words):
@@ -206,6 +215,12 @@ def test_a_reused_exam_clip_must_be_the_known_motion_asked_for(trained, change, 
     change(asset["motion"]["clips"]["exam_gait_s0"], synth)
     with pytest.raises(ValueError, match=words):
         pipeline.exam_creature(root, config, manifest, "wolf")
+    # the remedy works: with the clip's folder and video moved aside, the exam renders the known motion again
+    made = asset["motion"]["clips"]["exam_gait_s0"]
+    for relative in (made["exam"], made["clip"]):
+        (root / relative).rename((root / relative).with_name("aside-" + Path(relative).name))
+    assert pipeline.exam_creature(root, config, manifest, "wolf")["status"] == "passed"
+    assert asset["motion"]["clips"]["exam_gait_s0"]["fps"] == 16
 
 
 def test_the_posing_never_reads_an_earlier_report(tmp_path, monkeypatch):
@@ -221,3 +236,23 @@ def test_the_posing_never_reads_an_earlier_report(tmp_path, monkeypatch):
 def test_a_legs_tip_is_its_last_fitted_bone():
     legs = {"front.L": ["FrontPaw.L", "FrontToes.L"], "hind.L": ["HindToes.L", "HindToesEnd.L"]}
     assert pipeline._limb_ends(legs, ["FrontPaw.L", "FrontToes.L", "HindToes.L"]) == ["FrontToes.L", "HindToes.L"]
+
+
+def test_the_exam_fits_the_reading_as_extraction_fits_a_walk(trained):
+    """The exam measures what is delivered (review 2026-10-30): the known motion at the rate the type's video graph
+    delivers (Wan's CreateVideo: 16 fps), the reading fitted again with that rate's settings and the walk's ranges,
+    and the fit it judged recorded, so extraction can match it to a clip's."""
+    import math
+    from slopforge.backends import video2rig
+    root, config, manifest, calls, project = trained
+    pipeline.exam_creature(root, config, manifest, "wolf")
+    assert calls["synth"]["fps"] == 16
+    options = calls["fit_options"]
+    assert options["tag"] == "-slopforge" and options["settings"] == video2rig.fit_settings(16)
+    asset = manifest["assets"]["creature:wolf"]
+    judged = {"fps": 16.0, "settings": video2rig.fit_settings(16), "joint_limits": {"FrontPaw": 90, "FrontToes": 60}}
+    assert asset["motion"]["reader"]["exams"]["exam_gait_s0"]["fit"] == judged
+    assert asset["executions"][-1]["identity_inputs"]["fit"] == judged
+    paws = {bone: joint["range"] for bone, joint in options["creature"]["joints"].items() if "FrontPaw" in bone}
+    assert paws and all(value == math.radians(90) for value in paws.values())
+    assert Path(calls["pose_request"]["fit"]).name.startswith("fit-")         # the exam's copy of the refit

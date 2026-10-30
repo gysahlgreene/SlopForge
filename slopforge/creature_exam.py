@@ -13,6 +13,10 @@ EXAM_V1 = {"bone_median_deg": ("<=", 5), "worst_body_median_deg": ("<=", 10), "w
            "worst_tail_p95_deg": ("<=", 40), "joint_rel_median": ("<=", 0.025), "joint_rel_p95": ("<=", 0.10),
            "detection_side": (">=", 0.85), "detection_other": (">=", 0.45), "limb_tips_best_view": (">=", 0.95),
            "swap_worst": ("<=", 0.15), "views_body_pct": ("<=", 1.5), "views_limbs_pct": ("<=", 2.0)}
+# owner ruling 2026-10-30: the swap rate leaves out the shoulder blades (on B1's wolf they sit close together and the
+# fit reads the gait's 3-degree chest sway on the wrong side in about half the frames, every leg pair at 0.06 or
+# under); their rate is measured and recorded, not judged
+SWAP_UNJUDGED = re.compile(r"^Scapula")
 CONFIDENCE = 0.4   # under it video2rig's fit treats a reading as unsure (reader/fit.py SETTINGS bridge_conf)
 
 
@@ -135,8 +139,9 @@ def compare(posed, *, moved, reader=None, conf=CONFIDENCE):
 
 
 def measures(exam, check, *, limb_ends):
-    """Exam v1's twelve measures from one clip's exam and video2rig's check.json (D7's view disagreement). A tail bone
-    has "Tail" in its name; the limb ends are each declared leg's last bone."""
+    """Exam v1's twelve measures from one clip's exam and video2rig's check.json (D7's view disagreement), and the
+    shoulder blades' swap rate, recorded but not judged (SWAP_UNJUDGED). A tail bone has "Tail" in its name; the limb
+    ends are each declared leg's last bone."""
     summary, bones = exam["summary"], exam["bone_rotation_error_degrees"]
     body = {name: value for name, value in bones.items() if "Tail" not in name}
     tail = {name: value for name, value in bones.items() if "Tail" in name}
@@ -145,6 +150,9 @@ def measures(exam, check, *, limb_ends):
     other = next((value for view, value in views.items() if not view.endswith("side")), None)
     per_view = exam["joint_detection_rate"]["per_joint_per_view"]
     tips = [max(per_view[f"{bone}.tip"].values()) for bone in limb_ends if f"{bone}.tip" in per_view]
+    rates = {pair: item["rate"] for pair, item in exam["near_far_swap_rate"].items() if item["rate"] is not None}
+    judged = [rate for pair, rate in rates.items() if not SWAP_UNJUDGED.match(pair)]
+    blades = [rate for pair, rate in rates.items() if SWAP_UNJUDGED.match(pair)]
     return {"bone_median_deg": summary["bone_rotation_error_degrees"]["median"],
             "worst_body_median_deg": max(value["median"] for value in body.values()),
             "worst_body_p95_deg": max(value["p95"] for value in body.values()),
@@ -153,7 +161,7 @@ def measures(exam, check, *, limb_ends):
             "joint_rel_p95": summary["joint_position_error_root_relative"]["p95"],
             "detection_side": side, "detection_other": other,
             "limb_tips_best_view": min(tips) if len(tips) == len(limb_ends) else None,
-            "swap_worst": summary["near_far_swap_rate_max"],
+            "swap_worst": max(judged, default=None), "swap_shoulder_blades": max(blades, default=None),
             # a check that read no view disagreement has none to judge: unread, so failed
             "views_body_pct": None if check.get("body") is None else check["body"] * 100,
             "views_limbs_pct": None if check.get("limbs") is None else check["limbs"] * 100}
