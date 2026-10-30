@@ -24,7 +24,7 @@ Unity's test runner ([Weapons](WEAPONS.md#the-prefab-a-game-uses)). That run lau
 binary directly (the `unity` wrapper's `-quit` ends a test run before it starts), so the editor version in
 `ProjectSettings/ProjectVersion.txt` must be installed by the Hub under `/Applications/Unity/Hub/Editor`, or
 `UNITY_EDITOR_PATH` must name the binary; the project needs `com.unity.test-framework` (every Unity project
-template includes it). The NUnit results stay beside the asset as `<name>_playmode.xml`.
+template includes it). The NUnit results stay beside the asset as `<name>_playmode.xml`. A creature's controller and prefab are played the same way before they are recorded: facing, size, playback and in place ([Creatures](CREATURES.md#unity-delivery-b7)).
 
 SlopForge adds each file's SHA-256 and records the report as `unity_import` on the asset, under its logical ID (for example `prop:crate`). Approval stops before it is recorded in two cases: the material does not reference the published maps, or republishing changed a GUID at the same path, for example when a `.meta` file was lost and Unity made a new one on a checkout without its `Library/` cache. The previous files and `.meta` files are then restored. Restore the `.meta` files from version control, or publish under a new name. On a machine whose `Library/` still knows the path, Unity gave a deleted `.meta` its old GUID back.
 

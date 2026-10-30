@@ -1,7 +1,9 @@
 # Creatures
 
 M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
-video2rig views and render known motions (B2). No motion read from video is produced yet. This page documents the creature asset type, its rig, and the creature-motion provider the track will
+video2rig views and render known motions (B2). It generates walk clips with Wan 2.2 (B5), reads them onto the rig
+in place as looping animations for review (B6), and delivers the approved ones to Unity as a Generic controller and
+prefab played in Play mode (B7). This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
 (epic [#128](https://github.com/gysahlgreene/SlopForge/issues/128)).
@@ -310,9 +312,67 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 - **Not covered yet:**
   - D8's limits on the fit report;
   - the foot-slide limit;
-  - Unity playback, which is B7;
   - a cubic leaves some surge in a walk whose speed changes faster than it follows; the bake records the residual
     (`residual_travel_m`).
+
+## Unity delivery (B7)
+
+The approved rig and its approved clips go into Unity as a Generic Animator Controller and prefab:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
+```
+
+- **Refused before Unity runs:**
+  - the rig not approved, or changed since;
+  - no approved clip (clips not approved are left out);
+  - an approved clip whose FBX, bake report or sheet changed since its bake, or baked on another rig .blend;
+  - rights over the rig and the clips that are not shippable;
+  - `--rig-type humanoid`: a creature is delivered Generic;
+  - a controller or prefab already in `<output_root>/Creatures/<name>/Unity/`.
+- **The build.** One Unity run imports the rig and each clip as Generic without an avatar, with Preserve Hierarchy on
+  both. The controller has one looping state per clip, named after the clip; the default is the first by name. The
+  prefab's Animator has root motion off, because the clips are in place (D9).
+  - **Speed (D9).** Each clip's walking speed is a float parameter `<clip>_speed`, in metres a second: the bake's
+    stride divided by its period. A game moves the creature along its +Z at that speed (or scales `Animator.speed`
+    to its own) and reads the value with `Animator.GetFloat`. No runtime script is added to the project.
+- **Played before it is recorded.** Unity's test runner plays the prefab
+  ([Unity projects](UNITY.md); the NUnit results stay beside it as `<name>_playmode.xml`).
+  - **Facing and size:** in the bind pose the front feet lead along +Z, by more than 10 % of the height, and the
+    mesh's height is within 5 % of the height B1 measured.
+  - **Playing on its own:** the default state advances in real time, a bone turns, and the creature's own transform
+    keeps its position, rotation and scale.
+  - **Each clip:**
+    - it loops;
+    - its length is the bake's loop within one frame;
+    - its speed parameter is the bake's;
+    - every bone stays finite;
+    - a bone turns more than 5° over the loop.
+  - **In place:** over one loop, the root bone's horizontal sway stays under a quarter of the stride. A walk that kept
+    its travel moves a whole stride every period.
+  - **Recorded, not gated (D9's foot-slide limit is open):** the stance slide once the creature moves along +Z at the
+    clip's speed. The feet are each leg's last bone joint; the FBX has no leaf bones, so the paw tip is not a
+    transform. The measures go to `<name>_playmode.jsonl` and the prefab's provenance.
+
+  A failed play removes the controller and prefab, keeps the results, and records nothing.
+- **Found on the first live run (2026-10-30):** the bake exports the clip's armature alone. Unity folds a lone
+  top-level node into the file's root, so the clip's curves were keyed `Hips/...` while the rig's bones sat at
+  `Armature/Hips/...`. No bone moved, and the curves on the armature node landed on the prefab itself, turning it
+  90° and scaling it 100 times. Preserve Hierarchy keeps both files' roots, so the clip's paths are the rig's. The
+  builder is shared, so character clips get the same import. The playing-on-its-own check now fails a clip that
+  moves the creature's own transform.
+- **Recorded:** the controller and prefab as candidate `unity.animator_controller` and `unity.creature_prefab`,
+  pending review, derived from the rig and the clips, with each clip's speed, stride and period, the play-mode
+  results and the measures. Notices owed are written beside them.
+- **Live gate:** `SLOPFORGE_RUN_UNITY_ANIMATION=1` bakes the fixture quadruped's keyed walk in Blender, builds it
+  into a fresh Unity project and plays it (`tests/test_creature_unity_blender.py`). It needs Blender, the `unity`
+  CLI and editor 6000.6.3f1 under the Hub or `UNITY_EDITOR_PATH`.
+- **Not covered yet:**
+  - a delivery of an approved generated creature: the wolf's rig awaits review, so its walk was played only as
+    evidence, outside the gate ([evidence](media/creature-unity-b7-2026-10/README.md));
+  - the foot-slide limit;
+  - turning, blending between clips, and idles;
+  - Windows.
 
 ## video2rig
 
