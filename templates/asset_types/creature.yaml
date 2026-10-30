@@ -31,12 +31,21 @@ max_rig_asymmetry: 0.05
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).
 rig_seeds: 4
-# B2 (docs/CREATURES.md, video2rig's start frame): the two views. The three-quarter view sees the trunk and keeps a
-# lifted front paw off the hind leg behind it, which a dead-front view stacks (#140: trunk joints read 0.99-1.0 against
-# 0.65-0.69). The panel widths follow each view's span unless `widths` declares them; render_start's margins.
-views: [three-quarter, side]
-margin: 1.8
-margin_wide: 1.45
+# B2 (docs/CREATURES.md, video2rig's start frame): the two views and their framing. The views and panels are the
+# start frame the video route was proven from (#149): front and side in equal panels. In three-quarter + side, Wan 2.2
+# turned the creature in 3 of 4 clips; in front + side with the split-screen prompt, in none. The reader reads a lifted
+# front paw better from three-quarter, which a dead-front view stacks on the hind leg (#140: trunk joints read
+# 0.99-1.0 against 0.65-0.69), so declare that pair where no video is generated. margin_wide keeps a long creature
+# inside its side panel (#142). At 1.45 it set the wolf's scale (344 px tall) and all four clips that reached video2rig's
+# check failed it; at 1.2 the height margin sets it, as in #149 (400 px), and the same seeds passed (B5's live gate).
+# 2026-10-30: two views each leave a quadruped blind somewhere. Front + side reads the far legs' swing weakly (the
+# owner: "robotic"); three-quarter + right side measured the right legs' sideways place in no view, and they crossed.
+# Front + side with the wolf about 1.3x larger (margin 1.4; the narrow front view in a 640 px panel, the side in 1280)
+# the owner judged "significantly better" (private evidence: views spike).
+views: [front, side]
+widths: [640, 1280]
+margin: 1.4
+margin_wide: 1.2
 # Pictures the reader trains on (video2rig's reader.prepare --poses).
 training_poses: 3000
 # Joint ranges (#140), degrees from the start pose, by the role of B1's generic names. video2rig applies each to the
@@ -61,3 +70,56 @@ joint_limits:
   HindPaw: 100
   HindToes: 90
   End: 45
+# B5 (docs/CREATURES.md, "Video generation"): a motion clip generated from the start frame. The ComfyUI graph; how the
+# prompt names each view of the start frame ({name} and {side} filled in; front and side are #149's wording, the
+# three-quarter line is untried); each motion's template ({subject} is the asset's description, {left} and {right}
+# the panels' cameras), its frames (1 + 4k; 121 gave a full walk cycle in every #149 clip whose check ran, 81 one step)
+# and its retry budget (D6: seeds tried beyond the clips asked for).
+video_workflow: workflows/video_wan22_i2v_api.json
+video_views:
+  front: "a fixed camera straight in front of the {name}; the {name} keeps facing this camera the whole time, its nose pointing straight at it."
+  side: "a fixed camera at the {name}'s {side} side; the {name} keeps its {side} side to this camera the whole time, its head to the {side} of the picture."
+  three-quarter: "a fixed camera in front of the {name} and to its left; the {name} keeps its head and chest turned to this camera the whole time."
+video_motions:
+  walk:
+    frames: 121
+    retries: 4
+    # the fit's own ranges for this motion, by role, within joint_limits (the reader still trains on those): fitted
+    # within the type's 150 / 90, noisy toe readings snapped a front paw up to 118 deg in one frame; within 90 / 60, at
+    # most 78, and the owner chose that fit (2026-10-30, fit D)
+    fit_joint_limits: {FrontPaw: 90, FrontToes: 60}
+    prompt: >-
+      Split-screen video from two synchronised fixed cameras filming the same {subject} at the same moment, in a plain
+      grey studio with a level floor and soft constant lighting. Left half: {left} Right half: {right} The {name} walks
+      continuously on the spot for the whole clip, from the first frame to the last, at a calm, steady walking pace,
+      and never stops: all four legs step in turn, left hind, left fore, right hind, right fore, again and again, each
+      foot lifting clear of the floor and being set down again, its body staying in the same place and pointing the
+      same way; it never turns, never rotates and never changes direction. Its head stays forward and its tail hangs
+      relaxed. It has exactly four legs. Both halves show the same {name} at the same moment, moving together. Static
+      cameras, no zoom, no cuts, no camera shake, no slow motion, no motion blur. Keep the whole body inside the frame
+      the whole time; nothing crosses the dark line between the two halves. No visual effects of any kind: no dust, no
+      smoke, no debris, no sparks, no particles, no speed lines, no motion trails, no light trails, no motion blur, no
+      camera shake. Every limb stays sharp, the flat floor stays perfectly clean, and every foot stays clearly visible
+      in every frame.
+    # Wan 2.2's own default negative list, then the effects, extra or missing legs, turning and stopping (#149)
+    negative: >-
+      色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走,
+      dust, smoke, debris, sparks, particles, speed lines, motion trails, light trails, motion blur, camera shake,
+      camera movement, zoom, cuts, scene change, extra legs, three legs, five legs, extra animals, second {name}, text,
+      watermark, walking forward out of frame, turning, turning around, turning sideways, turning its body, rotating,
+      rotating body, changing direction, standing still, pausing, stopping, stops walking, standing, idle, frozen,
+      static pose
+# Intake (slopforge/video_intake.py), fail-closed before anything reads a clip. Set from #149's 40 Wan clips (good:
+# the backdrop's largest change from frame 0 1-6.7 and 10.7 on the one whose check still ran, motion 0.048+, outline
+# shape change 0.05-0.14, frame 0 3-6.5 grey levels from the start image, the creature in every frame of every panel;
+# refused: backdrop 11.7-23.7, still panels 0.0016-0.009, turning 0.31-1.4), and D7's cross-view limits from exam v1
+# (video2rig's check: body 1.5 %, limbs 2 % of the height).
+video_intake:
+  max_video_duplicate_share: 0.05
+  max_video_frame0_difference: 12
+  min_video_presence: 0.98
+  max_video_backdrop_drift: 11
+  min_video_motion_share: 0.02
+  max_video_turn: 0.25
+  max_video_view_disagreement: 0.015
+  max_video_limb_disagreement: 0.02

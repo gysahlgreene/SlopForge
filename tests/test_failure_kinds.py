@@ -7,9 +7,9 @@ import pytest
 from slopforge.failures import StageFailure, candidate_quality_rejection, failure_record, should_retry
 from tests.test_failure_classification import _quality_report
 
-VIDEO = {"status": "failed", "errors": ["the clip repeats frames: 12 distinct per second"],
+VIDEO = {"status": "failed", "errors": ["the clip repeats frames: 60% duplicated"],
          "failure_codes": ["video_frame_rate"], "artifact_kind": "video",
-         "measured": {"video_distinct_fps": 12.0}, "limits": {"min_video_distinct_fps": 20}}
+         "measured": {"video_duplicate_share": 0.6}, "limits": {"max_video_duplicate_share": 0.05}}
 
 
 def test_a_video_code_without_mesh_metrics_can_retry():
@@ -26,6 +26,13 @@ def test_a_video_code_without_mesh_metrics_can_retry():
     ("rig", "rig_bone_outside", "rig_bones_outside", "max_rig_bones_outside", 2, 0),
     ("video", "video_views_disagree", "video_view_disagreement", "max_video_view_disagreement", 0.05, 0.02),
     ("video", "video_cut", "video_cuts", "max_video_cuts", 1, 0),
+    ("video", "video_frame0", "video_frame0_difference", "max_video_frame0_difference", 40.0, 12),
+    ("video", "video_backdrop_drift", "video_backdrop_drift", "max_video_backdrop_drift", 22.0, 10),
+    ("video", "video_still", "video_motion_share", "min_video_motion_share", 0.002, 0.02),
+    ("video", "video_turned", "video_turn", "max_video_turn", 1.2, 0.25),
+    ("video", "video_limbs_disagree", "video_limb_disagreement", "max_video_limb_disagreement", 0.03, 0.02),
+    ("video", "video_check_failed", "video_check_failures", "max_video_check_failures", 1, 0),
+    ("video", "video_refused", "video_refusals", "max_video_refusals", 1, 0),
     ("motion", "motion_joint_lost", "motion_joints_lost", "max_motion_joints_lost", 3, 0),
     ("motion", "motion_limit_exceeded", "motion_limit_violations", "max_motion_limit_violations", 4, 0),
     ("motion", "exam_failed", "exam_bone_error_degrees", "max_exam_bone_error_degrees", 9.0, 5.0),

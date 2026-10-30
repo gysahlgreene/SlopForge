@@ -93,7 +93,11 @@ bpy.ops.export_scene.fbx(filepath=str(root/"Assets/Animations/walk.fbx"), use_se
             config = load_project(root)
             library_path = root / "ai/animation_libraries/base.yaml"
             library_path.parent.mkdir(parents=True, exist_ok=True)
-            library_path.write_text(yaml.safe_dump({"version": 1, "skeleton_type": "humanoid", "clips": [{
+            # the delivery's rights gate (B0) reads both: this test's own Blender fixtures, cleared
+            made_here = {"status": "cleared", "terms": "made by this test in Blender", "terms_version": "this test",
+                         "read_on": "2026-10-30"}
+            library_path.write_text(yaml.safe_dump({"version": 1, "skeleton_type": "humanoid",
+                                                    "output_rights": made_here, "clips": [{
                 "id": "walk", "name": "walk", "path": "Assets/Animations/walk.fbx", "loop": True,
                 "root_motion": False, "bone_mapping": {"hips": "hips"}}]}))
             manifest_path = root / config["asset_pipeline"]["manifest"]
@@ -102,7 +106,8 @@ bpy.ops.export_scene.fbx(filepath=str(root/"Assets/Animations/walk.fbx"), use_se
                                    {"strategy": "text_only"})
             manifest["assets"]["character:pilot"] = character
             register_artifact(manifest, "character:pilot", "rig", "model.rigged",
-                              "Assets/Characters/pilot/rig.fbx", status="ready", approval_status="approved")
+                              "Assets/Characters/pilot/rig.fbx", status="ready", approval_status="approved",
+                              provenance={"output_rights": [{"source": "this test's rig", **made_here}]})
             save_manifest(manifest_path, manifest)
 
             self.assertEqual(main(["--project", str(root), "animation", "retarget", "base", "walk",

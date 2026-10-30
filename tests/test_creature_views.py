@@ -49,7 +49,7 @@ def test_panel_widths_follow_each_views_span():
     assert chosen["views"] == ["three-quarter", "side"] and sum(chosen["widths"]) == 1920
     assert chosen["widths"][0] / chosen["widths"][1] == pytest.approx((0.77 + 0.64 * 0.35) / 1.0, rel=0.01)
     assert framing({"views": ["front", "side"]}, length=1.0, width=0.35)["widths"][0] < 600
-    assert chosen["margin_wide"] == 1.45 and chosen["margin"] == 1.8
+    assert chosen["margin_wide"] == 1.2 and chosen["margin"] == 1.4      # the creature type's (2026-10-30)
 
 
 def test_declared_widths_and_views_are_checked():
@@ -90,10 +90,10 @@ def test_the_creature_type_declares_its_views_framing_and_every_role_a_quadruped
     from slopforge.creature_views import motion_settings
     template = yaml.safe_load((Path(__file__).resolve().parents[1] / "templates/asset_types/creature.yaml").read_text())
     settings = motion_settings(template)
-    assert settings["views"] == ["three-quarter", "side"] and settings["training_poses"] == 3000
+    assert settings["views"] == ["front", "side"] and settings["training_poses"] == 3000
     rigging = {**RIGGING, "fit_bones": list(NAMES.values()) + ["FrontToesEnd.L", "HindToesEnd.R", "Spine3", "Neck2"]}
     creature_config("wolf", rigging, settings["joint_limits"])         # every generic role has a declared limit
-    assert framing(settings, 1.0, 0.35)["widths"][0] > 900
+    assert framing(settings, 1.0, 0.35)["widths"] == [640, 1280]        # declared: the side panel takes two thirds
     for bad in ({"joint_limits": {}}, {"joint_limits": {"Tail": 0}}, {"joint_limits": {"Tail": 200}},
                 {"training_poses": 10}):
         with pytest.raises(ValueError):

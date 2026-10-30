@@ -113,8 +113,18 @@ def preflight(python, checkout, role, blender=None):
             "dinov2_sha256": DINOV2_SHA256, **facts}
 
 
+def train(payload):
+    """reader.train on this machine (the GPU provider, this file streamed over SSH), offline against the pinned
+    backbone; its output goes to the caller's log. Returns the tool's exit code."""
+    checkout = Path(payload["checkout"])
+    return subprocess.run([payload["python"], "-m", "video2rig.reader.train", payload["project"], "--steps",
+                           str(payload["steps"])], cwd=checkout, env=environment(checkout), check=False).returncode
+
+
 def main():
     action, payload = sys.argv[1], json.loads(sys.argv[2])
+    if action == "train":
+        raise SystemExit(train(payload))
     if action != "preflight":
         raise SystemExit(f"unknown action {action!r}")
     print(json.dumps(preflight(payload.get("python"), payload.get("checkout"), payload["role"],
