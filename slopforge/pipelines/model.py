@@ -34,7 +34,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
-from ..unity_playmode import verify_play_mode
+from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
@@ -1961,17 +1961,19 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 paths["glb"].parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(root / mesh_source, paths["glb"])
             write_notices(paths["directory"], asset["name"], rights)
+            type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
+            # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
                                                 {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")},
-                                                lightmap_uvs=asset.get("pivot") != "grip")
+                                                lightmap_uvs=asset.get("pivot") != "grip"
+                                                and type_record.get("lightmap_uvs", True))
             _require_stable_unity_identity(asset.get("unity_import"), unity_import)
             validation = dict(candidate["validation"])
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
-            type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
             if moving or type_record.get("unity_prefab"):
                 # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a
                 # motion check (unity_weapon). Types that opt in get one for static assets too.
@@ -1991,7 +1993,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                                                            if key != "errors"}
                 # then the prefab is played: the Animator pulses each part and the Rigidbody settles on a floor
                 validation["measured"]["play_mode"] = verify_play_mode(
-                    root, motion["prefab"], moving, results=paths["directory"] / f"{asset['name']}_playmode.xml")
+                    root, play_mode_script(motion["prefab"], moving), results=paths["directory"] / f"{asset['name']}_playmode.xml")
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])

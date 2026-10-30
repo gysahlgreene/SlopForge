@@ -1,0 +1,94 @@
+schema_version: 1
+id: video.image_to_video.wan22
+version: 1
+capabilities:
+- image_to_video
+workflow_sha256: 27d99c5f8bb859b49b1ab4d68e546d4fb7518c2adbc03d5113baf253affb5faf
+nodes:
+- class: CLIPLoader
+  source: ComfyUI core
+  revision: unknown
+- class: CLIPTextEncode
+  source: ComfyUI core
+  revision: unknown
+- class: CreateVideo
+  source: ComfyUI core
+  revision: unknown
+- class: KSamplerAdvanced
+  source: ComfyUI core
+  revision: unknown
+- class: LoadImage
+  source: ComfyUI core
+  revision: unknown
+- class: ModelSamplingSD3
+  source: ComfyUI core
+  revision: unknown
+- class: SaveVideo
+  source: ComfyUI core
+  revision: unknown
+- class: UNETLoader
+  source: ComfyUI core
+  revision: unknown
+- class: VAEDecode
+  source: ComfyUI core
+  revision: unknown
+- class: VAELoader
+  source: ComfyUI core
+  revision: unknown
+- class: WanImageToVideo
+  source: ComfyUI core
+  revision: unknown
+# The installed files' sha256 were read on the H100 on 2026-10-28; Comfy-Org's repackaging is Apache-2.0, as are the
+# Wan-AI and Google model cards it repackages.
+models:
+- name: wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors
+  source: https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/diffusion_models
+  license: Apache-2.0
+  license_source: https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B
+  sha256: 6122e79d55e0f235698d11d657f3b196c5273c830da00b2b013c5a048d5e6a42
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "Wan-AI/Wan2.2-I2V-A14B model card", read_on: "2026-10-28"}
+- name: wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors
+  source: https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/diffusion_models
+  license: Apache-2.0
+  license_source: https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B
+  sha256: 5471a457b6ac404202a5fbe6c11595a3d5641fc766b00f38763f72303fffc21e
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "Wan-AI/Wan2.2-I2V-A14B model card", read_on: "2026-10-28"}
+- name: umt5_xxl_fp8_e4m3fn_scaled.safetensors
+  source: https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/text_encoders
+  license: Apache-2.0
+  license_source: https://huggingface.co/google/umt5-xxl
+  sha256: c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "google/umt5-xxl model card", read_on: "2026-10-28"}
+- name: wan_2.1_vae.safetensors
+  source: https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/vae
+  license: Apache-2.0
+  license_source: https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P
+  sha256: 2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b
+  output_rights: {status: "cleared", terms: "Apache-2.0", terms_version: "Wan-AI/Wan2.1-I2V-14B-720P model card", read_on: "2026-10-28"}
+inputs:
+- name: start_image
+  type: image
+- name: prompt
+  type: text
+- name: negative
+  type: text
+- name: seed
+  type: integer
+outputs:
+- name: video
+  type: video/mp4
+profiles:
+- h100
+- h100_final
+estimated_resource_class: large_gpu
+tested_on:
+- profile: h100
+  backend: comfyui
+  date: '2026-10-28'
+license_notes:
+- Model source/license statements refer to the linked upstream artifact; verify terms for the exact installed weights.
+limitations:
+- Node revisions are not exposed by the ComfyUI API and remain unverified.
+- 'Wan 2.2 image-to-video at 1280x720, 16 fps; 121 frames took 1,300-1,600 s on an 80 GB H100, 81 frames about
+  650 s (#149). Clips can darken the backdrop after frame 0 and redraw the creature; intake refuses the first and
+  records the second (docs/CREATURES.md).'
