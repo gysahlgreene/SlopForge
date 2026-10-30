@@ -1,7 +1,10 @@
 # Creatures
 
 M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
-video2rig views and render known motions (B2). No motion read from video is produced yet. This page documents the creature asset type, its rig, and the creature-motion provider the track will
+video2rig views and render known motions (B2), train its joint reader and examine it on a known motion (B3). It
+generates walk clips with Wan 2.2 (B5), reads them onto the rig
+in place as looping animations for review (B6), and delivers the approved ones to Unity as a Generic controller and
+prefab played in Play mode (B7). This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
 (epic [#128](https://github.com/gysahlgreene/SlopForge/issues/128)).
@@ -134,19 +137,33 @@ facing (#142). Passed as `--facing=-Y`, the facing is never guessed from foot an
   3 of 4 clips; in front + side with the split-screen prompt, in none. The three-quarter view reads a lifted front paw
   better, since a dead-front camera puts it in front of the hind leg (#140), so `three-quarter,side` is the choice
   (`--views`) for a creature whose motion does not come from video.
-- **Widths.** The type declares equal panels (960 + 960), as #149's clips had. Without declared widths, render_start's
-  one scale for both panels decides: the 1920 px frame is split by each view's span across its panel (three-quarter:
-  0.77 length + 0.64 width; side: the length), so neither panel wastes resolution.
-- **Margins.** `margin` 1.8 and `margin_wide` 1.2 come from the type. render_start's orthographic height is the
+- **Widths.** The type declares a narrow front panel and a wide side panel (640 + 1280): a creature seen from the
+  front needs little width. Without declared widths, render_start's one scale for both panels decides: the 1920 px
+  frame is split by each view's span across its panel (three-quarter: 0.77 length + 0.64 width; side: the length), so
+  neither panel wastes resolution.
+- **Margins.** `margin` 1.4 and `margin_wide` 1.2 come from the type. render_start's orthographic height is the
   larger of the creature's height × `margin` and its length × `margin_wide` across the side panel. The scale decides
   whether video2rig's check passes:
   - At 1.45 the length margin framed the wolf 344 px tall; all four clips that reached the check failed it (body
     1.7–3.0 %, limbs 3.2 %).
   - At 1.2 the height margin frames it 400 px tall, as in #149; the same seeds and prompt passed (seed 2: body 1.2 %,
     seed 3: 0.9 %).
+  - With 640 + 1280 panels and `margin` 1.4 (2026-10-30), the wolf is about 1.3× larger again. Seed 2 passed the
+    check (body 1.37 %, limbs 0.92 %). The owner judged its fitted walk "significantly better but needs improvement"
+    than the walk from equal panels at 1.8.
 
   Reader error is roughly fixed in pixels, so a smaller creature disagrees more as a share of its height. Scaling
-  alone did not explain the failures, though: Wan may also draw a smaller creature's two views less alike.
+  alone did not explain the failures, though: Wan may also draw a smaller creature's two views less alike. A larger
+  creature barely raised the reader's confidence in Wan's front view (0.58 to 0.61–0.66).
+- **Two views, two blind spots.** video2rig's `check`, and one step of its fit, need exactly two views. Each pair
+  leaves part of a quadruped's walk unmeasured:
+  - Front + side: the side view hides the far legs (confidence 0.19), and the front view shows their swing end on.
+    The owner called the result "robotic".
+  - Three-quarter (front-left, the only three-quarter render_start draws) + right side: no view measures the right
+    legs' sideways place. The fit crossed the left and right paws in 34 of 109 frames (front) and 40 (hind), by up to
+    33 cm; front + side crossed them in 2 of 109.
+
+  The type keeps front + side, the pair the tool was designed for.
 - **Check.** The calibration refuses a start frame from which any of the skin falls outside a panel.
 
 **The reader's training pictures** are rendered with `reader.prepare --skip-train`: the type's `training_poses`, 3000.
@@ -155,7 +172,10 @@ Training them on the GPU provider is B3.
 **A known motion** comes from `blender/synth_motion.py`, promoted from the spike's exam motion. It is seeded, and the
 same seed writes the same file. Each kind starts at the start pose and keeps the skin on the floor:
 - `random`: every fitted bone follows smooth noise, inside 0.9 of its declared range.
-- `gait`: an in-place walk.
+- `gait`: an in-place walk. Each leg swings from one bone (`Thigh`, `UpperArm`), its knee or elbow folds, and its
+  paw and toes flex. The spine, neck, head and tail sway. A scapula and the end bones stay still: on B1's wolf,
+  swinging the scapula as well kicked a front leg level, and curling the toes' end bones flicked them out of the
+  frame (found by B3's exam, 2026-10-30).
 - `action`: an authored action, looped.
 
 A motion is checked channel by channel, as video2rig bounds a bone (its turns about X, Y and Z, intrinsic XYZ, each
@@ -163,10 +183,91 @@ within the range). A knee or elbow is checked against video2rig's own hinge limi
 because exam v1 counts a result only when the truth stays inside the reader's ranges. Bad views, widths, kinds or
 `--action` refuse before anything is made. The clip is rendered with video2rig's `render_poses.py` through the start cameras:
 - each panel at its own size, one pose a picture;
-- joined as render_start joins panels, at 24 fps, into `clips/<clip>.mp4`;
-- with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
+- joined as render_start joins panels into `clips/<clip>.mp4`, at 24 fps unless asked otherwise (the exam asks for
+  the rate clips are delivered at). A random motion and the gait keep their timing in seconds at any rate; an
+  authored action is sampled key by key, so it is rendered at 24 fps only;
+- with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`) and its frame times
+  (`work/<clip>/timing.json`). Without them video2rig times a clip as 24 fps, so a 16 fps known motion compared
+  only 64 of its 96 frames.
 
 A motion whose joints leave a panel is refused.
+
+## Reader training and the exam (B3)
+
+The creature's joint reader is trained on the pictures calibration rendered, then examined on a motion SlopForge
+already knows, before it reads any generated clip:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature train wolf      # --steps 9000 by default
+slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gait --seed 0 --frames 96 by default
+```
+
+- **Training (`detector_training`).** It runs video2rig's `reader.train` for the given steps. With
+  `providers.video2rig.train_host` set, it runs on that machine:
+  - the project goes to a fresh folder there with `rsync`. An earlier reader, clips, readings, fits and exams are
+    not sent. rsync's SSH keeps the link alive, and a transfer that stalls for 10 minutes fails;
+  - the runtime module is piped over SSH and trains with the host's own install, offline against the pinned
+    backbone, as its preflight does;
+  - `reader.pt` and `reader-train.json` come back, and the folder is removed whatever happened. If removing it fails,
+    the log names the folder left on the host. Training stops after three hours (readers have taken 11 to 58
+    minutes on an H100).
+
+  Without a `train_host` it trains on this machine's CUDA card. The stage's parents are the training set calibration
+  made (`reader/poses.npz`, `visible.npz`) as it is now. The training machine's install is checked before anything is
+  sent, and its record (torch, device) is the stage's provider. It records the steps, the video2rig and DINOv2
+  revisions, where it trained, the minutes and the held-out error per view. The held-out error is recorded, not gated: no limit
+  is set. GPU training is not bit-repeatable, and the record says so.
+- **Refused:** a creature not calibrated; a training set changed since calibration; an existing `reader/reader.pt`
+  or `reader-train.json`. A reader is never replaced, because the clips and exams made with it name its hash, and
+  training would delete the old report. Move both aside to train another.
+  A failed training leaves no reader, since a partial one would pass for a trained one, and is recorded.
+- **The exam (`reader_exam`).** It takes these steps:
+  1. A known motion is rendered through the start cameras, as `creature synth` does (B2), at the rate the type's
+     video graph delivers clips at: its one `CreateVideo` node's fps, 16 for Wan (`--fps` sets another). The clip
+     is `exam_<kind>_s<seed>`, made once and reused by later readers' exams. A clip made with other frames, at
+     another rate, or by another `synth_motion.py` than today's, is refused: a changed gait is another truth. Move
+     its `exam/<clip>/` folder and `clips/<clip>.mp4` aside, and the next exam renders it again.
+  2. video2rig's `check` and `run` read it with the reader. The reading is then fitted again as extraction refits a
+     walk ([B6](#extraction-and-bake-b6)): with settings for that rate and within the walk's fit ranges. The exam
+     judges that refit, the fit a delivered clip gets, and records it (`fit`: the rate, the settings and the
+     ranges) in its stage identity and under the reader.
+  3. `blender/exam_pose.py` poses the truth and the fit on the rig and reads back every bone's head and tail per
+     frame, with the creature's height along up and its facing.
+  4. `slopforge/creature_exam.py` measures them and judges exam v1's twelve limits (`EXAM_V1`; their definitions and
+     the spike's numbers are in [#145](https://github.com/gysahlgreene/SlopForge/pull/145)). The swap rate leaves
+     out the shoulder blades (the owner's ruling, 2026-10-30): on B1's wolf they sit close together and barely move.
+     Their rate is recorded as `swap_shoulder_blades`, not judged.
+
+  The reader examined is the one `creature train` last recorded; another reader put in its place is refused. The
+  limb-end tips are each declared leg's last fitted bone. The reader names keypoints after bones (`FrontToes.L.tip` on
+  the wolf), so the spike's filter on "Hand" and "Foot" in a label found none on a B1-named rig.
+  - An exam counts only when every frame of the truth is compared and the truth matches the render's labels.
+    Otherwise it is an error (recorded as `error`), not a verdict. A check that read no view disagreement fails
+    those two measures.
+  - A failed exam is an answer: it is recorded with every measure and the names of the measures past their limits,
+    and `creature exam` exits 1.
+  - The stage's parents are the reader and the known motion. Its outputs are kept per reader in `exam/<clip>/`:
+    `exam-<reader>.json` (the verdict and every number), the posed frames, and copies of the fit and the check. The
+    verdict is recorded per clip under the reader (`motion.reader.exams`).
+- **Extraction needs a passed exam of the clip's fit.** `creature extract` counts only the exams that judged the
+  clip's own fit: the settings for its frame rate and its motion's fit ranges. It refuses a reader with no such exam,
+  with any such exam that did not pass (a pass on another seed does not outweigh a failure), or that is not the
+  reader the exams saw. An exam of another fit, such as one at 24 fps or before the ranges changed, is not counted.
+- **On the generated wolf (2026-10-30):** the reader trained on the H100 in 11.3 minutes (held-out median 5.6 px
+  front, 4.07 px side, as the hand-trained reader's 5.6 and 4.04). Its exam passes 11 of the 12 limits, most with room
+  (bone median 1.9°, worst body p95 9.5°, joint error 0.006 of the height), and fails the swap rate: 0.66 on the
+  scapulae, while every limb pair is at most 0.033. The spike's rig had no scapulae. The gait's 3° chest sway parts
+  the shoulders by up to 5.3 % of the height, and the fit reads that sway on the wrong side. The owner ruled that
+  the swap rate leaves the shoulder blades out (2026-10-30).
+  With the larger start frame (640 + 1280, `margin` 1.4), a newly trained reader examined at 16 fps with the walk's
+  refit passes all 12 limits: bone median 2.0°, worst body p95 9.8°, joint error 0.008 of the height, detection 0.88
+  side and 0.54 front, worst limb swap 0.056 (the shoulder blades 0.45, recorded). Its first run compared only 64 of
+  the 96 frames: the known motion had no `timing.json`, so video2rig timed 16 fps as 24.
+- **The port reproduces the spike.** On the spike's own data the measures match its `exam_compare.py` to 0.001: 471
+  numbers on the wolf gait, and 365 on the Fox walk with the paw-range reader, the failing exam, detection and swap
+  rate included. That data is private (the spike's working folder), so no repository test pins this match; the
+  offline tests pin each measure on a three-bone fixture. `tests/test_creature_exam_blender.py` poses a known motion on the fixture quadruped as its own fit
+  and reads no error, at the fixture's height and facing.
 
 ## Video generation and intake (B5)
 
@@ -188,8 +289,9 @@ slopforge --project ~/UnityProjects/MyGame creature video wolf walk            #
   - `video_motions.walk`: #149's split-screen continuous-walk prompt, its negative list, 121 frames, 4 retries.
   - `video_views`: how the prompt names each view of the start frame.
 
-  `{subject}` is the asset's description and `{name}` its name. Front and side are #149's wording; the three-quarter
-  line is untried.
+  `{subject}` is the asset's description and `{name}` its name. Front and side are #149's wording. The three-quarter
+  line says "to its left", since render_start's three-quarter camera is always front-left. With it and a right side
+  view, Wan held the facing on the first seed (2026-10-30), but the fit crossed the legs (see the start frame, B2).
 - **Candidates.**
   - **Seeds.** Each try uses the next seed from `--seed`. The tries are the clips asked for plus the motion's
     retries (D6), decided by `failures.should_retry`.
@@ -205,8 +307,8 @@ slopforge --project ~/UnityProjects/MyGame creature video wolf walk            #
   - **Stopping early.** The run stops early once the clips asked for are out of reach.
   - **Stage records.** The stage records the model files, the reader's SHA-256, the intake numbers and the check's
     result.
-- **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Until B3
-  wraps training, train it with video2rig's `reader.train` on the GPU provider, as #149 did.
+- **Reader.** The intake reads each clip's two views with video2rig's `check`, which needs `reader/reader.pt`. Train
+  it with `creature train` ([B3](#reader-training-and-the-exam-b3)).
 
 ### Video intake
 
@@ -248,14 +350,40 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 ```
 
 - **Extraction (`motion_extraction`).** video2rig's `run` reads the clip with the creature's reader and fits the rig.
-  Only the reader road is used; a missing `reader.pt` is refused. The fit (`out/<clip>.npz`) is checked before
+  Only the reader road is used; a missing `reader.pt` is refused. The reading is then fitted again with
+  `python -m video2rig.reader.fit <project> <clip> --tag=-slopforge`, because `run` fits with settings the project
+  cannot change:
+  - **Frame rate.** The fit's per-frame thresholds are tuned for Seedance's 24 fps. A Wan clip runs at 16 fps, so
+    they are converted to the clip's rate (`video2rig.fit_settings`): at 16 fps `despike_deg` 6 → 9, `w_smooth`
+    30 → 20, `lock_frames` and `lock_blend` 3 → 2, `bridge_max` 24 → 16 and `twin_switch` 6 → 4. `w_smooth` also
+    weights three solves that stay near one frame's own pose (the floor bend, the self-pass and the foot lock); the
+    conversion loosens those too, and the owner's chosen fit included that.
+  - **The motion's ranges.** The reader trains on the type's wide `joint_limits`. A motion can fit within narrower
+    ones (`video_motions.<motion>.fit_joint_limits`, by role, each above 0 and within the type's limit); the walk's
+    are FrontPaw 90° and FrontToes 60°. An end bone takes its chain's, as it does for training. A project keeps its
+    own copy of the type (`ai/asset_types/creature.yaml`): one copied before these ranges existed declares none, and
+    fits within the training ranges (recorded as `fit_joint_limits: {}`) until they are added to it. The tool reads
+    ranges only from creature.json and takes no option for them.
+    The refit therefore sees the project through a temporary sibling folder (`.<project>-fit`): every entry is
+    linked, and creature.json is replaced. The folder is removed afterwards.
+  - **What it changed** on the generated wolf's walk (2026-10-30, the same reading): one-frame spikes smoothed
+    131 → 89; median keypoint miss 5.68 → 5.53 px; the worst one-frame paw turn 107–118° → 78°. Front paw and toe
+    turns over 30° in one frame fell from 32 to 24; the rest come from the toe readings, not from pinning the feet.
+    Shown side by side, the owner chose this fit ("i think d is best yeah").
+
+  The settings and ranges are part of the stage's identity. The refit (`out/<clip>-slopforge.npz`) is checked before
   anything bakes it:
   - its bones are creature.json's;
   - it has one fit per clip frame, at the intake's measured times (`timing.json`);
   - every number is finite.
 
-  video2rig's report (outline match, frames under the floor, joints at their limit, warnings) is recorded in
-  `motion.clips.<clip>.extraction`, not gated: D8's limits are not set. The review sheet shows the frames.
+  `motion.clips.<clip>.extraction` records the refit's median keypoint miss and its biggest one-frame turn of a bone
+  (`biggest_turn`: degrees, bone, frame), measured by SlopForge on the refit. Neither is gated, since D8's limits are
+  not set. Above 45° the turn is a warning in video2rig's own words. video2rig writes its summary report (outline
+  match, frames under the floor, joints at their limit) only for `run`'s fit, which is not delivered. That report is
+  kept as the stage's `report` file, not as the clip's warnings. Its outline match is not yet a usable measure on
+  these clips: the side view reads 0.08–0.12 even on B3's rendered exam clip, where the fit is known to within 2°.
+  The review sheet shows the frames.
 - **Bake (`motion_bake`).** video2rig's `import_motion` puts the fit on the rig .blend as an Action at the clip's
   real times. `blender/bake_extracted_motion.py` then samples every key in world space, and
   `slopforge/creature_gait.py` measures:
@@ -302,6 +430,7 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
   - an uncalibrated creature;
   - a clip intake did not accept, or one changed since;
   - a missing reader or rig .blend;
+  - a reader that has not passed the motion exam, or is not the reader the exam saw (B3);
   - creature.json or the start cameras changed since calibration;
   - a rig .blend other than the one calibration used: the start frame and the reader belong to that rig;
   - a clip extracted before (move its folder first).
@@ -310,9 +439,79 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 - **Not covered yet:**
   - D8's limits on the fit report;
   - the foot-slide limit;
-  - Unity playback, which is B7;
   - a cubic leaves some surge in a walk whose speed changes faster than it follows; the bake records the residual
     (`residual_travel_m`).
+
+## Unity delivery (B7)
+
+The approved rig and its approved clips go into Unity as a Generic Animator Controller and prefab:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
+```
+
+- **Refused before Unity runs:**
+  - the rig not approved, or changed since;
+  - a rig facing anything but -Y. Blender's -Y is Unity's +Z, where a game moves the creature, and nothing turns a
+    creature rigged another way yet;
+  - no approved clip (clips not approved are left out);
+  - an approved clip whose FBX, bake report or sheet changed since its bake, or baked on another rig .blend;
+  - a clip name that is not lower-case letters, digits and underscores, or a bake number that is not finite and
+    positive. Both are written into the controller and the test script;
+  - rights over the rig and the clips that are not shippable;
+  - `--rig-type humanoid`: a creature is delivered Generic;
+  - no Unity editor for the project's version (the Hub's, or `UNITY_EDITOR_PATH`);
+  - a controller or prefab already in `<output_root>/Creatures/<name>/Unity/`.
+- **The build.** One Unity run imports the rig and each clip as Generic without an avatar, with Preserve Hierarchy on
+  both. The controller has one looping state per clip, named after the clip; the default is the first by name. The
+  prefab's Animator has root motion off, because the clips are in place (D9).
+  - **Speed (D9).** Each clip's walking speed is a float parameter `<clip>_speed`, in metres a second: the bake's
+    stride divided by its period. A game moves the creature along its +Z at that speed (or scales `Animator.speed`
+    to its own) and reads the value with `Animator.GetFloat`. No runtime script is added to the project.
+- **Played before it is recorded.** Unity's test runner plays the prefab
+  ([Unity projects](UNITY.md); the NUnit results stay beside it as `<name>_playmode.xml`).
+  - **Facing and size:** in the bind pose the front feet lead along +Z, by more than 10 % of the height, and the
+    mesh's height is within 5 % of the height B1 measured.
+  - **Playing on its own:** the default state advances in real time, a bone turns, and the creature's own transform
+    keeps its position, rotation and scale.
+  - **Each clip:**
+    - it loops;
+    - its length is the bake's loop within one frame;
+    - its speed parameter is the bake's;
+    - every bone stays finite;
+    - a bone turns more than 5° over the loop.
+  - **In place:** over one loop the root bone must move, and its horizontal sway must stay under a quarter of the
+    stride. A walk that kept its travel moves a whole stride every period. A root bone that never moves would pass
+    vacuously, as every bone did before the binding fix below.
+  - **Recorded, not gated (D9's foot-slide limit is open):** the stance slide once the creature moves along +Z at the
+    clip's speed. The feet are each leg's last bone joint; the FBX has no leaf bones, so the paw tip is not a
+    transform. The measures go to `<name>_playmode.jsonl` and the prefab's provenance.
+
+  Each run first clears an earlier run's results and measures, so a run that never played cannot pass on them. A
+  failed play removes the controller and prefab, keeps the results, and records the failed `unity_delivery` stage.
+- **Found on the first live run (2026-10-30):** the bake exports the clip's armature alone. Unity folds a lone
+  top-level node into the file's root, so the clip's curves were keyed `Hips/...` while the rig's bones sat at
+  `Armature/Hips/...`. No bone moved, and the curves on the armature node landed on the prefab itself, turning it
+  90° and scaling it 100 times. Preserve Hierarchy keeps both files' roots, so the clip's paths are the rig's. The
+  builder is shared, so character clips get the same import. The playing-on-its-own check now fails a clip that
+  moves the creature's own transform.
+- **Recorded:** a `unity_delivery` stage. Its parents are the stage outputs that made the rig FBX (`rig_postprocess`)
+  and each clip's FBX (`motion_bake`). Its outputs are the controller, the prefab, the results and the measures, each
+  with its SHA-256. The stage also records the Unity editor version and the hashes of the builder and the tests. The
+  controller and prefab are registered as candidate `unity.animator_controller` and `unity.creature_prefab`, pending
+  review, with each clip's speed, stride and period, the play-mode results and the measures. Notices owed are
+  written beside them.
+- **Live gate:** `SLOPFORGE_RUN_UNITY_ANIMATION=1` bakes the fixture quadruped's keyed walk in Blender, builds it
+  into a fresh Unity project and plays it (`tests/test_creature_unity_blender.py`). It needs Blender, the `unity`
+  CLI and editor 6000.6.3f1 under the Hub or `UNITY_EDITOR_PATH`. It calls the builder and the Play-mode tests
+  directly. `animation unity-setup`'s own wiring (the gates, the feet from B1's legs, B1's height, the root bone,
+  the loop's length) is covered by offline tests only, because no generated creature is approved yet.
+- **Not covered yet:**
+  - a delivery of an approved generated creature: the wolf's rig awaits review, so its walk was played only as
+    evidence, outside the gate ([evidence](media/creature-unity-b7-2026-10/README.md));
+  - the foot-slide limit;
+  - turning, blending between clips, and idles;
+  - Windows.
 
 ## video2rig
 
@@ -366,9 +565,8 @@ transformers ahead of the venv's.
   of the motion also run there.
 - On the GPU provider: `reader.train`, in bfloat16.
 
-Sending a project to the GPU provider for `reader.train` and bringing the reader back is not built yet; it belongs
-to package B3. Until then the client runs `train` only on a machine with no `train_host` set, and
-refuses it otherwise.
+With a `train_host` set, the client sends the project there for `reader.train` and brings the reader back
+([B3](#reader-training-and-the-exam-b3)).
 
 The client builds each documented command line and runs it with the provider's Python in its checkout. It makes
 every path absolute first, because a relative one would land inside the pinned checkout. `train` requires a step

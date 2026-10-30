@@ -38,9 +38,13 @@ rig_seeds: 4
 # 0.99-1.0 against 0.65-0.69), so declare that pair where no video is generated. margin_wide keeps a long creature
 # inside its side panel (#142). At 1.45 it set the wolf's scale (344 px tall) and all four clips that reached video2rig's
 # check failed it; at 1.2 the height margin sets it, as in #149 (400 px), and the same seeds passed (B5's live gate).
+# 2026-10-30: two views each leave a quadruped blind somewhere. Front + side reads the far legs' swing weakly (the
+# owner: "robotic"); three-quarter + right side measured the right legs' sideways place in no view, and they crossed.
+# Front + side with the wolf about 1.3x larger (margin 1.4; the narrow front view in a 640 px panel, the side in 1280)
+# the owner judged "significantly better" (private evidence: views spike).
 views: [front, side]
-widths: [960, 960]
-margin: 1.8
+widths: [640, 1280]
+margin: 1.4
 margin_wide: 1.2
 # Pictures the reader trains on (video2rig's reader.prepare --poses).
 training_poses: 3000
@@ -75,11 +79,15 @@ video_workflow: workflows/video_wan22_i2v_api.json
 video_views:
   front: "a fixed camera straight in front of the {name}; the {name} keeps facing this camera the whole time, its nose pointing straight at it."
   side: "a fixed camera at the {name}'s {side} side; the {name} keeps its {side} side to this camera the whole time, its head to the {side} of the picture."
-  three-quarter: "a fixed camera in front of the {name} and to its {side}; the {name} keeps its head and chest turned to this camera the whole time."
+  three-quarter: "a fixed camera in front of the {name} and to its left; the {name} keeps its head and chest turned to this camera the whole time."
 video_motions:
   walk:
     frames: 121
     retries: 4
+    # the fit's own ranges for this motion, by role, within joint_limits (the reader still trains on those): fitted
+    # within the type's 150 / 90, noisy toe readings snapped a front paw up to 118 deg in one frame; within 90 / 60, at
+    # most 78, and the owner chose that fit (2026-10-30, fit D)
+    fit_joint_limits: {FrontPaw: 90, FrontToes: 60}
     prompt: >-
       Split-screen video from two synchronised fixed cameras filming the same {subject} at the same moment, in a plain
       grey studio with a level floor and soft constant lighting. Left half: {left} Right half: {right} The {name} walks

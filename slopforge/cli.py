@@ -211,6 +211,18 @@ def parser():
     calibrate_cmd.add_argument("--widths", help="Panel widths in pixels adding up to 1920, such as 640,1280 "
                                                 "(default: split by each view's span)")
     calibrate_cmd.add_argument("--poses", type=int, help="Training pictures (default: the type's training_poses)")
+    train_cmd = creature_commands.add_parser(
+        "train", help="Train a calibrated creature's joint reader (on providers.video2rig.train_host when set)")
+    train_cmd.add_argument("name", help="Tracked creature asset name")
+    train_cmd.add_argument("--steps", type=int, default=9000, help="Training steps (default: 9000, every reader so far)")
+    exam_cmd = creature_commands.add_parser(
+        "exam", help="Examine a trained reader on a known motion under exam v1 (docs/CREATURES.md)")
+    exam_cmd.add_argument("name", help="Tracked creature asset name")
+    exam_cmd.add_argument("--kind", default="gait", choices=("random", "gait"))
+    exam_cmd.add_argument("--seed", type=int, default=0)
+    exam_cmd.add_argument("--frames", type=int, default=96)
+    exam_cmd.add_argument("--fps", type=float, help="The known motion's rate (default: the rate the type's video "
+                          "graph delivers clips at)")
     synth_cmd = creature_commands.add_parser("synth", help="Render a known motion through the creature's start cameras")
     synth_cmd.add_argument("name", help="Tracked creature asset name")
     synth_cmd.add_argument("clip", help="Clip name: lower-case letters, digits and underscores")
@@ -655,6 +667,18 @@ def _run(args):
             print(f"Creature {args.name} {args.clip}: {result['status']} (output rights "
                   f"{result['output_rights']['status']})")
             return 0
+        if args.animation_action == "unity-setup" and find_asset(manifest, args.character).get("type") == "creature":
+            from .pipelines.creature import creature_unity_setup
+            result = creature_unity_setup(root, config, manifest, args.character, rig_type=args.rig_type)
+            save_manifest(manifest_path, manifest)
+            print(f"Unity creature setup: {result['status']} (in place; Play mode passed)")
+            print(f"Controller: {result['controller']['path']}")
+            print(f"Prefab: {result['prefab']['path']}")
+            for clip, speed in result["speeds"].items():
+                slide = result["measured"]["clips"].get(clip, {}).get("stance_slide_mps")
+                print(f"  {clip}: {speed:.2f} m/s (parameter {clip}_speed); " +
+                      (f"stance slide {slide:.2f} m/s at that speed" if slide is not None else "stance slide not measured"))
+            return 0
         if args.animation_action == "unity-setup":
             from .unity_animation import build_character_animator
             result = build_character_animator(root, config, manifest, args.character, rig_type=args.rig_type)
@@ -770,6 +794,25 @@ def _run(args):
         print(f"FBX: {result['fbx']}")
         print(f"Review sheet: {result['review_sheet']}")
         print(f"Review the sheet, then: slopforge animation approve {args.name} {args.clip} --confirm")
+        return 0
+    if args.command == "creature" and args.creature_action == "exam":
+        from .pipelines.creature import exam_creature
+        result = exam_creature(root, config, manifest, args.name, kind=args.kind, seed=args.seed, frames=args.frames,
+                               fps=args.fps)
+        print(f"Creature {args.name}: exam v1 {result['status']} on {result['clip']}")
+        for key, (op, limit) in result["limits"].items():
+            value = result["measured"][key]
+            print(f"  {key}: {'unread' if value is None else round(value, 4)} ({op} {limit})"
+                  + ("  FAILED" if key in result["failures"] else ""))
+        print(f"Report: {result['report']}")
+        return 0 if result["status"] == "passed" else 1
+    if args.command == "creature" and args.creature_action == "train":
+        from .pipelines.creature import train_creature
+        result = train_creature(root, config, manifest, args.name, steps=args.steps)
+        medians = ", ".join(f"{value} px ({view})" for view, value in result["held_out_median_px"].items())
+        print(f"Creature {args.name}: reader trained on {result['trained_on']}, {result['steps']} steps in "
+              f"{result['minutes']} min; held-out median {medians}")
+        print(f"Reader: {result['reader']}")
         return 0
     if args.command == "creature" and args.creature_action in ("calibrate", "synth"):
         from .pipelines.creature import calibrate_creature, synthesize_motion
