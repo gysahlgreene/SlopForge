@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from slopforge.unity_playmode import editor_binary, parse_test_results, play_mode_script
+from slopforge.unity_playmode import (creature_play_script, editor_binary, parse_test_results, play_mode_script,
+                                      read_measures, verify_play_mode)
 
 RESULTS = """<?xml version="1.0" encoding="utf-8"?>
 <test-run id="2" testcasecount="3" result="Failed" total="3" passed="2" failed="1">
@@ -53,6 +54,50 @@ class PlayModeScriptTests(unittest.TestCase):
                 with self.assertRaises(Exception) as caught:
                     editor_binary(root)
                 self.assertIn("6000.6.3f1", str(caught.exception))
+
+    def test_the_creature_script_checks_facing_size_playback_and_in_place_per_clip(self):
+        script = creature_play_script(
+            "Assets/Generated/Creatures/wolf/Unity/wolf.prefab",
+            [{"state": "walk_s2", "length_s": 1.6875, "speed_mps": 0.41, "stride_m": 0.7}], height=0.78,
+            front=["FrontPaw.L", "FrontPaw.R"], hind=["HindPaw.L", "HindPaw.R"], root_bone="Hips",
+            measures="/project/wolf_playmode.jsonl")
+        self.assertIn('"Assets/Generated/Creatures/wolf/Unity/wolf.prefab"', script)
+        self.assertIn("const float Height = 0.78f;", script)
+        self.assertIn('new string[] {"FrontPaw.L", "FrontPaw.R"}', script)
+        self.assertIn('new string[] {"HindPaw.L", "HindPaw.R"}', script)
+        self.assertIn('"/project/wolf_playmode.jsonl"', script)
+        self.assertIn("public void FacesForwardAtItsSize()", script)
+        self.assertIn("public IEnumerator PlaysOnItsOwn()", script)   # the default state, in real time
+        # 2026-10-30 live: a clip's root curves landed on the prefab's own transform and scaled it 100x
+        self.assertIn("did not keep its own rotation and scale", script)
+        self.assertIn('[TestCase("walk_s2", 1.6875f, 0.41f, ExpectedResult = null)]', script)   # Plays
+        self.assertIn('[TestCase("walk_s2", 0.7f, 0.41f, ExpectedResult = null)]', script)      # InPlace
+
+    def test_the_play_mode_run_takes_its_script_and_leaves_no_test_assembly(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            seen = []
+
+            def run(command, **kwargs):
+                seen.append((root / "Assets/SlopForgeTests/PlayMode/PrefabPlayTests.cs").read_text())
+                Path(command[command.index("-testResults") + 1]).write_text(RESULTS.replace(
+                    'result="Failed" duration="1.2">', 'result="Passed" duration="1.2">'))
+            with patch("slopforge.unity_playmode.editor_binary", return_value="Unity"), \
+                    patch("slopforge.unity_playmode.subprocess.run", side_effect=run):
+                report = verify_play_mode(root, "// the creature's tests", results=root / "out/results.xml")
+            self.assertEqual(seen, ["// the creature's tests"])
+            self.assertEqual(len(report["passed"]), 3)
+            self.assertFalse((root / "Assets/SlopForgeTests").exists())
+
+    def test_the_creature_measures_merge_into_the_facing_and_one_record_per_clip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "wolf_playmode.jsonl"
+            path.write_text('{"faces_margin_m": 0.42, "height_m": 0.781}\n'
+                            '{"clip": "walk_s2", "length_s": 1.6875}\n'
+                            '{"clip": "walk_s2", "root_excursion_m": 0.04, "stance_slide_mps": 0.06}\n')
+            self.assertEqual(read_measures(path), {"faces_margin_m": 0.42, "height_m": 0.781, "clips": {
+                "walk_s2": {"length_s": 1.6875, "root_excursion_m": 0.04, "stance_slide_mps": 0.06}}})
 
     def test_results_name_the_failed_tests_with_their_messages(self):
         with tempfile.TemporaryDirectory() as temporary:

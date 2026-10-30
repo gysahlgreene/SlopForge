@@ -106,6 +106,231 @@ public class PrefabPlayTests
 """
 
 
+def creature_play_script(prefab_asset_path, clips, *, height, front, hind, root_bone, measures):
+    """The NUnit play-mode tests for a creature prefab (B7): it faces +Z at the size B1 measured, plays its default
+    state on its own, and each clip (`{state, length_s, speed_mps, stride_m}`) loops at its baked length with its
+    speed parameter, finite, and in place. `front`/`hind` name each leg's last bone; the facing, size and each clip's
+    measures are appended to `measures` as JSON lines (read_measures), the stance slide among them (recorded, not
+    gated: D9's foot-slide limit is open)."""
+    names = lambda bones: "new string[] {" + ", ".join(json.dumps(bone) for bone in bones) + "}"
+    number = lambda value: f"{float(value)!r}f"
+    plays = "\n".join(f"    [TestCase({json.dumps(clip['state'])}, {number(clip['length_s'])}, "
+                      f"{number(clip['speed_mps'])}, ExpectedResult = null)]" for clip in clips)
+    in_place = "\n".join(f"    [TestCase({json.dumps(clip['state'])}, {number(clip['stride_m'])}, "
+                         f"{number(clip['speed_mps'])}, ExpectedResult = null)]" for clip in clips)
+    return f"""using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEditor;
+using UnityEngine.TestTools;
+
+namespace SlopForge
+{{
+public class CreaturePlayTests
+{{
+    const string PrefabPath = {json.dumps(prefab_asset_path)};
+    const string MeasuresPath = {json.dumps(str(measures))};
+    const string RootBone = {json.dumps(root_bone)};
+    const float Height = {number(height)};
+    const int Samples = 48;
+    static readonly string[] Front = {names(front)};
+    static readonly string[] Hind = {names(hind)};
+
+    [OneTimeSetUp]
+    public void ClearMeasures() {{ if (File.Exists(MeasuresPath)) File.Delete(MeasuresPath); }}
+
+    static void Measure(string json) {{ File.AppendAllText(MeasuresPath, json + "\\n"); }}
+    static string Number(float value) {{
+        return float.IsNaN(value) ? "null" : value.ToString("R", CultureInfo.InvariantCulture); }}
+
+    static GameObject Spawn()
+    {{
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath);
+        Assert.IsNotNull(prefab, "prefab missing: " + PrefabPath);
+        return Object.Instantiate(prefab, Vector3.zero, Quaternion.identity);
+    }}
+
+    static Transform Bone(GameObject instance, string name)
+    {{
+        var bone = instance.GetComponentsInChildren<Transform>().FirstOrDefault(t => t.name == name);
+        Assert.IsNotNull(bone, "bone missing: " + name);
+        return bone;
+    }}
+
+    static Vector3 Mean(GameObject instance, string[] bones)
+    {{
+        var sum = Vector3.zero;
+        foreach (var name in bones) sum += Bone(instance, name).position;
+        return sum / bones.Length;
+    }}
+
+    static Animator Start(GameObject instance, string state)
+    {{
+        var animator = instance.GetComponent<Animator>();
+        Assert.IsNotNull(animator, "no Animator on the prefab");
+        animator.Play(state, 0, 0f);
+        animator.Update(0f);
+        return animator;
+    }}
+
+    [Test]
+    public void FacesForwardAtItsSize()
+    {{
+        var instance = Spawn();
+        instance.GetComponent<Animator>().enabled = false;   // the bind pose, as B1 measured it
+        // a game moves a creature along its transform's +Z, so the front feet lead
+        float margin = Mean(instance, Front).z - Mean(instance, Hind).z;
+        float low = float.MaxValue, high = float.MinValue;
+        // the bind pose baked into the renderer's own space (useScale), then placed by its whole world matrix: an
+        // imported mesh is not readable at run time, and the 2026-10-30 live runs measured 1/100 of the creature with
+        // that bake placed without the node's FBX scale of 100, and 100x with an unscaled bake placed with it
+        foreach (var skin in instance.GetComponentsInChildren<SkinnedMeshRenderer>())
+        {{
+            var mesh = new Mesh();
+            skin.BakeMesh(mesh, true);
+            var place = skin.transform.localToWorldMatrix;
+            foreach (var vertex in mesh.vertices)
+            {{
+                float y = place.MultiplyPoint3x4(vertex).y;
+                low = Mathf.Min(low, y); high = Mathf.Max(high, y);
+            }}
+            Object.Destroy(mesh);
+        }}
+        Object.Destroy(instance);
+        Assert.Less(low, high, "no skinned mesh on the prefab");
+        Measure("{{\\"faces_margin_m\\": " + Number(margin) + ", \\"height_m\\": " + Number(high - low) + "}}");
+        Assert.Greater(margin, 0.1f * Height, "the front feet are not ahead along +Z (by " + margin + " m): a game " +
+                       "moves the creature along its +Z");
+        Assert.Less(Mathf.Abs((high - low) / Height - 1f), 0.05f, "imported " + (high - low) + " m tall, rigged " +
+                    Height + " m");
+    }}
+
+    [UnityTest]
+    public IEnumerator PlaysOnItsOwn()
+    {{
+        var instance = Spawn();
+        var animator = instance.GetComponent<Animator>();
+        Assert.IsNotNull(animator, "no Animator on the prefab");
+        Assert.IsFalse(animator.applyRootMotion, "root motion is on: a creature's clips are delivered in place");
+        var bones = instance.GetComponentsInChildren<Transform>();
+        var rest = bones.Select(t => t.localRotation).ToArray();
+        yield return new WaitForSeconds(1f);
+        float turned = 0f;
+        for (int i = 0; i < bones.Length; i++) turned = Mathf.Max(turned, Quaternion.Angle(rest[i], bones[i].localRotation));
+        var moved = instance.transform.position.magnitude;
+        var spun = Quaternion.Angle(instance.transform.rotation, Quaternion.identity);
+        var scale = instance.transform.localScale;
+        var time = animator.GetCurrentAnimatorStateInfo(0).normalizedTime;
+        Object.Destroy(instance);
+        Assert.Greater(time, 0f, "the default state did not advance in 1 s");
+        Assert.Greater(turned, 5f, "no bone turned in 1 s of play");
+        Assert.Less(moved, 0.001f, "the creature moved itself " + moved + " m");
+        // a clip whose curves miss the rig's hierarchy moves the creature's own transform instead
+        Assert.IsTrue(spun < 0.5f && (scale - Vector3.one).magnitude < 0.001f,
+                      "the creature did not keep its own rotation and scale (turned " + spun + " deg, scale " + scale +
+                      "): the clip's curves miss the rig's hierarchy");
+    }}
+
+{plays}
+    [UnityTest]
+    public IEnumerator Plays(string state, float length, float speed)
+    {{
+        var instance = Spawn();
+        var animator = Start(instance, state);
+        yield return null;
+        var info = animator.GetCurrentAnimatorStateInfo(0);
+        Assert.IsTrue(info.IsName(state), "no state " + state);
+        Assert.IsTrue(info.loop, state + " does not loop");
+        Assert.Less(Mathf.Abs(info.length - length), 1f / 24f + 0.001f, state + " lasts " + info.length +
+                    " s; its loop was baked " + length + " s");
+        Assert.AreEqual(speed, animator.GetFloat(state + "_speed"), 0.0001f, "the controller's " + state + "_speed");
+        Measure("{{\\"clip\\": \\"" + state + "\\", \\"length_s\\": " + Number(info.length) + "}}");
+        var bones = instance.GetComponentsInChildren<Transform>();
+        var first = bones.Select(t => t.localRotation).ToArray();
+        float turned = 0f;
+        for (int k = 0; k < Samples; k++)
+        {{
+            animator.Play(state, 0, (float)k / Samples);
+            animator.Update(0f);
+            for (int i = 0; i < bones.Length; i++)
+            {{
+                var p = bones[i].localPosition; var q = bones[i].localRotation;
+                float sum = p.x + p.y + p.z + q.x + q.y + q.z + q.w;
+                Assert.IsFalse(float.IsNaN(sum) || float.IsInfinity(sum), bones[i].name + " is not finite in " +
+                               state + " at " + k + "/" + Samples);
+                turned = Mathf.Max(turned, Quaternion.Angle(first[i], q));
+            }}
+        }}
+        Object.Destroy(instance);
+        Assert.Greater(turned, 5f, state + ": no bone turns more than 5 degrees over its loop");
+    }}
+
+{in_place}
+    [UnityTest]
+    public IEnumerator InPlace(string state, float stride, float speed)
+    {{
+        var instance = Spawn();
+        var animator = Start(instance, state);
+        yield return null;
+        float length = animator.GetCurrentAnimatorStateInfo(0).length;
+        var root = Bone(instance, RootBone);
+        var feet = Front.Concat(Hind).Select(name => Bone(instance, name)).ToArray();
+        var track = new Vector3[Samples];
+        var steps = new Vector3[feet.Length, Samples];
+        for (int k = 0; k < Samples; k++)
+        {{
+            animator.Play(state, 0, (float)k / Samples);
+            animator.Update(0f);
+            track[k] = root.position;
+            for (int f = 0; f < feet.Length; f++) steps[f, k] = feet[f].position;
+        }}
+        Object.Destroy(instance);
+        // the root bone sways, but a walk that kept its travel moves a whole stride every period
+        float excursion = 0f;
+        foreach (var a in track)
+            foreach (var b in track)
+                excursion = Mathf.Max(excursion, new Vector2(a.x - b.x, a.z - b.z).magnitude);
+        // D9: moved along +Z at the recorded speed, a planted foot holds still (the bake's stance slide)
+        float dt = length / Samples;
+        var slides = new List<float>();
+        for (int f = 0; f < feet.Length; f++)
+        {{
+            var heights = Enumerable.Range(0, Samples).Select(k => steps[f, k].y).OrderBy(y => y).ToArray();
+            float planted = heights[Samples / 10] + 0.01f * Height;
+            for (int k = 0; k < Samples; k++)
+            {{
+                int next = (k + 1) % Samples;
+                if (steps[f, k].y > planted || steps[f, next].y > planted) continue;
+                var moved = steps[f, next] - steps[f, k] + Vector3.forward * speed * dt;
+                slides.Add(new Vector2(moved.x, moved.z).magnitude / dt);
+            }}
+        }}
+        slides.Sort();
+        float slide = slides.Count > 0 ? slides[slides.Count / 2] : float.NaN;
+        Measure("{{\\"clip\\": \\"" + state + "\\", \\"root_excursion_m\\": " + Number(excursion) +
+                ", \\"stance_slide_mps\\": " + Number(slide) + "}}");
+        Assert.Less(excursion, stride / 4f, state + "'s root bone travels " + excursion + " m in a loop; its stride is " +
+                    stride + " m: it is not in place");
+    }}
+}}
+}}
+"""
+
+
+def read_measures(path):
+    """The creature tests' JSON lines as one record: the facing and size, then each clip's measures."""
+    measured = {"clips": {}}
+    for line in Path(path).read_text().splitlines():
+        item = json.loads(line)
+        clip = item.pop("clip", None)
+        (measured["clips"].setdefault(clip, {}) if clip else measured).update(item)
+    return measured
+
+
 ASSEMBLY = {"name": "SlopForgePlayMode", "references": ["UnityEngine.TestRunner", "UnityEditor.TestRunner"],
             "includePlatforms": [], "excludePlatforms": [], "allowUnsafeCode": False, "overrideReferences": True,
             "precompiledReferences": ["nunit.framework.dll"], "autoReferenced": False,
@@ -126,15 +351,15 @@ def parse_test_results(path):
     return report
 
 
-def verify_play_mode(project_root, prefab, parts, *, results):
-    """Run the play-mode tests for `prefab` (an Assets path) in the project; writes `results` (NUnit XML) and
-    returns parse_test_results' report. Raises StageFailure naming the failed tests."""
+def verify_play_mode(project_root, script, *, results):
+    """Run a play-mode test script (play_mode_script, creature_play_script) in the project; writes `results` (NUnit
+    XML) and returns parse_test_results' report. Raises StageFailure naming the failed tests."""
     root = Path(project_root).resolve()
     editor = editor_binary(root)
     folder = root / TEST_FOLDER
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "SlopForgePlayMode.asmdef").write_text(json.dumps(ASSEMBLY, indent=2) + "\n")
-    (folder / "PrefabPlayTests.cs").write_text(play_mode_script(prefab, parts))
+    (folder / "PrefabPlayTests.cs").write_text(script)
     results = Path(results).resolve()
     results.parent.mkdir(parents=True, exist_ok=True)
     log = results.with_suffix(".log")

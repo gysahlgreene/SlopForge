@@ -30,9 +30,11 @@ from ..manifest import (begin_stage, find_asset, finish_execution, finish_stage,
                         set_artifact_approval, start_execution, start_stage)
 from ..paths import blender_executable, resolve_workflow, tool_root
 from ..provenance import file_sha256, tool_sha256
-from ..providers import artifact_rights, require_shippable, rights_of
+from ..providers import artifact_rights, merge_rights, require_shippable, rights_of, write_notices
 from ..skintokens_runtime import SKINTOKENS_SETTINGS
 from ..taxonomy import load_taxonomy, output_path
+from ..unity_animation import build_animator
+from ..unity_playmode import creature_play_script, read_measures, verify_play_mode
 from ..workflow_requirements import workflow_output_rights, workflow_requirements_identity
 from .model import _artifact_ref
 
@@ -993,6 +995,19 @@ def extract_creature(project_root, config, manifest, name, clip):
             "window": baked["window"], **gait}
 
 
+def _check_bake(root, asset, clip, extraction):
+    """A baked clip as it was made: on the creature's rig .blend as it is now, its FBX, bake report and review sheet
+    unchanged since the bake."""
+    if _rig_blend(root, asset)[1]["sha256"] != extraction.get("rig_blend_sha256"):
+        raise ValueError(f"clip {clip} was baked on another rig than {asset['name']}'s approved one; extract it again")
+    for kind, digest in extraction["outputs"].items():
+        path = root / {"animation.fbx": extraction["fbx"], "report.motion_bake": extraction["bake"],
+                       "image.motion_review": extraction["review_sheet"]}.get(kind, "")
+        if kind in ("animation.fbx", "report.motion_bake", "image.motion_review") and (
+                not path.is_file() or file_sha256(path) != digest):
+            raise ValueError(f"clip {clip}'s {kind} is missing or changed since the bake; extract it again")
+
+
 def approve_motion(project_root, manifest, name, clip, *, confirmed=False):
     """Record the human review of a baked creature clip (B6's gate): its rig approved first, its FBX, bake report and
     review sheet unchanged since the bake, and the rights over its whole lineage shippable."""
@@ -1007,16 +1022,87 @@ def approve_motion(project_root, manifest, name, clip, *, confirmed=False):
     if (asset.get("rigging") or {}).get("status") != "approved":
         raise ValueError(f"creature {name}'s rig is not approved: review its contact sheet and run "
                          f"`slopforge creature approve-rig {name} --confirm` first")
-    if _rig_blend(root, asset)[1]["sha256"] != extraction.get("rig_blend_sha256"):
-        raise ValueError(f"clip {clip} was baked on another rig than {name}'s approved one; extract it again")
-    for kind, digest in extraction["outputs"].items():
-        path = root / {"animation.fbx": extraction["fbx"], "report.motion_bake": extraction["bake"],
-                       "image.motion_review": extraction["review_sheet"]}.get(kind, "")
-        if kind in ("animation.fbx", "report.motion_bake", "image.motion_review") and (
-                not path.is_file() or file_sha256(path) != digest):
-            raise ValueError(f"clip {clip}'s {kind} is missing or changed since the bake; extract it again")
+    _check_bake(root, asset, clip, extraction)
     rights = require_shippable(artifact_rights(manifest, asset["id"], f"animation.{clip}"), f"{name} {clip}",
                                "animation approve")
     set_artifact_approval(manifest, asset["id"], f"animation.{clip}", "approved")
     extraction.update(status="approved", approved_at=datetime.now(timezone.utc).isoformat(), output_rights=rights)
     return {"status": "approved", "output_rights": rights}
+
+
+def creature_unity_setup(project_root, config, manifest, name, *, rig_type="generic"):
+    """B7: the creature's approved rig and approved clips into Unity as a Generic Animator Controller and prefab, in
+    place (D9) with each clip's speed as a float parameter `<clip>_speed`, then played in Play mode
+    (creature_play_script) before they are recorded as candidates. Refused before Unity runs: a rig not approved or
+    changed since, no approved clip, an approved clip changed since its bake, rights that are not shippable, outputs
+    already there. A failed play leaves no controller or prefab and keeps the results."""
+    if rig_type != "generic":
+        raise ValueError(f"a creature is delivered Generic: Unity's Humanoid avatar is for two-legged characters "
+                         f"({name})")
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    rigging = asset.get("rigging") or {}
+    if rigging.get("status") != "approved":
+        raise ValueError(f"creature {name}'s rig is not approved: review its contact sheet and run "
+                         f"`slopforge creature approve-rig {name} --confirm` first")
+    rig = _project_file(root, asset["artifacts"]["rig"]["path"], f"creature {name}'s rig")[1]
+    if file_sha256(rig) != rigging.get("rig_sha256"):
+        raise ValueError(f"creature {name}'s rig is missing or changed since it was approved; rig it again")
+    clips = []
+    for clip, entry in sorted(((asset.get("motion") or {}).get("clips") or {}).items()):
+        extraction = entry.get("extraction") or {}
+        if extraction.get("status") != "approved":
+            continue
+        _check_bake(root, asset, clip, extraction)
+        window = extraction["window"]
+        clips.append({"id": f"animation.{clip}", "state": clip, "loop": True, "root_motion": False,
+                      "path": _project_file(root, extraction["fbx"], f"Clip {clip}'s FBX")[0],
+                      "speed": extraction["speed_mps"], "stride_m": extraction["stride_m"],
+                      "period_s": extraction["period_s"], "length_s": window["end_s"] - window["start_s"]})
+    if not clips:
+        raise ValueError(f"creature {name} has no approved clip: review a baked clip's sheet and run "
+                         f"`slopforge animation approve {name} <clip> --confirm`")
+    # Unity delivery: the rig's and every clip's rights over their lineage decide, before Unity runs
+    rights = require_shippable(merge_rights(*(artifact_rights(manifest, asset["id"], artifact)
+                                              for artifact in ("rig", *(clip["id"] for clip in clips)))),
+                               name, "animation unity-setup")
+    output_dir = root / config["asset_pipeline"]["output_root"] / "Creatures" / name / "Unity"
+    results = output_dir / f"{name}_playmode.xml"
+    # what the play checks against, read before Unity builds anything
+    feet = {end: [chain[-1] for leg, chain in sorted(_legs(root, asset).items()) if leg.startswith(end)]
+            for end in ("front", "hind")}
+    script = creature_play_script(
+        (output_dir / f"{name}.prefab").relative_to(root).as_posix(),
+        [{"state": clip["state"], "length_s": clip["length_s"], "speed_mps": clip["speed"],
+          "stride_m": clip["stride_m"]} for clip in clips],
+        height=json.loads((root / rigging["structure"]).read_text())["measured"]["height"],
+        front=feet["front"], hind=feet["hind"], root_bone=asset["motion"]["creature"]["root_bone"],
+        measures=results.with_suffix(".jsonl"))
+    controller, prefab = build_animator(root, name, rig, clips, output_dir)
+    try:
+        played = verify_play_mode(root, script, results=results)
+        measured = read_measures(results.with_suffix(".jsonl"))
+    except (Exception, KeyboardInterrupt):
+        for path in (controller, prefab):   # Unity made them; they leave with their .meta files
+            path.unlink(missing_ok=True)
+            Path(f"{path}.meta").unlink(missing_ok=True)
+        raise
+    write_notices(output_dir, name, rights)
+    provenance = {"provider": "Unity ModelImporter and AnimatorController", "rig_type": "generic",
+                  "source_rig": asset["artifacts"]["rig"]["path"], "animations": [clip["id"] for clip in clips],
+                  "clips": {clip["state"]: {"speed_mps": clip["speed"], "stride_m": clip["stride_m"],
+                                            "period_s": clip["period_s"]} for clip in clips},
+                  "play_mode": {**played, "measured": measured, "results": results.relative_to(root).as_posix()},
+                  "output_rights": [], "delivered_rights": rights}
+    derived_from = ([{"asset_id": asset["id"], "output_id": "rig"}] +
+                    [{"asset_id": asset["id"], "output_id": clip["id"]} for clip in clips])
+    controller_artifact = register_artifact(manifest, asset["id"], "unity.animator_controller",
+                                            "unity.animator_controller", controller.relative_to(root).as_posix(),
+                                            status="candidate", derived_from=derived_from, provenance=provenance,
+                                            approval_status="pending")
+    prefab_artifact = register_artifact(manifest, asset["id"], "unity.creature_prefab", "unity.prefab",
+                                        prefab.relative_to(root).as_posix(), status="candidate",
+                                        derived_from=derived_from, provenance=provenance, approval_status="pending")
+    return {"status": "review_required", "controller": controller_artifact, "prefab": prefab_artifact,
+            "clips": [clip["state"] for clip in clips], "speeds": {clip["state"]: clip["speed"] for clip in clips},
+            "measured": measured}

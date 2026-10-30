@@ -34,7 +34,7 @@ from ..unity_material import (apply_glass, build_unity_material, derive_emission
                               unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
-from ..unity_playmode import verify_play_mode
+from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
@@ -1993,7 +1993,7 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                                                            if key != "errors"}
                 # then the prefab is played: the Animator pulses each part and the Rigidbody settles on a floor
                 validation["measured"]["play_mode"] = verify_play_mode(
-                    root, motion["prefab"], moving, results=paths["directory"] / f"{asset['name']}_playmode.xml")
+                    root, play_mode_script(motion["prefab"], moving), results=paths["directory"] / f"{asset['name']}_playmode.xml")
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
             outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
             published = _published_artifacts(root, paths, candidate, execution["id"])

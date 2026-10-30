@@ -57,14 +57,39 @@ def build_character_animator(project_root, config, manifest, character_selector,
                                               for name in ("rig", *(clip["id"] for clip in clips)))),
                                character["name"], "animation unity-setup")
 
-    output_dir = (root / config["asset_pipeline"]["output_root"] / "Characters" /
-                  character["name"] / "Unity").resolve()
+    output_dir = root / config["asset_pipeline"]["output_root"] / "Characters" / character["name"] / "Unity"
+    controller, prefab = build_animator(root, character["name"], rig_path, clips, output_dir, rig_type=rig_type,
+                                        humanoid_mapping=humanoid_mapping)
+    write_notices(output_dir, character["name"], rights)
+    provenance = {"provider": "Unity ModelImporter and AnimatorController", "rig_type": rig_type,
+                  "source_rig": rig["path"], "animations": [clip["id"] for clip in clips],
+                  "output_rights": [], "delivered_rights": rights}
+    derived_from = ([{"asset_id": character["id"], "output_id": "rig"}] +
+                    [{"asset_id": character["id"], "output_id": clip["id"]} for clip in clips])
+    controller_artifact = register_artifact(manifest, character["id"], "unity.animator_controller",
+        "unity.animator_controller", controller.relative_to(root).as_posix(), status="candidate",
+        derived_from=derived_from, provenance=provenance, approval_status="pending")
+    prefab_artifact = register_artifact(manifest, character["id"], "unity.character_prefab", "unity.prefab",
+        prefab.relative_to(root).as_posix(), status="candidate", derived_from=derived_from,
+        provenance=provenance, approval_status="pending")
+    if rig_type == "humanoid":
+        character.setdefault("pipeline_status", {})["unity_avatar_status"] = "valid"
+    return {"status": "review_required", "controller": controller_artifact, "prefab": prefab_artifact}
+
+
+def build_animator(root, name, rig_path, clips, output_dir, *, rig_type="generic", humanoid_mapping=None):
+    """One Unity run: the rig's and clips' import settings, an Animator Controller with a state per clip and a prefab
+    of the rig with it, as `<name>.controller` and `<name>.prefab` in `output_dir`. A clip is `{path, loop,
+    root_motion}` with an optional `state` name (the imported clip's name otherwise) and `speed` (m/s, a float
+    parameter `<state>_speed` a game reads, D9). Returns the two paths; nothing is left behind if Unity fails."""
+    root = Path(root).resolve()
+    output_dir = Path(output_dir).resolve()
     if not output_dir.is_relative_to(root):
         raise ValueError("Unity output directory must stay inside the project")
-    controller = output_dir / f"{character['name']}.controller"
-    prefab = output_dir / f"{character['name']}.prefab"
+    controller = output_dir / f"{name}.controller"
+    prefab = output_dir / f"{name}.prefab"
     if controller.exists() or prefab.exists():
-        raise FileExistsError(f"Unity character outputs already exist: {output_dir}")
+        raise FileExistsError(f"Unity outputs already exist: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     class_name = "SlopForgeCharacterAnimator_" + uuid.uuid4().hex
     script = root / "Assets/Editor" / f"{class_name}.cs"
@@ -74,9 +99,14 @@ def build_character_animator(project_root, config, manifest, character_selector,
     prefab_asset = prefab.relative_to(root).as_posix()
     animation_paths = ", ".join(json.dumps(clip["path"]) for clip in clips)
     loop_flags = ", ".join(str(clip["loop"]).lower() for clip in clips)
+    state_names = ", ".join(json.dumps(clip.get("state")) for clip in clips)
+    speeds = "".join(
+        "\n        controller.AddParameter(new AnimatorControllerParameter {{ name = {name}, "
+        "type = AnimatorControllerParameterType.Float, defaultFloat = {speed!r}f }});".format(
+            name=json.dumps(clip["state"] + "_speed"), speed=float(clip["speed"]))
+        for clip in clips if clip.get("speed") is not None)
     root_motion = any(clip["root_motion"] for clip in clips)
     humanoid_description = ""
-    humanoid_clip_hierarchy = ""
     if humanoid_mapping is not None:
         human_bones = ",\n            ".join(
             "new HumanBone {{ humanName = {human}, boneName = {bone}, limit = new HumanLimit {{ useDefaultValues = true }} }}".format(
@@ -93,7 +123,6 @@ def build_character_animator(project_root, config, manifest, character_selector,
         }};
         rigImporter.humanDescription = humanDescription;
         """
-        humanoid_clip_hierarchy = "importer.preserveHierarchy = true;"
     script.write_text(f'''using System;
 using System.Linq;
 using UnityEditor;
@@ -109,12 +138,16 @@ public static class {class_name}
         const string prefabPath = {json.dumps(prefab_asset)};
         string[] clipPaths = new string[] {{{animation_paths}}};
         bool[] loopFlags = new bool[] {{{loop_flags}}};
+        string[] stateNames = new string[] {{{state_names}}};
         AssetDatabase.Refresh();
         var rigImporter = AssetImporter.GetAtPath(rigPath) as ModelImporter;
         if (rigImporter == null) throw new Exception("Character FBX importer not found: " + rigPath);
         {humanoid_description}
         rigImporter.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
         rigImporter.avatarSetup = {"ModelImporterAvatarSetup.CreateFromThisModel" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
+        // the rig and its clips keep their FBX root: a clip exported with the armature alone would otherwise be folded
+        // into its file's root, its curves would miss the rig's bones, and its root curves would move the prefab itself
+        rigImporter.preserveHierarchy = true;
         rigImporter.SaveAndReimport();
         Avatar avatar = null;
         if ({str(rig_type == "humanoid").lower()})
@@ -130,7 +163,7 @@ public static class {class_name}
             importer.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
             importer.avatarSetup = {"ModelImporterAvatarSetup.CopyFromOther" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
             if ({str(rig_type == "humanoid").lower()}) importer.sourceAvatar = avatar;
-            {humanoid_clip_hierarchy}
+            importer.preserveHierarchy = true;
             var clipSettings = importer.clipAnimations;
             if (clipSettings.Length == 0) clipSettings = importer.defaultClipAnimations;
             for (int j = 0; j < clipSettings.Length; j++) clipSettings[j].loopTime = loopFlags[i];
@@ -139,13 +172,13 @@ public static class {class_name}
         }}
         var controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
         var machine = controller.layers[0].stateMachine;
-        foreach (string clipPath in clipPaths)
+        for (int i = 0; i < clipPaths.Length; i++)
         {{
-            var motion = AssetDatabase.LoadAllAssetsAtPath(clipPath).OfType<AnimationClip>()
+            var motion = AssetDatabase.LoadAllAssetsAtPath(clipPaths[i]).OfType<AnimationClip>()
                 .FirstOrDefault(clip => !clip.name.StartsWith("__preview__"));
-            if (motion == null) throw new Exception("No imported animation clip in " + clipPath);
-            machine.AddState(motion.name).motion = motion;
-        }}
+            if (motion == null) throw new Exception("No imported animation clip in " + clipPaths[i]);
+            machine.AddState(stateNames[i] ?? motion.name).motion = motion;
+        }}{speeds}
         var model = AssetDatabase.LoadAssetAtPath<GameObject>(rigPath);
         if (model == null) throw new Exception("Character FBX did not import as a model: " + rigPath);
         var instance = PrefabUtility.InstantiatePrefab(model) as GameObject;
@@ -187,19 +220,4 @@ public static class {class_name}
     finally:
         script.unlink(missing_ok=True)
         script.with_suffix(".cs.meta").unlink(missing_ok=True)
-
-    write_notices(output_dir, character["name"], rights)
-    provenance = {"provider": "Unity ModelImporter and AnimatorController", "rig_type": rig_type,
-                  "source_rig": rig["path"], "animations": [clip["id"] for clip in clips],
-                  "output_rights": [], "delivered_rights": rights}
-    derived_from = ([{"asset_id": character["id"], "output_id": "rig"}] +
-                    [{"asset_id": character["id"], "output_id": clip["id"]} for clip in clips])
-    controller_artifact = register_artifact(manifest, character["id"], "unity.animator_controller",
-        "unity.animator_controller", controller.relative_to(root).as_posix(), status="candidate",
-        derived_from=derived_from, provenance=provenance, approval_status="pending")
-    prefab_artifact = register_artifact(manifest, character["id"], "unity.character_prefab", "unity.prefab",
-        prefab.relative_to(root).as_posix(), status="candidate", derived_from=derived_from,
-        provenance=provenance, approval_status="pending")
-    if rig_type == "humanoid":
-        character.setdefault("pipeline_status", {})["unity_avatar_status"] = "valid"
-    return {"status": "review_required", "controller": controller_artifact, "prefab": prefab_artifact}
+    return controller, prefab

@@ -655,6 +655,18 @@ def _run(args):
             print(f"Creature {args.name} {args.clip}: {result['status']} (output rights "
                   f"{result['output_rights']['status']})")
             return 0
+        if args.animation_action == "unity-setup" and find_asset(manifest, args.character).get("type") == "creature":
+            from .pipelines.creature import creature_unity_setup
+            result = creature_unity_setup(root, config, manifest, args.character, rig_type=args.rig_type)
+            save_manifest(manifest_path, manifest)
+            print(f"Unity creature setup: {result['status']} (in place; Play mode passed)")
+            print(f"Controller: {result['controller']['path']}")
+            print(f"Prefab: {result['prefab']['path']}")
+            for clip, speed in result["speeds"].items():
+                slide = result["measured"]["clips"].get(clip, {}).get("stance_slide_mps")
+                print(f"  {clip}: {speed:.2f} m/s (parameter {clip}_speed); " +
+                      (f"stance slide {slide:.2f} m/s at that speed" if slide is not None else "stance slide not measured"))
+            return 0
         if args.animation_action == "unity-setup":
             from .unity_animation import build_character_animator
             result = build_character_animator(root, config, manifest, args.character, rig_type=args.rig_type)
