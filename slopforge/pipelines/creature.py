@@ -225,14 +225,14 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
     contact = review / "contact_sheet.png"
     stage = start_stage(execution, "rig_postprocess", 1, [raw_refs[chosen["seed"]], source_ref],
                         {"seed": chosen["seed"], "names": chosen["names"], "poses": poses, "tool_sha256": tool,
-                         "checks_sha256": checks},
+                         "checks_sha256": checks, "skin_weights": settings["skin_weights"]},
                         {"output_rights": rights})
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
     try:
         finished = _blender(config, root, {
             "action": "finish", "source": str(source), "raw": str(root / chosen["raw"]), "names": chosen["names"],
-            "facing": chosen["facing"],
+            "facing": chosen["facing"], "skin_weights": settings["skin_weights"],
             "rigged_model": str(rigged), "blend": str(blend), "poses": poses,
             "pose_images": [str(image) for image in images], "report": str(directory / "finish.json")})
         _sheet([(Image.open(image), pose["label"]) for image, pose in zip(images, poses)], contact, columns=3)

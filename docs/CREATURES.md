@@ -56,6 +56,14 @@ The best passing seed is finished. Best means it mirrors most closely; on a tie,
   A bone past its chain's names becomes an `…End` bone.
 - **Bone axes.** Each bone's tail runs along its chain, and each bone's local X lies across the body, which is how
   video2rig bends a joint.
+- **Weights.** The type's `skin_weights` sets how the finished skin follows the bones. The `creature` type declares
+  `proxy_heat`: SkinTokens' weights are dropped, and Blender's bone heat weights a closed voxel copy of the skin at
+  rest (the character route's `bind_with_proxy`, the finest of its voxel sizes that weights every voxel). The weights
+  are copied back to the skin, and each vertex keeps its four strongest bones, summing to 1. The skin does not move.
+  On the B1 wolf this cut the stretched edges 3-5 times: with a front leg lifted, 16 % of the chest and shoulder's
+  edges over 1.5 times their rest length, against 3 %. The cost: more skin near the legs follows the opposite leg a
+  little. The owner chose it (2026-10-30, [#154](https://github.com/gysahlgreene/SlopForge/issues/154)).
+  `skintokens` keeps the model's own weights. `finish.json` records which, and the bind's voxel attempts.
 - **Material.** The source material comes back as in the character route.
 - **Outputs.** It is exported as `<name>_rig.fbx` and a packed `<name>_rig.blend` under `Creatures/<name>/Rigging/`,
   registered as the pending `rig` artifact. Next to it are `Review/seed_sheet.png`, with every seed's views and verdict,
