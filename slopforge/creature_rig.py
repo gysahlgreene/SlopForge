@@ -309,12 +309,33 @@ def rig_settings(asset_type):
     if weights not in ("skintokens", "proxy_heat"):
         raise ValueError(f"asset type {asset_type.get('name')!r}: skin_weights must be skintokens or proxy_heat, "
                          f"got {weights!r}")
+    turn = asset_type.get("max_rig_head_turn")
+    if isinstance(turn, bool) or not isinstance(turn, (int, float)) or not 0 <= turn <= 1:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: max_rig_head_turn must be a share of the height "
+                         f"from 0 to 1, got {turn!r}")
     return {"limbs": dict(limbs), "seeds": seeds, "skin_weights": weights,
-            "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0}}
+            "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0,
+                       "max_rig_head_turn": turn}}
+
+
+def head_turn(rig, names):
+    """How far the muzzle stands off the body's line, as a share of the height: the head's skin (vertices led by Head
+    or a HeadEnd bone), its forward-most fifth averaged, from the line through the hips and chest joints, sideways."""
+    vertices, weights = np.asarray(rig["vertices"], float), np.asarray(rig["weights"], float)
+    renamed = [names[name] for name in rig["bones"]]
+    joint = dict(zip(renamed, np.asarray(rig["heads"], float)))
+    along = (joint["Chest"] - joint["Hips"])[:2]
+    along /= np.linalg.norm(along)
+    head = vertices[np.isin(np.asarray(renamed)[weights.argmax(1)], [n for n in renamed if n.startswith("Head")])]
+    reach = head[:, :2] @ along
+    muzzle = head[reach >= reach.max() - 0.2 * np.ptp(reach)].mean(0)
+    side = np.array([-along[1], along[0]])
+    return float(abs((muzzle[:2] - joint["Hips"][:2]) @ side) / np.ptp(vertices[:, 2]))
 
 
 def check_rig(rig, limbs, limits):
-    """structure(), then for a passing rig its generic names and fit_bones; a rig that cannot be named fails."""
+    """structure(), then for a passing rig its generic names and fit_bones; a rig that cannot be named fails, and so
+    does one whose head is turned off the body's line (the model's: no seed straightens it)."""
     report = structure(rig, limbs, limits)
     if report["status"] == "passed":
         try:
@@ -323,4 +344,10 @@ def check_rig(rig, limbs, limits):
             report.update(status="failed", errors=[f"the rig cannot be named: {exc}"], failure_codes=["rig_structure"])
         else:
             report["fit_bones"] = fit_bones(report["names"], report["skin_share"])
+            turn = report["measured"]["rig_head_turn"] = head_turn(rig, report["names"])
+            if turn > limits["max_rig_head_turn"]:
+                report.update(status="failed", failure_codes=["rig_head_turned"], errors=[
+                    f"the head is turned: its muzzle stands {turn:.3f} of the height off the body's line (limit "
+                    f"{limits['max_rig_head_turn']}); every view inherits it, so regenerate the creature with its "
+                    "head and neck in line with the body"])
     return report

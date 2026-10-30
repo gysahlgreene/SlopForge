@@ -41,6 +41,12 @@ for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md))
 - **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
 - **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
   chest further up one spine. Besides those, only a tail and one neck may leave them.
+- **The head is in line with the body.** The head's skin is the skin the `Head` and `…End` head bones lead; its
+  forward-most fifth, averaged, is the muzzle. It may stand at most `max_rig_head_turn` of the height (0.05 for the
+  `creature` type, provisional) off the line through the hips and chest joints. A turned head is the model's, so every
+  seed fails it (`rig_head_turned`) and the remedy is a new creature. The B1 wolf's concept turned its head to the
+  camera in a three-quarter view: 0.063-0.072 over three seeds, and every front view showed the face angled (owner,
+  2026-10-30). The type's concept rules now ask for the head and neck in line with the body.
 
 Each seed's result is kept as `rig_candidate.seed_N` with its verdict, raw GLB, structure report and front and side
 views; a rejected seed stays `failed` with its reasons. A seed that crashes is recorded and the others still run. No
