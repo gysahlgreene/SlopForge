@@ -41,8 +41,9 @@ scale: the wolf was 344 px tall, against 400 px in #149.
 | 3 | 1.8 % / 1.8 % | 0.9 % / 1.3 % | accepted |
 | 4 | 1.1 % / 3.2 % | 1.3 % / 2.1 % | refused: limbs over 2 % |
 | 5 | 1.7 % / 1.7 % | 1.1 % / 1.2 % | accepted |
+| 6 | not made | 0.9 % / 1.2 % | accepted |
 
-The limits are D7's: 1.5 % of the height for the body and 2 % for the limbs.
+The limits are D7's: 1.5 % of the height for the body and 2 % for the limbs. At 400 px, 4 of seeds 2–6 passed.
 
 The type's `margin_wide` is now 1.2. A regression test pins the wolf's framing to #149's scale.
 
@@ -64,7 +65,7 @@ The type's `margin_wide` is now 1.2. A regression test pins the wolf's framing t
 
 ## Intake on the accepted clips
 
-Seeds 2, 3 and 5 at 400 px:
+Seeds 2, 3, 5 and 6 at 400 px:
 
 | Measure | Range |
 | --- | --- |
@@ -72,9 +73,9 @@ Seeds 2, 3 and 5 at 400 px:
 | Frame 0's difference from the start image | 3.6–3.8 grey levels |
 | Creature present | in every frame |
 | Backdrop drift | 3–4 grey levels |
-| Pixels moved | 6.2–6.6 % |
+| Pixels moved | 6.1–6.6 % |
 | Facing change | 0.09–0.11 |
-| Identity drift (recorded, not refused) | 12–23 |
+| Identity drift (recorded, not refused) | 9–23 |
 
 ## Not covered
 

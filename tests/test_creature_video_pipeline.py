@@ -80,6 +80,10 @@ def video(rigged, tool, monkeypatch):  # noqa: F811
     monkeypatch.setattr(pipeline, "_v2r", v2r)
     monkeypatch.setattr(pipeline, "_generate_video", generate)
     monkeypatch.setattr(pipeline, "_read_clip", lambda path: clips[str(path)])
+    # the stubbed reader needs no ffmpeg; the preflight still asks for it (CI's runner has none)
+    which = pipeline.shutil.which
+    monkeypatch.setattr(pipeline.shutil, "which", lambda name, *args, **kwargs: (
+        f"/usr/bin/{name}" if name in ("ffprobe", "ffmpeg") else which(name, *args, **kwargs)))
     pipeline.calibrate_creature(root, config, manifest, "wolf")
     project = root / manifest["assets"]["creature:wolf"]["motion"]["project"]
     (project / "reader/reader.pt").write_bytes(b"trained reader")
