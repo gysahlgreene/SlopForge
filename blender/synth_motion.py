@@ -97,8 +97,11 @@ def make(request):
         return (1.0 if moved_by < 0 else -1.0) if way == "back" else (1.0 if moved_by > 0 else -1.0)
 
     folds = {name: fold_sign(name, way) for name, way in hinges.items()}
-    swings = {name: fold_sign(name, "front") for name in moved if re.match(r"Thigh|UpperArm|Scapula", name)}
-    flexes = {name: fold_sign(name, "back") for name in moved if re.match(r"FrontPaw|HindPaw|FrontToes|HindToes", name)}
+    # one bone swings a leg and the paw and toes flex, never a scapula above it or an end bone below: a B1 front leg has
+    # a scapula and B1 fits the end bones, and swinging or curling those too kicked a leg level (B3's exam, 2026-10-30)
+    swings = {name: fold_sign(name, "front") for name in moved if re.match(r"(Thigh|UpperArm)\.[LR]$", name)}
+    flexes = {name: fold_sign(name, "back") for name in moved
+              if re.match(r"(FrontPaw|HindPaw|FrontToes|HindToes)\.[LR]$", name)}
 
     def amplitude(name):
         role = next(degrees for pattern, degrees in AMPLITUDES if re.match(pattern, name))
@@ -154,11 +157,11 @@ def make(request):
                         x = folds[name] * np.radians(35) * lift
                     elif name in swings:
                         x = np.radians(min(20, 0.9 * ranges.get(name, 20))) * swing * swings[name]
-                    else:
-                        x = np.radians(min(20, 0.9 * ranges.get(name, 20))) * lift * flexes.get(name, 1.0)
+                    elif name in flexes:
+                        x = np.radians(min(20, 0.9 * ranges.get(name, 20))) * lift * flexes[name]
                 elif name.startswith("Tail"):
                     z = np.radians(12) * math.sin(2 * np.pi * t[f])
-                elif name.startswith(("Neck", "Head")):
+                elif name.startswith("Neck") or name == "Head":
                     x = np.radians(6) * math.sin(4 * np.pi * t[f])
                 elif name.startswith(("Spine", "Chest")):
                     z = np.radians(3) * math.sin(2 * np.pi * t[f])

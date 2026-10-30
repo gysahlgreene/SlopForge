@@ -12,6 +12,7 @@ from PIL import Image
 from slopforge.backends import video2rig
 from slopforge.failures import StageFailure
 from slopforge.pipelines import creature as pipeline
+from slopforge.provenance import file_sha256
 from tests.test_creature_calibration import rigged, tool  # noqa: F401  (B1/B2 stubs)
 from tests.test_creature_pipeline import stubs  # noqa: F401
 from tests.test_creature_video_pipeline import WALK, video  # noqa: F401
@@ -30,6 +31,9 @@ def extracted(video, monkeypatch):  # noqa: F811
     .blend, and the bake `calls["bake"]`'s report with its FBX, .blend and renders."""
     root, config, manifest, calls, project = video
     pipeline.video_creature(root, config, manifest, "wolf", "walk", count=1, seed=11)
+    # the reader passed exam v1 (B3), as extraction needs
+    manifest["assets"]["creature:wolf"]["motion"]["reader"] = {
+        "status": "trained", "sha256": file_sha256(project / "reader/reader.pt"), "exam": {"status": "passed"}}
     creature = json.loads((project / "creature.json").read_text())
     timing = json.loads((project / "work/walk_s11/timing.json").read_text())["times"]
     calls.update(fit={"bones": list(creature["fit_bones"]), "times": timing}, bake=dict(BAKED), steps=[])
@@ -264,3 +268,16 @@ def test_animation_approve_refuses_a_changed_bake_report_or_sheet(extracted, nam
     path.write_bytes(path.read_bytes() + b" ")
     with pytest.raises(ValueError, match="changed since the bake"):
         pipeline.approve_motion(root, manifest, "wolf", "walk_s11", confirmed=True)
+
+
+@pytest.mark.parametrize("change", [
+    lambda reader, project: reader.update(exam={"status": "failed"}),
+    lambda reader, project: reader.pop("exam"),
+    lambda reader, project: (project / "reader/reader.pt").write_bytes(b"a reader the exam never saw"),
+])
+def test_a_reader_that_has_not_passed_the_exam_reads_no_clip(extracted, change):
+    root, config, manifest, calls, project = extracted
+    change(manifest["assets"]["creature:wolf"]["motion"]["reader"], project)
+    with pytest.raises(ValueError, match="has not passed the motion exam.*creature exam wolf"):
+        pipeline.extract_creature(root, config, manifest, "wolf", "walk_s11")
+    assert calls["steps"] == []

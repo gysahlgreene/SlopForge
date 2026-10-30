@@ -196,15 +196,56 @@ def read_output(project, step, clip=None):
     return result
 
 
+# what training does not read: an earlier reader, and the clips, readings and fits of the project
+_NOT_SENT = ("reader/reader*.pt", "work/", "out/", "clips/")
+
+
+def _train_remote(tools, project, steps, log):
+    """reader.train on providers.video2rig.train_host: the project is sent to a fresh folder there, the runtime
+    trains it with the provider's own install, the reader and its report come back, and the folder is removed
+    whatever happened. Nothing stays on the host between trainings."""
+    host = tools["train_host"]
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", host]
+
+    def step(name, argv, **kwargs):
+        with open(log, "a") as stream:
+            stream.write("$ " + shlex.join(argv) + "\n")
+            stream.flush()
+            done = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, text=True, check=False, **kwargs)
+        if done.returncode != 0:
+            raise StageFailure("environment", f"video2rig train on {host}: {name} exited with code {done.returncode}",
+                               operation="video2rig train", remedy=f"Read {log}", evidence={"log": str(log)})
+
+    made = subprocess.run(ssh + ["mktemp -d /tmp/slopforge-reader-XXXXXX"], capture_output=True, text=True,
+                          check=False)
+    remote = made.stdout.strip()
+    if made.returncode != 0 or not remote.startswith("/tmp/slopforge-reader-"):
+        raise StageFailure("environment", f"video2rig train: no working folder on {host}: "
+                           + ((made.stderr or "").strip().splitlines() or ["no reply"])[-1],
+                           operation="video2rig train", remedy=f"Check that `ssh {host}` works without a prompt")
+    try:
+        step("send", ["rsync", "-a", *[word for pattern in _NOT_SENT for word in ("--exclude", pattern)],
+                      f"{project}/", f"{host}:{remote}/"])
+        payload = {"python": tools["train_python"], "checkout": tools["train_checkout"], "project": remote,
+                   "steps": steps}
+        step("train", ssh + [shlex.join([tools["train_python"], "-", "train", json.dumps(payload)])],
+             input=Path(runtime.__file__).read_text())
+        step("fetch", ["rsync", "-a", f"{host}:{remote}/reader/reader.pt", f"{host}:{remote}/reader/reader-train.json",
+                       f"{project}/reader/"])
+    finally:
+        subprocess.run(ssh + [f"rm -rf {shlex.quote(remote)}"], capture_output=True, check=False)
+
+
 def run(config, project_root, step, project, log, **options):
     """Run one step with the provider's Python in its checkout, offline against the pinned backbone, and return
     what it wrote: reader-train.json (train), check.json (check: a FAIL verdict is an answer, not an error),
-    {"report", "motion"} (run), else None."""
-    host = settings(config)["train_host"]
-    if step == "train" and host:
-        raise StageFailure("configuration", f"readers train on {host} (providers.video2rig.train_host), and sending a "
-                           "project there is not built yet (plan package B3)", operation="video2rig train",
-                           remedy="Unset providers.video2rig.train_host to train on this machine's CUDA card")
+    {"report", "motion"} (run), else None. With providers.video2rig.train_host set, train runs there."""
+    tools = settings(config)
+    if step == "train" and tools["train_host"]:
+        project = Path(project).resolve()
+        (project / _OUTPUTS["train"]).unlink(missing_ok=True)
+        _train_remote(tools, project, options["steps"], log)
+        return read_output(project, "train")
     project = Path(project).resolve()
     argv = command(config, project_root, step, project, **options)
     _, checkout = _local(config, project_root)
