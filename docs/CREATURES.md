@@ -325,10 +325,15 @@ slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
 
 - **Refused before Unity runs:**
   - the rig not approved, or changed since;
+  - a rig facing anything but -Y. Blender's -Y is Unity's +Z, where a game moves the creature, and nothing turns a
+    creature rigged another way yet;
   - no approved clip (clips not approved are left out);
   - an approved clip whose FBX, bake report or sheet changed since its bake, or baked on another rig .blend;
+  - a clip name that is not lower-case letters, digits and underscores, or a bake number that is not finite and
+    positive. Both are written into the controller and the test script;
   - rights over the rig and the clips that are not shippable;
   - `--rig-type humanoid`: a creature is delivered Generic;
+  - no Unity editor for the project's version (the Hub's, or `UNITY_EDITOR_PATH`);
   - a controller or prefab already in `<output_root>/Creatures/<name>/Unity/`.
 - **The build.** One Unity run imports the rig and each clip as Generic without an avatar, with Preserve Hierarchy on
   both. The controller has one looping state per clip, named after the clip; the default is the first by name. The
@@ -348,25 +353,32 @@ slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
     - its speed parameter is the bake's;
     - every bone stays finite;
     - a bone turns more than 5° over the loop.
-  - **In place:** over one loop, the root bone's horizontal sway stays under a quarter of the stride. A walk that kept
-    its travel moves a whole stride every period.
+  - **In place:** over one loop the root bone must move, and its horizontal sway must stay under a quarter of the
+    stride. A walk that kept its travel moves a whole stride every period. A root bone that never moves would pass
+    vacuously, as every bone did before the binding fix below.
   - **Recorded, not gated (D9's foot-slide limit is open):** the stance slide once the creature moves along +Z at the
     clip's speed. The feet are each leg's last bone joint; the FBX has no leaf bones, so the paw tip is not a
     transform. The measures go to `<name>_playmode.jsonl` and the prefab's provenance.
 
-  A failed play removes the controller and prefab, keeps the results, and records nothing.
+  Each run first clears an earlier run's results and measures, so a run that never played cannot pass on them. A
+  failed play removes the controller and prefab, keeps the results, and records the failed `unity_delivery` stage.
 - **Found on the first live run (2026-10-30):** the bake exports the clip's armature alone. Unity folds a lone
   top-level node into the file's root, so the clip's curves were keyed `Hips/...` while the rig's bones sat at
   `Armature/Hips/...`. No bone moved, and the curves on the armature node landed on the prefab itself, turning it
   90° and scaling it 100 times. Preserve Hierarchy keeps both files' roots, so the clip's paths are the rig's. The
   builder is shared, so character clips get the same import. The playing-on-its-own check now fails a clip that
   moves the creature's own transform.
-- **Recorded:** the controller and prefab as candidate `unity.animator_controller` and `unity.creature_prefab`,
-  pending review, derived from the rig and the clips, with each clip's speed, stride and period, the play-mode
-  results and the measures. Notices owed are written beside them.
+- **Recorded:** a `unity_delivery` stage. Its parents are the stage outputs that made the rig FBX (`rig_postprocess`)
+  and each clip's FBX (`motion_bake`). Its outputs are the controller, the prefab, the results and the measures, each
+  with its SHA-256. The stage also records the Unity editor version and the hashes of the builder and the tests. The
+  controller and prefab are registered as candidate `unity.animator_controller` and `unity.creature_prefab`, pending
+  review, with each clip's speed, stride and period, the play-mode results and the measures. Notices owed are
+  written beside them.
 - **Live gate:** `SLOPFORGE_RUN_UNITY_ANIMATION=1` bakes the fixture quadruped's keyed walk in Blender, builds it
   into a fresh Unity project and plays it (`tests/test_creature_unity_blender.py`). It needs Blender, the `unity`
-  CLI and editor 6000.6.3f1 under the Hub or `UNITY_EDITOR_PATH`.
+  CLI and editor 6000.6.3f1 under the Hub or `UNITY_EDITOR_PATH`. It calls the builder and the Play-mode tests
+  directly. `animation unity-setup`'s own wiring (the gates, the feet from B1's legs, B1's height, the root bone,
+  the loop's length) is covered by offline tests only, because no generated creature is approved yet.
 - **Not covered yet:**
   - a delivery of an approved generated creature: the wolf's rig awaits review, so its walk was played only as
     evidence, outside the gate ([evidence](media/creature-unity-b7-2026-10/README.md));

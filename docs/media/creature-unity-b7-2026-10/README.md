@@ -4,6 +4,8 @@ This is the live check of package B7 ([Creatures](../../CREATURES.md#unity-deliv
 [#128](https://github.com/gysahlgreene/SlopForge/issues/128)). It covers two runs:
 - **The live gate:** the fixture quadruped's keyed walk, baked by B6 in Blender, built into a fresh Unity project and
   played through Unity's test runner (`SLOPFORGE_RUN_UNITY_ANIMATION=1 pytest tests/test_creature_unity_blender.py`).
+  It calls the builder and the Play-mode tests directly. The command's own gates and wiring are covered by offline
+  tests.
 - **The wolf:** its rig FBX and the walk B6 baked from clip `walk_s2` ([B6's evidence](../creature-extract-b6-2026-10/README.md)),
   built and played with the same builder and Play-mode tests. The wolf's rig still awaits its deformation review, so
   `animation unity-setup wolf` refuses it. This run called the builder and the tests directly, on copies, and

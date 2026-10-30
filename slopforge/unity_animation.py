@@ -142,12 +142,13 @@ public static class {class_name}
         AssetDatabase.Refresh();
         var rigImporter = AssetImporter.GetAtPath(rigPath) as ModelImporter;
         if (rigImporter == null) throw new Exception("Character FBX importer not found: " + rigPath);
+        // the rig and its clips keep their FBX root: a clip exported with the armature alone would otherwise be folded
+        // into its file's root, its curves would miss the rig's bones, and its root curves would move the prefab itself.
+        // Set before any reimport, so a Humanoid skeleton is read with the hierarchy the clips use.
+        rigImporter.preserveHierarchy = true;
         {humanoid_description}
         rigImporter.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
         rigImporter.avatarSetup = {"ModelImporterAvatarSetup.CreateFromThisModel" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
-        // the rig and its clips keep their FBX root: a clip exported with the armature alone would otherwise be folded
-        // into its file's root, its curves would miss the rig's bones, and its root curves would move the prefab itself
-        rigImporter.preserveHierarchy = true;
         rigImporter.SaveAndReimport();
         Avatar avatar = null;
         if ({str(rig_type == "humanoid").lower()})

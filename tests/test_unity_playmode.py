@@ -72,6 +72,7 @@ class PlayModeScriptTests(unittest.TestCase):
         self.assertIn("did not keep its own rotation and scale", script)
         self.assertIn('[TestCase("walk_s2", 1.6875f, 0.41f, ExpectedResult = null)]', script)   # Plays
         self.assertIn('[TestCase("walk_s2", 0.7f, 0.41f, ExpectedResult = null)]', script)      # InPlace
+        self.assertIn("the root bone does not move", script)   # an unanimated root would pass in place vacuously
 
     def test_the_play_mode_run_takes_its_script_and_leaves_no_test_assembly(self):
         from unittest.mock import patch
@@ -89,6 +90,20 @@ class PlayModeScriptTests(unittest.TestCase):
             self.assertEqual(seen, ["// the creature's tests"])
             self.assertEqual(len(report["passed"]), 3)
             self.assertFalse((root / "Assets/SlopForgeTests").exists())
+
+    def test_a_run_that_writes_no_results_fails_even_with_an_old_results_file(self):
+        # review 2026-10-30: a failed run's results stay beside the prefab; a later run that never played (editor
+        # crash, compile error) would have read them back as a pass
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "out").mkdir()
+            (root / "out/results.xml").write_text(RESULTS.replace('result="Failed" duration="1.2">',
+                                                                  'result="Passed" duration="1.2">'))
+            with patch("slopforge.unity_playmode.editor_binary", return_value="Unity"), \
+                    patch("slopforge.unity_playmode.subprocess.run"), self.assertRaises(Exception) as caught:
+                verify_play_mode(root, "// tests", results=root / "out/results.xml")
+            self.assertIn("wrote no results", str(caught.exception))
 
     def test_the_creature_measures_merge_into_the_facing_and_one_record_per_clip(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -24,15 +24,22 @@ def editor_binary(project_root):
     override = os.environ.get("UNITY_EDITOR_PATH")
     if override:
         return Path(override)
-    version_file = Path(project_root) / "ProjectSettings/ProjectVersion.txt"
-    version = next((line.split(":", 1)[1].strip() for line in version_file.read_text().splitlines()
-                    if line.startswith("m_EditorVersion:")), "")
+    version = editor_version(project_root)
     binary = HUB_EDITORS / version / "Unity.app/Contents/MacOS/Unity"
     if not binary.is_file():
         raise StageFailure("environment", f"Unity editor {version} is not installed under {HUB_EDITORS}",
                            operation="play_mode_preflight",
                            remedy=f"install editor {version} with the Hub, or set UNITY_EDITOR_PATH to its binary")
     return binary
+
+
+def editor_version(project_root):
+    """The editor version the project names (ProjectSettings/ProjectVersion.txt), or "" when it names none."""
+    version_file = Path(project_root) / "ProjectSettings/ProjectVersion.txt"
+    if not version_file.is_file():
+        return ""
+    return next((line.split(":", 1)[1].strip() for line in version_file.read_text().splitlines()
+                 if line.startswith("m_EditorVersion:")), "")
 
 
 def play_mode_script(prefab_asset_path, parts):
@@ -290,10 +297,15 @@ public class CreaturePlayTests
         }}
         Object.Destroy(instance);
         // the root bone sways, but a walk that kept its travel moves a whole stride every period
-        float excursion = 0f;
+        float excursion = 0f, span = 0f;
         foreach (var a in track)
             foreach (var b in track)
+            {{
                 excursion = Mathf.Max(excursion, new Vector2(a.x - b.x, a.z - b.z).magnitude);
+                span = Mathf.Max(span, (a - b).magnitude);
+            }}
+        Assert.Greater(span, 0.001f, state + ": the root bone does not move, so in place proves nothing: its curves " +
+                       "miss " + RootBone);
         // D9: moved along +Z at the recorded speed, a planted foot holds still (the bake's stance slide)
         float dt = length / Samples;
         var slides = new List<float>();
@@ -351,9 +363,10 @@ def parse_test_results(path):
     return report
 
 
-def verify_play_mode(project_root, script, *, results):
+def verify_play_mode(project_root, script, *, results, remedy=None):
     """Run a play-mode test script (play_mode_script, creature_play_script) in the project; writes `results` (NUnit
-    XML) and returns parse_test_results' report. Raises StageFailure naming the failed tests."""
+    XML) and returns parse_test_results' report. Raises StageFailure naming the failed tests, with `remedy` (the
+    prefab checks' by default)."""
     root = Path(project_root).resolve()
     editor = editor_binary(root)
     folder = root / TEST_FOLDER
@@ -362,6 +375,7 @@ def verify_play_mode(project_root, script, *, results):
     (folder / "PrefabPlayTests.cs").write_text(script)
     results = Path(results).resolve()
     results.parent.mkdir(parents=True, exist_ok=True)
+    results.unlink(missing_ok=True)   # an earlier run's results must not answer for a run that never played
     log = results.with_suffix(".log")
     try:
         subprocess.run([str(editor), "-batchmode", "-projectPath", str(root), "-logFile", str(log), "-runTests",
@@ -386,5 +400,5 @@ def verify_play_mode(project_root, script, *, results):
     if report["failed"]:
         raise StageFailure("processing_validation", "play-mode checks failed: " + "; ".join(
             f"{item['name']}: {item['message']}" for item in report["failed"]), operation="play_mode_verification",
-            remedy="check the prefab's Animator and colliders in Play mode; the results file names each failure")
+            remedy=remedy or "check the prefab's Animator and colliders in Play mode; the results file names each failure")
     return report
