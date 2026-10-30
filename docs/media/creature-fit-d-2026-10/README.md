@@ -13,7 +13,6 @@ does the chosen fit ([Creatures](../../CREATURES.md): the start frame in B2, the
 
 **What it does not show:**
 - A walk the owner judges good: "significantly better but needs improvement".
-- A passed exam: the scapulae's swap rate still waits on the owner's ruling (B3).
 - Other creatures, motions or seeds. Every number here is one clip of one wolf.
 
 ## The start frame
@@ -52,8 +51,22 @@ readings, not from pinning the feet: in D, 24 front paw and toe turns exceed 30�
 
 The pipeline now does D. Extraction refits each clip's reading with `video2rig.reader.fit` at the clip's frame rate,
 within the motion's `fit_joint_limits`. The reader keeps training on the type's wide ranges, and the exam judges the
-same refit. On the larger layout, a newly trained reader's exam passes 11 of 12 limits (bone median 1.68°, worst body
-p95 9.2°) and fails the swap rate on the scapulae only (0.54), as in B3.
+same refit. The exam also runs at Wan's 16 fps now, so it examines the converted settings that ship. Under the owner's ruling
+that the swap rate leaves out the shoulder blades, a newly trained reader passes all 12 limits on the larger layout:
+bone median 2.0°, worst body p95 9.8°, worst limb swap 0.056.
+
+## Through the pipeline
+
+`creature extract wolf walk_s2` refused the clip: no full walk cycle, because the left hind foot never lifts 3 % of
+the wolf's height. The refit is identical to D, so this is the gait rule judging D on this clip:
+
+| Fit | Left hind foot's highest lift | Swings counted |
+| --- | --- | --- |
+| A, `run`'s own fit | 3.4 % of the height | 1 (one bump just over 3 %) |
+| D, the pipeline's refit | 2.6 % | 0 |
+
+Wan's clip shows the hind legs shuffling and blurring rather than stepping, so the refusal is right, and its remedy
+is the designed one: generate another clip.
 
 ## Still open
 

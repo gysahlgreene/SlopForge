@@ -186,7 +186,9 @@ because exam v1 counts a result only when the truth stays inside the reader's ra
 - joined as render_start joins panels into `clips/<clip>.mp4`, at 24 fps unless asked otherwise (the exam asks for
   the rate clips are delivered at). A random motion and the gait keep their timing in seconds at any rate; an
   authored action is sampled key by key, so it is rendered at 24 fps only;
-- with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`).
+- with its truth (`exam/<clip>/labels.npz`, `poses.npz`, `truth.json`) and its frame times
+  (`work/<clip>/timing.json`). Without them video2rig times a clip as 24 fps, so a 16 fps known motion compared
+  only 64 of its 96 frames.
 
 A motion whose joints leave a panel is refused.
 
@@ -232,7 +234,9 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   3. `blender/exam_pose.py` poses the truth and the fit on the rig and reads back every bone's head and tail per
      frame, with the creature's height along up and its facing.
   4. `slopforge/creature_exam.py` measures them and judges exam v1's twelve limits (`EXAM_V1`; their definitions and
-     the spike's numbers are in [#145](https://github.com/gysahlgreene/SlopForge/pull/145)).
+     the spike's numbers are in [#145](https://github.com/gysahlgreene/SlopForge/pull/145)). The swap rate leaves
+     out the shoulder blades (the owner's ruling, 2026-10-30): on B1's wolf they sit close together and barely move.
+     Their rate is recorded as `swap_shoulder_blades`, not judged.
 
   The reader examined is the one `creature train` last recorded; another reader put in its place is refused. The
   limb-end tips are each declared leg's last fitted bone. The reader names keypoints after bones (`FrontToes.L.tip` on
@@ -253,11 +257,12 @@ slopforge --project ~/UnityProjects/MyGame creature exam wolf       # --kind gai
   front, 4.07 px side, as the hand-trained reader's 5.6 and 4.04). Its exam passes 11 of the 12 limits, most with room
   (bone median 1.9°, worst body p95 9.5°, joint error 0.006 of the height), and fails the swap rate: 0.66 on the
   scapulae, while every limb pair is at most 0.033. The spike's rig had no scapulae. The gait's 3° chest sway parts
-  the shoulders by up to 5.3 % of the height, and the fit reads that sway on the wrong side. Whether exam v1's swap
-  rate counts shoulders is the owner's decision; until then the exam fails and this reader extracts no clip.
-  With the larger start frame (640 + 1280, `margin` 1.4) and the refit, a newly trained reader's exam gives the same
-  picture: 11 of 12 limits pass (bone median 1.68°, worst body p95 9.2°, joint error 0.006 of the height, detection
-  0.88 side and 0.54 front), and the scapulae's swap rate is 0.54. Every limb pair is at most 0.033.
+  the shoulders by up to 5.3 % of the height, and the fit reads that sway on the wrong side. The owner ruled that
+  the swap rate leaves the shoulder blades out (2026-10-30).
+  With the larger start frame (640 + 1280, `margin` 1.4), a newly trained reader examined at 16 fps with the walk's
+  refit passes all 12 limits: bone median 2.0°, worst body p95 9.8°, joint error 0.008 of the height, detection 0.88
+  side and 0.54 front, worst limb swap 0.056 (the shoulder blades 0.45, recorded). Its first run compared only 64 of
+  the 96 frames: the known motion had no `timing.json`, so video2rig timed 16 fps as 24.
 - **The port reproduces the spike.** On the spike's own data the measures match its `exam_compare.py` to 0.001: 471
   numbers on the wolf gait, and 365 on the Fox walk with the paw-range reader, the failing exam, detection and swap
   rate included. That data is private (the spike's working folder), so no repository test pins this match; the
@@ -355,7 +360,10 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
     conversion loosens those too, and the owner's chosen fit included that.
   - **The motion's ranges.** The reader trains on the type's wide `joint_limits`. A motion can fit within narrower
     ones (`video_motions.<motion>.fit_joint_limits`, by role, each above 0 and within the type's limit); the walk's
-    are FrontPaw 90° and FrontToes 60°. The tool reads ranges only from creature.json and takes no option for them.
+    are FrontPaw 90° and FrontToes 60°. An end bone takes its chain's, as it does for training. A project keeps its
+    own copy of the type (`ai/asset_types/creature.yaml`): one copied before these ranges existed declares none, and
+    fits within the training ranges (recorded as `fit_joint_limits: {}`) until they are added to it. The tool reads
+    ranges only from creature.json and takes no option for them.
     The refit therefore sees the project through a temporary sibling folder (`.<project>-fit`): every entry is
     linked, and creature.json is replaced. The folder is removed afterwards.
   - **What it changed** on the generated wolf's walk (2026-10-30, the same reading): one-frame spikes smoothed

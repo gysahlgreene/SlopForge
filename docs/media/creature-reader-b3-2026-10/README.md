@@ -54,8 +54,9 @@ front leg. The gait's 3° chest sway moves one shoulder forward and the other ba
 fit reads that sway on the wrong side in 66 % of those frames. The limbs, which the metric was set for, swap at most
 3.3 % of the time.
 
-Whether exam v1's swap rate counts the shoulders is your decision. Until it is made the exam fails, and this reader
-extracts no clip.
+Whether exam v1's swap rate counts the shoulders was the owner's decision. **Ruled 2026-10-30: it does not.** The
+shoulder blades' rate is still measured and recorded (`swap_shoulder_blades`), but not judged. See the
+[fit D evidence](../creature-fit-d-2026-10/README.md) for the exam under that ruling.
 
 ## Found while running it
 
