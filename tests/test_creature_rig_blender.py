@@ -67,3 +67,56 @@ def test_a_fixture_quadruped_is_checked_named_and_finished(tmp_path):
     rest = np.asarray(Image.open(images[0]).convert("RGB"), float)
     creature_pixels = np.abs(rest - rest[2, 2]).sum(2) > 12
     assert 100 < (rest[creature_pixels] @ (0.2126, 0.7152, 0.0722)).mean() < 190
+
+
+WEIGHTS_PROBE = """import bpy, json
+out = []
+for obj in bpy.data.objects:
+    if obj.type == 'MESH':
+        names = {g.index: g.name for g in obj.vertex_groups}
+        rows = [[(names[g.group], round(g.weight, 6)) for g in v.groups if g.weight > 0] for v in obj.data.vertices]
+        out.append({"mesh": obj.name, "armatures": sum(m.type == 'ARMATURE' for m in obj.modifiers), "weights": rows,
+                    "rest": [list(obj.matrix_world @ v.co) for v in obj.data.vertices]})
+print('PROBE' + json.dumps(out))
+"""
+
+
+def probe_weights(blend):
+    out = subprocess.run([BLENDER, "--background", str(blend), "--python-expr", WEIGHTS_PROBE], capture_output=True,
+                         text=True).stdout
+    return json.loads(next(line[5:] for line in out.splitlines() if line.startswith("PROBE")))
+
+
+@pytest.mark.skipif(not Path(BLENDER).is_file(), reason="Blender is not installed")
+def test_the_skin_can_be_weighted_again_by_bone_heat_on_a_voxel_proxy(tmp_path):
+    """Owner ruling 2026-10-30 (#154): the model's own weights stretch the wolf's chest and face; weights from bone
+    heat on a closed voxel proxy of the skin (the character route's bind_with_proxy), four influences at most, cut
+    that 3-5x. The skin stays where it was; only the weights change."""
+    rig = creature(extra=0)
+    fixture = {"vertices": rig["vertices"].tolist(), "triangles": rig["triangles"].tolist(), "bones": rig["bones"],
+               "parents": rig["parents"], "heads": rig["heads"].tolist(),
+               "leads": [rig["bones"][k] for k in rig["weights"].argmax(1)]}
+    source, raw = str(tmp_path / "source.fbx"), str(tmp_path / "raw.glb")
+    blender(tmp_path, {"action": "fixture", "fixture": fixture, "source": source, "raw": raw})
+    report = blender(tmp_path, {"action": "check", "raw": raw, "limbs": LIMBS, "limits": LIMITS,
+                                "views": {view: str(tmp_path / f"{view}.png") for view in ("front", "side")}})
+    poses = deformation_poses(set(report["names"].values()))
+    finished = {}
+    for weights in ("skintokens", "proxy_heat"):
+        out = tmp_path / weights
+        out.mkdir()
+        finished[weights] = blender(out, {
+            "action": "finish", "source": source, "raw": raw, "names": report["names"], "facing": report["facing"],
+            "rigged_model": str(out / "rig.fbx"), "blend": str(out / "rig.blend"), "poses": poses,
+            "pose_images": [str(out / f"pose_{k}.png") for k in range(len(poses))], "skin_weights": weights})
+    assert finished["skintokens"]["skin_weights"] == {"method": "skintokens"}
+    bound = finished["proxy_heat"]["skin_weights"]
+    assert bound["method"] == "voxel_proxy_bone_heat" and bound["influences_max"] <= 4
+    before, after = probe_weights(tmp_path / "skintokens/rig.blend"), probe_weights(tmp_path / "proxy_heat/rig.blend")
+    assert [mesh["mesh"] for mesh in before] == [mesh["mesh"] for mesh in after]
+    for old, new in zip(before, after):
+        assert new["armatures"] == 1
+        assert np.allclose(old["rest"], new["rest"], atol=1e-6)                   # the skin did not move
+        assert all(1 <= len(row) <= 4 and abs(sum(w for _, w in row) - 1) < 1e-4 for row in new["weights"])
+        assert any(len(row) > 1 for row in new["weights"])                       # blended, not the fixture's one bone
+        assert sorted({name for row in new["weights"] for name, _ in row}) <= sorted(NAMES.values())

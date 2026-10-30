@@ -304,7 +304,12 @@ def rig_settings(asset_type):
     seeds = asset_type.get("rig_seeds", 4)
     if isinstance(seeds, bool) or not isinstance(seeds, int) or not 1 <= seeds <= 8:
         raise ValueError(f"asset type {asset_type.get('name')!r}: rig_seeds must be 1 to 8, got {seeds!r}")
-    return {"limbs": dict(limbs), "seeds": seeds,
+    # how the finished skin is weighted: the model's own weights, or bone heat on a voxel proxy (#154)
+    weights = asset_type.get("skin_weights") or "skintokens"
+    if weights not in ("skintokens", "proxy_heat"):
+        raise ValueError(f"asset type {asset_type.get('name')!r}: skin_weights must be skintokens or proxy_heat, "
+                         f"got {weights!r}")
+    return {"limbs": dict(limbs), "seeds": seeds, "skin_weights": weights,
             "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0}}
 
 

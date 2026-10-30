@@ -31,6 +31,11 @@ max_rig_asymmetry: 0.05
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).
 rig_seeds: 4
+# The finished skin's weights. SkinTokens' own stretched the wolf's chest and face (edges over 1.5x their rest length:
+# 16 % of the chest-shoulder region with a front leg lifted); bone heat on a closed voxel proxy of the skin, four bones
+# a vertex at most, cut that 3-5x at the cost of some skin near the legs following the opposite leg a little. The
+# owner chose it (2026-10-30, #154). `skintokens` keeps the model's weights.
+skin_weights: proxy_heat
 # B2 (docs/CREATURES.md, video2rig's start frame): the two views and their framing. The views and panels are the
 # start frame the video route was proven from (#149): front and side in equal panels. In three-quarter + side, Wan 2.2
 # turned the creature in 3 of 4 clips; in front + side with the split-screen prompt, in none. The reader reads a lifted

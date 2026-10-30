@@ -259,7 +259,11 @@ def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
     shutil.copy(template, tmp_path / "ai/asset_types/creature.yaml")
     creature_type = load_taxonomy(tmp_path)["creature"]
     assert creature_type["pipeline"] == "model"
-    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4}
+    # owner ruling 2026-10-30 (#154): the skin is weighted again by bone heat on a voxel proxy
+    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4, "skin_weights": "proxy_heat"}
+    assert rig_settings({**creature_type, "skin_weights": None})["skin_weights"] == "skintokens"   # undeclared
+    with pytest.raises(ValueError, match="skin_weights"):
+        rig_settings({**creature_type, "skin_weights": "heat"})
     for bad in ({"ground_contact": 6}, {"ground_contact": 4, "wings": 2}, None):
         with pytest.raises(ValueError, match="quadrupeds only"):
             rig_settings({**creature_type, "limbs": bad})

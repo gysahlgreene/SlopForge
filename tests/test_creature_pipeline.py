@@ -64,6 +64,7 @@ def stubs(monkeypatch):
             images = request["views"].values()
         else:
             calls["finished"] = int(Path(request["raw"]).parent.name.removeprefix("seed_"))
+            calls["skin_weights"] = request["skin_weights"]
             assert Path(request["raw"]).read_bytes() == b"glTF" + bytes([calls["finished"]])   # that seed's raw rig
             assert Path(request["source"]).is_file()
             for key in ("rigged_model", "blend"):
@@ -115,6 +116,8 @@ def test_every_seed_is_kept_and_the_best_passing_rig_is_finished(tmp_path, stubs
     # the checks module's rules are part of every stage's identity, beside the Blender script
     checks = file_sha256(ROOT / "slopforge/creature_rig.py")
     assert execution["identity_inputs"]["checks_sha256"] == checks
+    # the type's skin weighting reaches the finish and is part of the rig's identity (#154)
+    assert stubs[0]["skin_weights"] == execution["identity_inputs"]["skin_weights"] == rigging["skin_weights"] == "proxy_heat"
     assert all(stage["settings"]["checks_sha256"] == checks for stage in execution["stages"])
     # each seed keeps its own SkinTokens log beside its candidate
     assert stubs[0]["logs"] == [root / asset["artifacts"][f"rig_candidate.seed_{seed}"]["path"].replace(
