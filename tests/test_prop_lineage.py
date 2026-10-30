@@ -778,8 +778,8 @@ avoid: [environment]
             return fake_unity_material(root, fbx, material, maps, **options)
         played = []
 
-        def play(root, prefab_path, parts, *, results):
-            played.append((prefab_path, [part["name"] for part in parts], Path(results).name))
+        def play(root, script, *, results):   # play_mode_script's tests: the prefab, and a pulse per moving part
+            played.append(('"Assets/relay.prefab"' in script, "PartPulses" in script, Path(results).name))
             return {"passed": ["RestsOnTheGround"], "failed": []}
         with patch("slopforge.pipelines.model.unity_cli", return_value="unity"), \
                 patch("slopforge.pipelines.model.build_unity_material", side_effect=unity_material), \
@@ -788,7 +788,7 @@ avoid: [environment]
             approve_texture(self.root, self.config, self.manifest, "prop:relay", 1)
         self.assertEqual(calls, [("relay", [], False, 25.0, "Props")])
         # the prefab is then played: the Animator and physics run in Play mode, not only sampled in the editor
-        self.assertEqual(played, [("Assets/relay.prefab", [], "relay_playmode.xml")])
+        self.assertEqual(played, [(True, False, "relay_playmode.xml")])
         record = self.manifest["assets"]["prop:relay"]
         self.assertEqual(record["validation"]["measured"]["play_mode"], {"passed": ["RestsOnTheGround"], "failed": []})
         self.assertEqual(imports, [True])  # a static prop gets lightmap UVs; a held weapon does not

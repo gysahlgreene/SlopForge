@@ -39,8 +39,16 @@ def video_settings(asset_type, motion):
         value = declared.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
             raise ValueError(f"asset type {name!r}: video_intake.{key} must be a number of 0 or more, got {value!r}")
+    # the fit's ranges for this motion, by role, each within the type's own (the reader trains on those)
+    fitted, trained = spec.get("fit_joint_limits", {}), asset_type.get("joint_limits") or {}
+    if not isinstance(fitted, dict) or not all(
+            role in trained and isinstance(value, (int, float)) and not isinstance(value, bool)
+            and 0 < value <= trained[role] for role, value in fitted.items()):
+        raise ValueError(f"video motion {motion!r}: fit_joint_limits must map the type's joint_limits roles to degrees "
+                         f"above 0 and at most the type's own, got {fitted!r}")
     return {"workflow": workflow, "frames": frames, "retries": retries, "prompt": prompt, "negative": negative,
-            "views": dict(views), "limits": {key: declared[key] for key in INTAKE_LIMITS}}
+            "views": dict(views), "limits": {key: declared[key] for key in INTAKE_LIMITS},
+            "fit_joint_limits": dict(fitted)}
 
 
 def video_prompt(settings, *, description, name, views, side):

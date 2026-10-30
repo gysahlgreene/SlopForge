@@ -161,7 +161,7 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
         self.assertAlmostEqual(motions["lever"]["pivot"][1], 0.0, delta=0.002)
 
     def test_the_prefab_plays_in_play_mode(self):
-        from slopforge.unity_playmode import verify_play_mode
+        from slopforge.unity_playmode import play_mode_script, verify_play_mode
         fbx = self._export()
         parts = [{"name": "slide", "kind": "slide", "axis": "z", "min": -0.03, "max": 0.0},
                  {"name": "lever", "kind": "hinge", "axis": "x", "min": -20.0, "max": 0.0}]
@@ -169,7 +169,7 @@ bpy.ops.export_scene.fbx(filepath={str(self.folder / 'weapon.fbx')!r}, use_selec
                             clip_folder=self.folder / "Animations", render=self.folder / "motion.png",
                             held=True, mass=1.0, layer=None)
         prefab = (self.folder / "weapon.prefab").relative_to(self.root).as_posix()
-        report = verify_play_mode(self.root, prefab, parts, results=self.folder / "playmode.xml")
+        report = verify_play_mode(self.root, play_mode_script(prefab, parts), results=self.folder / "playmode.xml")
         self.assertEqual(report["failed"], [])
         self.assertEqual(sorted(report["passed"]), ['PartPulses("lever")', 'PartPulses("slide")', "RestsOnTheGround"])
         self.assertFalse((self.root / "Assets/SlopForgeTests").exists())  # the scaffolding leaves the project

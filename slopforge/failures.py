@@ -57,7 +57,11 @@ _KIND_CODES: Dict[str, Dict[str, tuple[str, str]]] = {
               "video_cut": ("video_cuts", "max_video_cuts")},
     "motion": {"motion_joint_lost": ("motion_joints_lost", "max_motion_joints_lost"),
                "motion_limit_exceeded": ("motion_limit_violations", "max_motion_limit_violations"),
-               "exam_failed": ("exam_bone_error_degrees", "max_exam_bone_error_degrees")},
+               "exam_failed": ("exam_bone_error_degrees", "max_exam_bone_error_degrees"),
+               # B6's bake (slopforge/creature_gait.py): a full cycle plants every leg once; a period needs a leg
+               # planting twice
+               "motion_no_cycle": ("motion_min_plants", "min_motion_plants"),
+               "motion_no_period": ("motion_max_plants", "min_motion_max_plants")},
 }
 
 # ── Retryable categories (subset of all categories) ───────────────────
