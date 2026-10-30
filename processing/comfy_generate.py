@@ -35,11 +35,30 @@ def write_metadata(path, value):
         if os.path.exists(temporary):
             os.unlink(temporary)
 
-def find_save_node(workflow):
+SAVE_NODES = {"image": "SaveImage", "video": "SaveVideo"}
+EXTENSIONS = {"image": (".png", ".jpg", ".jpeg", ".webp"), "video": (".mp4", ".webm", ".mov")}
+# A video run that finishes without a video (the provider refused or produced nothing) is a retryable candidate
+# failure in B0's validation shape: the next seed may succeed (B5; failures._KIND_CODES["video"]).
+REFUSAL = {"status": "failed", "errors": ["the provider returned no video"], "failure_codes": ["video_refused"],
+           "artifact_kind": "video", "measured": {"video_refusals": 1}, "limits": {"max_video_refusals": 0}}
+
+def find_save_node(workflow, kind="image"):
     for node_id, node in workflow.items():
-        if node.get("class_type") == "SaveImage":
+        if node.get("class_type") == SAVE_NODES[kind]:
             return node_id
     return None
+
+def bind_start_image(client, workflow, path):
+    """The image-to-video start frame: uploaded and bound to the graph's one LoadImage node."""
+    loaders = [node_id for node_id, node in workflow.items() if node.get("class_type") == "LoadImage"]
+    if len(loaders) != 1:
+        raise ValueError(f"a start image needs exactly one LoadImage node in the workflow, found {len(loaders)}")
+    uploaded = client.upload_input(path, "slopforge/video")
+    if not uploaded.get("name"):
+        raise ValueError(f"ComfyUI did not return an uploaded filename for {path}")
+    workflow[loaders[0]]["inputs"]["image"] = "/".join(part for part in (uploaded.get("subfolder") or "",
+                                                                          uploaded["name"]) if part)
+    return {"workflow_slot": f"{loaders[0]}.image", "content_sha256": file_sha256(path), "path": str(path)}
 
 def bind_reference_inputs(client, workflow, references, slots):
     if len(references) > len(slots):
@@ -98,6 +117,9 @@ def main():
     p.add_argument("--reference-inputs", help="JSON array mapping reference slots to workflow node inputs")
     p.add_argument("--workflow-inputs", help="JSON node/input overrides for the selected quality tier")
     p.add_argument("--quality", help="JSON quality tier and effective settings for provenance")
+    p.add_argument("--output", choices=sorted(SAVE_NODES), default="image", help="the kind of output the graph saves")
+    p.add_argument("--image", help="the start image for an image-to-video graph (bound to its LoadImage node)")
+    p.add_argument("--timeout", type=int, default=600, help="seconds to wait for the run (a video takes longer)")
     args = p.parse_args()
 
     workflow_path = Path(args.workflow)
@@ -138,9 +160,9 @@ def main():
     if neg_id is not None:
         workflow[neg_id]["inputs"][prompt_inputs[workflow[neg_id]["class_type"]]] = args.negative
 
-    save_id = find_save_node(workflow)
+    save_id = find_save_node(workflow, args.output)
     if save_id is None:
-        print("Could not find SaveImage node in workflow.", file=sys.stderr)
+        print(f"Could not find {SAVE_NODES[args.output]} node in workflow.", file=sys.stderr)
         sys.exit(1)
 
     workflow[save_id]["inputs"]["filename_prefix"] = args.prefix
@@ -168,8 +190,10 @@ def main():
             references_used = bind_reference_inputs(client, workflow, references, reference_inputs)
             if any("content_sha256" not in item for item in references_used):
                 raise ValueError("A selected reference is missing local content and cannot be fingerprinted")
+        if args.image:
+            references_used.append(bind_start_image(client, workflow, args.image))
         prompt_id = client.queue_workflow(workflow)
-        history = client.wait_for_completion(prompt_id, timeout=600)
+        history = client.wait_for_completion(prompt_id, timeout=args.timeout)
     except ComfyUIError as exc:
         # Tag errors at the client/boundary that knows their category.
         # Never infer retryability from message text.
@@ -181,13 +205,18 @@ def main():
         # Preserve subprocess return behavior: exit non-zero.
         sys.exit(1)
 
-    extensions = (".png", ".jpg", ".jpeg", ".webp")
-    # Preview nodes return "temp" images; only a SaveImage result is the generated asset.
+    # Preview nodes return "temp" images; only a saved result of the requested kind is the generated asset.
     outputs = [item for item in client.list_outputs(history)
-               if item["type"] == "output" and item["filename"].lower().endswith(extensions)]
+               if item["type"] == "output" and item["filename"].lower().endswith(EXTENSIONS[args.output])]
 
     if not outputs:
-        print("No image outputs found in ComfyUI output.", file=sys.stderr)
+        if args.output == "video":
+            refusal = ComfyUIError("ComfyUI finished without a video", category="candidate_quality",
+                                   operation="video_generation", evidence={"validation": REFUSAL,
+                                                                           "prompt_id": prompt_id})
+            if args.failure_report:
+                _write_failure_report(args.failure_report, error=refusal)
+        print(f"No {args.output} outputs found in ComfyUI output.", file=sys.stderr)
         sys.exit(1)
 
     dest = Path(args.dest)
@@ -197,6 +226,7 @@ def main():
     if args.metadata:
         quality = json.loads(args.quality) if args.quality else None
         uploaded_inputs = {item["workflow_slot"]: item["content_sha256"] for item in references_used}
+        references_used = [item for item in references_used if "strength" in item]   # the start image is not one
         workflow_identity = canonical_workflow_identity(source_workflow, workflow, uploaded_inputs)
         bindings = {"prompt": args.prompt, "negative_prompt": args.negative, "seed": seed,
                     "workflow_inputs": json.loads(args.workflow_inputs) if args.workflow_inputs else {},
@@ -205,7 +235,7 @@ def main():
                     "quality": quality}
         graph_models = sorted(set(models))
         outputs = [{"index": 0, "source_filename": outputs[0]["source_filename"], "path": dest.name,
-                    "sha256": file_sha256(dest), "kind": "image"}]
+                    "sha256": file_sha256(dest), "kind": args.output}]
         write_metadata(args.metadata, {"workflow": workflow_path.name, "model": models or None, "seed": seed,
                                        "workflow_sha256": workflow_sha256(workflow_path),
                                        "workflow_source_sha256": workflow_identity["source_sha256"],
@@ -215,7 +245,7 @@ def main():
                                        "model_filenames": [{"status": "known", "value": name} for name in graph_models],
                                        "workflow_requirements": workflow_requirements,
                                        "output_rights": workflow_output_rights(workflow_path, graph_models),
-                                       "prompt_id": prompt_id, "output_kind": "image",
+                                       "prompt_id": prompt_id, "output_kind": args.output,
                                        "references_used": references_used,
                                        "outputs": outputs, "quality": quality})
 

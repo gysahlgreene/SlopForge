@@ -8,7 +8,9 @@ readers train on the configured GPU provider (providers.video2rig.train_host), o
 """
 import json
 import os
+import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -23,10 +25,30 @@ OUTPUT_RIGHTS = {"status": "cleared", "terms": "AGPL-3.0 (the tool) and the auth
                  "terms_version": f"video2rig commit {runtime.VIDEO2RIG_REVISION[:7]}", "read_on": "2026-10-27"}
 # What each step needs; train needs a step count because the tool's default, 8 minutes, depends on the card's speed.
 STEPS = {"export_rig": ("blend",), "render_start": ("blend",), "prepare": ("blend",), "train": ("steps",),
-         "check": ("clip",), "run": ("clip",), "review": ("clip",), "import_motion": ("blend", "clip", "save")}
+         "check": ("clip",), "run": ("clip",), "fit": ("clip", "tag"), "review": ("clip",),
+         "import_motion": ("blend", "clip", "save"),
+         "render_poses": ("blend", "motion", "out", "fit")}
 
 
 KEYS = ("python", "checkout", "train_host", "train_python", "train_checkout")
+# the reader fit's settings counted in frames, as the tool tuned them on Seedance's 24 fps content (reader/fit.py
+# SETTINGS at the pinned commit): at another frame rate the same counts mean other durations
+FIT_TUNED_FPS = 24.0
+FIT_PER_FRAME = {"despike_deg": 6.0, "w_smooth": 30.0, "lock_frames": 3, "lock_blend": 3, "bridge_max": 24,
+                 "twin_switch": 6.0}
+
+
+def fit_settings(fps):
+    """The reader fit's per-frame settings for a clip at `fps`, so each means the duration it was tuned for: a turn per
+    frame that counts as a spike grows as frames get longer, the pull toward the frame before and the windows shrink.
+    At 24 fps they are the tool's own."""
+    if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not fps > 0:
+        raise ValueError(f"fit_settings needs the clip's fps above 0, got {fps!r}")
+    scale = FIT_TUNED_FPS / fps
+    return {"despike_deg": round(FIT_PER_FRAME["despike_deg"] * scale, 3),
+            "w_smooth": round(FIT_PER_FRAME["w_smooth"] / scale, 3),
+            **{key: max(1, round(FIT_PER_FRAME[key] / scale)) for key in ("lock_frames", "lock_blend", "bridge_max")},
+            "twin_switch": round(FIT_PER_FRAME["twin_switch"] / scale, 3)}
 
 
 def settings(config):
@@ -133,13 +155,17 @@ def project_folder(candidate_dir, settings=None):
     return project
 
 
-def command(config, project_root, step, project, *, blend=None, clip=None, save=None, poses=3000, steps=None):
+def command(config, project_root, step, project, *, blend=None, clip=None, save=None, poses=3000, steps=None,
+            framing=None, motion=None, out=None, fit=None, tag=None, settings=None):
     """The command line of one step as video2rig's README documents it ("The whole thing in six steps"). Its older
     road (the BootsTAPIR point tracker: `run` without a reader, `--old`, `track`, `solve`) is never built. Paths are
-    made absolute: the tool runs in its checkout, and a relative one would land there."""
+    made absolute: the tool runs in its checkout, and a relative one would land there. `framing` is render_start's
+    documented view pair and framing (slopforge.creature_views.framing); render_poses renders a known motion
+    (`motion`, a poses.npz) through the start cameras into `out`, each panel at `fit` pixels, one pose a picture."""
     if step not in STEPS:
         raise ValueError(f"unknown video2rig step {step!r}; expected one of {', '.join(STEPS)}")
-    missing = [name for name in STEPS[step] if not {"blend": blend, "clip": clip, "save": save, "steps": steps}[name]]
+    missing = [name for name in STEPS[step] if not {"blend": blend, "clip": clip, "save": save, "steps": steps,
+                                                    "motion": motion, "out": out, "fit": fit, "tag": tag}[name]]
     if missing:
         raise ValueError(f"video2rig {step} needs {', '.join(missing)}")
     python, checkout = _local(config, project_root)
@@ -152,7 +178,16 @@ def command(config, project_root, step, project, *, blend=None, clip=None, save=
     if step == "export_rig":
         return script("export_rig.py") + ["--out", str(project / "rig")]
     if step == "render_start":
-        return script("render_start.py") + ["--out", str(project / "start")]
+        return script("render_start.py") + ["--out", str(project / "start")] + ([
+            "--views", ",".join(framing["views"]), "--widths", ",".join(map(str, framing["widths"])),
+            "--margin", str(framing["margin"]), "--margin-wide", str(framing["margin_wide"]),
+            "--side", framing["side"]] + ([f"--facing={framing['facing']}"] if framing.get("facing") else [])
+            if framing else [])
+    if step == "render_poses":
+        return script("render_poses.py") + [
+            "--poses", str(Path(motion).resolve()), "--cameras", str(project / "start/cameras.json"),
+            "--out", str(Path(out).resolve()), "--copies", "1", "--fit", str(fit), "--height", "1080", "--sharp",
+            "--project", str(project)]
     if step == "prepare":  # D15 (a): the training pictures render here; training is the "train" step
         return tool[:2] + ["video2rig.reader.prepare", str(project), "--blend", str(blend), "--blender", blender,
                            "--poses", str(poses), "--skip-train"]
@@ -164,14 +199,19 @@ def command(config, project_root, step, project, *, blend=None, clip=None, save=
                            operation="video2rig run", remedy="Train the creature's reader first (prepare, then train)")
     if step in ("check", "run", "review"):
         return tool + [step, str(project), clip] + (["--cpu"] if step == "run" else [])
-    return script("import_motion.py") + ["--motion", str(project / "out" / f"{clip}.npz"), "--save", str(save)]
+    if step == "fit":   # the reader fit again on the saved reading: its settings are reached only here (docs/CONFIG.md)
+        return tool[:2] + ["video2rig.reader.fit", str(project), clip, f"--tag={tag}"] + [
+            word for key, value in (settings or {}).items() for word in ("--set", f"{key}={json.dumps(value)}")]
+    motion = Path(motion).resolve() if motion else project / "out" / f"{clip}.npz"
+    return script("import_motion.py") + ["--motion", str(motion), "--save", str(save)]
 
 
-_OUTPUTS = {"train": "reader/reader-train.json", "check": "work/{clip}/check.json", "run": "work/{clip}/report.json"}
+_OUTPUTS = {"train": "reader/reader-train.json", "check": "work/{clip}/check.json", "run": "work/{clip}/report.json",
+            "fit": "work/{clip}/fit{tag}-report.json"}
 
 
-def read_output(project, step, clip=None):
-    path = Path(project) / _OUTPUTS[step].format(clip=clip)
+def read_output(project, step, clip=None, tag=""):
+    path = Path(project) / _OUTPUTS[step].format(clip=clip, tag=tag)
     try:
         result = json.loads(path.read_text())
         if step == "check" and result.get("verdict") not in ("OK", "WARN", "FAIL"):
@@ -182,19 +222,92 @@ def read_output(project, step, clip=None):
     return result
 
 
+# what training does not read: an earlier reader, and the clips, readings, fits and exams of the project
+_NOT_SENT = ("reader/reader*.pt", "work/", "out/", "clips/", "exam/")
+# rsync's own SSH keeps alive and gives up on a stalled link; training stops after three hours (readers took 11-58 min)
+_RSYNC = ["rsync", "-a", "-e", "ssh -o BatchMode=yes -o ServerAliveInterval=30", "--timeout=600"]
+TRAIN_TIMEOUT = 3 * 3600
+
+
+def _train_remote(tools, project, steps, log):
+    """reader.train on providers.video2rig.train_host: the project is sent to a fresh folder there, the runtime
+    trains it with the provider's own install, the reader and its report come back, and the folder is removed
+    whatever happened. Nothing stays on the host between trainings."""
+    host = tools["train_host"]
+    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", host]
+
+    def step(name, argv, **kwargs):
+        with open(log, "a") as stream:
+            stream.write("$ " + shlex.join(argv) + "\n")
+            stream.flush()
+            try:
+                done = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, text=True, check=False, **kwargs)
+            except subprocess.TimeoutExpired:
+                raise StageFailure("environment", f"video2rig train on {host}: {name} did not finish in "
+                                   f"{kwargs.get('timeout')} s", operation="video2rig train", remedy=f"Read {log}")
+        if done.returncode != 0:
+            raise StageFailure("environment", f"video2rig train on {host}: {name} exited with code {done.returncode}",
+                               operation="video2rig train", remedy=f"Read {log}", evidence={"log": str(log)})
+
+    made = subprocess.run(ssh + ["mktemp -d /tmp/slopforge-reader-XXXXXX"], capture_output=True, text=True,
+                          check=False)
+    remote = made.stdout.strip()
+    if made.returncode != 0 or not re.fullmatch(r"/tmp/slopforge-reader-[A-Za-z0-9]+", remote):
+        raise StageFailure("environment", f"video2rig train: no working folder on {host}: "
+                           + ((made.stderr or "").strip().splitlines() or ["no reply"])[-1],
+                           operation="video2rig train", remedy=f"Check that `ssh {host}` works without a prompt")
+    try:
+        step("send", [*_RSYNC, *[word for pattern in _NOT_SENT for word in ("--exclude", pattern)],
+                      f"{project}/", f"{host}:{remote}/"])
+        payload = {"python": tools["train_python"], "checkout": tools["train_checkout"], "project": remote,
+                   "steps": steps}
+        step("train", ssh + [shlex.join([tools["train_python"], "-", "train", json.dumps(payload)])],
+             input=Path(runtime.__file__).read_text(), timeout=TRAIN_TIMEOUT)
+        step("fetch", [*_RSYNC, f"{host}:{remote}/reader/reader.pt", f"{host}:{remote}/reader/reader-train.json",
+                       f"{project}/reader/"])
+    finally:
+        removed = subprocess.run(ssh + [f"rm -rf {shlex.quote(remote)}"], capture_output=True, text=True, check=False)
+        if removed.returncode != 0:
+            with open(log, "a") as stream:
+                stream.write(f"{remote} was not removed from {host}: "
+                             + ((removed.stderr or "").strip() or f"exit {removed.returncode}") + "\n")
+
+
 def run(config, project_root, step, project, log, **options):
     """Run one step with the provider's Python in its checkout, offline against the pinned backbone, and return
     what it wrote: reader-train.json (train), check.json (check: a FAIL verdict is an answer, not an error),
-    {"report", "motion"} (run), else None."""
-    host = settings(config)["train_host"]
-    if step == "train" and host:
-        raise StageFailure("configuration", f"readers train on {host} (providers.video2rig.train_host), and sending a "
-                           "project there is not built yet (plan package B3)", operation="video2rig train",
-                           remedy="Unset providers.video2rig.train_host to train on this machine's CUDA card")
+    {"report", "motion"} (run), else None. With providers.video2rig.train_host set, train runs there."""
+    tools = settings(config)
+    if step == "train" and tools["train_host"]:
+        project = Path(project).resolve()
+        (project / _OUTPUTS["train"]).unlink(missing_ok=True)
+        _train_remote(tools, project, options["steps"], log)
+        return read_output(project, "train")
     project = Path(project).resolve()
-    argv = command(config, project_root, step, project, **options)
+    creature = options.pop("creature", None)
+    overlay = project.parent / f".{project.name}-fit"
+    if step == "fit" and creature is not None:
+        # ranges for the fit alone: the project seen through an overlay whose creature.json is replaced, everything
+        # else linked, so the fit writes into the project; the reader trained on the project's own
+        shutil.rmtree(overlay, ignore_errors=True)
+        overlay.mkdir()
+        for entry in project.iterdir():
+            if entry.name != "creature.json":
+                (overlay / entry.name).symlink_to(entry)
+        (overlay / "creature.json").write_text(json.dumps(creature, indent=1))
+    try:
+        return _run_step(config, project_root, step, project, overlay if step == "fit" and creature is not None
+                         else project, log, **options)
+    finally:
+        if step == "fit" and creature is not None:
+            shutil.rmtree(overlay, ignore_errors=True)
+
+
+def _run_step(config, project_root, step, project, seen_as, log, **options):
+    argv = command(config, project_root, step, seen_as, **options)
     _, checkout = _local(config, project_root)
-    output = project / _OUTPUTS[step].format(clip=options.get("clip")) if step in _OUTPUTS else None
+    output = (project / _OUTPUTS[step].format(clip=options.get("clip"), tag=options.get("tag", ""))
+              if step in _OUTPUTS else None)
     if output:
         output.unlink(missing_ok=True)  # a crashed step must not leave an earlier take's answer to read
     with open(log, "a") as stream:
@@ -209,4 +322,7 @@ def run(config, project_root, step, project, log, **options):
     if step == "run":
         return {"report": read_output(project, "run", options["clip"]),
                 "motion": project / "out" / f"{options['clip']}.npz"}
+    if step == "fit":
+        return {"report": read_output(project, "fit", options["clip"], options["tag"]),
+                "motion": project / "out" / f"{options['clip']}{options['tag']}.npz"}
     return read_output(project, step, options.get("clip")) if step in _OUTPUTS else None

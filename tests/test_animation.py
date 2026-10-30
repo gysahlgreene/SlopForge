@@ -259,6 +259,9 @@ class AnimationLibraryTests(unittest.TestCase):
                         scripts[0].rindex('rigImporter.animationType = ModelImporterAnimationType.Human'))
         self.assertLess(scripts[0].index('humanDescription.human = new HumanBone[]'),
                         scripts[0].rindex('rigImporter.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel'))
+        # the skeleton the avatar maps is read on the first reimport: Preserve Hierarchy must already be set
+        self.assertLess(scripts[0].index('rigImporter.preserveHierarchy = true;'),
+                        scripts[0].index('rigImporter.SaveAndReimport();'))
 
     def test_humanoid_setup_refuses_rig_without_explicit_unity_mapping(self):
         from slopforge.unity_animation import build_character_animator
