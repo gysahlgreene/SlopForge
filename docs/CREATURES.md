@@ -522,7 +522,8 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf gait_walk --co
   - the body carried 4.7 cm low;
   - largest leg turn 48°.
 
-  Not yet reviewed by the owner, nor delivered to Unity.
+  Shown beside the video walk `walk_s3` in the same texture and camera, the owner judged the video walk better.
+  The computed walk is the route's fallback; it is not approved or delivered to Unity.
 - **Not covered yet:**
   - an idle;
   - turning;
