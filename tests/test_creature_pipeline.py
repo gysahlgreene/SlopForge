@@ -64,12 +64,15 @@ def stubs(monkeypatch):
             images = request["views"].values()
         else:
             calls["finished"] = int(Path(request["raw"]).parent.name.removeprefix("seed_"))
+            calls["skin_weights"], calls["straighten_head"] = request["skin_weights"], request["straighten_head"]
             assert Path(request["raw"]).read_bytes() == b"glTF" + bytes([calls["finished"]])   # that seed's raw rig
             assert Path(request["source"]).is_file()
             for key in ("rigged_model", "blend"):
                 Path(request[key]).write_bytes(b"rig")
             report = {"status": "complete", "bone_names": list(request["names"].values()),
-                      "material_coverage": {"base_color": 1.0}}
+                      "material_coverage": {"base_color": 1.0}, "head": calls.get("head", {
+                          "straightened": True, "turn_before": 0.066, "turn_after": 0.001, "yaw_before": 12.0,
+                          "yaw_after": 0.1})}
             images = request["pose_images"]
         for image in images:
             Path(image).parent.mkdir(parents=True, exist_ok=True)
@@ -115,6 +118,8 @@ def test_every_seed_is_kept_and_the_best_passing_rig_is_finished(tmp_path, stubs
     # the checks module's rules are part of every stage's identity, beside the Blender script
     checks = file_sha256(ROOT / "slopforge/creature_rig.py")
     assert execution["identity_inputs"]["checks_sha256"] == checks
+    # the type's skin weighting reaches the finish and is part of the rig's identity (#154)
+    assert stubs[0]["skin_weights"] == execution["identity_inputs"]["skin_weights"] == rigging["skin_weights"] == "proxy_heat"
     assert all(stage["settings"]["checks_sha256"] == checks for stage in execution["stages"])
     # each seed keeps its own SkinTokens log beside its candidate
     assert stubs[0]["logs"] == [root / asset["artifacts"][f"rig_candidate.seed_{seed}"]["path"].replace(
@@ -248,3 +253,22 @@ def test_an_unclear_publication_record_refuses_to_rig(tmp_path, stubs, mutate):
     with pytest.raises(ValueError, match="published model"):
         pipeline.rig_creature(root, config, manifest, "wolf")
     assert stubs[0]["infer"] == []
+
+
+def test_the_finish_straightens_the_head_and_a_head_still_turned_fails_the_rig(tmp_path, stubs):
+    """Owner's choice 2026-10-31: the finish straightens a turned head (the type's straighten_head); the rig record keeps
+    the turn before and after, and a head still past max_rig_head_turn after it fails the rig with its reason."""
+    root, config, manifest = project(tmp_path)
+    pipeline.rig_creature(root, config, manifest, "wolf")
+    rigging = manifest["assets"]["creature:wolf"]["rigging"]
+    assert stubs[0]["straighten_head"] is True
+    assert rigging["head"] == {"straightened": True, "turn_before": 0.066, "turn_after": 0.001, "yaw_before": 12.0,
+                               "yaw_after": 0.1}
+    root, config, manifest = project(tmp_path / "again")
+    stubs[0]["head"] = {"straightened": True, "turn_before": 0.2, "turn_after": 0.09, "yaw_before": 40.0,
+                        "yaw_after": 15.0}
+    with pytest.raises(StageFailure, match="head.*0.090"):
+        pipeline.rig_creature(root, config, manifest, "wolf")
+    asset = manifest["assets"]["creature:wolf"]
+    assert asset["rigging"]["status"] == "failed"
+    assert asset["executions"][-1]["stages"][-1]["status"] == "failed"

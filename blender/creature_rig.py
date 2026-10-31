@@ -20,12 +20,13 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
-from slopforge.creature_rig import check_rig  # noqa: E402
+from slopforge.creature_rig import check_rig, head_turn, head_yaw  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from skintokens_character import imported, sha, transfer, weld_coincident_vertices  # noqa: E402
+from rigify_character import bind_with_proxy  # noqa: E402
 
 LEG_COLOURS = {("front", "L"): (0.9, 0.2, 0.2, 1), ("front", "R"): (0.2, 0.4, 0.95, 1),
                ("hind", "L"): (0.95, 0.6, 0.1, 1), ("hind", "R"): (0.2, 0.8, 0.9, 1)}
@@ -183,6 +184,89 @@ def set_bones(rig, meshes, names, left):
     return min(across, default=1.0)
 
 
+def proxy_heat(rig, meshes, limit=4):
+    """The model's weights replaced by bone heat on a closed voxel proxy of the skin (the character route's
+    bind_with_proxy), at rest, each vertex kept to its `limit` strongest bones. Owner ruling 2026-10-30 (#154): on the
+    wolf it cut the chest and face stretch 3-5x. The skin keeps its place; only the weights change."""
+    for bone in rig.pose.bones:
+        bone.rotation_mode, bone.rotation_quaternion = "QUATERNION", (1, 0, 0, 0)
+        bone.location, bone.scale = (0, 0, 0), (1, 1, 1)
+    bpy.context.view_layer.update()
+    placed = {obj.name: obj.matrix_world.copy() for obj in meshes}
+    for obj in meshes:
+        for modifier in [m for m in obj.modifiers if m.type == "ARMATURE"]:
+            obj.modifiers.remove(modifier)
+        obj.vertex_groups.clear()
+    corners = [obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box]
+    report = bind_with_proxy(rig, meshes, max(c.z for c in corners) - min(c.z for c in corners))
+    bones = {bone.name for bone in rig.data.bones if bone.use_deform}
+    most = 0
+    for obj in meshes:
+        obj.matrix_world = placed[obj.name]   # bind_with_proxy re-parents; the skin stays where it was
+        names = {group.index: group.name for group in obj.vertex_groups}
+        for vertex in obj.data.vertices:
+            items = sorted(((names[g.group], g.weight) for g in vertex.groups if g.weight > 0 and names[g.group] in bones),
+                           key=lambda item: item[1], reverse=True)[:limit]
+            total = sum(weight for _, weight in items)
+            if total <= 0:
+                raise ValueError(f"bone heat left a vertex of {obj.name} unweighted")
+            for index in [g.group for g in vertex.groups]:   # indices first: removing invalidates the elements
+                obj.vertex_groups[index].remove([vertex.index])
+            for name, weight in items:
+                obj.vertex_groups[name].add([vertex.index], weight / total, "REPLACE")
+            most = max(most, len(items))
+    return {**report, "influences_max": most}
+
+
+def bake_pose(rig, meshes):
+    """The current pose made the rest pose: each skin keeps its posed shape (its weights unchanged), each bone its
+    posed place."""
+    bpy.context.view_layer.update()
+    for obj in meshes:
+        for modifier in [m for m in obj.modifiers if m.type == "ARMATURE"]:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    bpy.ops.object.select_all(action="DESELECT")
+    rig.select_set(True)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.pose.armature_apply(selected=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for obj in meshes:
+        obj.modifiers.new("Armature", "ARMATURE").object = rig
+
+
+def straighten_head(rig, meshes, rounds=4):
+    """A head turned off the body's line, turned back: Neck1..Head each turn an equal share about the vertical at its
+    own joint until the muzzle points along the body (slopforge.creature_rig.head_yaw), and that pose is made the
+    rest pose. Owner's choice (2026-10-31): concepts drew the wolf's head turned toward or away from the camera."""
+    names = {bone.name: bone.name for bone in rig.data.bones}
+    depth = {bone.name: len(bone.parent_recursive) for bone in rig.data.bones}
+    chain = sorted((name for name in names if name == "Head" or (name.startswith("Neck") and name[4:].isdigit())),
+                   key=depth.get)
+    arrays = measure([rig], meshes)
+    report = {"straightened": True, "chain": chain, "turn_before": head_turn(arrays, names),
+              "yaw_before": head_yaw(arrays, names), "rounds": 0}
+    for _ in range(rounds):
+        yaw = head_yaw(measure([rig], meshes), names)
+        if abs(yaw) < 0.2:
+            break
+        for name in chain:   # parents first: a joint's share turns everything after it
+            bone = rig.pose.bones[name]
+            pivot = rig.matrix_world @ bone.head
+            turn = (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(-yaw / len(chain)), 4, "Z")
+                    @ Matrix.Translation(-pivot))
+            bone.matrix = rig.matrix_world.inverted() @ turn @ rig.matrix_world @ bone.matrix
+            bpy.context.view_layer.update()
+        bake_pose(rig, meshes)
+        report["rounds"] += 1
+    arrays = measure([rig], meshes)
+    report.update(turn_after=head_turn(arrays, names), yaw_after=head_yaw(arrays, names))
+    return report
+
+
 def make_opaque(meshes):
     """A creature's skin is opaque. Blender's FBX import wires the published base colour's Color into Alpha, and
     Cycles (video2rig's studio renders) then drew the B1 wolf see-through. Returns the links removed."""
@@ -245,10 +329,13 @@ def finish(request):
     forward, left = axes(request["facing"])
     lateral_x = set_bones(rig, meshes, request["names"], left)
     welded = sum(weld_coincident_vertices(obj) for obj in meshes)
+    weights = (proxy_heat(rig, meshes) if request.get("skin_weights") == "proxy_heat"
+               else {"method": "skintokens"})
     coverage, methods = transfer(source_meshes, meshes, Path(request["rigged_model"]).parent)
     if coverage.get("base_color", 0) <= 0:
         raise ValueError("the source's base colour did not transfer to the rig")
     alpha_links = make_opaque(meshes)
+    head = straighten_head(rig, meshes) if request.get("straighten_head") else {"straightened": False}
     for obj in source_meshes:
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -263,7 +350,7 @@ def finish(request):
     render_poses(rig, meshes, request["poses"], request["pose_images"], forward, left)
     return {"status": "complete", "bone_names": [bone.name for bone in rig.data.bones],
             "lateral_x_min": lateral_x, "welded_vertices": welded, "material_coverage": coverage,
-            "alpha_links_removed": alpha_links,
+            "alpha_links_removed": alpha_links, "skin_weights": weights, "head": head,
             "material_transfer": methods, "rigged_model_sha256": sha(request["rigged_model"]),
             "blend_sha256": sha(request["blend"]), "blender_version": bpy.app.version_string}
 

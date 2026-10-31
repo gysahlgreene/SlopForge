@@ -304,12 +304,58 @@ def rig_settings(asset_type):
     seeds = asset_type.get("rig_seeds", 4)
     if isinstance(seeds, bool) or not isinstance(seeds, int) or not 1 <= seeds <= 8:
         raise ValueError(f"asset type {asset_type.get('name')!r}: rig_seeds must be 1 to 8, got {seeds!r}")
-    return {"limbs": dict(limbs), "seeds": seeds,
-            "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0}}
+    # how the finished skin is weighted: the model's own weights, or bone heat on a voxel proxy (#154)
+    weights = asset_type.get("skin_weights") or "skintokens"
+    if weights not in ("skintokens", "proxy_heat"):
+        raise ValueError(f"asset type {asset_type.get('name')!r}: skin_weights must be skintokens or proxy_heat, "
+                         f"got {weights!r}")
+    turn = asset_type.get("max_rig_head_turn")
+    if isinstance(turn, bool) or not isinstance(turn, (int, float)) or not 0 <= turn <= 1:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: max_rig_head_turn must be a share of the height "
+                         f"from 0 to 1, got {turn!r}")
+    straighten = asset_type.get("straighten_head")
+    if straighten is not None and not isinstance(straighten, bool):
+        raise ValueError(f"asset type {asset_type.get('name')!r}: straighten_head must be true or false, got "
+                         f"{straighten!r}")
+    return {"limbs": dict(limbs), "seeds": seeds, "skin_weights": weights, "straighten_head": bool(straighten),
+            "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0,
+                       "max_rig_head_turn": turn}}
+
+
+def _muzzle(rig, names):
+    """(the muzzle, the joints by generic name, the body's line from the hips to the chest, horizontal): the muzzle
+    is the head's skin (vertices led by Head or a HeadEnd bone), its forward-most fifth averaged."""
+    vertices, weights = np.asarray(rig["vertices"], float), np.asarray(rig["weights"], float)
+    renamed = [names[name] for name in rig["bones"]]
+    joint = dict(zip(renamed, np.asarray(rig["heads"], float)))
+    along = (joint["Chest"] - joint["Hips"])[:2]
+    along /= np.linalg.norm(along)
+    head = vertices[np.isin(np.asarray(renamed)[weights.argmax(1)], [n for n in renamed if n.startswith("Head")])]
+    reach = head[:, :2] @ along
+    return head[reach >= reach.max() - 0.2 * np.ptp(reach)].mean(0), joint, along
+
+
+def head_turn(rig, names):
+    """How far the muzzle stands off the body's line (through the hips and chest joints), sideways, as a share of the
+    height."""
+    muzzle, joint, along = _muzzle(rig, names)
+    side = np.array([-along[1], along[0]])
+    return float(abs((muzzle[:2] - joint["Hips"][:2]) @ side) / np.ptp(np.asarray(rig["vertices"], float)[:, 2]))
+
+
+def head_yaw(rig, names):
+    """The head's turn in degrees about the vertical, from the body's line to the line from the neck's base (the first
+    neck joint, else the chest) to the muzzle; positive turns toward +x of a creature facing -y (counter-clockwise
+    from above). Turning the neck and head by its negative straightens the head."""
+    muzzle, joint, along = _muzzle(rig, names)
+    base = joint.get("Neck1", joint["Chest"])
+    to = muzzle[:2] - base[:2]
+    return float(np.degrees(np.arctan2(along[0] * to[1] - along[1] * to[0], along @ to)))
 
 
 def check_rig(rig, limbs, limits):
-    """structure(), then for a passing rig its generic names and fit_bones; a rig that cannot be named fails."""
+    """structure(), then for a passing rig its generic names, fit_bones and how far its head is turned (the finish
+    straightens it); a rig that cannot be named fails."""
     report = structure(rig, limbs, limits)
     if report["status"] == "passed":
         try:
@@ -318,4 +364,5 @@ def check_rig(rig, limbs, limits):
             report.update(status="failed", errors=[f"the rig cannot be named: {exc}"], failure_codes=["rig_structure"])
         else:
             report["fit_bones"] = fit_bones(report["names"], report["skin_share"])
+            report["measured"]["rig_head_turn"] = head_turn(rig, report["names"])
     return report

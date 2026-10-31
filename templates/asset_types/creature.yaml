@@ -17,10 +17,11 @@ lightmap_uvs: false
 requirements:
   - one four-legged creature standing still on all four feet, in a side three-quarter view
   - legs straight and slightly apart, so each leg is clearly separate from the others and from the body
-  - head forward, mouth closed, a tail hanging apart from the hind legs
+  - head and neck in line with the body, the muzzle pointing straight ahead the way the body faces, not turned toward the viewer
+  - mouth closed, a tail hanging apart from the hind legs
   - complete animal with plausible anatomy, isolated on a plain light background
 avoid: [humanoid, rider, saddle or harness, multiple creatures, action pose, crossed or hidden legs, wings, floor,
-        pedestal, cast shadow]
+        pedestal, cast shadow, head turned toward the viewer]
 # The limb declaration the rig is checked against: legs that stand on the ground, in front and hind pairs. Quadrupeds
 # only for now (owner decision D12); a leg TRELLIS.2 paints on the body has no geometry to rig and fails B1.
 limbs:
@@ -28,9 +29,23 @@ limbs:
 # Twin legs' joints must mirror within this share of the creature's height (owner ruling, 2026-10-27; a value per
 # type). Bounded check #129: the passing wolf seed mirrored within 0.005, a failing seed 0.28; B1's live wolf 0.025-0.05.
 max_rig_asymmetry: 0.05
+# The muzzle may stand at most this share of the height off the line through the hips and chest (B1's check). The B1
+# wolf's concept turned its head to the camera in a three-quarter view: 0.063-0.072 over three SkinTokens seeds (the
+# muzzle about 5.5 cm off a 0.78 m wolf's line), and every front view showed the face angled (owner, 2026-10-30). A
+# straight head reads near 0; the limit is provisional until a straight-headed creature is measured.
+max_rig_head_turn: 0.05
+# The finish straightens a turned head: Neck1..Head turned about the vertical until the muzzle is on the body's line,
+# made the rest pose. Concepts asked to keep the head in line turned it the other way, away from the camera
+# (2026-10-30); the owner chose to straighten it in the rig (2026-10-31). max_rig_head_turn then applies after it.
+straighten_head: true
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).
 rig_seeds: 4
+# The finished skin's weights. SkinTokens' own stretched the wolf's chest and face (edges over 1.5x their rest length:
+# 16 % of the chest-shoulder region with a front leg lifted); bone heat on a closed voxel proxy of the skin, four bones
+# a vertex at most, cut that 3-5x at the cost of some skin near the legs following the opposite leg a little. The
+# owner chose it (2026-10-30, #154). `skintokens` keeps the model's weights.
+skin_weights: proxy_heat
 # B2 (docs/CREATURES.md, video2rig's start frame): the two views and their framing. The views and panels are the
 # start frame the video route was proven from (#149): front and side in equal panels. In three-quarter + side, Wan 2.2
 # turned the creature in 3 of 4 clips; in front + side with the split-screen prompt, in none. The reader reads a lifted
