@@ -15,6 +15,7 @@ from tests.test_creature_pipeline import stubs  # noqa: F401
 from tests.test_creature_video_pipeline import video  # noqa: F401
 
 UNITY = "Assets/Generated/Creatures/wolf/Unity"
+MATERIAL = "Assets/Generated/Creatures/wolf/Materials/wolf_preview_PBR.mat"
 MEASURES = {"faces_margin_m": 0.42, "height_m": 0.781,
             "clips": {"walk_s11": {"length_s": 1.25, "root_excursion_m": 0.04, "stance_slide_mps": 0.06}}}
 
@@ -28,6 +29,11 @@ def unity(extracted, monkeypatch):  # noqa: F811
     calls.update(editor=[], play=[], remedies=[], stale=[])
     (root / "ProjectSettings").mkdir(exist_ok=True)
     (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
+    # the creature's approved Unity material, as approve-texture records it for the published model
+    material = root / MATERIAL
+    material.parent.mkdir(parents=True, exist_ok=True)
+    material.write_text("%YAML 1.1\nMaterial: wolf_preview_PBR\n")
+    manifest["assets"]["creature:wolf"]["unity_import"] = {"assets": {"material": {"path": MATERIAL}}}
 
     def editor(command, **kwargs):
         script = next((root / "Assets/Editor").glob("*.cs")).read_text()
@@ -76,6 +82,13 @@ def test_an_approved_creature_is_delivered_generic_in_place_at_its_clips_speed_a
     # root, so its curves (Hips/...) missed the rig's bones (Armature/Hips/...) and its root curves scaled the prefab
     # 100x; both importers keep their FBX root, so the clip's paths are the rig's
     assert "rigImporter.preserveHierarchy = true;" in build and "importer.preserveHierarchy = true;" in build
+    # 2026-10-31: the rig FBX's own material carried no texture, so the delivered wolf rendered white; its embedded
+    # materials are remapped to the creature's approved one, and a prefab rendering anything else fails the build
+    assert f'"{MATERIAL}"' in build and "rigImporter.AddRemap(" in build
+    assert "does not use its approved material" in build
+    # Unity's asset database registers the output folder before anything is created in it: a folder moved aside with
+    # its .meta and made again on disk was unknown to it, and creating the controller failed (2026-10-31)
+    assert f'EnsureFolder("{UNITY}")' in build and "AssetDatabase.CreateFolder(" in build
     play = calls["play"][0]
     assert f'"{UNITY}/wolf.prefab"' in play and '"walk_s11"' in play
     assert "FacesForwardAtItsSize" in play and "InPlace" in play
@@ -100,6 +113,18 @@ def test_an_approved_creature_is_delivered_generic_in_place_at_its_clips_speed_a
 def test_a_creature_whose_rig_is_not_approved_is_refused_before_unity_runs(unity):
     root, config, manifest, calls = unity
     with pytest.raises(ValueError, match="rig is not approved"):
+        pipeline.creature_unity_setup(root, config, manifest, "wolf")
+    assert calls["editor"] == []
+
+
+def test_a_creature_with_no_approved_material_is_refused_before_unity_runs(unity):
+    root, config, manifest, calls = unity
+    approve(root, manifest)
+    (root / MATERIAL).unlink()
+    with pytest.raises(ValueError, match="no approved Unity material"):
+        pipeline.creature_unity_setup(root, config, manifest, "wolf")
+    del manifest["assets"]["creature:wolf"]["unity_import"]
+    with pytest.raises(ValueError, match="no approved Unity material"):
         pipeline.creature_unity_setup(root, config, manifest, "wolf")
     assert calls["editor"] == []
 

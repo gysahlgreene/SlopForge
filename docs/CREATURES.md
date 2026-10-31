@@ -484,12 +484,18 @@ slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
   - a clip name that is not lower-case letters, digits and underscores, or a bake number that is not finite and
     positive. Both are written into the controller and the test script;
   - rights over the rig and the clips that are not shippable;
+  - no approved Unity material for the creature (`unity_import.assets.material`, which `approve-texture` makes for
+    the published model);
   - `--rig-type humanoid`: a creature is delivered Generic;
   - no Unity editor for the project's version (the Hub's, or `UNITY_EDITOR_PATH`);
   - a controller or prefab already in `<output_root>/Creatures/<name>/Unity/`.
 - **The build.** One Unity run imports the rig and each clip as Generic without an avatar, with Preserve Hierarchy on
   both. The controller has one looping state per clip, named after the clip; the default is the first by name. The
   prefab's Animator has root motion off, because the clips are in place (D9).
+  - **Skin.** Every material the rig's FBX embeds is remapped to the creature's approved material, and a prefab
+    rendering anything else fails the build. The rig FBX's own material carries no texture: the first delivered wolf
+    rendered white in Unity (2026-10-31). The output folder is registered with Unity's asset database first, so one
+    moved aside with its `.meta` and made again does not fail the build.
   - **Speed (D9).** Each clip's walking speed is a float parameter `<clip>_speed`, in metres a second: the bake's
     stride divided by its period. A game moves the creature along its +Z at that speed (or scales `Animator.speed`
     to its own) and reads the value with `Animator.GetFloat`. No runtime script is added to the project.

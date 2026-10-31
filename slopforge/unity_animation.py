@@ -77,11 +77,14 @@ def build_character_animator(project_root, config, manifest, character_selector,
     return {"status": "review_required", "controller": controller_artifact, "prefab": prefab_artifact}
 
 
-def build_animator(root, name, rig_path, clips, output_dir, *, rig_type="generic", humanoid_mapping=None):
+def build_animator(root, name, rig_path, clips, output_dir, *, rig_type="generic", humanoid_mapping=None,
+                   material=None):
     """One Unity run: the rig's and clips' import settings, an Animator Controller with a state per clip and a prefab
     of the rig with it, as `<name>.controller` and `<name>.prefab` in `output_dir`. A clip is `{path, loop,
     root_motion}` with an optional `state` name (the imported clip's name otherwise) and `speed` (m/s, a float
-    parameter `<state>_speed` a game reads, D9). Returns the two paths; nothing is left behind if Unity fails."""
+    parameter `<state>_speed` a game reads, D9). With `material` (a project path), every material the rig's FBX
+    embeds is remapped to it, and a prefab rendering anything else fails. Returns the two paths; nothing is left
+    behind if Unity fails."""
     root = Path(root).resolve()
     output_dir = Path(output_dir).resolve()
     if not output_dir.is_relative_to(root):
@@ -97,6 +100,14 @@ def build_animator(root, name, rig_path, clips, output_dir, *, rig_type="generic
     rig_asset = rig_path.relative_to(root).as_posix()
     controller_asset = controller.relative_to(root).as_posix()
     prefab_asset = prefab.relative_to(root).as_posix()
+    # the rig FBX's own material carries no texture (the creature wolf rendered white, 2026-10-31): its embedded
+    # materials take the asset's approved one, as approve-texture maps the published model's
+    skin_asset = Path(material).resolve().relative_to(root).as_posix() if material else None
+    skin_remap = (f"""var skin = AssetDatabase.LoadAssetAtPath<Material>({json.dumps(skin_asset)});
+        if (skin == null) throw new Exception("Approved material not found: " + {json.dumps(skin_asset)});
+        foreach (var embedded in AssetDatabase.LoadAllAssetsAtPath(rigPath).OfType<Material>())
+            rigImporter.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), embedded.name), skin);"""
+                  if material else "Material skin = null;")
     animation_paths = ", ".join(json.dumps(clip["path"]) for clip in clips)
     loop_flags = ", ".join(str(clip["loop"]).lower() for clip in clips)
     state_names = ", ".join(json.dumps(clip.get("state")) for clip in clips)
@@ -131,6 +142,18 @@ using UnityEngine;
 
 public static class {class_name}
 {{
+    // the output folder known to the asset database before anything is created in it: one made on disk after an
+    // earlier folder at its path was moved aside with its .meta was unknown to it, and creating assets there failed
+    static void EnsureFolder(string folder)
+    {{
+        if (AssetDatabase.IsValidFolder(folder)) return;
+        var parent = System.IO.Path.GetDirectoryName(folder).Replace('\\\\', '/');
+        EnsureFolder(parent);
+        if (System.IO.Directory.Exists(folder)) AssetDatabase.ImportAsset(folder, ImportAssetOptions.ForceSynchronousImport);
+        if (!AssetDatabase.IsValidFolder(folder)) AssetDatabase.CreateFolder(parent, System.IO.Path.GetFileName(folder));
+        if (!AssetDatabase.IsValidFolder(folder)) throw new Exception("Unity could not make the output folder " + folder);
+    }}
+
     public static void Build()
     {{
         const string rigPath = {json.dumps(rig_asset)};
@@ -140,12 +163,14 @@ public static class {class_name}
         bool[] loopFlags = new bool[] {{{loop_flags}}};
         string[] stateNames = new string[] {{{state_names}}};
         AssetDatabase.Refresh();
+        EnsureFolder({json.dumps(output_dir.relative_to(root).as_posix())});
         var rigImporter = AssetImporter.GetAtPath(rigPath) as ModelImporter;
         if (rigImporter == null) throw new Exception("Character FBX importer not found: " + rigPath);
         // the rig and its clips keep their FBX root: a clip exported with the armature alone would otherwise be folded
         // into its file's root, its curves would miss the rig's bones, and its root curves would move the prefab itself.
         // Set before any reimport, so a Humanoid skeleton is read with the hierarchy the clips use.
         rigImporter.preserveHierarchy = true;
+        {skin_remap}
         {humanoid_description}
         rigImporter.animationType = {"ModelImporterAnimationType.Human" if rig_type == "humanoid" else "ModelImporterAnimationType.Generic"};
         rigImporter.avatarSetup = {"ModelImporterAvatarSetup.CreateFromThisModel" if rig_type == "humanoid" else "ModelImporterAvatarSetup.NoAvatar"};
@@ -194,6 +219,8 @@ public static class {class_name}
         var savedAnimator = savedPrefab == null ? null : savedPrefab.GetComponent<Animator>();
         if (savedAnimator == null || savedAnimator.runtimeAnimatorController != controller)
             throw new Exception("Unity character prefab is missing its Animator or controller");
+        if (skin != null && savedPrefab.GetComponentsInChildren<Renderer>().SelectMany(r => r.sharedMaterials).Any(m => m != skin))
+            throw new Exception("Unity creature prefab does not use its approved material " + {json.dumps(skin_asset)});
         if ({str(rig_type == "humanoid").lower()} &&
             (savedAnimator.avatar == null || !savedAnimator.avatar.isValid || !savedAnimator.avatar.isHuman))
             throw new Exception("Unity character prefab did not retain a valid Humanoid Avatar");
