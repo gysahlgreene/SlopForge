@@ -387,24 +387,30 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 - **Bake (`motion_bake`).** video2rig's `import_motion` puts the fit on the rig .blend as an Action at the clip's
   real times. `blender/bake_extracted_motion.py` then samples every key in world space, and
   `slopforge/creature_gait.py` measures:
-  - **Plants per leg.** The foot is the lower tail of each declared leg's last two bones (B1's structure report). A
-    swing passes 3 % of the height and plants under 1 %, measured from that foot's own resting height (its 10th
-    percentile). On #149's g2 the fit sinks one foot 8 mm under the floor and the hind feet's lowest bone tails rest
-    about 1 cm up, so a shared floor saw no hind plants at all.
-  - **Full cycle and period.** A full cycle is every leg planting at least once, #149's plants per leg; `cycles` is
-    the fewest plants of any leg. The period is the median interval between successive plants of one leg, over the
-    legs that plant twice or more. A leg that plants only once is a warning (`weak_legs`): in #149's g3, g4 and e1,
-    walks by eye, and the B5 framing test's seed 2, one hind leg lifts under 2.5 % of the height in most steps.
-    Requiring two plants of every leg would have passed only g2 of #149's 18 imported walks. Refused, retryable
-    (generate another clip), and kept with the fit:
+  - **Steps and plants per leg.** The foot is the lower tail of each declared leg's last two bones (B1's structure
+    report). A step is the foot swinging forward relative to the hips (the root joint; B1's rig faces -Y): a run of
+    frames it moves forward, over 5 % of the height; its plant is where the swing ends. A step under 0.6 of its
+    leg's median step is partial, as is a swing the clip's first or last frame cuts.
+    Why not lift: the B1 wolf's feet lift 2-4 % of its height in Wan's walks. A swing past 3 % found one front step
+    where the foot swung forward six times, so `walk_s3`'s period came out 2.5 s for 1.2, and three of five walks were
+    refused. The owner saw its front legs "take two steps with a front leg before the other moves" (2026-10-31): half
+    steps (8-23 cm against about 47) while getting going, which the loop took in.
+  - **Full cycle and period.** A full cycle is every leg planting at least once; `cycles` is the fewest plants of any
+    leg. The period is the median interval between successive plants of one leg, over the legs that plant twice or
+    more. A leg that plants only once is a warning (`weak_legs`). Refused, retryable (generate another clip), and
+    kept with the fit:
     - a leg that never plants: `motion_no_cycle`;
-    - no leg planting twice: `motion_no_period`.
+    - no leg planting twice: `motion_no_period`;
+    - no whole period in the clean stretch (below): `motion_no_clean_period`.
+  - **Clean stretch.** The longest stretch with no partial step (`clean`, recorded with every `partial_steps`). The
+    loop is cut from it, so a creature getting going, or a shuffle, never enters the delivered clip. On five of the
+    wolf's Wan walks, it left four whole periods in four and one in the fifth, whose hind legs shuffle throughout.
   - **Stride.** The root's mean horizontal speed over the delivered window, times the period. This is the travel
     video2rig's `steps` reads into a walk on the spot.
   - **In place (D9).** The root's horizontal travel is removed: a least-squares cubic through its track, re-keyed
     in the root bone's own axes. g2's travel sped up from 20 to 29 mm a frame, so a straight line left the root
     surging 21 cm; the cubic leaves 5.5 cm and keeps the step's 6.6 cm sideways sway.
-  - **Loop.** The most whole periods that fit, starting where the seam's pose matches best (mean bone angle,
+  - **Loop.** The most whole periods that fit in the clean stretch, starting where the seam's pose matches best (mean bone angle,
     recorded as `seam_deg`, with the root's gap as `seam_root_m`). Both ends are keys on whole scene frames:
     import_motion keys a 16 fps clip on every 1.5 frames at 24 fps, and the FBX bakes whole frames, so a window between
     half frames exported one frame short with a worse seam than the one measured.
