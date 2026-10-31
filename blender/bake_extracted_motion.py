@@ -5,7 +5,8 @@ import_motion put on a creature's rig, measured, made in place, cut to its loop 
 
 The request names the legs (each leg's last two bones: the foot is the lower of their tails), the root bone, the fit
 bones, the FBX, the baked .blend, the review renders and the report. Every key of the Action is sampled in world
-space, and slopforge.creature_gait measures plants, period, stride and the loop window. The root's horizontal travel
+space, and slopforge.creature_gait measures the steps (each foot swinging forward relative to the hips; B1's rig
+faces -Y), plants, period, stride and the loop window, cut from the stretch with no partial step. The root's horizontal travel
 is removed (the owner's D9: a delivered clip is in place, and the Unity Generic controller moves the creature at
 stride / period). The Action is cut to its whole cycles, and the armature is exported as FBX with the rig's settings.
 The window is rendered through the creature's start cameras for the review sheet.
@@ -34,14 +35,20 @@ def fcurves(action):
 
 
 def sample(scene, rig, keys, legs, root, bones):
-    feet, roots, rotations = {leg: [] for leg in legs}, [], []
+    """(each foot's height, each foot's offset forward of the root joint (the rig faces -Y), the root's positions,
+    the bones' rotations) at every key; a foot is the lower tail of its leg's last two bones."""
+    feet, ahead, roots, rotations = {leg: [] for leg in legs}, {leg: [] for leg in legs}, [], []
     for key in keys:
         scene.frame_set(int(key), subframe=key - int(key))
+        hips = rig.matrix_world @ rig.pose.bones[root].head
         for leg, names in legs.items():
-            feet[leg].append(min((rig.matrix_world @ rig.pose.bones[name].tail).z for name in names))
-        roots.append(list(rig.matrix_world @ rig.pose.bones[root].head))
+            foot = min((rig.matrix_world @ rig.pose.bones[name].tail for name in names), key=lambda point: point.z)
+            feet[leg].append(foot.z)
+            ahead[leg].append(hips.y - foot.y)
+        roots.append(list(hips))
         rotations.append([list(rig.pose.bones[name].rotation_quaternion) for name in bones])
-    return {leg: np.array(values) for leg, values in feet.items()}, np.array(roots), np.array(rotations)
+    return ({leg: np.array(values) for leg, values in feet.items()},
+            {leg: np.array(values) for leg, values in ahead.items()}, np.array(roots), np.array(rotations))
 
 
 def remove_travel(scene, rig, keys, root, before, after):
@@ -139,11 +146,14 @@ def run(request):
                for corner in obj.bound_box]
     height = max(c.z for c in corners) - min(c.z for c in corners)
 
-    feet, before, rotations = sample(scene, rig, keys, legs, root, bones)
-    measured = gait(feet, times, height, root=before)
-    # the loop's ends on keys at whole scene frames: the FBX export bakes whole frames, so it delivers this window
+    feet, ahead, before, rotations = sample(scene, rig, keys, legs, root, bones)
+    measured = gait(ahead, times, height, root=before)
+    # the loop's ends on keys at whole scene frames: the FBX export bakes whole frames, so it delivers this window, cut
+    # from the stretch with no partial step (a creature getting going, or a shuffle)
     whole = np.abs(np.array(keys) - np.round(keys)) < 1e-3
-    window = loop_window(rotations, times, measured["period_s"], allowed=whole)
+    a, b = measured["clean"]
+    window = loop_window(rotations[a:b + 1], times[a:b + 1], measured["period_s"], allowed=whole[a:b + 1])
+    window.update(start=window["start"] + a, end=window["end"] + a)
     start, end = window["start"], window["end"]
     after, _ = in_place(before, times)
     span = slice(start, end + 1)
@@ -151,7 +161,7 @@ def run(request):
     speed = float(np.hypot(*velocity))
 
     remove_travel(scene, rig, keys, root, before, after)
-    _, baked, _ = sample(scene, rig, keys, {}, root, [])
+    _, _, baked, _ = sample(scene, rig, keys, {}, root, [])
     lifts, feet_xy = {}, {leg: [] for leg in legs}
     for key in keys[span]:
         scene.frame_set(int(key), subframe=key - int(key))
@@ -182,7 +192,7 @@ def run(request):
     bpy.ops.wm.save_as_mainfile(filepath=request["blend"], copy=True)
     return {"status": "complete", "fps": fps, "keys": len(keys), "height_m": round(height, 4),
             "plants": measured["plants"], "cycles": measured["cycles"], "period_s": measured["period_s"],
-            "weak_legs": measured["weak_legs"],
+            "weak_legs": measured["weak_legs"], "partial_steps": measured["partial"], "clean": measured["clean"],
             "speed_mps": round(speed, 4), "velocity": [round(float(v), 4) for v in velocity],
             "stride_m": round(speed * measured["period_s"], 4),
             "window": {**window, "start_frame": scene.frame_start, "end_frame": scene.frame_end,

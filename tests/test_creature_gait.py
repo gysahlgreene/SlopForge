@@ -4,27 +4,50 @@ calls these."""
 import numpy as np
 import pytest
 
-from slopforge.creature_gait import GaitError, gait, in_place, loop_window, swings
+from slopforge.creature_gait import GaitError, gait, in_place, loop_window, steps
 
 FPS = 16.0
 
 
-def walk(seconds=7.5, period=1.2, speed=0.4, height=0.8, lift=0.06):
-    """A synthetic four-legged walk: each foot swings for 30 % of the period (lifting `lift` m), legs a quarter period
-    apart; the root travels forward at `speed` with a small sideways sway."""
+PHASE = {"front.L": 0.0, "hind.R": 0.25, "front.R": 0.5, "hind.L": 0.75}
+
+
+def walk(seconds=7.5, period=1.2, speed=0.4, height=0.8, reach=lambda leg, step: 1.0):
+    """A synthetic four-legged walk: each foot's forward offset from the hips (m), swinging forward for 30 % of the
+    period and sliding back for the rest, legs a quarter period apart; step k of a leg reaches `reach(leg, k)` of a
+    stride. The root travels forward at `speed` with a small sideways sway."""
     times = np.arange(int(seconds * FPS) + 1) / FPS
-    phase = {"front.L": 0.0, "hind.R": 0.25, "front.R": 0.5, "hind.L": 0.75}
+    stride = speed * period
     feet = {}
-    for leg, offset in phase.items():
-        cycle = ((times / period) - offset) % 1.0
-        feet[leg] = np.where(cycle < 0.3, lift * np.sin(np.pi * cycle / 0.3), 0.0)
+    for leg, offset in PHASE.items():
+        u = times / period - offset
+        step, cycle = np.floor(u), u - np.floor(u)
+        r = stride * np.array([reach(leg, int(k)) for k in step])
+        feet[leg] = np.where(cycle < 0.3, -stride / 2 + r * cycle / 0.3, -stride / 2 + r * (1 - (cycle - 0.3) / 0.7))
     root = np.stack([0.01 * np.sin(2 * np.pi * times / period), -speed * times, np.full_like(times, 0.5)], 1)
     return times, feet, root, height
 
 
-def test_a_swing_needs_to_pass_the_lift_share_and_come_back_under_the_plant_share():
-    lift = np.array([0, 0.02, 0.05, 0.04, 0.02, 0.005, 0, 0.02, 0.005, 0.0])   # shares of the height
-    assert [(start, end) for start, end, _ in swings(lift)] == [(2, 5)]         # the 0.02 bump is jitter, not a step
+def one_step_each(seconds=2.0, height=0.8, stride=0.48):
+    """Each leg stands, swings forward once (staggered), and stands again: one plant a leg."""
+    times = np.arange(int(seconds * FPS) + 1) / FPS
+    feet = {}
+    for k, leg in enumerate(("front.L", "hind.R", "front.R", "hind.L")):
+        start = 0.3 + 0.3 * k
+        feet[leg] = np.clip((times - start) / 0.36, 0, 1) * stride - stride / 2
+    return times, feet, height
+
+
+def halves(leg, step):
+    """A third of each leg's steps at 30 % reach, staggered so every period holds a partial step."""
+    return 0.3 if step % 3 == list(PHASE).index(leg) % 3 else 1.0
+
+
+def test_a_step_is_a_forward_swing_of_the_foot_past_a_share_of_the_height():
+    """2026-10-31: the B1 wolf's feet lift 2-4 % of its height in Wan's walks, so a lift rule found one front step
+    where the foot swung forward six times; a step is the foot swinging forward relative to the hips."""
+    forward = np.array([0.0, -0.02, -0.04, 0.02, 0.10, 0.18, 0.16, 0.14, 0.15, 0.16, 0.14, 0.12])   # m, height 1
+    assert steps(forward, 1.0) == [(2, 5, 0.22)]       # the 2 cm creep at frames 7-9 is under 5 % of the height
 
 
 def test_the_period_is_the_median_interval_between_one_legs_plants():
@@ -33,30 +56,36 @@ def test_the_period_is_the_median_interval_between_one_legs_plants():
     assert result["period_s"] == pytest.approx(1.2, abs=1 / FPS)
     assert min(len(plants) for plants in result["plants"].values()) >= 5
     assert result["cycles"] == min(len(plants) for plants in result["plants"].values())
+    # only swings the clip's ends cut short are partial
+    assert all(start == 0 or end == len(times) - 1 for _, start, end in result["partial"])
+    a, b = result["clean"]
+    assert times[a] < 0.5 and times[b] > 7.0
 
 
-def test_each_foot_is_measured_from_its_own_resting_height():
-    """#149's g2 fit: one foot sinks 8 mm under the floor in a few frames, and the hind feet's lowest bone tails rest
-    about 1 cm up; a shared floor at the lowest point would leave the hind feet never planted."""
-    times, feet, root, height = walk()
-    feet["hind.L"] = feet["hind.L"] + 0.011
-    feet["front.L"] = np.where((times > 2.0) & (times < 2.4), -0.008, feet["front.L"])
+def test_partial_steps_are_kept_out_of_the_clean_stretch():
+    """2026-10-31, owner on walk_s3: "it looks like it takes two steps with a front leg before the other moves". Its
+    front legs made half steps (8-23 cm against about 47) while getting going in the clip's first 2.5 s, and the loop,
+    the most whole periods that fit, took them in. A step under PARTIAL of its leg's median is partial, and the loop
+    is cut from the longest stretch with none."""
+    times, feet, root, height = walk(reach=lambda leg, step: 0.3 if leg == "front.L" and step < 2 else 1.0)
     result = gait(feet, times, height)
-    assert min(len(plants) for plants in result["plants"].values()) >= 5
+    assert all(leg == "front.L" or start == 0 or end == len(times) - 1 for leg, start, end in result["partial"])
+    assert any(leg == "front.L" and start > 0 for leg, start, _ in result["partial"])
+    a, b = result["clean"]
+    assert times[a] >= 1.5 and times[b] > 7.0                # after the last half step (1.2-1.56 s), to the end
+    assert int((times[b] - times[a]) // result["period_s"]) >= 4
 
 
-def test_a_full_cycle_is_every_leg_planting_once_and_the_period_comes_from_the_legs_that_plant_twice():
-    """#149's plants-per-leg rule: in g3, g4 and e1 (walks by eye) and the B5 framing test's seed 2, one hind leg lifts
-    under 2.5 % of the height in most steps and plants once; the other legs give the period."""
+def test_a_leg_with_one_full_step_is_weak_and_the_others_give_the_period():
     times, feet, root, height = walk()
-    feet["hind.L"] = np.where((times > 0.85) & (times < 1.3), feet["hind.L"], 0.0)   # one swing (0.9-1.26 s), then shuffles
+    feet["hind.L"] = np.where((times > 0.7) & (times < 1.5), feet["hind.L"], 0.0)   # one swing, then stands
     result = gait(feet, times, height)
     assert len(result["plants"]["hind.L"]) == 1 and result["cycles"] == 1
     assert result["period_s"] == pytest.approx(1.2, abs=1 / FPS)
     assert result["weak_legs"] == ["hind.L"]
 
 
-def test_a_leg_that_never_plants_means_no_full_cycle():
+def test_a_leg_that_never_steps_means_no_full_cycle():
     times, feet, root, height = walk()
     feet["hind.L"] = np.zeros_like(times)
     with pytest.raises(GaitError, match="hind.L never planted") as caught:
@@ -64,21 +93,28 @@ def test_a_leg_that_never_plants_means_no_full_cycle():
     assert caught.value.code == "motion_no_cycle" and caught.value.measured == {"motion_min_plants": 0}
 
 
-def test_no_leg_planting_twice_means_no_period():
-    times, feet, root, height = walk(seconds=1.0)            # every leg plants once (hind.L at 0.06 s, mid-swing at 0)
+def test_no_leg_stepping_twice_means_no_period():
+    times, feet, height = one_step_each()
     with pytest.raises(GaitError, match="no leg planted twice") as caught:
         gait(feet, times, height)
     assert caught.value.code == "motion_no_period" and caught.value.measured == {"motion_max_plants": 1}
+
+
+def test_partial_steps_throughout_leave_no_clean_period():
+    times, feet, root, height = walk(reach=halves)
+    with pytest.raises(GaitError, match="no clean walk period") as caught:
+        gait(feet, times, height)
+    assert caught.value.code == "motion_no_clean_period" and caught.value.measured == {"motion_clean_periods": 0}
 
 
 def test_every_gait_refusal_states_a_limit_its_measure_breaks():
     """B0: a candidate_quality refusal is retryable only when its codes' measures pass their declared limits."""
     from slopforge.failures import candidate_quality_rejection
     from slopforge.creature_gait import GAIT_LIMITS
-    for seconds, feet_change in ((7.5, lambda feet, t: feet.update({"hind.L": np.zeros_like(t)})),
-                                 (1.0, lambda feet, t: None)):
-        times, feet, root, height = walk(seconds=seconds)
-        feet_change(feet, times)
+    still = walk()
+    still[1]["hind.L"] = np.zeros_like(still[0])
+    halved = walk(reach=halves)
+    for times, feet, height in ((still[0], still[1], still[3]), one_step_each(), (halved[0], halved[1], halved[3])):
         with pytest.raises(GaitError) as caught:
             gait(feet, times, height)
         error = caught.value

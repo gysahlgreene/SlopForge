@@ -1,17 +1,24 @@
 """B6's gait measures on an extracted creature motion (AI motion sources plan, B6; docs/CREATURES.md, "Extraction and
 bake"). Pure NumPy, so blender/bake_extracted_motion.py samples the rig and calls these, and the tests need no Blender.
 
-- swings / gait: plants per leg (#149's plants.py rule), the period and, with the root's track, the speed and stride.
+- steps / gait: each leg's steps (the foot swinging forward relative to the hips), its plants, the period, the clean
+  stretch the loop may use and, with the root's track, the speed and stride.
 - in_place: the root's linear horizontal travel removed (the owner's D9 ruling: a delivered clip is in place; the
   Unity Generic controller moves the creature at stride / period).
 - loop_window: the whole number of periods to deliver as the looping clip, where the seam's pose matches best.
 """
 import numpy as np
 
-SWING, PLANT = 0.03, 0.01   # a foot's lift as a share of the body height: a swing passes SWING, a plant is under PLANT
+PLANT = 0.01   # a planted foot's lift as a share of the body height (the bake's stance slide)
+# A step swings the foot forward, relative to the hips, over STEP of the height; one under PARTIAL of its leg's median
+# step is partial (2026-10-31: the wolf's front legs got going with 8-23 cm half steps against about 47; 0.5 let a
+# 22 cm one through, 0.6 caught it on five Wan walks and kept a four-period loop in four of them)
+STEP, PARTIAL = 0.05, 0.6
 MIN_PLANTS = 2              # a leg's period is the interval between two of its plants; a full cycle needs one each
-# B0's limits for each refusal (failures._KIND_CODES["motion"]): every leg plants once; some leg plants twice
-GAIT_LIMITS = {"motion_no_cycle": {"min_motion_plants": 1}, "motion_no_period": {"min_motion_max_plants": MIN_PLANTS}}
+# B0's limits for each refusal (failures._KIND_CODES["motion"]): every leg plants once; some leg plants twice; a whole
+# period with no partial step
+GAIT_LIMITS = {"motion_no_cycle": {"min_motion_plants": 1}, "motion_no_period": {"min_motion_max_plants": MIN_PLANTS},
+               "motion_no_clean_period": {"min_motion_clean_periods": 1}}
 
 
 class GaitError(ValueError):
@@ -22,19 +29,24 @@ class GaitError(ValueError):
         self.code, self.measured = code, measured
 
 
-def swings(lift, *, swing=SWING, plant=PLANT):
-    """[(lift frame, plant frame, peak lift)] for one foot's lift per frame (a share of the height); hysteresis, so
-    jitter between the two shares is not a step."""
-    found, start, peak = [], None, 0.0
-    for frame, value in enumerate(np.asarray(lift, float)):
-        if start is None:
-            if value > swing:
-                start, peak = frame, value
-        else:
-            peak = max(peak, value)
-            if value < plant:
-                found.append((start, frame, round(float(peak), 4)))
-                start = None
+def steps(forward, height, *, step=STEP):
+    """[(start frame, end frame, reach m)] for one foot's forward offset from the hips per frame (m): each run of
+    frames it moves forward (a 3-frame mean of its motion, so a frame's jitter does not split a swing), its ends moved
+    to the lowest and highest offsets beside them, reaching over `step` of the height. A swing cut by the clip's first
+    or last frame reaches less than it would."""
+    forward = np.asarray(forward, float)
+    moving = np.convolve(np.diff(forward), np.ones(3) / 3, mode="same") > 0
+    found, start = [], None
+    for frame, ahead in enumerate([*moving, False]):
+        if ahead and start is None:
+            start = frame
+        elif not ahead and start is not None:
+            low = max(start - 1, 0) + int(np.argmin(forward[max(start - 1, 0):start + 2]))
+            high = frame - 1 + int(np.argmax(forward[frame - 1:frame + 2]))
+            reach = float(forward[high] - forward[low])
+            if reach > step * height:
+                found.append((low, high, round(reach, 4)))
+            start = None
     return found
 
 
@@ -56,23 +68,26 @@ def in_place(root, times):
     return still, velocity
 
 
-REST = 10   # percentile of a foot's own height taken as its resting height: a walking foot stands most of the cycle
-
-
 def gait(feet, times, height, *, root=None):
-    """{plants, swings, period_s, cycles, weak_legs[, speed_mps, velocity, stride_m]} from each leg's foot height per
-    frame (m). Each foot's lift is measured from its own resting height, not a shared floor: a fit sinks a foot under
-    the floor in some frames, and a foot's lowest bone tail rests above the skin's sole (#149's g2). A full cycle is
-    every leg planting at least once (#149's plants per leg; `cycles` is the fewest plants of any leg); the period is
-    the median interval between successive plants of one leg, over the legs that plant twice or more. Legs planting
-    once are `weak_legs`: in g3, g4 and e1, walks by eye, one hind leg lifts under 2.5 % of the height in most steps.
-    A leg that never plants, or no leg planting twice, refuses the motion."""
+    """{plants, steps, partial, clean, period_s, cycles, weak_legs[, speed_mps, velocity, stride_m]} from each leg's
+    foot offset forward of the hips per frame (m). A step is the foot swinging forward (steps); its plant is where the
+    swing ends. Steps under PARTIAL of their leg's median are partial: a creature getting going, or a shuffle. A full
+    cycle is every leg planting at least once (`cycles` is the fewest plants of any leg); the period is the median
+    interval between successive plants of one leg, over the legs that plant twice or more; legs planting once are
+    `weak_legs`. `clean` is the longest stretch [first, last frame] with no partial step: the loop is cut from it.
+    A leg that never plants, no leg planting twice, or no whole period in the clean stretch refuses the motion.
+    2026-10-31: lift (over 3 % of the height) found one front step where the B1 wolf's foot swung forward six times,
+    so the period came out 2.5 s for 1.2 and the loop took in the front legs' half steps while getting going."""
     times = np.asarray(times, float)
-    found = {}
-    for leg, heights in feet.items():
-        heights = np.asarray(heights, float)
-        found[leg] = swings((heights - np.percentile(heights, REST)) / height)
-    plants = {leg: [end for _, end, _ in steps] for leg, steps in found.items()}
+    found, partial = {}, []
+    last = len(times) - 1
+    for leg, forward in feet.items():
+        runs = steps(forward, height)
+        whole = [run for run in runs if 0 < run[0] and run[1] < last]   # a swing the clip cuts has no known end
+        median = float(np.median([reach for _, _, reach in whole])) if whole else 0.0
+        found[leg] = [run for run in whole if run[2] >= PARTIAL * median]
+        partial += [[leg, start, end] for start, end, reach in runs if (start, end, reach) not in found[leg]]
+    plants = {leg: [end for _, end, _ in runs] for leg, runs in found.items()}
     fewest = min(len(frames) for frames in plants.values())
     never = sorted(leg for leg, frames in plants.items() if not frames)
     if never:
@@ -81,8 +96,21 @@ def gait(feet, times, height, *, root=None):
     if not timed:
         raise GaitError("no walk period: no leg planted twice",
                         {"motion_max_plants": max(len(frames) for frames in plants.values())}, code="motion_no_period")
-    intervals = np.concatenate([np.diff(times[frames]) for frames in timed])
-    result = {"plants": plants, "swings": found, "period_s": round(float(np.median(intervals)), 4), "cycles": fewest,
+    period = float(np.median(np.concatenate([np.diff(times[frames]) for frames in timed])))
+    # the gaps between partial steps; the longest is the clean stretch
+    gaps, reach = [], 0
+    for _, start, end in sorted(partial, key=lambda item: item[1]):
+        gaps.append((reach, start))
+        reach = max(reach, end)
+    gaps.append((reach, len(times) - 1))
+    clean = max(gaps, key=lambda gap: times[gap[1]] - times[gap[0]])
+    periods = int((times[clean[1]] - times[clean[0]]) // period)
+    if periods < 1:
+        raise GaitError(f"no clean walk period: partial steps leave {times[clean[1]] - times[clean[0]]:.2f} s at most "
+                        f"without one, under a period ({period:.2f} s)", {"motion_clean_periods": periods},
+                        code="motion_no_clean_period")
+    result = {"plants": plants, "steps": found, "partial": sorted(partial, key=lambda item: item[1]),
+              "clean": [int(clean[0]), int(clean[1])], "period_s": round(period, 4), "cycles": fewest,
               "weak_legs": sorted(leg for leg, frames in plants.items() if len(frames) < MIN_PLANTS)}
     if root is not None:
         _, velocity = in_place(root, times)
