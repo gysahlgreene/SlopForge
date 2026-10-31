@@ -77,8 +77,9 @@ def prepare_skintokens_runtime(config, project_root):
     return runtime.prepare(checkout)
 
 
-def run_skintokens_inference(config, source_model, output_model, *, seed):
-    """Run raw SkinTokens inference; postprocessing is a separate pipeline task."""
+def run_skintokens_inference(config, source_model, output_model, *, seed, log=None):
+    """Run raw SkinTokens inference; postprocessing is a separate pipeline task. The log goes to `log`, or to
+    ai/logs/skintokens/<output name>.log."""
     output = Path(output_model).resolve()
     root = config.get("_project_root", output.parent)
     report = skintokens_preflight(config, root)
@@ -95,7 +96,7 @@ def run_skintokens_inference(config, source_model, output_model, *, seed):
         raise ValueError("SkinTokens output already exists")
     python, checkout, checkpoint = _skintokens_paths(config, root)
     output.parent.mkdir(parents=True, exist_ok=True)
-    log = Path(root).resolve() / "ai/logs/skintokens" / (output.stem + ".log")
+    log = Path(log).resolve() if log else Path(root).resolve() / "ai/logs/skintokens" / (output.stem + ".log")
     log.parent.mkdir(parents=True, exist_ok=True)
     host = _skintokens_host(config)
     if host:

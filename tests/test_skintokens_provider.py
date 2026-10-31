@@ -303,3 +303,23 @@ def test_remote_cleanup_only_removes_the_created_work_directory(tmp_path, monkey
     with pytest.raises(RuntimeError, match="work directory"):
         rigging._remote_inference(*args)
     assert not any("rm" in argv for argv in calls)
+
+
+def test_inference_writes_its_log_where_the_caller_asks(tmp_path, monkeypatch):
+    # creature rig runs one inference per seed into seed_N/raw.glb: a log named after the output would be shared
+    monkeypatch.setattr(rigging, "skintokens_preflight", lambda *_: {
+        "status": "ready", "revision": rigging.SKINTOKENS_REVISION,
+        "checkpoint_id": "weights.ckpt", "checkpoint_sha256": "x", "compatibility_sha256": "y"})
+    logs = []
+
+    def launch(python, checkout, checkpoint, source, output, seed, log):
+        logs.append(Path(log))
+        Path(output).write_bytes(_glb())
+        return True
+    monkeypatch.setattr(rigging.runtime, "launch", launch)
+    source = tmp_path / "source.glb"
+    source.write_bytes(b"input")
+    settings = config(sys.executable, tmp_path, tmp_path / "weights.ckpt")
+    run_skintokens_inference(settings, source, tmp_path / "a/raw.glb", seed=1, log=tmp_path / "a/skintokens.log")
+    run_skintokens_inference(settings, source, tmp_path / "out.glb", seed=2)
+    assert logs == [tmp_path / "a/skintokens.log", tmp_path / "ai/logs/skintokens/out.log"]

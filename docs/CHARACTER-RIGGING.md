@@ -1,5 +1,7 @@
 # 3D character rigging
 
+Four-legged creatures are rigged by `slopforge creature rig` with generic names; see [Creatures](CREATURES.md#rigging-a-creature-b1). This guide covers humanoid characters.
+
 **Current references:** [Humanoid test 1](media/character-qualification-2026-10/basalt-warden-unity-preview/README.md) demonstrates Unity walk playback; arm deformation and source topology remain under review. The [diagnostic humanoid benchmark](media/character-qualification-2026-10/basalt-corrected-humanoid/README.md) has approved body deformation and evaluated animation. Rigging providers remain experimental; broad deformation and production qualification are outstanding.
 
 ## Animation-readiness gate
