@@ -185,8 +185,8 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
                            "asymmetry": report["measured"]["rig_asymmetry"], "raw": relative(raw),
                            "structure": relative(report_path),
                            "views": {view: relative(path) for view, path in views.items()},
-                           **({"names": report["names"], "fit_bones": report["fit_bones"], "facing": report["facing"]}
-                              if report["status"] == "passed" else {})})
+                           **({"names": report["names"], "fit_bones": report["fit_bones"], "facing": report["facing"],
+                               "head_turn": report["measured"]["rig_head_turn"]} if report["status"] == "passed" else {})})
 
     review = directory / "Review"
     seed_sheet = review / "seed_sheet.png"
@@ -225,7 +225,8 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
     contact = review / "contact_sheet.png"
     stage = start_stage(execution, "rig_postprocess", 1, [raw_refs[chosen["seed"]], source_ref],
                         {"seed": chosen["seed"], "names": chosen["names"], "poses": poses, "tool_sha256": tool,
-                         "checks_sha256": checks, "skin_weights": settings["skin_weights"]},
+                         "checks_sha256": checks, "skin_weights": settings["skin_weights"],
+                         "straighten_head": settings["straighten_head"]},
                         {"output_rights": rights})
     begin_stage(stage)
     save_manifest(manifest_path, manifest)
@@ -233,9 +234,16 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
         finished = _blender(config, root, {
             "action": "finish", "source": str(source), "raw": str(root / chosen["raw"]), "names": chosen["names"],
             "facing": chosen["facing"], "skin_weights": settings["skin_weights"],
-            "rigged_model": str(rigged), "blend": str(blend), "poses": poses,
+            "straighten_head": settings["straighten_head"], "rigged_model": str(rigged), "blend": str(blend), "poses": poses,
             "pose_images": [str(image) for image in images], "report": str(directory / "finish.json")})
         _sheet([(Image.open(image), pose["label"]) for image, pose in zip(images, poses)], contact, columns=3)
+        head = finished.get("head") or {}
+        turn = head.get("turn_after", chosen["head_turn"])     # not straightened: the raw rig's own turn
+        if turn > settings["limits"]["max_rig_head_turn"]:
+            raise StageFailure("processing_validation", f"the head is still turned: its muzzle stands {turn:.3f} of "
+                               f"the height off the body's line (limit {settings['limits']['max_rig_head_turn']})",
+                               operation="creature_rig", remedy="look at the contact sheet; set straighten_head in "
+                               "the type, or regenerate the creature with its head and neck in line with the body")
     except Exception as exc:
         fail(exc, stage)
         raise
@@ -261,7 +269,7 @@ def rig_creature(project_root, config, manifest, name, *, seeds=None):
                         "names": chosen["names"], "fit_bones": chosen["fit_bones"], "rig_sha256": file_sha256(rigged),
                         "source_sha256": source_ref["sha256"],
                         "contact_sheet": relative(contact), "structure": chosen["structure"],
-                        "material_transfer": finished.get("material_transfer")}
+                        "material_transfer": finished.get("material_transfer"), "head": finished.get("head")}
     asset.setdefault("pipeline_status", {})["rigging_status"] = "review_required"
     save_manifest(manifest_path, manifest)
     return {"status": "review_required", "seed": chosen["seed"], "rig": rig, "contact_sheet": relative(contact),
