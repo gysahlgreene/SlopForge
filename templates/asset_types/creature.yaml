@@ -34,6 +34,10 @@ max_rig_asymmetry: 0.05
 # muzzle about 5.5 cm off a 0.78 m wolf's line), and every front view showed the face angled (owner, 2026-10-30). A
 # straight head reads near 0; the limit is provisional until a straight-headed creature is measured.
 max_rig_head_turn: 0.05
+# The finish straightens a turned head: Neck1..Head turned about the vertical until the muzzle is on the body's line,
+# made the rest pose. Concepts asked to keep the head in line turned it the other way, away from the camera
+# (2026-10-30); the owner chose to straighten it in the rig (2026-10-31). max_rig_head_turn then applies after it.
+straighten_head: true
 # SkinTokens seeds `creature rig` tries unless --seeds says otherwise; the best passing one is kept (the bounded check:
 # 1 of 4 passed).
 rig_seeds: 4

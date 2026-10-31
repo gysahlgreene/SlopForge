@@ -20,10 +20,10 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
-from slopforge.creature_rig import check_rig  # noqa: E402
+from slopforge.creature_rig import check_rig, head_turn, head_yaw  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from skintokens_character import imported, sha, transfer, weld_coincident_vertices  # noqa: E402
 from rigify_character import bind_with_proxy  # noqa: E402
@@ -218,6 +218,55 @@ def proxy_heat(rig, meshes, limit=4):
     return {**report, "influences_max": most}
 
 
+def bake_pose(rig, meshes):
+    """The current pose made the rest pose: each skin keeps its posed shape (its weights unchanged), each bone its
+    posed place."""
+    bpy.context.view_layer.update()
+    for obj in meshes:
+        for modifier in [m for m in obj.modifiers if m.type == "ARMATURE"]:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    bpy.ops.object.select_all(action="DESELECT")
+    rig.select_set(True)
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.pose.armature_apply(selected=False)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    for obj in meshes:
+        obj.modifiers.new("Armature", "ARMATURE").object = rig
+
+
+def straighten_head(rig, meshes, rounds=4):
+    """A head turned off the body's line, turned back: Neck1..Head each turn an equal share about the vertical at its
+    own joint until the muzzle points along the body (slopforge.creature_rig.head_yaw), and that pose is made the
+    rest pose. Owner's choice (2026-10-31): concepts drew the wolf's head turned toward or away from the camera."""
+    names = {bone.name: bone.name for bone in rig.data.bones}
+    depth = {bone.name: len(bone.parent_recursive) for bone in rig.data.bones}
+    chain = sorted((name for name in names if name == "Head" or (name.startswith("Neck") and name[4:].isdigit())),
+                   key=depth.get)
+    arrays = measure([rig], meshes)
+    report = {"straightened": True, "chain": chain, "turn_before": head_turn(arrays, names),
+              "yaw_before": head_yaw(arrays, names), "rounds": 0}
+    for _ in range(rounds):
+        yaw = head_yaw(measure([rig], meshes), names)
+        if abs(yaw) < 0.2:
+            break
+        for name in chain:   # parents first: a joint's share turns everything after it
+            bone = rig.pose.bones[name]
+            pivot = rig.matrix_world @ bone.head
+            turn = (Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(-yaw / len(chain)), 4, "Z")
+                    @ Matrix.Translation(-pivot))
+            bone.matrix = rig.matrix_world.inverted() @ turn @ rig.matrix_world @ bone.matrix
+            bpy.context.view_layer.update()
+        bake_pose(rig, meshes)
+        report["rounds"] += 1
+    arrays = measure([rig], meshes)
+    report.update(turn_after=head_turn(arrays, names), yaw_after=head_yaw(arrays, names))
+    return report
+
+
 def make_opaque(meshes):
     """A creature's skin is opaque. Blender's FBX import wires the published base colour's Color into Alpha, and
     Cycles (video2rig's studio renders) then drew the B1 wolf see-through. Returns the links removed."""
@@ -286,6 +335,7 @@ def finish(request):
     if coverage.get("base_color", 0) <= 0:
         raise ValueError("the source's base colour did not transfer to the rig")
     alpha_links = make_opaque(meshes)
+    head = straighten_head(rig, meshes) if request.get("straighten_head") else {"straightened": False}
     for obj in source_meshes:
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.ops.object.select_all(action="DESELECT")
@@ -300,7 +350,7 @@ def finish(request):
     render_poses(rig, meshes, request["poses"], request["pose_images"], forward, left)
     return {"status": "complete", "bone_names": [bone.name for bone in rig.data.bones],
             "lateral_x_min": lateral_x, "welded_vertices": welded, "material_coverage": coverage,
-            "alpha_links_removed": alpha_links, "skin_weights": weights,
+            "alpha_links_removed": alpha_links, "skin_weights": weights, "head": head,
             "material_transfer": methods, "rigged_model_sha256": sha(request["rigged_model"]),
             "blend_sha256": sha(request["blend"]), "blender_version": bpy.app.version_string}
 

@@ -1,5 +1,6 @@
 """B1 in real Blender: a four-legged fixture GLB checked, named, finished and posed by blender/creature_rig.py."""
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -120,3 +121,39 @@ def test_the_skin_can_be_weighted_again_by_bone_heat_on_a_voxel_proxy(tmp_path):
         assert all(1 <= len(row) <= 4 and abs(sum(w for _, w in row) - 1) < 1e-4 for row in new["weights"])
         assert any(len(row) > 1 for row in new["weights"])                       # blended, not the fixture's one bone
         assert sorted({name for row in new["weights"] for name, _ in row}) <= sorted(NAMES.values())
+
+
+@pytest.mark.skipif(not Path(BLENDER).is_file(), reason="Blender is not installed")
+def test_the_finish_straightens_a_turned_head_and_makes_it_the_rest_pose(tmp_path):
+    """Owner's choice 2026-10-31: the finish turns Neck1..Head about the vertical until the muzzle is on the body's
+    line, and that pose becomes the rest pose; the skin follows its weights, the legs and body stay where they were."""
+    from tests.test_creature_rig import turned_head
+    rig = turned_head()
+    fixture = {"vertices": rig["vertices"].tolist(), "triangles": rig["triangles"].tolist(), "bones": rig["bones"],
+               "parents": rig["parents"], "heads": rig["heads"].tolist(),
+               "leads": [rig["bones"][k] for k in rig["weights"].argmax(1)]}
+    source, raw = str(tmp_path / "source.fbx"), str(tmp_path / "raw.glb")
+    blender(tmp_path, {"action": "fixture", "fixture": fixture, "source": source, "raw": raw})
+    report = blender(tmp_path, {"action": "check", "raw": raw, "limbs": LIMBS, "limits": LIMITS,
+                                "views": {view: str(tmp_path / f"{view}.png") for view in ("front", "side")}})
+    assert report["status"] == "passed" and report["measured"]["rig_head_turn"] > 0.1
+    poses = deformation_poses(set(report["names"].values()))
+    finished = {}
+    for straighten in (False, True):
+        out = tmp_path / f"straighten_{straighten}"
+        out.mkdir()
+        finished[straighten] = blender(out, {
+            "action": "finish", "source": source, "raw": raw, "names": report["names"], "facing": report["facing"],
+            "rigged_model": str(out / "rig.fbx"), "blend": str(out / "rig.blend"), "poses": poses,
+            "pose_images": [str(out / f"pose_{k}.png") for k in range(len(poses))], "straighten_head": straighten})
+    assert finished[False]["head"] == {"straightened": False}
+    head = finished[True]["head"]
+    assert head["straightened"] and head["turn_before"] > 0.1 and head["turn_after"] < 0.005
+    assert head["yaw_before"] == pytest.approx(math.degrees(math.atan2(0.15, 0.28)), abs=1.5)
+    assert abs(head["yaw_after"]) < 1.0
+    before, after = probe_weights(tmp_path / "straighten_False/rig.blend"), probe_weights(tmp_path / "straighten_True/rig.blend")
+    rest_before, rest_after = np.array(before[0]["rest"]), np.array(after[0]["rest"])
+    moved = np.linalg.norm(rest_after - rest_before, axis=1)
+    hind = np.array([rest[1] > 0.3 and rest[2] < 0.42 for rest in rest_before])   # the hind legs' skin
+    assert moved[hind].max() < 1e-5 and moved.max() > 0.05                           # legs stay; the head turned
+    assert after[0]["armatures"] == 1

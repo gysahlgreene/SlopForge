@@ -41,12 +41,9 @@ for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md))
 - **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
 - **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
   chest further up one spine. Besides those, only a tail and one neck may leave them.
-- **The head is in line with the body.** The head's skin is the skin the `Head` and `…End` head bones lead; its
-  forward-most fifth, averaged, is the muzzle. It may stand at most `max_rig_head_turn` of the height (0.05 for the
-  `creature` type, provisional) off the line through the hips and chest joints. A turned head is the model's, so every
-  seed fails it (`rig_head_turned`) and the remedy is a new creature. The B1 wolf's concept turned its head to the
-  camera in a three-quarter view: 0.063-0.072 over three seeds, and every front view showed the face angled (owner,
-  2026-10-30). The type's concept rules now ask for the head and neck in line with the body.
+- **How far the head is turned** is measured and recorded (`rig_head_turn`). The head's skin is the skin the `Head`
+  and `…End` head bones lead; its forward-most fifth, averaged, is the muzzle. The turn is how far the muzzle stands
+  off the line through the hips and chest joints, as a share of the height. The finish straightens it (below).
 
 Each seed's result is kept as `rig_candidate.seed_N` with its verdict, raw GLB, structure report and front and side
 views; a rejected seed stays `failed` with its reasons. A seed that crashes is recorded and the others still run. No
@@ -62,6 +59,14 @@ The best passing seed is finished. Best means it mirrors most closely; on a tie,
   A bone past its chain's names becomes an `…End` bone.
 - **Bone axes.** Each bone's tail runs along its chain, and each bone's local X lies across the body, which is how
   video2rig bends a joint.
+- **A turned head is straightened.** With the type's `straighten_head` (true for `creature`), `Neck1` to `Head` each
+  turn an equal share about the vertical, at their own joints, until the muzzle points along the body. That pose,
+  the skin following its weights, becomes the rest pose; the legs and body do not move. `finish.json` and the rig
+  record keep the turn and the angle before and after (`head`). A head still more than `max_rig_head_turn` of the
+  height off the line (0.05 for `creature`, provisional) fails the rig. Why: the B1 wolf's concept turned its head to
+  the camera in a three-quarter view (0.063-0.072 over three seeds), and every front view showed the face angled
+  (owner, 2026-10-30). Concepts asked to keep the head in line turned it away from the camera instead (2026-10-30), so
+  the owner chose to straighten it in the rig (2026-10-31). The concept rules still ask for the head in line.
 - **Weights.** The type's `skin_weights` sets how the finished skin follows the bones. The `creature` type declares
   `proxy_heat`: SkinTokens' weights are dropped, and Blender's bone heat weights a closed voxel copy of the skin at
   rest (the character route's `bind_with_proxy`, the finest of its voxel sizes that weights every voxel). The weights
