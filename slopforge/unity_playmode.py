@@ -113,6 +113,9 @@ public class PrefabPlayTests
 """
 
 
+STILL_SWAY = 0.1   # a clip standing still (speed 0) is in place while its root bone keeps within this share of the height
+
+
 def creature_play_script(prefab_asset_path, clips, *, height, front, hind, root_bone, measures):
     """The NUnit play-mode tests for a creature prefab (B7): it faces +Z at the size B1 measured, plays its default
     state on its own, and each clip (`{state, length_s, speed_mps, stride_m}`) loops at its baked length with its
@@ -123,7 +126,9 @@ def creature_play_script(prefab_asset_path, clips, *, height, front, hind, root_
     number = lambda value: f"{float(value)!r}f"
     plays = "\n".join(f"    [TestCase({json.dumps(clip['state'])}, {number(clip['length_s'])}, "
                       f"{number(clip['speed_mps'])}, ExpectedResult = null)]" for clip in clips)
-    in_place = "\n".join(f"    [TestCase({json.dumps(clip['state'])}, {number(clip['stride_m'])}, "
+    # in place: a walk's root bone may sway a quarter of its stride, a clip standing still a tenth of the height
+    limit = lambda clip: clip["stride_m"] / 4 if clip["stride_m"] > 0 else STILL_SWAY * height
+    in_place = "\n".join(f"    [TestCase({json.dumps(clip['state'])}, {number(round(limit(clip), 6))}, "
                          f"{number(clip['speed_mps'])}, ExpectedResult = null)]" for clip in clips)
     return f"""using System.Collections;
 using System.Collections.Generic;
@@ -234,7 +239,7 @@ public class CreaturePlayTests
         var time = animator.GetCurrentAnimatorStateInfo(0).normalizedTime;
         Object.Destroy(instance);
         Assert.Greater(time, 0f, "the default state did not advance in 1 s");
-        Assert.Greater(turned, 5f, "no bone turned in 1 s of play");
+        Assert.Greater(turned, 1f, "no bone turned in 1 s of play");   // an unbound clip turns none; an idle little
         Assert.Less(moved, 0.001f, "the creature moved itself " + moved + " m");
         // a clip whose curves miss the rig's hierarchy moves the creature's own transform instead
         Assert.IsTrue(spun < 0.5f && (scale - Vector3.one).magnitude < 0.001f,
@@ -278,7 +283,7 @@ public class CreaturePlayTests
 
 {in_place}
     [UnityTest]
-    public IEnumerator InPlace(string state, float stride, float speed)
+    public IEnumerator InPlace(string state, float limit, float speed)
     {{
         var instance = Spawn();
         var animator = Start(instance, state);
@@ -325,8 +330,8 @@ public class CreaturePlayTests
         float slide = slides.Count > 0 ? slides[slides.Count / 2] : float.NaN;
         Measure("{{\\"clip\\": \\"" + state + "\\", \\"root_excursion_m\\": " + Number(excursion) +
                 ", \\"stance_slide_mps\\": " + Number(slide) + "}}");
-        Assert.Less(excursion, stride / 4f, state + "'s root bone travels " + excursion + " m in a loop; its stride is " +
-                    stride + " m: it is not in place");
+        Assert.Less(excursion, limit, state + "'s root bone travels " + excursion + " m in a loop, over its " + limit +
+                    " m (a quarter stride, or a tenth of the height standing still): it is not in place");
     }}
 }}
 }}

@@ -6,6 +6,7 @@ bake"). Pure NumPy, so blender/bake_extracted_motion.py samples the rig and call
 - in_place: the root's linear horizontal travel removed (the owner's D9 ruling: a delivered clip is in place; the
   Unity Generic controller moves the creature at stride / period).
 - loop_window: the whole number of periods to deliver as the looping clip, where the seam's pose matches best.
+- gait_settings: a creature type's computed motion (B4, blender/procedural_gait.py), which the same bake measures.
 """
 import numpy as np
 
@@ -151,3 +152,38 @@ def loop_window(rotations, times, period, *, allowed=None):
     if best is None:
         raise ValueError(f"no loop window: no key on a whole scene frame starts {cycles} periods")
     return best
+
+
+GAIT_FPS = 24   # a computed motion's key rate; its period is snapped to whole frames so its loop closes on one
+# a computed motion's declaration: (low, high) for each number. A walk's duty over half keeps three feet down, and
+# seconds over four periods leave whole periods between the partial steps at its two ends. An idle is one loop of
+# whole breaths, its sway a share of the height, its head's look and tail's sway in degrees to each side.
+GAIT_RANGES = {"walk": {"period_s": (0.3, 4.0), "duty": (0.5, 0.95), "stride": (0.05, 2.0), "lift": (0.005, 0.3),
+                        "seconds": (0.0, 60.0)},
+               "idle": {"seconds": (1.0, 30.0), "breaths": (0, 20), "sway": (0.0, 0.1), "look_deg": (0.0, 45.0),
+                        "tail_deg": (0.0, 45.0)}}
+
+
+def gait_settings(asset_type, motion):
+    """A motion the type computes (procedural_motions), as blender/procedural_gait.py takes it: a walk's {period_s,
+    duty, stride, lift, seconds}, stride and lift shares of the creature's height; an idle's {seconds, breaths, sway,
+    look_deg, tail_deg}. ValueError names a bad declaration."""
+    name, motions = asset_type.get("name"), asset_type.get("procedural_motions")
+    if not isinstance(motions, dict) or motion not in motions:
+        known = ", ".join(sorted(motions)) if isinstance(motions, dict) else "none"
+        raise ValueError(f"asset type {name!r} has no procedural motion {motion!r} (declared: {known})")
+    if motion not in GAIT_RANGES:
+        raise ValueError(f"asset type {name!r}: the gait computes {' and '.join(sorted(GAIT_RANGES))}, not {motion!r}")
+    spec = motions[motion] if isinstance(motions[motion], dict) else {}
+    for key, (low, high) in GAIT_RANGES[motion].items():
+        value = spec.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not low < value <= high:
+            raise ValueError(f"procedural motion {motion!r}: {key} must be a number above {low:g} and at most "
+                             f"{high:g}, got {value!r}")
+    if motion == "walk" and spec["seconds"] <= 4 * spec["period_s"]:
+        raise ValueError(f"procedural motion {motion!r}: seconds must be over four periods "
+                         f"({4 * spec['period_s']:g} s), got {spec['seconds']!r}")
+    if motion == "idle" and not isinstance(spec["breaths"], int):
+        raise ValueError(f"procedural motion {motion!r}: breaths must be a whole number, so the loop closes, got "
+                         f"{spec['breaths']!r}")
+    return {key: spec[key] for key in GAIT_RANGES[motion]}

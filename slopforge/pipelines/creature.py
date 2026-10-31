@@ -408,7 +408,10 @@ def calibrate_creature(project_root, config, manifest, name, *, views=None, widt
     log = folder / "video2rig.log"
     record = asset["motion"] = {"status": "calibrating", "project": project.relative_to(root).as_posix(),
                                 "creature": creature, "training_poses": count, "rig_status": asset["rigging"]["status"],
-                                "clips": {}}
+                                # computed motions do not come from the video2rig project: they stay
+                                "clips": {clip: entry for clip, entry in
+                                          ((asset.get("motion") or {}).get("clips") or {}).items()
+                                          if entry.get("kind") == "procedural"}}
     review = asset["rigging"]["status"]   # a rig awaiting its deformation review may be calibrated; the stages say so
     stage = start_stage(execution, "creature_calibration", 1, [blend_ref], {"creature": creature, "framing": request},
                         {"provider": provider, "output_rights": rights, "rig_review": review})
@@ -988,20 +991,31 @@ def video_creature(project_root, config, manifest, name, motion, *, count=1, see
 # B6: extraction, bake and review (docs/CREATURES.md, "Extraction and bake")
 
 BAKE = "blender/bake_extracted_motion.py"
+GAIT = "blender/procedural_gait.py"
 REVIEW_SAMPLES = 8   # one cycle's phases in the review sheet
+
+
+def _run_script(config, root, script, source, request, what):
+    """A Blender script on `source` with `request`; its report, RuntimeError when Blender wrote none."""
+    with tempfile.TemporaryDirectory(prefix="slopforge-motion-") as temporary:
+        path = Path(temporary) / "request.json"
+        path.write_text(json.dumps(request, default=str))
+        subprocess.run([blender_executable(config, root), str(source), "--background", "--factory-startup",
+                        "--python", str(tool_root() / script), "--", str(path)], check=False, env=blender_environment())
+    if not Path(request["report"]).is_file():
+        raise RuntimeError(f"Blender's {what} wrote no report")
+    return json.loads(Path(request["report"]).read_text())
 
 
 def _bake(config, root, source, request):
     """blender/bake_extracted_motion.py on the .blend import_motion saved; its report (complete, or an error with
-    its failure code), RuntimeError when Blender wrote none."""
-    with tempfile.TemporaryDirectory(prefix="slopforge-bake-") as temporary:
-        path = Path(temporary) / "request.json"
-        path.write_text(json.dumps(request, default=str))
-        subprocess.run([blender_executable(config, root), str(source), "--background", "--factory-startup",
-                        "--python", str(tool_root() / BAKE), "--", str(path)], check=False, env=blender_environment())
-    if not Path(request["report"]).is_file():
-        raise RuntimeError("Blender's motion bake wrote no report")
-    return json.loads(Path(request["report"]).read_text())
+    its failure code)."""
+    return _run_script(config, root, BAKE, source, request, "motion bake")
+
+
+def _gait(config, root, blend, request):
+    """blender/procedural_gait.py on the rig .blend; its report (complete, or an error)."""
+    return _run_script(config, root, GAIT, blend, request, "computed motion")
 
 
 def _accepted_clip(root, asset, clip):
@@ -1022,12 +1036,12 @@ def _accepted_clip(root, asset, clip):
     return entry, refs[-1], rights
 
 
-def _legs(root, asset):
+def _legs(root, asset, whole=False):
     """{front.L: [the leg's last two bones]}: each declared leg's chain from B1's structure report, by final name;
-    the bake takes the lower of the two bones' tails as the foot."""
+    the bake takes the lower of the two bones' tails as the foot. `whole`: every bone of the chain, top first."""
     structure = json.loads((root / asset["rigging"]["structure"]).read_text())
     names = structure["names"]
-    return {f"{limb['end']}.{limb['side']}": [names[bone] for bone in limb["chain"][-2:]]
+    return {f"{limb['end']}.{limb['side']}": [names[bone] for bone in limb["chain"][(0 if whole else -2):]]
             for limb in structure["limbs"]}
 
 
@@ -1080,8 +1094,9 @@ def _calibration_output(root, asset, relative):
 
 def _review_sheet(root, mp4, cameras, renders, path):
     """Each sampled phase as a row: the clip's two panels at that frame, then the baked Action in the same views; the
-    last row is the loop's seam, the window's last frame beside its first, as the game plays it."""
-    frames, _ = _read_clip(mp4)
+    last row is the loop's seam, the window's last frame beside its first, as the game plays it. With no clip (a
+    computed motion), two phases a row."""
+    frames = _read_clip(mp4)[0] if mp4 else None
     by_index = {}
     for item in renders:
         by_index.setdefault(item["index"], {})[item["view"]] = item
@@ -1089,18 +1104,18 @@ def _review_sheet(root, mp4, cameras, renders, path):
     for index in sorted(key for key in by_index if key != "seam"):
         row = by_index[index]
         frame = next(iter(row.values()))["clip_frame"]
-        for view in cameras["views"]:
+        for view in cameras["views"] if frames is not None else []:
             panel = frames[frame][:, view["x0_px"] * frames.shape[2] // cameras["frame_px"][0]:
                                   (view["x0_px"] + view["width_px"]) * frames.shape[2] // cameras["frame_px"][0]]
-            tiles.append((Image.fromarray(panel), f"clip frame {frame}, {view['name'][4:]}"))
+            tiles.append((Image.fromarray(panel), f"clip frame {frame}, {view['name'].removeprefix('v2r_')}"))
         for view in cameras["views"]:
             with Image.open(row[view["name"]]["path"]) as image:
-                tiles.append((image.convert("RGB"), f"baked, {view['name'][4:]}"))
+                tiles.append((image.convert("RGB"), f"baked, {view['name'].removeprefix('v2r_')}"))
     first = by_index[min(key for key in by_index if key != "seam")]
     for view in cameras["views"]:
         for item, words in ((by_index["seam"][view["name"]], "loop's last frame"), (first[view["name"]], "its first")):
             with Image.open(item["path"]) as image:
-                tiles.append((image.convert("RGB"), f"seam: {words}, {view['name'][4:]}"))
+                tiles.append((image.convert("RGB"), f"seam: {words}, {view['name'].removeprefix('v2r_')}"))
     _sheet(tiles, path, columns=2 * len(cameras["views"]))
 
 
@@ -1283,6 +1298,109 @@ def extract_creature(project_root, config, manifest, name, clip):
             "window": baked["window"], **gait}
 
 
+def gait_creature(project_root, config, manifest, name, motion):
+    """B4: a motion the creature type computes (procedural_motions) built on the creature's rig by
+    blender/procedural_gait.py, which frames its own review cameras, then baked in place and cut to its loop by B6's
+    bake and registered as the candidate animation `gait_<motion>`, as `creature extract` registers a clip;
+    `animation approve` is the human gate. Needs a rig, not a video2rig calibration."""
+    root = Path(project_root).resolve()
+    asset = _creature(manifest, name)
+    settings = creature_gait.gait_settings(load_taxonomy(root)[asset["type"]], motion)
+    blend, blend_ref = _rig_blend(root, asset)
+    clip = f"gait_{motion}"
+    folder = output_path(root, config, asset["type"], name) / "Motion" / clip
+    if folder.exists():
+        raise FileExistsError(f"Computed motion {clip} was made before; inspect or move {folder} before making it again")
+    structure = json.loads((root / asset["rigging"]["structure"]).read_text())
+    height = structure["measured"]["height"]
+    role = lambda name: sorted(bone for bone in structure["names"].values() if creature_views._role(bone) == name)
+    fps = creature_gait.GAIT_FPS
+    rights = rights_of(config, "blender")
+    tools = {script: tool_sha256(tool_root() / script) for script in (GAIT, BAKE)}
+    execution = start_execution(asset, {"stage": "procedural_motion", "motion": motion, "settings": settings,
+                                        "rig_blend_sha256": blend_ref["sha256"], "tools_sha256": tools,
+                                        "gait_sha256": file_sha256(creature_gait.__file__)})
+    manifest_path = root / config["asset_pipeline"]["manifest"]
+    clips = asset.setdefault("motion", {}).setdefault("clips", {})
+    extraction = {"status": "computing"}
+    clips[clip] = {"kind": "procedural", "motion": motion, "settings": settings, "extraction": extraction}
+    folder.mkdir(parents=True)
+    # shares of the height in metres; an idle also turns the neck and head as it looks
+    moves = ({"period_s": settings["period_s"], "duty": settings["duty"], "stride_m": settings["stride"] * height,
+              "lift_m": settings["lift"] * height} if motion == "walk" else
+             {"breaths": settings["breaths"], "sway_m": settings["sway"] * height, "look_deg": settings["look_deg"],
+              "tail_deg": settings["tail_deg"], "neck": role("Neck") + role("Head")})
+    request = {"motion": motion, "legs": _legs(root, asset, whole=True), "root": creature_views.ROOT_BONE,
+               "tail": role("Tail"), "seconds": settings["seconds"], "fps": fps, **moves,
+               "save": str(folder / "source.blend"), "cameras": str(folder / "cameras.json"),
+               "report": str(folder / "gait.json")}
+    stage = start_stage(execution, "procedural_motion", 1, [blend_ref], {"motion": motion, **settings},
+                        {"provider": "SlopForge procedural gait", "output_rights": rights})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    try:
+        built = _gait(config, root, blend, request)
+        if built.get("status") != "complete":
+            raise RuntimeError("the computed motion failed: " + "; ".join(built.get("errors") or ["no reason"]))
+    except (Exception, KeyboardInterrupt) as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, extraction)
+        raise
+    built_refs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "procedural_motion", 1, [blend_ref])
+                  for label, kind, path in (("blend", "project.blend", folder / "source.blend"),
+                                            ("report", "report.procedural_motion", folder / "gait.json"),
+                                            ("cameras", "data.cameras", folder / "cameras.json"))]
+    finish_stage(stage, "succeeded", built_refs)
+
+    bake = {"legs": _legs(root, asset), "root_bone": creature_views.ROOT_BONE, "fit_bones": asset["rigging"]["fit_bones"],
+            "fbx": str(folder / f"{clip}.fbx"), "blend": str(folder / f"{clip}_baked.blend"),
+            "renders": str(folder / "renders"), "cameras": request["cameras"],
+            "times": [k / fps for k in range(built["frames"])], "samples": REVIEW_SAMPLES,
+            "still": motion == "idle", "report": str(folder / "bake.json")}
+    parents = [built_refs[0], blend_ref, built_refs[2]]
+    stage = start_stage(execution, "motion_bake", 1, parents,
+                        {"legs": bake["legs"], "samples": REVIEW_SAMPLES, "tool_sha256": tools[BAKE]},
+                        {"output_rights": rights})
+    begin_stage(stage)
+    save_manifest(manifest_path, manifest)
+    try:
+        baked = _bake(config, root, folder / "source.blend", bake)
+        if baked.get("status") != "complete":   # a computed walk the bake cannot measure is the gait's fault
+            raise RuntimeError("the motion bake failed: " + "; ".join(baked.get("errors") or ["no reason"]))
+        _review_sheet(root, None, json.loads((folder / "cameras.json").read_text()), baked["renders"],
+                      folder / "review.png")
+    except (Exception, KeyboardInterrupt) as exc:
+        _fail(root, config, manifest, asset, execution, stage, exc, extraction)
+        raise
+    outputs = [_artifact_ref(root, path, f"{execution['id']}:{label}", kind, "motion_bake", 1, parents)
+               for label, kind, path in (("fbx", "animation.fbx", folder / f"{clip}.fbx"),
+                                         ("bake", "report.motion_bake", folder / "bake.json"),
+                                         ("blend", "project.blend", folder / f"{clip}_baked.blend"),
+                                         ("review", "image.motion_review", folder / "review.png"))]
+    finish_stage(stage, "succeeded", outputs)
+    finish_execution(execution, "succeeded")
+    gait = {**{key: baked[key] for key in ("stride_m", "period_s", "speed_mps", "residual_travel_m",
+                                           "stance_slide_mps")},
+            "loop_periods": baked["window"]["cycles"], "min_plants": baked["cycles"]}
+    relative = {output["type"]: output["path"] for output in outputs}
+    register_artifact(manifest, asset["id"], f"animation.{clip}", "animation.fbx", relative["animation.fbx"],
+                      status="candidate", derived_from=[{"asset_id": asset["id"], "output_id": "rig"}],
+                      provenance={"provider": "SlopForge procedural gait", "procedural": {"motion": motion, **settings},
+                                  "loop": True, "root_motion": False, **gait, "window": baked["window"],
+                                  "fps": baked["fps"], "output_rights": rights},
+                      approval_status="pending", validation={"measured": {**gait, "plants": baked["plants"]}})
+    warnings = [f"{leg} planted once: its steps barely lift; watch it in the review sheet" for leg in baked["weak_legs"]]
+    extraction.update(status="review_required", fbx=relative["animation.fbx"], bake=relative["report.motion_bake"],
+                      review_sheet=relative["image.motion_review"], window=baked["window"], warnings=warnings, **gait,
+                      gait={key: built[key] for key in ("ik_miss_max_m", "body_drop_m", "hips_rise_m",
+                                                        "leg_turn_max_deg", "head_turn_max_deg", "front_rise_m")
+                            if key in built},
+                      rig_blend_sha256=blend_ref["sha256"],
+                      outputs={output["type"]: output["sha256"] for output in outputs})
+    save_manifest(manifest_path, manifest)
+    return {"status": "review_required", "clip": clip, "fbx": relative["animation.fbx"],
+            "review_sheet": relative["image.motion_review"], "warnings": warnings, "window": baked["window"], **gait}
+
+
 def _check_bake(root, asset, clip, extraction):
     """A baked clip as it was made: on the creature's rig .blend as it is now, its FBX, bake report and review sheet
     unchanged since the bake."""
@@ -1371,8 +1489,12 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
         window = extraction["window"]
         numbers = {"speed_mps": extraction["speed_mps"], "stride_m": extraction["stride_m"],
                    "period_s": extraction["period_s"], "length_s": window["end_s"] - window["start_s"]}
-        if not all(isinstance(value, (int, float)) and np.isfinite(value) and value > 0 for value in numbers.values()):
-            raise ValueError(f"clip {clip}'s bake numbers are not finite and positive: {numbers}; extract it again")
+        # a clip standing still (B4's idle) moves at 0 m/s with no stride; everything else is positive
+        still = numbers["speed_mps"] == numbers["stride_m"] == 0
+        if not all(isinstance(value, (int, float)) and np.isfinite(value) and (value > 0 or still and key in (
+                "speed_mps", "stride_m")) for key, value in numbers.items()):
+            raise ValueError(f"clip {clip}'s bake numbers are not finite and positive (or a still clip's speed and "
+                             f"stride both 0): {numbers}; extract it again")
         clip_refs.append(_made_by(root, asset, "motion_bake", extraction["fbx"], f"clip {clip}'s FBX")[1])
         clips.append({"id": f"animation.{clip}", "state": clip, "loop": True, "root_motion": False,
                       "path": clip_refs[-1]["path"], "speed": numbers["speed_mps"], **numbers})
@@ -1402,7 +1524,7 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
         [{"state": clip["state"], "length_s": clip["length_s"], "speed_mps": clip["speed"],
           "stride_m": clip["stride_m"]} for clip in clips],
         height=json.loads((root / rigging["structure"]).read_text())["measured"]["height"],
-        front=feet["front"], hind=feet["hind"], root_bone=asset["motion"]["creature"]["root_bone"],
+        front=feet["front"], hind=feet["hind"], root_bone=creature_views.ROOT_BONE,
         measures=measures)
     editor_binary(root)
     unity = editor_version(root)

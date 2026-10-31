@@ -3,7 +3,7 @@
 M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
 video2rig views and render known motions (B2), train its joint reader and examine it on a known motion (B3). It
 generates walk clips with Wan 2.2 (B5), reads them onto the rig
-in place as looping animations for review (B6), and delivers the approved ones to Unity as a Generic controller and
+in place as looping animations for review (B6), computes a walk and an idle on the rig without video (B4), and delivers the approved ones to Unity as a Generic controller and
 prefab played in Play mode (B7). This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
@@ -467,6 +467,90 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
   - a cubic leaves some surge in a walk whose speed changes faster than it follows; the bake records the residual
     (`residual_travel_m`).
 
+## Computed motions (B4)
+
+A walk and an idle can also be computed on the creature's rig, with no video and no video2rig calibration. They are
+baked, reviewed, approved and delivered as a clip is:
+
+```sh
+slopforge --project ~/UnityProjects/MyGame creature gait wolf idle
+slopforge --project ~/UnityProjects/MyGame animation approve wolf gait_idle --confirm   # after the review sheet
+slopforge --project ~/UnityProjects/MyGame creature gait wolf walk                      # the video walk's fallback
+```
+
+- **The idle** (`procedural_motions.idle`, stage `procedural_motion`):
+  - The feet stay where they stand, the legs following by IK as in the walk.
+  - The whole body sinks a little with each breath (0.4 % of the height). The spine does not bend with it: a
+    1.5° bend per spine bone lifted the wolf's neck 29 mm against 3 mm at the hips, and the owner found the front
+    moving up and down weird. The gait reports the neck base's rise (`front_rise_m`).
+  - The weight shifts side to side once a loop, and fore and aft twice.
+  - The neck and head look to each side once a loop, the head nodding a quarter as far.
+  - The tail sways twice a loop, each bone a little later.
+  - Every movement has a whole number of cycles in the loop, so it closes on its last frame.
+  - The type's idle is 6 s with 3 breaths, a sway of 0.007 of the height, 7° of look and 4° of tail. On the wolf,
+    0.012, 12° and 6° were "almost right, just a bit too exaggerated".
+  - B6's bake takes it as a still motion (`still`): no steps or travel are measured, and the whole motion is its one
+    loop, with speed and stride 0. It is registered as `animation.gait_idle`.
+- **The wolf's idle** (2026-10-31): a 6 s loop with a 0.18° seam, hips and neck rising 3.1 mm, the head turning
+  7.1°. The owner approved it ("Yes, right is good"). It was delivered to Unity with the video walk `walk_s3` as the
+  controller's default state, and Play mode passed.
+
+- **The walk (`blender/procedural_gait.py`, stage `procedural_motion`).** Both motions run on the rig .blend B1
+  made.
+  - The body travels forward at stride / period, with a small bob and sway.
+  - Each foot is planted for `duty` of the period and swings to its next plant on a lifted arc. The order is hind
+    left, front left, hind right, front right, a quarter period apart.
+  - The paw bone and the two bones above it follow their foot by IK. The pole angle is the one that keeps the
+    leg's rest pose. The pole travels with the body: a fixed pole flipped the wolf's forward-bent knees round 170°
+    after its first step.
+  - The toes keep their rest angle to the ground, so a planted foot does not slide (the wolf: 0.18 m/s without
+    this, 0.001 with it).
+  - The tail sways, each bone a little later than the one above.
+  - The keys are baked on every frame and the IK removed.
+- **The body's height.** A foot planted half a stride ahead can be out of reach of a leg at rest height. The body is
+  carried as low as the stride's longest reach needs (`REACH`, 0.97 of the leg's length), at one height for the
+  whole walk, so it does not dip at each reach.
+- **The loop.** The period is snapped to whole frames at 24 fps (1.2 s → 29 frames, 1.208 s), so the loop closes on
+  a frame.
+- **Refusals.** A leg bone that turns more than 90° from rest (`FLIPPED`) means the IK flipped a joint. The gait
+  refuses it and the stage fails.
+- **The type's walk** (`procedural_motions.walk`, checked by `creature_gait.gait_settings`, which also checks the
+  idle's numbers and refuses a motion the gait does not compute):
+  - `period_s`: above 0.3 and at most 4;
+  - `duty`: above 0.5, so three feet stay down;
+  - `stride` and `lift`: shares of the creature's height;
+  - `seconds`: over four periods, leaving whole periods between the partial steps at the two ends.
+
+  The type's walk is 1.2 s, duty 0.62, stride 0.75, lift 0.06, 6 s. On the wolf, a stride of 0.9 of the height
+  reached past its legs: the body would sink 7 cm, against 4.7 cm at 0.75.
+- **Review cameras.** The gait writes its own front and side orthographic cameras (`cameras.json`, in the start
+  frame's format), framing the creature at rest with a stride's room along its length. The review sheet shows two
+  phases a row in both views, then the loop's seam.
+- **The bake and the record.** B6's bake (stage `motion_bake`) measures the steps, cuts the loop and exports the FBX,
+  as it does for a clip:
+  - The FBX is registered as the candidate `animation.gait_<motion>`. Its provenance carries the declaration
+    (`procedural`) and its rights are Blender's, plus the rig's lineage.
+  - The clip is recorded as `motion.clips.gait_<motion>` with `kind: procedural`. Calibrating later keeps it.
+  - The gait's own measures are kept in `extraction.gait`: IK miss, body drop, hips rise, largest leg turn.
+  - `animation approve` and `animation unity-setup` take it unchanged. A motion computed before is refused; move
+    its folder first.
+- **The wolf** (2026-10-31, the approved re-rigged wolf, 0.78 m tall):
+  - 9 s on a Mac;
+  - stride 0.585 m every 1.208 s (0.48 m/s);
+  - a 4-period loop with a 0.14° seam;
+  - stance slide 0.001 m/s;
+  - the body carried 4.7 cm low;
+  - largest leg turn 48°.
+
+  Shown beside the video walk `walk_s3` in the same texture and camera, the owner judged the video walk better.
+  The computed walk is the route's fallback; it is not approved or delivered to Unity.
+- **Not covered yet:**
+  - turning;
+  - slopes and uneven ground;
+  - gaits other than the walk;
+  - a front-leg elbow or a hind knee that bends the other way at rest. The fixture quadruped's hind knees bend
+    backwards and never flipped with the fixed pole; the wolf's bend forwards and did.
+
 ## Unity delivery (B7)
 
 The approved rig and its approved clips go into Unity as a Generic Animator Controller and prefab:
@@ -503,8 +587,9 @@ slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
   ([Unity projects](UNITY.md); the NUnit results stay beside it as `<name>_playmode.xml`).
   - **Facing and size:** in the bind pose the front feet lead along +Z, by more than 10 % of the height, and the
     mesh's height is within 5 % of the height B1 measured.
-  - **Playing on its own:** the default state advances in real time, a bone turns, and the creature's own transform
-    keeps its position, rotation and scale.
+  - **Playing on its own:** the default state advances in real time, a bone turns more than 1° in its first second,
+    and the creature's own transform keeps its position, rotation and scale. An unbound clip turns none. The limit was
+    5° until the wolf's computed idle became the default state: it turns 3.7° in its first second (2026-10-31).
   - **Each clip:**
     - it loops;
     - its length is the bake's loop within one frame;
@@ -513,7 +598,8 @@ slopforge --project ~/UnityProjects/MyGame animation unity-setup wolf
     - a bone turns more than 5° over the loop.
   - **In place:** over one loop the root bone must move, and its horizontal sway must stay under a quarter of the
     stride. A walk that kept its travel moves a whole stride every period. A root bone that never moves would pass
-    vacuously, as every bone did before the binding fix below.
+    vacuously, as every bone did before the binding fix below. A clip standing still (speed and stride 0, B4's idle)
+    must keep its root within a tenth of the height (`STILL_SWAY`).
   - **Recorded, not gated (D9's foot-slide limit is open):** the stance slide once the creature moves along +Z at the
     clip's speed. The feet are each leg's last bone joint; the FBX has no leaf bones, so the paw tip is not a
     transform. The measures go to `<name>_playmode.jsonl` and the prefab's provenance.

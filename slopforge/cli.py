@@ -242,6 +242,11 @@ def parser():
                         "make its review sheet (docs/CREATURES.md)")
     extract_cmd.add_argument("name", help="Tracked creature asset name")
     extract_cmd.add_argument("clip", help="A clip `creature video` accepted, such as walk_s4")
+    gait_cmd = creature_commands.add_parser(
+        "gait", help="Compute a motion the creature type declares on its rig (procedural_motions), bake it in place "
+                     "and cut to its loop as a clip is, and make its review sheet (docs/CREATURES.md)")
+    gait_cmd.add_argument("name", help="Tracked creature asset name")
+    gait_cmd.add_argument("motion", help="A motion the creature type declares under procedural_motions, such as walk")
     prompt = sub.add_parser("prompt", help="Print a style-injected prompt without inference")
     prompt.add_argument("asset_type")
     prompt.add_argument("description")
@@ -794,6 +799,23 @@ def _run(args):
         print(f"FBX: {result['fbx']}")
         print(f"Review sheet: {result['review_sheet']}")
         print(f"Review the sheet, then: slopforge animation approve {args.name} {args.clip} --confirm")
+        return 0
+    if args.command == "creature" and args.creature_action == "gait":
+        from .pipelines.creature import gait_creature
+        result = gait_creature(root, config, manifest, args.name, args.motion)
+        loop = result["window"]
+        if result["speed_mps"] == 0:
+            print(f"Creature {args.name} {result['clip']}: {result['status']}; standing in place, a loop of "
+                  f"{result['period_s']:.2f} s, seam {loop['seam_deg']:.1f} deg")
+        else:
+            print(f"Creature {args.name} {result['clip']}: {result['status']}; stride {result['stride_m']:.2f} m every "
+                  f"{result['period_s']:.2f} s ({result['speed_mps']:.2f} m/s); a loop of {loop['cycles']} "
+                  f"period{'s' if loop['cycles'] != 1 else ''}, seam {loop['seam_deg']:.1f} deg")
+        for warning in result["warnings"]:
+            print(f"  warning: {warning}")
+        print(f"FBX: {result['fbx']}")
+        print(f"Review sheet: {result['review_sheet']}")
+        print(f"Review the sheet, then: slopforge animation approve {args.name} {result['clip']} --confirm")
         return 0
     if args.command == "creature" and args.creature_action == "exam":
         from .pipelines.creature import exam_creature
