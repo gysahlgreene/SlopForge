@@ -804,9 +804,13 @@ def _run(args):
         from .pipelines.creature import gait_creature
         result = gait_creature(root, config, manifest, args.name, args.motion)
         loop = result["window"]
-        print(f"Creature {args.name} {result['clip']}: {result['status']}; stride {result['stride_m']:.2f} m every "
-              f"{result['period_s']:.2f} s ({result['speed_mps']:.2f} m/s); a loop of {loop['cycles']} "
-              f"period{'s' if loop['cycles'] != 1 else ''}, seam {loop['seam_deg']:.1f} deg")
+        if result["speed_mps"] == 0:
+            print(f"Creature {args.name} {result['clip']}: {result['status']}; standing in place, a loop of "
+                  f"{result['period_s']:.2f} s, seam {loop['seam_deg']:.1f} deg")
+        else:
+            print(f"Creature {args.name} {result['clip']}: {result['status']}; stride {result['stride_m']:.2f} m every "
+                  f"{result['period_s']:.2f} s ({result['speed_mps']:.2f} m/s); a loop of {loop['cycles']} "
+                  f"period{'s' if loop['cycles'] != 1 else ''}, seam {loop['seam_deg']:.1f} deg")
         for warning in result["warnings"]:
             print(f"  warning: {warning}")
         print(f"FBX: {result['fbx']}")

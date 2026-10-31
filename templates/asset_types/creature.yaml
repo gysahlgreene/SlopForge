@@ -149,3 +149,12 @@ procedural_motions:
     stride: 0.75
     lift: 0.06
     seconds: 6.0
+  # one 6 s loop (whole frames): three breaths, the weight shifted side to side by 0.7 % of the height, the head looking
+  # 7 degrees to each side and nodding a quarter of that, the tail swaying 4 degrees twice; the feet stay put. The
+  # owner judged 1.2 %, 12 and 6 on the wolf "almost right, just a bit too exaggerated" (2026-10-31).
+  idle:
+    seconds: 6.0
+    breaths: 3
+    sway: 0.007
+    look_deg: 7
+    tail_deg: 4

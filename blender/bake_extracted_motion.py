@@ -9,7 +9,8 @@ space, and slopforge.creature_gait measures the steps (each foot swinging forwar
 faces -Y), plants, period, stride and the loop window, cut from the stretch with no partial step. The root's horizontal travel
 is removed (the owner's D9: a delivered clip is in place, and the Unity Generic controller moves the creature at
 stride / period). The Action is cut to its whole cycles, and the armature is exported as FBX with the rig's settings.
-The window is rendered through the creature's start cameras for the review sheet.
+The window is rendered through the creature's start cameras for the review sheet. A still motion (`still`, B4's idle)
+has no steps or travel: it is delivered whole as its one loop, its speed and stride 0.
 """
 import json
 import os
@@ -147,7 +148,9 @@ def run(request):
     height = max(c.z for c in corners) - min(c.z for c in corners)
 
     feet, ahead, before, rotations = sample(scene, rig, keys, legs, root, bones)
-    measured = gait(ahead, times, height, root=before)
+    still = request.get("still", False)   # an idle (B4): no steps or travel; the whole motion is its one loop
+    measured = ({"plants": {}, "cycles": 0, "period_s": float(times[-1]), "weak_legs": [], "partial": [],
+                 "clean": [0, len(keys) - 1]} if still else gait(ahead, times, height, root=before))
     # the loop's ends on keys at whole scene frames: the FBX export bakes whole frames, so it delivers this window, cut
     # from the stretch with no partial step (a creature getting going, or a shuffle)
     whole = np.abs(np.array(keys) - np.round(keys)) < 1e-3
@@ -155,9 +158,10 @@ def run(request):
     window = loop_window(rotations[a:b + 1], times[a:b + 1], measured["period_s"], allowed=whole[a:b + 1])
     window.update(start=window["start"] + a, end=window["end"] + a)
     start, end = window["start"], window["end"]
-    after, _ = in_place(before, times)
+    after = before if still else in_place(before, times)[0]
     span = slice(start, end + 1)
-    velocity = np.polyfit(times[span] - times[start], before[span, :2], 1)[0]   # the delivered window's own speed
+    velocity = (np.zeros(2) if still   # the delivered window's own speed
+                else np.polyfit(times[span] - times[start], before[span, :2], 1)[0])
     speed = float(np.hypot(*velocity))
 
     remove_travel(scene, rig, keys, root, before, after)

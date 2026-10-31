@@ -68,11 +68,23 @@ class PlayModeScriptTests(unittest.TestCase):
         self.assertIn('"/project/wolf_playmode.jsonl"', script)
         self.assertIn("public void FacesForwardAtItsSize()", script)
         self.assertIn("public IEnumerator PlaysOnItsOwn()", script)   # the default state, in real time
+        # an unbound clip turns no bone; a computed idle, the default state, turns its bones 3.7 degrees in its first
+        # second (the wolf, 2026-10-31), under the 5 a walk passes with
+        self.assertIn('Assert.Greater(turned, 1f, "no bone turned in 1 s of play")', script)
         # 2026-10-30 live: a clip's root curves landed on the prefab's own transform and scaled it 100x
         self.assertIn("did not keep its own rotation and scale", script)
         self.assertIn('[TestCase("walk_s2", 1.6875f, 0.41f, ExpectedResult = null)]', script)   # Plays
-        self.assertIn('[TestCase("walk_s2", 0.7f, 0.41f, ExpectedResult = null)]', script)      # InPlace
+        # InPlace: a walk's root may sway a quarter of its stride; a clip standing still a tenth of the height
+        self.assertIn('[TestCase("walk_s2", 0.175f, 0.41f, ExpectedResult = null)]', script)
         self.assertIn("the root bone does not move", script)   # an unanimated root would pass in place vacuously
+
+    def test_a_clip_standing_still_is_in_place_within_a_tenth_of_the_height(self):
+        script = creature_play_script(
+            "Assets/Generated/Creatures/wolf/Unity/wolf.prefab",
+            [{"state": "gait_idle", "length_s": 6.0, "speed_mps": 0.0, "stride_m": 0.0}], height=0.78,
+            front=["FrontPaw.L", "FrontPaw.R"], hind=["HindPaw.L", "HindPaw.R"], root_bone="Hips",
+            measures="/project/wolf_playmode.jsonl")
+        self.assertIn('[TestCase("gait_idle", 0.078f, 0.0f, ExpectedResult = null)]', script)
 
     def test_the_play_mode_run_takes_its_script_and_leaves_no_test_assembly(self):
         from unittest.mock import patch

@@ -209,3 +209,31 @@ def test_a_motion_the_type_does_not_compute_is_refused():
         gait_settings(WALK_TYPE, "gallop")
     with pytest.raises(ValueError, match="no procedural motion"):
         gait_settings({"name": "creature"}, "walk")
+
+
+IDLE_TYPE = {"name": "creature", "procedural_motions": {"idle": {"seconds": 6.0, "breaths": 3, "sway": 0.012,
+                                                                 "look_deg": 12, "tail_deg": 6}}}
+
+
+def test_a_types_computed_idle_is_read_with_whole_breaths_in_its_loop():
+    assert gait_settings(IDLE_TYPE, "idle") == {"seconds": 6.0, "breaths": 3, "sway": 0.012, "look_deg": 12,
+                                                 "tail_deg": 6}
+
+
+@pytest.mark.parametrize("change, words", [
+    (lambda spec: spec.update(breaths=2.5), "breaths"),        # whole breaths, so the loop closes
+    (lambda spec: spec.update(seconds=0.5), "seconds"),
+    (lambda spec: spec.update(look_deg=90), "look_deg"),
+    (lambda spec: spec.pop("tail_deg"), "tail_deg"),
+])
+def test_a_bad_computed_idle_declaration_is_named(change, words):
+    declared = {"name": "creature", "procedural_motions": {"idle": dict(IDLE_TYPE["procedural_motions"]["idle"])}}
+    change(declared["procedural_motions"]["idle"])
+    with pytest.raises(ValueError, match=words):
+        gait_settings(declared, "idle")
+
+
+def test_a_declared_motion_the_gait_cannot_compute_is_refused():
+    declared = {"name": "creature", "procedural_motions": {"trot": {"seconds": 6.0}}}
+    with pytest.raises(ValueError, match="computes idle and walk, not 'trot'"):
+        gait_settings(declared, "trot")

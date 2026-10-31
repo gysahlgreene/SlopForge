@@ -26,6 +26,7 @@ PHASE = {"hind.L": 0.0, "front.L": 0.25, "hind.R": 0.5, "front.R": 0.75}
 BOB, SWAY, TAIL_SWAY = 0.012, 0.008, math.radians(10)   # shares of the height; the tail's sideways turn
 FLIPPED = 90.0   # degrees a leg bone may not turn from rest in a walk: beyond it the IK has flipped the joint
 MARGIN, PANEL = 1.3, 540   # the review views' room around the creature, and their height in pixels
+BREATH = 0.004   # an idle's breath: the whole body sinks this share of the height
 REACH = 0.97   # a planted foot stays within this share of its leg's length: the body drops to keep it so
 
 
@@ -122,10 +123,15 @@ def build(request):
         bone.rotation_mode = "QUATERNION"
         bone.rotation_quaternion, bone.location, bone.scale = (1, 0, 0, 0), (0, 0, 0), (1, 1, 1)
     bpy.context.view_layer.update()
-    if request["motion"] != "walk":
+    walking = request["motion"] == "walk"
+    if request["motion"] not in ("walk", "idle"):
         raise ValueError(f"unknown procedural motion {request['motion']!r}")
-    duty, stride, lift = request["duty"], request["stride_m"], request["lift_m"]
-    period = round(request["period_s"] * fps) / fps   # a whole number of frames, so the loop closes on a frame
+    frames = int(round(request["seconds"] * fps)) + 1
+    if walking:
+        duty, stride, lift = request["duty"], request["stride_m"], request["lift_m"]
+        period = round(request["period_s"] * fps) / fps   # a whole number of frames, so the loop closes on a frame
+    else:
+        stride, period = 0.0, (frames - 1) / fps          # the idle is one loop, closing on its last frame
     corners = [obj.matrix_world @ Vector(corner) for obj in scene.objects if obj.type == "MESH"
                for corner in obj.bound_box]
     height = max(c.z for c in corners) - min(c.z for c in corners)
@@ -137,16 +143,23 @@ def build(request):
     root = rig.pose.bones[request["root"]]
     to_rig = rig.matrix_world.inverted().to_3x3()
     rest_root = root.matrix.copy()
-    tail = [rig.pose.bones[name] for name in request.get("tail", [])]
-    frames = int(round(request["seconds"] * fps)) + 1
+    tail, neck = ([rig.pose.bones[name] for name in request.get(key, [])] for key in ("tail", "neck"))
     speed = stride / period
 
     def pose_at(t):
-        """The body's shift (travel, bob, sway) and each foot's goal at `t`."""
-        shift = FORWARD * (speed * t) + UP * (BOB * height * math.cos(4 * math.pi * t / period))
-        shift += Vector((SWAY * height * math.sin(2 * math.pi * t / period), 0.0, 0.0))
-        return shift, {leg: foot_at(rest, PHASE[leg], t, period, duty, stride, lift)
-                       for leg, (_, rest, _, _, _) in feet.items()}
+        """The body's shift and each foot's goal at `t`: a walk's travel, bob and sway with its feet stepping; an
+        idle's weight shift and breath with its feet where they stand."""
+        if walking:
+            shift = FORWARD * (speed * t) + UP * (BOB * height * math.cos(4 * math.pi * t / period))
+            shift += Vector((SWAY * height * math.sin(2 * math.pi * t / period), 0.0, 0.0))
+            return shift, {leg: foot_at(rest, PHASE[leg], t, period, duty, stride, lift)
+                           for leg, (_, rest, _, _, _) in feet.items()}
+        u, sway = 2 * math.pi * t / period, request["sway_m"]
+        shift = Vector((sway * math.sin(u), 0.4 * sway * math.sin(2 * u), -BREATH * height * breath_at(t)))
+        return shift, {leg: rest for leg, (_, rest, _, _, _) in feet.items()}
+
+    def breath_at(t):
+        return (1 - math.cos(2 * math.pi * request["breaths"] * t / period)) / 2
 
     def drop_at(t):
         """How far the body must drop at `t` for its farthest foot to stay within reach."""
@@ -168,21 +181,33 @@ def build(request):
         shift -= UP * drop
         root.matrix = Matrix.Translation(to_rig @ shift) @ rest_root
         root.keyframe_insert("location", frame=frame + 1)
+        u = 2 * math.pi * t / period
+        sways = 1 if walking else 2   # the tail sways once a stride, twice in an idle's loop
+        swing = TAIL_SWAY if walking else math.radians(request["tail_deg"])
         for k, bone in enumerate(tail):   # each tail bone a little later than the one before
-            angle = TAIL_SWAY * math.sin(2 * math.pi * t / period - 0.6 * (k + 1))
-            bone.rotation_quaternion = Quaternion((0.0, 0.0, 1.0), angle)
+            bone.rotation_quaternion = Quaternion((0.0, 0.0, 1.0), swing * math.sin(sways * u - 0.6 * (k + 1)))
             bone.keyframe_insert("rotation_quaternion", frame=frame + 1)
+        # an idle's head looks to each side once a loop, nodding; it breathes with its whole body (pose_at): a spine
+        # bent with each breath lifted the wolf's neck 29 mm on 3 mm at the hips, which the owner found weird
+        if not walking:
+            look = math.radians(request["look_deg"])
+            for k, bone in enumerate(neck):
+                nod = 0.25 * look * math.sin(2 * u) if k == len(neck) - 1 else 0.0
+                bone.rotation_quaternion = (Quaternion((1.0, 0.0, 0.0), nod)
+                                            @ Quaternion((0.0, 0.0, 1.0), look / len(neck) * math.sin(u + 0.5)))
+                bone.keyframe_insert("rotation_quaternion", frame=frame + 1)
         for leg, (target, _, _, _, pole) in feet.items():
             target.location = goals[leg]
             target.keyframe_insert("location", frame=frame + 1)
             pole.location = poles[leg] + shift   # the pole travels with the body, or a knee bent forward flips round
             pole.keyframe_insert("location", frame=frame + 1)
     # how far each paw ends from its target: a target out of the leg's reach would leave a planted foot sliding
-    miss, hips = 0.0, []
+    miss, hips, front = 0.0, [], []
     paws = {leg: next(name for name in request["legs"][leg] if "Paw" in name) for leg in feet}
     for frame in range(1, frames + 1, 3):
         scene.frame_set(frame)
         hips.append((rig.matrix_world @ root.head).z)
+        front.append((rig.matrix_world @ (neck[0] if neck else root).head).z)   # the base of the neck
         for leg, (target, _, _, _, _) in feet.items():
             miss = max(miss, (rig.matrix_world @ rig.pose.bones[paws[leg]].tail - target.matrix_world.translation).length)
     scene.frame_start, scene.frame_end = 1, frames
@@ -196,18 +221,23 @@ def build(request):
     bpy.ops.object.mode_set(mode="OBJECT")
     for empty in empties:
         bpy.data.objects.remove(empty, do_unlink=True)
-    turn = 0.0   # the baked keys' largest turn of a leg bone from rest
+    turn, look = 0.0, 0.0   # the baked keys' largest turn of a leg bone from rest, and of the head from its rest
     for frame in range(1, frames + 1, 3):
         scene.frame_set(frame)
         turn = max([turn] + [math.degrees(rig.pose.bones[name].matrix_basis.to_quaternion().angle)
                              for chain in request["legs"].values() for name in chain])
+        if neck:
+            head = neck[-1]
+            look = max(look, math.degrees(head.matrix.to_quaternion().rotation_difference(
+                head.bone.matrix_local.to_quaternion()).angle))
     if turn > FLIPPED:
-        raise ValueError(f"a leg bone turns {turn:.0f} degrees from its rest pose during the walk: its IK flipped "
-                         "the knee or elbow round")
+        raise ValueError(f"a leg bone turns {turn:.0f} degrees from its rest pose during the {request['motion']}: "
+                         "its IK flipped the knee or elbow round")
     bpy.ops.wm.save_as_mainfile(filepath=request["save"], copy=True)
     return {"status": "complete", "frames": frames, "fps": fps, "period_s": round(period, 4), "speed_mps": round(speed, 4), "height_m": round(height, 4),
             "ik_miss_max_m": round(miss, 4), "body_drop_m": round(drop, 4), "hips_rise_m": round(max(hips) - min(hips), 4),
-            "leg_turn_max_deg": round(turn, 1),
+            "leg_turn_max_deg": round(turn, 1), "front_rise_m": round(max(front) - min(front), 4),
+            **({"head_turn_max_deg": round(look, 1)} if neck else {}),
             "legs": {leg: [round(v, 4) for v in rest] for leg, (_, rest, _, _, _) in feet.items()}}
 
 

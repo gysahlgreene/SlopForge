@@ -1313,7 +1313,7 @@ def gait_creature(project_root, config, manifest, name, motion):
         raise FileExistsError(f"Computed motion {clip} was made before; inspect or move {folder} before making it again")
     structure = json.loads((root / asset["rigging"]["structure"]).read_text())
     height = structure["measured"]["height"]
-    tail = sorted(bone for bone in structure["names"].values() if creature_views._role(bone) == "Tail")
+    role = lambda name: sorted(bone for bone in structure["names"].values() if creature_views._role(bone) == name)
     fps = creature_gait.GAIT_FPS
     rights = rights_of(config, "blender")
     tools = {script: tool_sha256(tool_root() / script) for script in (GAIT, BAKE)}
@@ -1325,11 +1325,15 @@ def gait_creature(project_root, config, manifest, name, motion):
     extraction = {"status": "computing"}
     clips[clip] = {"kind": "procedural", "motion": motion, "settings": settings, "extraction": extraction}
     folder.mkdir(parents=True)
+    # shares of the height in metres; an idle also turns the neck and head as it looks
+    moves = ({"period_s": settings["period_s"], "duty": settings["duty"], "stride_m": settings["stride"] * height,
+              "lift_m": settings["lift"] * height} if motion == "walk" else
+             {"breaths": settings["breaths"], "sway_m": settings["sway"] * height, "look_deg": settings["look_deg"],
+              "tail_deg": settings["tail_deg"], "neck": role("Neck") + role("Head")})
     request = {"motion": motion, "legs": _legs(root, asset, whole=True), "root": creature_views.ROOT_BONE,
-               "tail": tail, "period_s": settings["period_s"], "duty": settings["duty"],
-               "stride_m": settings["stride"] * height, "lift_m": settings["lift"] * height,
-               "seconds": settings["seconds"], "fps": fps, "save": str(folder / "source.blend"),
-               "cameras": str(folder / "cameras.json"), "report": str(folder / "gait.json")}
+               "tail": role("Tail"), "seconds": settings["seconds"], "fps": fps, **moves,
+               "save": str(folder / "source.blend"), "cameras": str(folder / "cameras.json"),
+               "report": str(folder / "gait.json")}
     stage = start_stage(execution, "procedural_motion", 1, [blend_ref], {"motion": motion, **settings},
                         {"provider": "SlopForge procedural gait", "output_rights": rights})
     begin_stage(stage)
@@ -1351,7 +1355,7 @@ def gait_creature(project_root, config, manifest, name, motion):
             "fbx": str(folder / f"{clip}.fbx"), "blend": str(folder / f"{clip}_baked.blend"),
             "renders": str(folder / "renders"), "cameras": request["cameras"],
             "times": [k / fps for k in range(built["frames"])], "samples": REVIEW_SAMPLES,
-            "report": str(folder / "bake.json")}
+            "still": motion == "idle", "report": str(folder / "bake.json")}
     parents = [built_refs[0], blend_ref, built_refs[2]]
     stage = start_stage(execution, "motion_bake", 1, parents,
                         {"legs": bake["legs"], "samples": REVIEW_SAMPLES, "tool_sha256": tools[BAKE]},
@@ -1388,7 +1392,8 @@ def gait_creature(project_root, config, manifest, name, motion):
     extraction.update(status="review_required", fbx=relative["animation.fbx"], bake=relative["report.motion_bake"],
                       review_sheet=relative["image.motion_review"], window=baked["window"], warnings=warnings, **gait,
                       gait={key: built[key] for key in ("ik_miss_max_m", "body_drop_m", "hips_rise_m",
-                                                        "leg_turn_max_deg") if key in built},
+                                                        "leg_turn_max_deg", "head_turn_max_deg", "front_rise_m")
+                            if key in built},
                       rig_blend_sha256=blend_ref["sha256"],
                       outputs={output["type"]: output["sha256"] for output in outputs})
     save_manifest(manifest_path, manifest)
@@ -1484,8 +1489,12 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
         window = extraction["window"]
         numbers = {"speed_mps": extraction["speed_mps"], "stride_m": extraction["stride_m"],
                    "period_s": extraction["period_s"], "length_s": window["end_s"] - window["start_s"]}
-        if not all(isinstance(value, (int, float)) and np.isfinite(value) and value > 0 for value in numbers.values()):
-            raise ValueError(f"clip {clip}'s bake numbers are not finite and positive: {numbers}; extract it again")
+        # a clip standing still (B4's idle) moves at 0 m/s with no stride; everything else is positive
+        still = numbers["speed_mps"] == numbers["stride_m"] == 0
+        if not all(isinstance(value, (int, float)) and np.isfinite(value) and (value > 0 or still and key in (
+                "speed_mps", "stride_m")) for key, value in numbers.items()):
+            raise ValueError(f"clip {clip}'s bake numbers are not finite and positive (or a still clip's speed and "
+                             f"stride both 0): {numbers}; extract it again")
         clip_refs.append(_made_by(root, asset, "motion_bake", extraction["fbx"], f"clip {clip}'s FBX")[1])
         clips.append({"id": f"animation.{clip}", "state": clip, "loop": True, "root_motion": False,
                       "path": clip_refs[-1]["path"], "speed": numbers["speed_mps"], **numbers})

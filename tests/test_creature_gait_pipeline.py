@@ -150,6 +150,14 @@ def test_a_computed_walk_is_delivered_to_unity_on_a_creature_never_calibrated(ga
     pipeline.gait_creature(root, config, manifest, "wolf", "walk")
     pipeline.approve_rig(root, manifest, "wolf", confirmed=True)
     pipeline.approve_motion(root, manifest, "wolf", "gait_walk", confirmed=True)
+    played = deliverable(root, manifest, monkeypatch)
+    result = pipeline.creature_unity_setup(root, config, manifest, "wolf")
+    assert result["clips"] == ["gait_walk"] and result["speeds"] == {"gait_walk": 0.4841}
+    assert '"Hips"' in played[0]                        # the root bone the play keeps in place
+
+
+def deliverable(root, manifest, monkeypatch):
+    """The approved material, a Unity version, and the editor and Play mode as stubs; the scripts Play mode ran."""
     (root / "ProjectSettings").mkdir(exist_ok=True)
     (root / "ProjectSettings/ProjectVersion.txt").write_text("m_EditorVersion: 6000.6.3f1\n")
     (root / MATERIAL).parent.mkdir(parents=True, exist_ok=True)
@@ -165,16 +173,14 @@ def test_a_computed_walk_is_delivered_to_unity_on_a_creature_never_calibrated(ga
     def play(project_root, script, *, results, remedy=None):
         played.append(script)
         Path(results).write_text("<test-run/>")
-        Path(results).with_suffix(".jsonl").write_text(json.dumps({"clip": "gait_walk", "length_s": 4.83}) + "\n")
-        return {"passed": ['Plays("gait_walk")'], "failed": []}
+        Path(results).with_suffix(".jsonl").write_text(json.dumps({"height_m": 0.95}) + "\n")
+        return {"passed": ["FacesForwardAtItsSize"], "failed": []}
 
     monkeypatch.setattr("slopforge.unity_animation.unity_cli", lambda root_: "unity")
     monkeypatch.setattr("slopforge.unity_animation.subprocess.run", editor)
     monkeypatch.setattr(pipeline, "verify_play_mode", play)
     monkeypatch.setattr(pipeline, "editor_binary", lambda root_: "Unity")
-    result = pipeline.creature_unity_setup(root, config, manifest, "wolf")
-    assert result["clips"] == ["gait_walk"] and result["speeds"] == {"gait_walk": 0.4841}
-    assert '"Hips"' in played[0]                        # the root bone the play keeps in place
+    return played
 
 
 def test_the_cli_computes_a_walk(gaited, capsys):
@@ -192,3 +198,54 @@ def test_the_cli_computes_a_walk(gaited, capsys):
     out = capsys.readouterr().out
     assert "stride 0.58 m every 1.21 s (0.48 m/s)" in out and "a loop of 4 periods, seam 0.1 deg" in out
     assert "slopforge animation approve wolf gait_walk --confirm" in out
+    calls.update(built=dict(IDLE_BUILT), baked=dict(IDLE_BAKED))
+    assert main(["--project", str(root), "creature", "gait", "wolf", "idle"]) == 0
+    assert "gait_idle: review_required; standing in place, a loop of 6.00 s, seam 0.0 deg" in capsys.readouterr().out
+
+
+IDLE_BUILT = {"status": "complete", "frames": 145, "fps": 24, "period_s": 6.0, "speed_mps": 0.0, "height_m": 0.95,
+              "ik_miss_max_m": 0.0, "body_drop_m": 0.0, "hips_rise_m": 0.012, "leg_turn_max_deg": 6.0,
+              "head_turn_max_deg": 12.4}
+IDLE_BAKED = {"status": "complete", "fps": 24.0, "keys": 145, "height_m": 0.95, "plants": {}, "cycles": 0,
+              "weak_legs": [], "period_s": 6.0, "speed_mps": 0.0, "velocity": [0.0, 0.0], "stride_m": 0.0,
+              "partial_steps": [], "clean": [0, 144],
+              "window": {"start": 0, "end": 144, "cycles": 1, "seam_deg": 0.0, "start_frame": 1, "end_frame": 145,
+                         "start_s": 0.0, "end_s": 6.0, "seam_root_m": 0.0},
+              "residual_travel_m": 0.0, "stance_slide_mps": 0.0}
+
+
+def test_a_computed_idle_is_built_baked_whole_and_registered_still(gaited):
+    root, config, manifest, calls = gaited
+    calls.update(built=dict(IDLE_BUILT), baked=dict(IDLE_BAKED))
+    result = pipeline.gait_creature(root, config, manifest, "wolf", "idle")
+    asset = manifest["assets"]["creature:wolf"]
+    _, request = calls["gait"]
+    height = json.loads((root / asset["rigging"]["structure"]).read_text())["measured"]["height"]
+    assert {"motion": "idle", "seconds": 6.0, "breaths": 3, "look_deg": 7, "tail_deg": 4}.items() <= request.items()
+    assert request["sway_m"] == pytest.approx(0.007 * height) and "stride_m" not in request
+    assert request["neck"] == ["Neck1", "Head"] and "spine" not in request
+    _, baking = calls["bake"]
+    assert baking["still"] is True and baking["times"] == pytest.approx([k / 24 for k in range(145)])
+    animation = asset["artifacts"]["animation.gait_idle"]
+    assert {"loop": True, "root_motion": False, "speed_mps": 0.0, "stride_m": 0.0, "period_s": 6.0,
+            "loop_periods": 1}.items() <= animation["provenance"].items()
+    assert asset["motion"]["clips"]["gait_idle"]["extraction"]["gait"]["head_turn_max_deg"] == 12.4
+    assert result["clip"] == "gait_idle"
+
+
+def test_a_computed_walks_bake_is_not_still(gaited):
+    root, config, manifest, calls = gaited
+    pipeline.gait_creature(root, config, manifest, "wolf", "walk")
+    assert calls["bake"][1]["still"] is False and "breaths" not in calls["gait"][1]
+
+
+def test_an_approved_computed_idle_is_delivered_to_unity_standing_still(gaited, monkeypatch):
+    root, config, manifest, calls = gaited
+    calls.update(built=dict(IDLE_BUILT), baked=dict(IDLE_BAKED))
+    pipeline.gait_creature(root, config, manifest, "wolf", "idle")
+    pipeline.approve_rig(root, manifest, "wolf", confirmed=True)
+    pipeline.approve_motion(root, manifest, "wolf", "gait_idle", confirmed=True)
+    played = deliverable(root, manifest, monkeypatch)
+    result = pipeline.creature_unity_setup(root, config, manifest, "wolf")
+    assert result["speeds"] == {"gait_idle": 0.0}
+    assert '[TestCase("gait_idle", ' in played[0]
