@@ -6,6 +6,7 @@ bake"). Pure NumPy, so blender/bake_extracted_motion.py samples the rig and call
 - in_place: the root's linear horizontal travel removed (the owner's D9 ruling: a delivered clip is in place; the
   Unity Generic controller moves the creature at stride / period).
 - loop_window: the whole number of periods to deliver as the looping clip, where the seam's pose matches best.
+- gait_settings: a creature type's computed motion (B4, blender/procedural_gait.py), which the same bake measures.
 """
 import numpy as np
 
@@ -151,3 +152,29 @@ def loop_window(rotations, times, period, *, allowed=None):
     if best is None:
         raise ValueError(f"no loop window: no key on a whole scene frame starts {cycles} periods")
     return best
+
+
+GAIT_FPS = 24   # a computed motion's key rate; its period is snapped to whole frames so its loop closes on one
+# a computed motion's declaration: (low, high) for each number; duty over half keeps three feet down in a walk, and
+# seconds over four periods leave whole periods between the partial steps at the motion's two ends
+GAIT_RANGES = {"period_s": (0.3, 4.0), "duty": (0.5, 0.95), "stride": (0.05, 2.0), "lift": (0.005, 0.3),
+               "seconds": (0.0, 60.0)}
+
+
+def gait_settings(asset_type, motion):
+    """{period_s, duty, stride, lift, seconds} of a motion the type computes (procedural_motions); stride and lift are
+    shares of the creature's height. ValueError names a bad declaration."""
+    name, motions = asset_type.get("name"), asset_type.get("procedural_motions")
+    if not isinstance(motions, dict) or motion not in motions:
+        known = ", ".join(sorted(motions)) if isinstance(motions, dict) else "none"
+        raise ValueError(f"asset type {name!r} has no procedural motion {motion!r} (declared: {known})")
+    spec = motions[motion] if isinstance(motions[motion], dict) else {}
+    for key, (low, high) in GAIT_RANGES.items():
+        value = spec.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not low < value <= high:
+            raise ValueError(f"procedural motion {motion!r}: {key} must be a number above {low:g} and at most "
+                             f"{high:g}, got {value!r}")
+    if spec["seconds"] <= 4 * spec["period_s"]:
+        raise ValueError(f"procedural motion {motion!r}: seconds must be over four periods "
+                         f"({4 * spec['period_s']:g} s), got {spec['seconds']!r}")
+    return {key: spec[key] for key in GAIT_RANGES}

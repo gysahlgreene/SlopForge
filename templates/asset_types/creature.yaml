@@ -138,3 +138,14 @@ video_intake:
   max_video_turn: 0.25
   max_video_view_disagreement: 0.015
   max_video_limb_disagreement: 0.02
+# B4 (docs/CREATURES.md, "Computed walk"): motions computed on the rig by blender/procedural_gait.py, then baked and
+# reviewed as a clip is. Stride and lift are shares of the creature's height. The wolf (2026-10-31): a stride of 0.9
+# reached past its legs and the body sank 7 cm to keep the feet down; 0.75 sinks it 4.7 cm, carried level; the period
+# is snapped to whole 24 fps frames (1.2 s -> 29 frames) so the loop closes on a frame.
+procedural_motions:
+  walk:
+    period_s: 1.2
+    duty: 0.62
+    stride: 0.75
+    lift: 0.06
+    seconds: 6.0

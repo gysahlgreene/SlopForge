@@ -15,6 +15,7 @@ import numpy as np
 
 VIEWS = ("front", "side", "three-quarter", "top")
 FRAME_WIDTH = 1920
+ROOT_BONE = "Hips"   # B1's generic name for the bone that carries the body
 HINGES = {"Shin": "back", "Forearm": "front"}   # knees fold back, elbows forward: video2rig's hinges dict
 # video2rig's own limits on a hinge (creature.py bounds): the bend one way from straight up to 2.7 rad, the twist about
 # the bone 1.4 rad on an elbow and 0.45 on a knee, the sideways turn 0.2 rad; degrees
@@ -43,14 +44,14 @@ def creature_config(name, rigging, limits):
     hinges = {bone: HINGES[_role(bone)] for bone in fit if _role(bone) in HINGES}
     joints = {}
     for bone in fit:
-        if bone == "Hips" or bone in hinges:   # the root carries the body; a hinge's own declaration bounds it
+        if bone == ROOT_BONE or bone in hinges:   # the root carries the body; a hinge's own declaration bounds it
             continue
         limit = _limit(limits, bone)
         if limit is None:
             raise ValueError(f"no declared joint limit for {_role(bone)} (bone {bone}): add it, or an End limit for "
                              "end bones, to the type's joint_limits")
         joints[bone] = {"range": math.radians(limit)}
-    return {"name": name, "root_bone": "Hips", "facing": rigging["facing"], "fit_bones": fit, "hinges": hinges,
+    return {"name": name, "root_bone": ROOT_BONE, "facing": rigging["facing"], "fit_bones": fit, "hinges": hinges,
             "joints": joints}
 
 

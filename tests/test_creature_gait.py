@@ -4,7 +4,7 @@ calls these."""
 import numpy as np
 import pytest
 
-from slopforge.creature_gait import GaitError, gait, in_place, loop_window, steps
+from slopforge.creature_gait import GaitError, gait, gait_settings, in_place, loop_window, steps
 
 FPS = 16.0
 
@@ -178,3 +178,34 @@ def test_the_loop_window_starts_and_ends_on_keys_the_export_can_hit():
     whole = (np.arange(121) * 1.5) % 1 == 0                       # every other key is on a whole scene frame
     window = loop_window(rotations, times, 1.2, allowed=whole)
     assert whole[window["start"]] and whole[window["end"]]
+
+
+WALK_TYPE = {"name": "creature", "procedural_motions": {"walk": {"period_s": 1.2, "duty": 0.62, "stride": 0.75,
+                                                                 "lift": 0.06, "seconds": 6.0}}}
+
+
+def test_a_types_computed_walk_is_read_with_its_stride_and_lift_as_shares_of_the_height():
+    assert gait_settings(WALK_TYPE, "walk") == {"period_s": 1.2, "duty": 0.62, "stride": 0.75, "lift": 0.06,
+                                                 "seconds": 6.0}
+
+
+@pytest.mark.parametrize("change, words", [
+    (lambda spec: spec.update(duty=0.45), "duty"),             # a walk keeps three feet down: over half the period
+    (lambda spec: spec.update(stride=0), "stride"),
+    (lambda spec: spec.update(lift=True), "lift"),
+    (lambda spec: spec.update(period_s="1.2"), "period_s"),
+    (lambda spec: spec.update(seconds=4.0), "seconds"),        # the bake needs whole periods past the partial ends
+    (lambda spec: spec.pop("stride"), "stride"),
+])
+def test_a_bad_computed_walk_declaration_is_named(change, words):
+    declared = {"name": "creature", "procedural_motions": {"walk": dict(WALK_TYPE["procedural_motions"]["walk"])}}
+    change(declared["procedural_motions"]["walk"])
+    with pytest.raises(ValueError, match=words):
+        gait_settings(declared, "walk")
+
+
+def test_a_motion_the_type_does_not_compute_is_refused():
+    with pytest.raises(ValueError, match="no procedural motion 'gallop'.*walk"):
+        gait_settings(WALK_TYPE, "gallop")
+    with pytest.raises(ValueError, match="no procedural motion"):
+        gait_settings({"name": "creature"}, "walk")
