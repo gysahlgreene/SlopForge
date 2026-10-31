@@ -1379,6 +1379,11 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
     if not clips:
         raise ValueError(f"creature {name} has no approved clip: review a baked clip's sheet and run "
                          f"`slopforge animation approve {name} <clip> --confirm`")
+    # the skin's colours: the material approve-texture made for the published model (the rig FBX's own has none)
+    material = (((asset.get("unity_import") or {}).get("assets") or {}).get("material") or {}).get("path")
+    if not material or not (root / material).is_file():
+        raise ValueError(f"creature {name} has no approved Unity material ({material or 'none recorded'}): approve "
+                         f"its texture first (`slopforge approve-texture {name} <number>`)")
     # Unity delivery: the rig's and every clip's rights over their lineage decide, before Unity runs
     rights = require_shippable(merge_rights(*(artifact_rights(manifest, asset["id"], artifact)
                                               for artifact in ("rig", *(clip["id"] for clip in clips)))),
@@ -1403,7 +1408,8 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
     unity = editor_version(root)
     parents = [rig_ref, *clip_refs]
     execution = start_execution(asset, {"stage": "unity_delivery",
-                                        "inputs": {ref["path"]: ref["sha256"] for ref in parents}, "unity_editor": unity,
+                                        "inputs": {ref["path"]: ref["sha256"] for ref in parents},
+                                        "material": {material: file_sha256(root / material)}, "unity_editor": unity,
                                         "tools_sha256": {module.__name__: file_sha256(module.__file__)
                                                          for module in (unity_animation, unity_playmode)}})
     stage = start_stage(execution, "unity_delivery", 1, parents,
@@ -1415,7 +1421,7 @@ def creature_unity_setup(project_root, config, manifest, name, *, rig_type="gene
     save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
     try:
         measures.unlink(missing_ok=True)   # an earlier run's measures must not stand for this one's
-        build_animator(root, name, rig, clips, output_dir)
+        build_animator(root, name, rig, clips, output_dir, material=root / material)
         played = verify_play_mode(root, script, results=results, remedy=UNITY_REMEDY)
         measured = read_measures(measures)
     except (Exception, KeyboardInterrupt) as exc:
