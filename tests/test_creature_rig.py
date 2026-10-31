@@ -1,5 +1,6 @@
 """B1: a raw creature rig checked against its limb declaration, on a four-legged box fixture (no Blender)."""
 import copy
+import math
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +10,7 @@ from slopforge.creature_rig import bone_names, check_rig, deformation_poses, fit
 from slopforge.failures import candidate_quality_rejection
 
 LIMBS = {"ground_contact": 4}
-LIMITS = {"max_rig_limbs_missing": 0, "max_rig_asymmetry": 0.05, "max_rig_bones_outside": 0}
+LIMITS = {"max_rig_limbs_missing": 0, "max_rig_asymmetry": 0.05, "max_rig_bones_outside": 0, "max_rig_head_turn": 0.05}
 
 # Raw SkinTokens-style names, heads in metres, the creature facing -Y with its left on +X (the model pipeline's frame).
 BONES = {
@@ -260,7 +261,19 @@ def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
     creature_type = load_taxonomy(tmp_path)["creature"]
     assert creature_type["pipeline"] == "model"
     # owner ruling 2026-10-30 (#154): the skin is weighted again by bone heat on a voxel proxy
-    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4, "skin_weights": "proxy_heat"}
+    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4, "skin_weights": "proxy_heat",
+                                           "straighten_head": True}
+    with pytest.raises(ValueError, match="max_rig_head_turn"):
+        rig_settings({**creature_type, "max_rig_head_turn": -1})
+    # the finish straightens a turned head (owner's choice, 2026-10-31); undeclared, it does not
+    assert rig_settings(creature_type)["straighten_head"] is True
+    assert rig_settings({**creature_type, "straighten_head": None})["straighten_head"] is False
+    with pytest.raises(ValueError, match="straighten_head"):
+        rig_settings({**creature_type, "straighten_head": "yes"})
+    # the concept keeps the head in line with the body: a three-quarter view otherwise turns it to the camera
+    import yaml
+    rules = " ".join(yaml.safe_load(template.read_text())["requirements"])
+    assert "in line with the body" in rules and "not turned toward the viewer" in rules
     assert rig_settings({**creature_type, "skin_weights": None})["skin_weights"] == "skintokens"   # undeclared
     with pytest.raises(ValueError, match="skin_weights"):
         rig_settings({**creature_type, "skin_weights": "heat"})
@@ -331,3 +344,31 @@ def test_an_end_bone_that_leads_skin_is_fitted():
     assert report["status"] == "passed"
     assert {"HindToesEnd.L", "HindToesEnd.R"} <= set(report["fit_bones"])
     assert "HeadEnd" not in report["fit_bones"]          # an end that leads no skin stays out
+
+
+def turned_head(dx=0.15):
+    """The fixture with its head's skin and joints moved `dx` to its left: a head turned off the body's line."""
+    rig = creature()
+    head = [rig["bones"].index(name) for name in ("bone_5", "bone_6")]
+    rig["vertices"][rig["weights"][:, head].sum(1) > 0.5, 0] += dx
+    rig["heads"][head, 0] += dx
+    return rig
+
+
+def test_a_turned_head_is_measured_and_its_yaw_is_signed():
+    """2026-10-30, owner: "from the front view the face is always angled". The B1 wolf's muzzle stood 0.063-0.072 of
+    its height off the line through its hips and chest (its concept turned the head to the camera); concepts asked to
+    keep it in line turned it the other way. The check measures the turn; the finish straightens it (owner's choice)."""
+    from slopforge.creature_rig import head_yaw
+    straight = check_rig(creature(), LIMBS, LIMITS)
+    assert straight["status"] == "passed" and straight["measured"]["rig_head_turn"] == pytest.approx(0, abs=1e-6)
+    assert head_yaw(creature(), straight["names"]) == pytest.approx(0, abs=1e-6)
+    turned = turned_head()
+    report = check_rig(turned, LIMBS, LIMITS)
+    height = np.ptp(turned["vertices"][:, 2])
+    assert report["status"] == "passed"                         # the finish straightens it; no seed would
+    assert report["measured"]["rig_head_turn"] == pytest.approx(0.15 / height, rel=0.02)
+    # the muzzle (the head skin's forward-most fifth: x 0.15, y -0.8) seen from the neck's base (0, -0.52), against
+    # the body's line from the hips to the chest (-y): turned toward the creature's left (+x), positive
+    assert head_yaw(turned, report["names"]) == pytest.approx(math.degrees(math.atan2(0.15, 0.28)), abs=0.01)
+    assert head_yaw(turned_head(-0.15), report["names"]) == pytest.approx(-math.degrees(math.atan2(0.15, 0.28)), abs=0.01)
