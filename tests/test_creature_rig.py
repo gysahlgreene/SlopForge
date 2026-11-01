@@ -48,11 +48,11 @@ def default_legs():
             for end, y, paw, top in (("hind", 0.4, 2, 0), ("front", -0.4, 3, 1)) for side, x in (("L", 0.1), ("R", -0.1))}
 
 
-def creature(bones=BONES, legs=None, extra=4000):
+def creature(bones=BONES, legs=None, extra=4000, body="bone_1"):
     """Boxes for body, head, tail and four legs, each skinned to one bone; a leg's floor corners follow its paw.
     `extra` vertices inside the body follow the spine, as a dense fur body outweighs thin legs (#139)."""
     legs = legs or default_legs()
-    parts = [((-0.15, -0.55, 0.4), (0.15, 0.55, 0.7), "bone_1", "bone_1"),
+    parts = [((-0.15, -0.55, 0.4), (0.15, 0.55, 0.7), body, body),
              ((-0.1, -0.8, 0.6), (0.1, -0.5, 0.95), "bone_5", "bone_5"),
              ((-0.03, 0.5, 0.55), (0.03, 0.85, 0.62), "bone_8", "bone_8")]
     parts += [((x - 0.04, y - 0.04, 0.0), (x + 0.04, y + 0.04, 0.42), low, high)
@@ -67,7 +67,7 @@ def creature(bones=BONES, legs=None, extra=4000):
     rng = np.random.default_rng(0)
     for point in rng.uniform((-0.12, -0.5, 0.45), (0.12, 0.5, 0.65), (extra, 3)):
         vertices.append(point.tolist())
-        leads.append("bone_1")
+        leads.append(body)
     weights = np.zeros((len(vertices), len(names)))
     for index, name in enumerate(leads):
         weights[index, names.index(name)] = 1.0
@@ -210,21 +210,60 @@ def test_bones_past_a_chains_names_are_unfitted_ends():
     assert not {"HindToesEnd.L", "HeadEnd", "HeadEnd1"} & set(fit_bones(names, shares))
 
 
-def test_a_rig_rooted_away_from_the_hind_legs_cannot_be_named():
-    bones = {"root": ((0, 0.4, 0.62), None), **BONES}
-    bones["bone_0"] = (BONES["bone_0"][0], "root")
+def pelvis_rig():
+    """The rabbit's seed 3 (2026-10-31): the root a little behind the hind legs, the tail off a bone of that pelvis, the
+    hind legs one bone further along the spine, and single leaf bones off the hind legs' and front legs' hubs."""
+    bones = {"pelvis0": ((0, 0.46, 0.55), None), "pelvis1": ((0, 0.44, 0.55), "pelvis0"), **BONES}
+    bones["bone_0"] = (BONES["bone_0"][0], "pelvis1")
+    bones["bone_7"] = (BONES["bone_7"][0], "pelvis1")
+    bones["belly"] = ((0, 0.3, 0.42), "bone_0")
+    bones["breast"] = ((0, -0.3, 0.42), "bone_3")
+    return bones
+
+
+def test_a_root_behind_the_hind_legs_is_the_hips_and_leaf_bones_on_the_body_are_ends():
+    names = named(pelvis_rig())
+    assert names["pelvis0"] == "Hips" and names["bone_3"] == "Chest"
+    assert [names[bone] for bone in ("pelvis1", "bone_0", "bone_1", "bone_2")] == ["Spine1", "Spine2", "Spine3", "Spine4"]
+    assert names["bone_7"] == "Tail1" and names["bone_8"] == "Tail2" and names["hindL0"] == "Thigh.L"
+    assert names["belly"] == "Spine2End" and names["breast"] == "ChestEnd"
+
+
+def test_only_the_spine_between_the_hind_legs_and_the_chest_counts_as_bending():
+    report = check_rig(creature(pelvis_rig()), LIMBS, {**LIMITS, "min_rig_spine_bones": 2})
+    assert report["status"] == "passed" and report["measured"]["rig_spine_bones"] == 2    # not the pelvis's two
+
+
+def test_a_rig_read_backwards_is_still_refused():
+    """A root behind the hind legs is accepted only on the line to the front legs: read from the wrong end, the
+    "hind" hub is not on it."""
+    bones = dict(BONES)
+    bones["bone_3"] = (BONES["bone_3"][0], "bone_2")
     rig = creature(bones)
     report = structure(rig, LIMBS, LIMITS)
-    assert report["status"] == "passed"
-    with pytest.raises(ValueError, match="hind legs leave the body at bone_0, not at the root root"):
+    report["limbs"] = [{**limb, "end": "hind" if limb["end"] == "front" else "front"} for limb in report["limbs"]]
+    with pytest.raises(ValueError, match="hind legs leave the body at bone_3, not on the line from the root bone_0"):
         bone_names(report, rig)
 
 
+def test_two_chains_off_the_hips_cannot_be_named():
+    bones = {**BONES, "second0": ((0, 0.5, 0.5), "bone_0"), "second1": ((0, 0.5, 0.45), "second0")}
+    rig = creature(bones)
+    with pytest.raises(ValueError, match="2 chains leave the hips"):
+        bone_names(structure(rig, LIMBS, LIMITS), rig)
+
+
 def test_an_undeclared_chain_off_the_chest_cannot_be_named():
-    bones = dict(BONES)
-    bones["wing"] = ((0, -0.3, 0.68), "bone_3")
+    bones = {**BONES, "wing": ((0, -0.3, 0.68), "bone_3"), "wing1": ((0, -0.25, 0.6), "wing")}
     rig = creature(bones)
     with pytest.raises(ValueError, match="2 chains leave the chest besides the front legs"):
+        bone_names(structure(rig, LIMBS, LIMITS), rig)
+
+
+def test_a_chain_off_the_spine_cannot_be_named():
+    bones = {**BONES, "wing": ((0, 0.1, 0.68), "bone_1"), "wing1": ((0, 0.1, 0.6), "wing")}
+    rig = creature(bones)
+    with pytest.raises(ValueError, match="wing branches off the Spine1"):
         bone_names(structure(rig, LIMBS, LIMITS), rig)
 
 
@@ -261,7 +300,8 @@ def test_the_creature_type_declares_four_legs_and_its_rig_limits(tmp_path):
     creature_type = load_taxonomy(tmp_path)["creature"]
     assert creature_type["pipeline"] == "model"
     # owner ruling 2026-10-30 (#154): the skin is weighted again by bone heat on a voxel proxy
-    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": LIMITS, "seeds": 4, "skin_weights": "proxy_heat",
+    assert rig_settings(creature_type) == {"limbs": LIMBS, "limits": {**LIMITS, "min_rig_spine_bones": 2}, "seeds": 4,
+                                           "skin_weights": "proxy_heat",
                                            "straighten_head": True}
     with pytest.raises(ValueError, match="max_rig_head_turn"):
         rig_settings({**creature_type, "max_rig_head_turn": -1})
@@ -290,8 +330,7 @@ def test_a_checked_rig_carries_its_names_and_fit_bones_or_why_it_has_none():
     assert report["status"] == "passed" and report["names"] == NAMES
     assert report["fit_bones"] == fit_bones(report["names"], report["skin_share"])
     assert set(report["fit_bones"]) == set(NAMES.values()) - {"HeadEnd"}
-    bones = dict(BONES)
-    bones["wing"] = ((0, -0.3, 0.68), "bone_3")
+    bones = {**BONES, "wing": ((0, -0.3, 0.68), "bone_3"), "wing1": ((0, -0.25, 0.6), "wing")}
     report = check_rig(creature(bones), LIMBS, LIMITS)
     assert report["status"] == "failed" and report["failure_codes"] == ["rig_structure"]
     assert report["errors"] == ["the rig cannot be named: 2 chains leave the chest besides the front legs; "
@@ -372,3 +411,35 @@ def test_a_turned_head_is_measured_and_its_yaw_is_signed():
     # the body's line from the hips to the chest (-y): turned toward the creature's left (+x), positive
     assert head_yaw(turned, report["names"]) == pytest.approx(math.degrees(math.atan2(0.15, 0.28)), abs=0.01)
     assert head_yaw(turned_head(-0.15), report["names"]) == pytest.approx(-math.degrees(math.atan2(0.15, 0.28)), abs=0.01)
+
+
+def test_a_rig_whose_body_has_too_few_spine_bones_is_refused():
+    """The rabbit (2026-10-31): SkinTokens' seed 1 joined the hips straight to the chest, 61 cm away, so the body could
+    not bend, and every check passed it. The fixture's body has two spine bones."""
+    bones = {name: bone for name, bone in BONES.items() if name not in ("bone_1", "bone_2")}
+    bones["bone_3"] = (BONES["bone_3"][0], "bone_0")
+    limits = {**LIMITS, "min_rig_spine_bones": 2}
+    rig = creature(bones, body="bone_0")
+    report = check_rig(rig, LIMBS, limits)
+    assert report["status"] == "failed" and report["failure_codes"] == ["rig_spine"]
+    assert report["measured"]["rig_spine_bones"] == 0 and "2" in report["errors"][0] and "spine" in report["errors"][0]
+    assert candidate_quality_rejection(report)                 # the next seed is tried
+    passing = check_rig(creature(), LIMBS, limits)
+    assert passing["status"] == "passed" and passing["measured"]["rig_spine_bones"] == 2
+    # a project's older copy of the type declares no limit: measured, not refused
+    assert check_rig(rig, LIMBS, LIMITS)["status"] == "passed"
+
+
+def test_a_too_short_spine_is_a_rig_candidates_quality_failure():
+    from slopforge.failures import _KIND_CODES
+    assert _KIND_CODES["rig"]["rig_spine"] == ("rig_spine_bones", "min_rig_spine_bones")
+
+
+def test_the_creature_type_asks_for_a_spine_that_bends(tmp_path):
+    import yaml
+    from slopforge.creature_rig import rig_settings
+    template = Path(__file__).resolve().parents[1] / "templates/asset_types/creature.yaml"
+    declared = yaml.safe_load(template.read_text())
+    assert rig_settings(declared)["limits"]["min_rig_spine_bones"] == 2
+    with pytest.raises(ValueError, match="min_rig_spine_bones"):
+        rig_settings({**declared, "min_rig_spine_bones": 1.5})

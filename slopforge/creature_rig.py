@@ -193,9 +193,10 @@ _END = re.compile(r"End\d*(\.[LR])?$")
 
 def bone_names(report, rig):
     """Generic names for a rig whose structure passed, {raw name: name}: video2rig's quadruped names, none of Unity's
-    humanoid limb names; a bone past its chain's names is an unfitted ...End. Raises ValueError for a body plan that is
-    not a quadruped's: the hind legs off the root (the hips), the front legs off a chest further up one spine, a tail
-    at most besides, and one neck."""
+    humanoid limb names; a bone past its chain's names is an unfitted ...End. The root is the hips, whether the hind
+    legs leave it or a bone a little along the spine (the tail off that pelvis: the rabbit, 2026-10-31); single leaf
+    bones on the body are ends. Raises ValueError for a body plan that is not a quadruped's: the hind legs not on the
+    line from the root to the chest, the front legs' hub, one chain at most besides as a tail, and one neck."""
     if report["status"] != "passed":
         raise ValueError("only a rig whose structure passed is named")
     names = list(rig["bones"])
@@ -208,16 +209,15 @@ def bone_names(report, rig):
     hips = next(limb["hub"] for limb in limbs if limb["end"] == "hind")
     chest = next(limb["hub"] for limb in limbs if limb["end"] == "front")
     root = next(name for name in names if parent[name] is None)
-    if hips != root:
-        raise ValueError(f"the hind legs leave the body at {hips}, not at the root {root} (the head end is read from "
-                         f"the highest skin, here {report['facing']}; a tail standing above the head reads the wrong way)")
-    spine = [chest]
-    while spine[0] != hips:
-        if parent[spine[0]] is None:
-            raise ValueError(f"the front legs leave the body at {chest}, which is not on a spine from {hips}")
-        spine.insert(0, parent[spine[0]])
-    if len(spine) < 2:
+    if hips == chest:
         raise ValueError(f"the front and hind legs all leave the body at {hips}")
+    spine = [chest]
+    while parent[spine[0]] is not None:
+        spine.insert(0, parent[spine[0]])
+    if hips not in spine:
+        raise ValueError(f"the hind legs leave the body at {hips}, not on the line from the root {root} to the front "
+                         f"legs' {chest} (the head end is read from the highest skin, here {report['facing']}; a tail "
+                         "standing above the head reads the wrong way)")
 
     def line(bone):
         chain = [bone]
@@ -225,12 +225,17 @@ def bone_names(report, rig):
             chain.append(kids[chain[-1]][0])
         return chain
 
-    rename = {hips: "Hips", chest: "Chest", **{bone: f"Spine{k}" for k, bone in enumerate(spine[1:-1], 1)}}
-    tails = [bone for bone in kids[hips] if bone not in legs and bone != spine[1]]
+    def chains(off):
+        """Of the bones leaving the body, those with bones of their own, or a lone leaf; other leaves are ends."""
+        return [bone for bone in off if kids[bone]] or (off if len(off) == 1 else [])
+
+    rename = {root: "Hips", chest: "Chest", **{bone: f"Spine{k}" for k, bone in enumerate(spine[1:-1], 1)}}
+    tails = chains([bone for on in spine[:spine.index(hips) + 1] for bone in kids[on]
+                    if bone not in legs and bone not in spine])
     if len(tails) > 1:
         raise ValueError(f"{len(tails)} chains leave the hips besides the hind legs and the spine")
     rename.update({bone: f"Tail{k}" for k, bone in enumerate(line(tails[0]) if tails else [], 1)})
-    necks = [bone for bone in kids[chest] if bone not in legs]
+    necks = chains([bone for bone in kids[chest] if bone not in legs])
     if len(necks) != 1:
         raise ValueError(f"{len(necks)} chains leave the chest besides the front legs; a quadruped has one neck")
     neck = line(necks[0])
@@ -255,7 +260,7 @@ def bone_names(report, rig):
         if bone in rename:
             continue
         base = rename[parent[bone]]
-        if base in ("Hips", "Chest") or base.startswith("Spine"):
+        if kids[bone] and (base in ("Hips", "Chest") or base.startswith("Spine")):
             raise ValueError(f"{bone} branches off the {base}; a quadruped's body carries only legs, a neck and a tail")
         stem, side = (base[:-2], base[-2:]) if base[-2:] in (".L", ".R") else (base, "")
         stem, k = re.sub(r"End\d*$", "", stem), 0
@@ -317,9 +322,12 @@ def rig_settings(asset_type):
     if straighten is not None and not isinstance(straighten, bool):
         raise ValueError(f"asset type {asset_type.get('name')!r}: straighten_head must be true or false, got "
                          f"{straighten!r}")
+    spine = asset_type.get("min_rig_spine_bones", 0)   # a project's older copy of the type declares none
+    if isinstance(spine, bool) or not isinstance(spine, int) or not 0 <= spine <= 16:
+        raise ValueError(f"asset type {asset_type.get('name')!r}: min_rig_spine_bones must be 0 to 16, got {spine!r}")
     return {"limbs": dict(limbs), "seeds": seeds, "skin_weights": weights, "straighten_head": bool(straighten),
             "limits": {"max_rig_limbs_missing": 0, "max_rig_asymmetry": asymmetry, "max_rig_bones_outside": 0,
-                       "max_rig_head_turn": turn}}
+                       "max_rig_head_turn": turn, "min_rig_spine_bones": spine}}
 
 
 def _muzzle(rig, names):
@@ -365,4 +373,15 @@ def check_rig(rig, limbs, limits):
         else:
             report["fit_bones"] = fit_bones(report["names"], report["skin_share"])
             report["measured"]["rig_head_turn"] = head_turn(rig, report["names"])
+            # the bones that bend the body: between the hind legs and the front legs, not a pelvis behind them
+            parent = dict(zip(rig["bones"], rig["parents"]))
+            hind, spine = next(limb["hub"] for limb in report["limbs"] if limb["end"] == "hind"), 0
+            bone = parent[next(limb["hub"] for limb in report["limbs"] if limb["end"] == "front")]
+            while bone != hind:
+                spine, bone = spine + 1, parent[bone]
+            report["measured"]["rig_spine_bones"] = spine
+            if spine < limits.get("min_rig_spine_bones", 0):
+                report.update(status="failed", failure_codes=["rig_spine"],
+                              errors=[f"the body has {spine} spine bones between the hips and chest, so it barely "
+                                      f"bends (at least {limits['min_rig_spine_bones']})"])
     return report

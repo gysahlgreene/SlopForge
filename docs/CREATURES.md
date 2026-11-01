@@ -16,6 +16,21 @@ budget. Its type declares the limbs the rig is checked against: four legs that s
 {ground_contact: 4}`). Only quadrupeds are supported for now (owner decision D12). Generate, approve a concept and
 approve a material as for any model, then rig the published model:
 
+**Writing the concept prompt.** The concept check looks at the image file only, not at the pose, so the words matter:
+
+- Say "on all fours, its long body level", and that it is not sitting up or rearing. "Standing up on all four legs"
+  drew four rabbits rearing on their hind legs, and all four passed. Use `--aspect landscape`.
+- Prefer short, even, rich fur colours. TRELLIS.2 lost a rabbit's grey-tipped mottled fur on all three seeds (almost
+  white, 0.44-0.51 of the concept's saturation). Colour correction brought the saturation back but not the pattern.
+  With even chestnut fur, 4 of 14 models passed, keeping up to 0.85 of the saturation, and 7 broke into pieces. Every one that passed was still
+  lighter than the concept.
+
+An outline check was tried and rejected: width against height separates the rabbit's poses (0.54-0.78 rearing,
+1.16-1.41 on all fours), but the wolf's good concepts in a front three-quarter view measure 0.79-0.82.
+
+Run on the H100 profile (`compute_profile: h100` or `SLOPFORGE_COMPUTE_PROFILE=h100`). The default profile's graph bakes
+no normal map, and `approve-texture` refuses its placeholder.
+
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate creature wolf "Grey wolf" --material "fur=nonmetal: grey and cream fur"
 slopforge --project ~/UnityProjects/MyGame approve wolf <n>
@@ -39,8 +54,15 @@ for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md))
   per type). In the bounded check, the passing wolf seed mirrored within 0.005 and a failing seed 0.28.
 - **Every joint is inside the skin,** by generalized winding number above 0.5.
 - **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
-- **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
-  chest further up one spine. Besides those, only a tail and one neck may leave them.
+- **The rig can be named as a quadruped.** The root is the hips. The hind legs leave the body at the root or a little
+  along one spine, and the front legs at a chest further along it. Besides those, one tail may leave the hips' end of
+  the spine and one neck the chest. A single leaf bone with no bones of its own may leave any body bone, and is an
+  end (`Spine2End`, `ChestEnd`). The rabbit's skeletons needed both (2026-10-31): the root a little behind the hind
+  legs with the tail off it, and leaf bones on the hubs. Any other chain off the body is refused.
+- **The body can bend.** At least `min_rig_spine_bones` bones (2 for `creature`, provisional) lie between the hind
+  legs' bone and the chest, measured as `rig_spine_bones`. A failure tries the next seed. The rabbit's first passing
+  seed joined the hips straight to the chest, 61 cm apart, and every other check passed it. The wolf's seeds have 2
+  and 4. A project's older copy of the type declares no limit, so nothing is refused there.
 - **How far the head is turned** is measured and recorded (`rig_head_turn`). The head's skin is the skin the `Head`
   and `…End` head bones lead; its forward-most fifth, averaged, is the muzzle. The turn is how far the muzzle stands
   off the line through the hips and chest joints, as a share of the height. The finish straightens it (below).
@@ -90,7 +112,7 @@ that review. It refuses a rig changed since it was made, a rig made from a model
 rig whose lineage's output rights are `unknown` or `restricted`.
 
 **Facing.** The head end is read from the highest skin. A creature whose tail stands above its head reads the wrong
-way round. Its hind legs then seem to leave the body away from the root, so it is refused, with that reason. One case
+way round. Its hind legs then seem to leave the body off the line from the root to the chest, so it is refused, with that reason. One case
 is not refused: a rig that SkinTokens roots at the chest, on a creature whose tail stands above its head, would be named
 back to front. The review poses show it, because the wrong leg lifts.
 
