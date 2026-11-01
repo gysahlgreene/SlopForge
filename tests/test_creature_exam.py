@@ -100,7 +100,7 @@ def test_detection_is_the_share_of_frames_read_above_the_confidence_limit():
 def scored(**changes):
     """An exam and a check at exam v1's limits, with `changes` to the measures."""
     measured = {"bone_median_deg": 5, "worst_body_median_deg": 10, "worst_body_p95_deg": 25, "worst_tail_p95_deg": 40,
-                "joint_rel_median": 0.025, "joint_rel_p95": 0.10, "detection_side": 0.85, "detection_other": 0.45,
+                "joint_rel_median": 0.025, "joint_rel_p95": 0.10, "detection_best_view": 0.85, "detection_other": 0.45,
                 "limb_tips_best_view": 0.95, "swap_worst": 0.15, "views_body_pct": 1.5, "views_limbs_pct": 2.0}
     measured.update(changes)
     return creature_exam.judge(measured)
@@ -108,11 +108,31 @@ def scored(**changes):
 
 def test_exam_v1_passes_at_its_limits_and_names_every_measure_past_one():
     assert scored()["status"] == "passed" and scored()["failures"] == []
-    verdict = scored(worst_body_p95_deg=155.7, detection_side=0.84)
-    assert verdict["status"] == "failed" and verdict["failures"] == ["worst_body_p95_deg", "detection_side"]
+    verdict = scored(worst_body_p95_deg=155.7, detection_best_view=0.84)
+    assert verdict["status"] == "failed" and verdict["failures"] == ["worst_body_p95_deg", "detection_best_view"]
     assert verdict["limits"]["worst_body_p95_deg"] == ["<=", 25]
     # a measure that cannot be read fails: no limb-end tips read means none was shown to be read
     assert scored(limb_tips_best_view=None)["failures"] == ["limb_tips_best_view"]
+
+
+def test_a_joint_counts_as_seen_when_either_camera_sees_it():
+    """Owner ruling 2026-11-01: the rabbit's round body hides its far legs and inner spine from the side camera (0.75
+    seen, against the wolf's 0.88), the bone errors well inside their limits. Judged by the better camera for each
+    joint: rabbit 0.91, wolf 0.93. The side camera's own share stays measured, not judged."""
+    assert scored(detection_side=0.75)["status"] == "passed"
+    heads, tails = walk()
+    conf = np.ones((10, 2, 3))
+    conf[:, 1, 2] = 0.0                                  # the side camera never sees the far leg's tip
+    conf[:, 0, 0] = 0.0                                  # the front camera never sees the hips
+    reader = {"conf": conf, "views": ["v2r_front", "v2r_side"],
+              "keypoints": [["hips", "Hips", 0.0], ["Leg.L.tip", "Leg.L", 1.0], ["Leg.R.tip", "Leg.R", 1.0]]}
+    exam = creature_exam.compare(posed(heads, tails, fit_tails=tails), moved=NAMES, reader=reader)
+    measured = creature_exam.measures(exam, {"body": 0.004, "limbs": 0.011}, limb_ends=["Leg.L", "Leg.R"])
+    assert measured["detection_side"] == pytest.approx(2 / 3, abs=0.01) and measured["detection_best_view"] == 1.0
+    conf[:, 0, 2] = 0.0                                  # now neither camera sees that tip
+    exam = creature_exam.compare(posed(heads, tails, fit_tails=tails), moved=NAMES, reader=reader)
+    measured = creature_exam.measures(exam, {"body": 0.004, "limbs": 0.011}, limb_ends=["Leg.L", "Leg.R"])
+    assert measured["detection_best_view"] == pytest.approx(2 / 3, abs=0.01)
 
 
 def test_the_measures_come_from_the_exam_and_videorigs_check():

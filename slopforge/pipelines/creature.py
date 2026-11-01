@@ -1313,7 +1313,8 @@ def gait_creature(project_root, config, manifest, name, motion):
         raise FileExistsError(f"Computed motion {clip} was made before; inspect or move {folder} before making it again")
     structure = json.loads((root / asset["rigging"]["structure"]).read_text())
     height = structure["measured"]["height"]
-    role = lambda name: sorted(bone for bone in structure["names"].values() if creature_views._role(bone) == name)
+    role = lambda name: sorted((bone for bone in structure["names"].values() if creature_views._role(bone) == name),
+                               key=lambda bone: (len(bone), bone))   # Spine2 before Spine10
     fps = creature_gait.GAIT_FPS
     rights = rights_of(config, "blender")
     tools = {script: tool_sha256(tool_root() / script) for script in (GAIT, BAKE)}
@@ -1325,11 +1326,17 @@ def gait_creature(project_root, config, manifest, name, motion):
     extraction = {"status": "computing"}
     clips[clip] = {"kind": "procedural", "motion": motion, "settings": settings, "extraction": extraction}
     folder.mkdir(parents=True)
-    # shares of the height in metres; an idle also turns the neck and head as it looks
-    moves = ({"period_s": settings["period_s"], "duty": settings["duty"], "stride_m": settings["stride"] * height,
-              "lift_m": settings["lift"] * height} if motion == "walk" else
-             {"breaths": settings["breaths"], "sway_m": settings["sway"] * height, "look_deg": settings["look_deg"],
-              "tail_deg": settings["tail_deg"], "neck": role("Neck") + role("Head")})
+    # shares of the height in metres; an idle also turns the neck and head as it looks, a hop bends the back, turns the
+    # neck and head back level and lets the ears trail (the head's end bones; the script keeps those in chains)
+    if motion == "idle":
+        moves = {"breaths": settings["breaths"], "sway_m": settings["sway"] * height, "look_deg": settings["look_deg"],
+                 "tail_deg": settings["tail_deg"], "neck": role("Neck") + role("Head")}
+    else:
+        moves = {"period_s": settings["period_s"], "duty": settings["duty"], "stride_m": settings["stride"] * height,
+                 "lift_m": settings["lift"] * height}
+    if motion == "hop":
+        moves.update(rise_m=settings["rise"] * height, pitch_deg=settings["pitch_deg"], flex_deg=settings["flex_deg"],
+                     neck=role("Neck") + role("Head"), spine=role("Spine") + role("Chest"), ears=role("HeadEnd"))
     request = {"motion": motion, "legs": _legs(root, asset, whole=True), "root": creature_views.ROOT_BONE,
                "tail": role("Tail"), "seconds": settings["seconds"], "fps": fps, **moves,
                "save": str(folder / "source.blend"), "cameras": str(folder / "cameras.json"),
@@ -1392,7 +1399,8 @@ def gait_creature(project_root, config, manifest, name, motion):
     extraction.update(status="review_required", fbx=relative["animation.fbx"], bake=relative["report.motion_bake"],
                       review_sheet=relative["image.motion_review"], window=baked["window"], warnings=warnings, **gait,
                       gait={key: built[key] for key in ("ik_miss_max_m", "body_drop_m", "hips_rise_m",
-                                                        "leg_turn_max_deg", "head_turn_max_deg", "front_rise_m")
+                                                        "leg_turn_max_deg", "head_turn_max_deg", "front_rise_m",
+                                                        "airborne_share", "head_pitch_max_deg", "ear_turn_max_deg")
                             if key in built},
                       rig_blend_sha256=blend_ref["sha256"],
                       outputs={output["type"]: output["sha256"] for output in outputs})
