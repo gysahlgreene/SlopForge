@@ -11,12 +11,15 @@ import numpy as np
 # exam v1, owner-ruled 2026-10-27 (D5, D7) from the spike's four clips: synthetic motion only, revisable with evidence
 EXAM_V1 = {"bone_median_deg": ("<=", 5), "worst_body_median_deg": ("<=", 10), "worst_body_p95_deg": ("<=", 25),
            "worst_tail_p95_deg": ("<=", 40), "joint_rel_median": ("<=", 0.025), "joint_rel_p95": ("<=", 0.10),
-           "detection_side": (">=", 0.85), "detection_other": (">=", 0.45), "limb_tips_best_view": (">=", 0.95),
+           "detection_best_view": (">=", 0.85), "detection_other": (">=", 0.45), "limb_tips_best_view": (">=", 0.95),
            "swap_worst": ("<=", 0.15), "views_body_pct": ("<=", 1.5), "views_limbs_pct": ("<=", 2.0)}
 # owner ruling 2026-10-30: the swap rate leaves out the shoulder blades (on B1's wolf they sit close together and the
 # fit reads the gait's 3-degree chest sway on the wrong side in about half the frames, every leg pair at 0.06 or
 # under); their rate is measured and recorded, not judged
 SWAP_UNJUDGED = re.compile(r"^Scapula")
+# owner ruling 2026-11-01: a joint counts as seen when either camera sees it (detection_best_view). The side camera alone
+# (detection_side, was the limit) measured how round the body is: the rabbit hides its far legs and inner spine from it
+# (0.75, the wolf 0.88) with its bone errors well inside their limits; by the better camera, 0.91 and 0.93. Recorded.
 CONFIDENCE = 0.4   # under it video2rig's fit treats a reading as unsure (reader/fit.py SETTINGS bridge_conf)
 
 
@@ -139,9 +142,9 @@ def compare(posed, *, moved, reader=None, conf=CONFIDENCE):
 
 
 def measures(exam, check, *, limb_ends):
-    """Exam v1's twelve measures from one clip's exam and video2rig's check.json (D7's view disagreement), and the
-    shoulder blades' swap rate, recorded but not judged (SWAP_UNJUDGED). A tail bone has "Tail" in its name; the limb
-    ends are each declared leg's last bone."""
+    """Exam v1's twelve measures from one clip's exam and video2rig's check.json (D7's view disagreement), and, recorded
+    but not judged, the shoulder blades' swap rate (SWAP_UNJUDGED) and the side camera's detection. A tail bone has
+    "Tail" in its name; the limb ends are each declared leg's last bone."""
     summary, bones = exam["summary"], exam["bone_rotation_error_degrees"]
     body = {name: value for name, value in bones.items() if "Tail" not in name}
     tail = {name: value for name, value in bones.items() if "Tail" in name}
@@ -150,6 +153,7 @@ def measures(exam, check, *, limb_ends):
     other = next((value for view, value in views.items() if not view.endswith("side")), None)
     per_view = exam["joint_detection_rate"]["per_joint_per_view"]
     tips = [max(per_view[f"{bone}.tip"].values()) for bone in limb_ends if f"{bone}.tip" in per_view]
+    best = round(float(np.mean([max(rates.values()) for rates in per_view.values()])), 4) if per_view else None
     rates = {pair: item["rate"] for pair, item in exam["near_far_swap_rate"].items() if item["rate"] is not None}
     judged = [rate for pair, rate in rates.items() if not SWAP_UNJUDGED.match(pair)]
     blades = [rate for pair, rate in rates.items() if SWAP_UNJUDGED.match(pair)]
@@ -159,7 +163,7 @@ def measures(exam, check, *, limb_ends):
             "worst_tail_p95_deg": max((value["p95"] for value in tail.values()), default=0.0),
             "joint_rel_median": summary["joint_position_error_root_relative"]["median"],
             "joint_rel_p95": summary["joint_position_error_root_relative"]["p95"],
-            "detection_side": side, "detection_other": other,
+            "detection_side": side, "detection_other": other, "detection_best_view": best,
             "limb_tips_best_view": min(tips) if len(tips) == len(limb_ends) else None,
             "swap_worst": max(judged, default=None), "swap_shoulder_blades": max(blades, default=None),
             # a check that read no view disagreement has none to judge: unread, so failed

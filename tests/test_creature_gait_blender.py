@@ -126,3 +126,46 @@ def test_a_procedural_idle_keeps_its_feet_planted_breathes_looks_round_and_close
     assert (window["start"], window["end"], window["cycles"]) == (0, 144, 1) and window["seam_deg"] < 0.5
     assert baked["stance_slide_mps"] < 0.01                  # the feet stay where they stand
     assert Path(tmp_path / "idle.fbx").is_file()
+
+
+@pytest.mark.skipif(not Path(BLENDER).is_file(), reason="Blender is not installed")
+def test_a_procedural_hop_lands_in_pairs_leaves_the_floor_keeps_its_head_level_and_loops(tmp_path):
+    """A rabbit's slow hop: the hind feet land and push off together, the body goes up and over with every foot off
+    the floor, the front paws land one after the other, not as a mirror (the owner, 2026-11-01), and the hind feet come
+    through as they lift. B6's bake measures it as it measures a walk."""
+    blend, report = rigged(tmp_path)
+    names = report["names"]
+    chains = {f"{limb['end']}.{limb['side']}": [names[bone] for bone in limb["chain"]] for limb in report["limbs"]}
+    role = lambda prefix: sorted(n for n in names.values() if n.rstrip("0123456789") == prefix)
+    built = run_script("blender/procedural_gait.py", blend, {
+        "motion": "hop", "legs": chains, "root": "Hips", "tail": [], "ears": role("Tail"),   # a chain as the ears
+        "neck": role("Neck") + ["Head"], "spine": role("Spine") + ["Chest"], "period_s": 0.75, "duty": 0.36,
+        "stride_m": 0.3, "lift_m": 0.05, "rise_m": 0.05, "pitch_deg": 6, "flex_deg": 12, "seconds": 6.0, "fps": FPS,
+        "save": str(tmp_path / "hop.blend"), "cameras": str(tmp_path / "cameras.json"),
+        "report": str(tmp_path / "hop.json")}, tmp_path / "hop_request.json")
+    assert built["status"] == "complete", built
+    assert built["ik_miss_max_m"] < 0.005 and built["leg_turn_max_deg"] < 90, built
+    assert built["airborne_share"] > 0.05, built               # it leaves the floor, every foot at once
+    assert built["hips_rise_m"] >= 0.04, built                 # the body goes up and over
+    assert built["head_pitch_max_deg"] < 8, built              # the neck turns back most of the body's tip
+    assert built["ear_turn_max_deg"] >= 5, built               # the ears trail behind
+    baked = run_script("blender/bake_extracted_motion.py", tmp_path / "hop.blend", {
+        "legs": {leg: chain[-2:] for leg, chain in chains.items()}, "root_bone": "Hips",
+        "fit_bones": sorted(set(names.values())), "fbx": str(tmp_path / "hop.fbx"),
+        "blend": str(tmp_path / "hop_baked.blend"), "renders": None, "cameras": None,
+        "times": [k / FPS for k in range(built["frames"])], "samples": 0, "report": str(tmp_path / "bake.json")},
+        tmp_path / "bake_request.json")
+    assert baked["status"] == "complete", baked
+    assert all(len(plants) >= 4 for plants in baked["plants"].values()), baked["plants"]
+    assert baked["period_s"] == pytest.approx(0.75, abs=1.5 / FPS)
+    assert baked["window"]["cycles"] >= 3 and baked["window"]["seam_deg"] < 1
+    assert baked["stance_slide_mps"] < 0.03
+    assert baked["speed_mps"] == pytest.approx(0.3 / 0.75, rel=0.1)
+    # the hind feet land together; the left front paw leads the right by a frame or more, and the front pair lands
+    # well after the hind pair
+    period = round(0.75 * FPS)
+    apart = lambda a, b: min((a - b) % period, (b - a) % period)
+    first = {leg: min(plants) for leg, plants in baked["plants"].items()}
+    assert apart(first["hind.L"], first["hind.R"]) <= 1, first
+    assert 1 <= (first["front.R"] - first["front.L"]) % period <= 3, first
+    assert apart(first["hind.L"], first["front.L"]) >= period / 4, first

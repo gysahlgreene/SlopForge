@@ -235,5 +235,27 @@ def test_a_bad_computed_idle_declaration_is_named(change, words):
 
 def test_a_declared_motion_the_gait_cannot_compute_is_refused():
     declared = {"name": "creature", "procedural_motions": {"trot": {"seconds": 6.0}}}
-    with pytest.raises(ValueError, match="computes idle and walk, not 'trot'"):
+    with pytest.raises(ValueError, match="computes hop and idle and walk, not 'trot'"):
         gait_settings(declared, "trot")
+
+
+HOP_TYPE = {"name": "creature", "procedural_motions": {"hop": {"period_s": 0.75, "duty": 0.42, "stride": 0.4,
+                                                               "lift": 0.08, "rise": 0.08, "pitch_deg": 10,
+                                                               "flex_deg": 12, "seconds": 6.0}}}
+
+
+def test_a_types_computed_hop_is_read_with_its_moves_as_shares_of_the_height():
+    assert gait_settings(HOP_TYPE, "hop") == HOP_TYPE["procedural_motions"]["hop"]
+
+
+@pytest.mark.parametrize("change, words", [
+    (lambda spec: spec.update(duty=0.5), "duty"),   # at half, each pair lands as the other leaves: no time in the air
+    (lambda spec: spec.update(seconds=3.0), "four periods"),
+    (lambda spec: spec.update(rise=0.9), "rise"),
+    (lambda spec: spec.pop("flex_deg"), "flex_deg"),
+])
+def test_a_bad_computed_hop_declaration_is_named(change, words):
+    declared = {"name": "creature", "procedural_motions": {"hop": dict(HOP_TYPE["procedural_motions"]["hop"])}}
+    change(declared["procedural_motions"]["hop"])
+    with pytest.raises(ValueError, match=words):
+        gait_settings(declared, "hop")

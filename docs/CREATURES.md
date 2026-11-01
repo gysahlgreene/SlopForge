@@ -16,6 +16,21 @@ budget. Its type declares the limbs the rig is checked against: four legs that s
 {ground_contact: 4}`). Only quadrupeds are supported for now (owner decision D12). Generate, approve a concept and
 approve a material as for any model, then rig the published model:
 
+**Writing the concept prompt.** The concept check looks at the image file only, not at the pose, so the words matter:
+
+- Say "on all fours, its long body level", and that it is not sitting up or rearing. "Standing up on all four legs"
+  drew four rabbits rearing on their hind legs, and all four passed. Use `--aspect landscape`.
+- Prefer short, even, rich fur colours. TRELLIS.2 lost a rabbit's grey-tipped mottled fur on all three seeds (almost
+  white, 0.44-0.51 of the concept's saturation). Colour correction brought the saturation back but not the pattern.
+  With even chestnut fur, 4 of 14 models passed, keeping up to 0.85 of the saturation, and 7 broke into pieces. Every one that passed was still
+  lighter than the concept.
+
+An outline check was tried and rejected: width against height separates the rabbit's poses (0.54-0.78 rearing,
+1.16-1.41 on all fours), but the wolf's good concepts in a front three-quarter view measure 0.79-0.82.
+
+Run on the H100 profile (`compute_profile: h100` or `SLOPFORGE_COMPUTE_PROFILE=h100`). The default profile's graph bakes
+no normal map, and `approve-texture` refuses its placeholder.
+
 ```sh
 slopforge --project ~/UnityProjects/MyGame generate creature wolf "Grey wolf" --material "fur=nonmetal: grey and cream fur"
 slopforge --project ~/UnityProjects/MyGame approve wolf <n>
@@ -39,8 +54,15 @@ for characters (`tools.skintokens_*`; [Character rigging](CHARACTER-RIGGING.md))
   per type). In the bounded check, the passing wolf seed mirrored within 0.005 and a failing seed 0.28.
 - **Every joint is inside the skin,** by generalized winding number above 0.5.
 - **The weights** follow a bone at every vertex, with at most four influences, summing to 1.
-- **The rig can be named as a quadruped.** The hind legs leave the body at the root (the hips) and the front legs at a
-  chest further up one spine. Besides those, only a tail and one neck may leave them.
+- **The rig can be named as a quadruped.** The root is the hips. The hind legs leave the body at the root or a little
+  along one spine, and the front legs at a chest further along it. Besides those, one tail may leave the hips' end of
+  the spine and one neck the chest. A single leaf bone with no bones of its own may leave any body bone, and is an
+  end (`Spine2End`, `ChestEnd`). The rabbit's skeletons needed both (2026-10-31): the root a little behind the hind
+  legs with the tail off it, and leaf bones on the hubs. Any other chain off the body is refused.
+- **The body can bend.** At least `min_rig_spine_bones` bones (2 for `creature`, provisional) lie between the hind
+  legs' bone and the chest, measured as `rig_spine_bones`. A failure tries the next seed. The rabbit's first passing
+  seed joined the hips straight to the chest, 61 cm apart, and every other check passed it. The wolf's seeds have 2
+  and 4. A project's older copy of the type declares no limit, so nothing is refused there.
 - **How far the head is turned** is measured and recorded (`rig_head_turn`). The head's skin is the skin the `Head`
   and `…End` head bones lead; its forward-most fifth, averaged, is the muzzle. The turn is how far the muzzle stands
   off the line through the hips and chest joints, as a share of the height. The finish straightens it (below).
@@ -90,7 +112,7 @@ that review. It refuses a rig changed since it was made, a rig made from a model
 rig whose lineage's output rights are `unknown` or `restricted`.
 
 **Facing.** The head end is read from the highest skin. A creature whose tail stands above its head reads the wrong
-way round. Its hind legs then seem to leave the body away from the root, so it is refused, with that reason. One case
+way round. Its hind legs then seem to leave the body off the line from the root to the chest, so it is refused, with that reason. One case
 is not refused: a rig that SkinTokens roots at the chest, on a creature whose tail stands above its head, would be named
 back to front. The review poses show it, because the wrong leg lifts.
 
@@ -469,13 +491,14 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 
 ## Computed motions (B4)
 
-A walk and an idle can also be computed on the creature's rig, with no video and no video2rig calibration. They are
-baked, reviewed, approved and delivered as a clip is:
+A walk, an idle and a hop can also be computed on the creature's rig, with no video and no video2rig calibration.
+They are baked, reviewed, approved and delivered as a clip is:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame creature gait wolf idle
 slopforge --project ~/UnityProjects/MyGame animation approve wolf gait_idle --confirm   # after the review sheet
 slopforge --project ~/UnityProjects/MyGame creature gait wolf walk                      # the video walk's fallback
+slopforge --project ~/UnityProjects/MyGame creature gait rabbit hop
 ```
 
 - **The idle** (`procedural_motions.idle`, stage `procedural_motion`):
@@ -495,7 +518,32 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
   7.1°. The owner approved it ("Yes, right is good"). It was delivered to Unity with the video walk `walk_s3` as the
   controller's default state, and Play mode passed.
 
-- **The walk (`blender/procedural_gait.py`, stage `procedural_motion`).** Both motions run on the rig .blend B1
+- **The hop** (`procedural_motions.hop`, on the same script and stage):
+  - The feet step in pairs. The hind pair lands and pushes off. Every foot is off the floor for a moment, reported
+    as `airborne_share`. The front pair lands and lifts as the hind pair lands again. `duty` is under half so that
+    the moment in the air exists.
+  - The middle of the back rises to that moment and the body tips about it, nose-up as the hind feet push and
+    nose-down as the front takes the weight, so the chest rises first and the hips follow. Tipping about the hips
+    (the first try) dropped the chest almost to the floor, and the body never seemed to leave it.
+  - The front paws are not a mirror. The left leads: it lands two frames earlier and further on, and lifts higher.
+    With the two paws almost together, the owner found they "feel like they are a mirror and a bit stiff". The
+    shoulder blades swing with their own legs.
+  - Each landing sinks into the end of the body that landed. Toes hang in the air, the head follows the tip late and
+    dips as the front lands, and the ears and tail trail, each bone later than the one before. The ears are the
+    head's end bones that grow from another end bone; a lone nub on the head stays still.
+  - A hopping foot goes up and comes down steeply, reaching little near the floor. One that reached late skimmed the
+    floor as it landed (0.15 m/s of slide on the rabbit, 0.003 without).
+  - The rabbit's hop (2026-11-01) was 8 hops in 6 s, with a 0.17° seam, no IK miss and 0.003 m/s of stance slide. The
+    owner's verdict on the Blender render was "good, keep it". Delivered to Unity with the rabbit's idle, Play mode
+    passed and the owner passed the Unity film. The type's numbers are that hop's; they are not measured on any other
+    creature.
+  - It is computed because the video route has not drawn one. Five Wan clips (seeds 1-5) were refused for views that
+    disagree on the body by 2.8-5.9 % of the height, against a 1.5 % limit, and one seed of a reworded prompt (all four
+    feet leaving and landing together) by 6.8 %, before that run was stopped, so the wording is not settled. The limit
+    is not at fault: silhouette tops that match to 0.1 px on a rendered motion miss by 15-41 px on these clips, and in
+    the side view the rabbit's lowest point never leaves the floor. `video_motions` has no hop for this reason.
+
+- **The walk (`blender/procedural_gait.py`, stage `procedural_motion`).** All three motions run on the rig .blend B1
   made.
   - The body travels forward at stride / period, with a small bob and sway.
   - Each foot is planted for `duty` of the period and swings to its next plant on a lifted arc. The order is hind
@@ -506,7 +554,9 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
   - The toes keep their rest angle to the ground, so a planted foot does not slide (the wolf: 0.18 m/s without
     this, 0.001 with it).
   - The tail sways, each bone a little later than the one above.
-  - The keys are baked on every frame and the IK removed.
+  - The keys are baked on every frame and the IK removed. A bone of a leg's IK that turns past 90° from rest is
+    refused, and the refusal names the bone and frame. Toes are left out: they turn with the paw and are no joint the
+    IK can flip.
 - **The body's height.** A foot planted half a stride ahead can be out of reach of a leg at rest height. The body is
   carried as low as the stride's longest reach needs (`REACH`, 0.97 of the leg's length), at one height for the
   whole walk, so it does not dip at each reach.
@@ -547,7 +597,7 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
 - **Not covered yet:**
   - turning;
   - slopes and uneven ground;
-  - gaits other than the walk;
+  - gaits other than the walk and the hop;
   - a front-leg elbow or a hind knee that bends the other way at rest. The fixture quadruped's hind knees bend
     backwards and never flipped with the fixed pole; the wolf's bend forwards and did.
 
@@ -759,7 +809,8 @@ video. The limits can be revised with new evidence, and passing them qualifies n
 | Worst tail bone's p95 | ≤ 40° | 27.2° | 18.6° | 24.9° | 28.5° |
 | Joint error with travel removed, median (share of height) | ≤ 0.025 | 0.011 | 0.020 | 0.008 | 0.007 |
 | Joint error with travel removed, p95 | ≤ 0.10 | 0.050 | 0.071 | 0.029 | 0.064 |
-| Detection, side view | ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, side view (recorded, not judged since 2026-11-01) | was ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, the better camera per joint (since 2026-11-01) | ≥ 0.85 | not measured | not measured | not measured | not measured |
 | Detection, front view | ≥ 0.45 | 0.69 | 0.65 | 0.56 | 0.59 |
 | Limb-end tips read in their better view (share of frames) | ≥ 0.95 | 1.0 | 1.0 | 1.0 | 1.0 |
 | Near/far swap rate, worst left/right pair | ≤ 0.15 | 0.00 | 0.14 | 0.01 | 0.096 |
@@ -785,7 +836,11 @@ clip's front detection (0.56).
   the fit and the truth, over the creature's height. World-space error belongs to D9
   ([#141](https://github.com/gysahlgreene/SlopForge/issues/141)), because clips walked on the spot come back with travel.
 - *Detection:* the share of frames in which the reader reads a joint at confidence ≥ 0.4, the fit's own "unsure"
-  limit. The front view never sees the hips, spine and tail base, so its limit is lower.
+  limit. The front view never sees the hips, spine and tail base, so its limit is lower. The judged share takes each
+  joint's better camera (`detection_best_view`, owner ruling, 2026-11-01): a joint counts as seen if either camera
+  sees it. The side camera's own share is recorded as `detection_side`. It was the limit until the rabbit: its round
+  body hides the far legs and inner spine from that camera (0.75, the wolf 0.88) while its bone errors stay well inside
+  their limits. By the better camera the rabbit reads 0.91 and the wolf 0.93.
 - *Swap rate:* per left/right pair, the share of frames in which the fit puts the far limb near. Only frames where the
   true pair is more than 2 % of the height apart in the body's side plane count.
   The shoulder blades are left out of the judged rate (owner ruling, 2026-10-30): on B1's wolf they sit close together

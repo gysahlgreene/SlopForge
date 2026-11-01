@@ -42,7 +42,8 @@ _CANDIDATE_QUALITY_CODES = frozenset({
 _KIND_CODES: Dict[str, Dict[str, tuple[str, str]]] = {
     "rig": {"rig_limb_missing": ("rig_limbs_missing", "max_rig_limbs_missing"),
             "rig_asymmetric": ("rig_asymmetry", "max_rig_asymmetry"),
-            "rig_bone_outside": ("rig_bones_outside", "max_rig_bones_outside")},
+            "rig_bone_outside": ("rig_bones_outside", "max_rig_bones_outside"),
+            "rig_spine": ("rig_spine_bones", "min_rig_spine_bones")},
     # B5's intake (slopforge/video_intake.py), then video2rig's check of the two views (D7, exam v1's limits)
     "video": {"video_frame_rate": ("video_duplicate_share", "max_video_duplicate_share"),
               "video_frame0": ("video_frame0_difference", "max_video_frame0_difference"),
