@@ -233,6 +233,18 @@ def test_a_computed_idle_is_built_baked_whole_and_registered_still(gaited):
     assert result["clip"] == "gait_idle"
 
 
+def test_a_computed_hop_gets_its_body_moves_in_metres_with_the_bones_they_turn(gaited):
+    root, config, manifest, calls = gaited
+    asset = manifest["assets"]["creature:wolf"]
+    result = pipeline.gait_creature(root, config, manifest, "wolf", "hop")
+    _, request = calls["gait"]
+    height = json.loads((root / asset["rigging"]["structure"]).read_text())["measured"]["height"]
+    assert request["stride_m"] == pytest.approx(0.4 * height) and request["rise_m"] == pytest.approx(0.1 * height)
+    assert request["pitch_deg"] == 6 and request["flex_deg"] == 12 and request["duty"] == 0.36
+    assert request["neck"] == ["Neck1", "Head"] and request["spine"][-1] == "Chest" and "ears" in request
+    assert calls["bake"][1]["still"] is False and result["clip"] == "gait_hop"
+
+
 def test_a_computed_walks_bake_is_not_still(gaited):
     root, config, manifest, calls = gaited
     pipeline.gait_creature(root, config, manifest, "wolf", "walk")

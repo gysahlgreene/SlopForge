@@ -491,13 +491,14 @@ slopforge --project ~/UnityProjects/MyGame animation approve wolf walk_s4 --conf
 
 ## Computed motions (B4)
 
-A walk and an idle can also be computed on the creature's rig, with no video and no video2rig calibration. They are
-baked, reviewed, approved and delivered as a clip is:
+A walk, an idle and a hop can also be computed on the creature's rig, with no video and no video2rig calibration.
+They are baked, reviewed, approved and delivered as a clip is:
 
 ```sh
 slopforge --project ~/UnityProjects/MyGame creature gait wolf idle
 slopforge --project ~/UnityProjects/MyGame animation approve wolf gait_idle --confirm   # after the review sheet
 slopforge --project ~/UnityProjects/MyGame creature gait wolf walk                      # the video walk's fallback
+slopforge --project ~/UnityProjects/MyGame creature gait rabbit hop
 ```
 
 - **The idle** (`procedural_motions.idle`, stage `procedural_motion`):
@@ -517,7 +518,32 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
   7.1°. The owner approved it ("Yes, right is good"). It was delivered to Unity with the video walk `walk_s3` as the
   controller's default state, and Play mode passed.
 
-- **The walk (`blender/procedural_gait.py`, stage `procedural_motion`).** Both motions run on the rig .blend B1
+- **The hop** (`procedural_motions.hop`, on the same script and stage):
+  - The feet step in pairs. The hind pair lands and pushes off. Every foot is off the floor for a moment, reported
+    as `airborne_share`. The front pair lands and lifts as the hind pair lands again. `duty` is under half so that
+    the moment in the air exists.
+  - The middle of the back rises to that moment and the body tips about it, nose-up as the hind feet push and
+    nose-down as the front takes the weight, so the chest rises first and the hips follow. Tipping about the hips
+    (the first try) dropped the chest almost to the floor, and the body never seemed to leave it.
+  - The front paws are not a mirror. The left leads: it lands two frames earlier and further on, and lifts higher.
+    With the two paws almost together, the owner found they "feel like they are a mirror and a bit stiff". The
+    shoulder blades swing with their own legs.
+  - Each landing sinks into the end of the body that landed. Toes hang in the air, the head follows the tip late and
+    dips as the front lands, and the ears and tail trail, each bone later than the one before. The ears are the
+    head's end bones that grow from another end bone; a lone nub on the head stays still.
+  - A hopping foot goes up and comes down steeply, reaching little near the floor. One that reached late skimmed the
+    floor as it landed (0.15 m/s of slide on the rabbit, 0.003 without).
+  - The rabbit's hop (2026-11-01) was 8 hops in 6 s, with a 0.17° seam, no IK miss and 0.003 m/s of stance slide. The
+    owner's verdict on the Blender render was "good, keep it". Delivered to Unity with the rabbit's idle, Play mode
+    passed and the owner passed the Unity film. The type's numbers are that hop's; they are not measured on any other
+    creature.
+  - It is computed because the video route has not drawn one. Five Wan clips (seeds 1-5) were refused for views that
+    disagree on the body by 2.8-5.9 % of the height, against a 1.5 % limit, and one seed of a reworded prompt (all four
+    feet leaving and landing together) by 6.8 %, before that run was stopped, so the wording is not settled. The limit
+    is not at fault: silhouette tops that match to 0.1 px on a rendered motion miss by 15-41 px on these clips, and in
+    the side view the rabbit's lowest point never leaves the floor. `video_motions` has no hop for this reason.
+
+- **The walk (`blender/procedural_gait.py`, stage `procedural_motion`).** All three motions run on the rig .blend B1
   made.
   - The body travels forward at stride / period, with a small bob and sway.
   - Each foot is planted for `duty` of the period and swings to its next plant on a lifted arc. The order is hind
@@ -528,7 +554,9 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
   - The toes keep their rest angle to the ground, so a planted foot does not slide (the wolf: 0.18 m/s without
     this, 0.001 with it).
   - The tail sways, each bone a little later than the one above.
-  - The keys are baked on every frame and the IK removed.
+  - The keys are baked on every frame and the IK removed. A bone of a leg's IK that turns past 90° from rest is
+    refused, and the refusal names the bone and frame. Toes are left out: they turn with the paw and are no joint the
+    IK can flip.
 - **The body's height.** A foot planted half a stride ahead can be out of reach of a leg at rest height. The body is
   carried as low as the stride's longest reach needs (`REACH`, 0.97 of the leg's length), at one height for the
   whole walk, so it does not dip at each reach.
@@ -569,7 +597,7 @@ slopforge --project ~/UnityProjects/MyGame creature gait wolf walk              
 - **Not covered yet:**
   - turning;
   - slopes and uneven ground;
-  - gaits other than the walk;
+  - gaits other than the walk and the hop;
   - a front-leg elbow or a hind knee that bends the other way at rest. The fixture quadruped's hind knees bend
     backwards and never flipped with the fixed pole; the wolf's bend forwards and did.
 
