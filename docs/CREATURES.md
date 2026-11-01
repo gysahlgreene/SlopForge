@@ -781,7 +781,8 @@ video. The limits can be revised with new evidence, and passing them qualifies n
 | Worst tail bone's p95 | ≤ 40° | 27.2° | 18.6° | 24.9° | 28.5° |
 | Joint error with travel removed, median (share of height) | ≤ 0.025 | 0.011 | 0.020 | 0.008 | 0.007 |
 | Joint error with travel removed, p95 | ≤ 0.10 | 0.050 | 0.071 | 0.029 | 0.064 |
-| Detection, side view | ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, side view (recorded, not judged since 2026-11-01) | was ≥ 0.85 | 0.98 | 0.995 | 0.92 | 0.92 |
+| Detection, the better camera per joint (since 2026-11-01) | ≥ 0.85 | not measured | not measured | not measured | not measured |
 | Detection, front view | ≥ 0.45 | 0.69 | 0.65 | 0.56 | 0.59 |
 | Limb-end tips read in their better view (share of frames) | ≥ 0.95 | 1.0 | 1.0 | 1.0 | 1.0 |
 | Near/far swap rate, worst left/right pair | ≤ 0.15 | 0.00 | 0.14 | 0.01 | 0.096 |
@@ -807,7 +808,11 @@ clip's front detection (0.56).
   the fit and the truth, over the creature's height. World-space error belongs to D9
   ([#141](https://github.com/gysahlgreene/SlopForge/issues/141)), because clips walked on the spot come back with travel.
 - *Detection:* the share of frames in which the reader reads a joint at confidence ≥ 0.4, the fit's own "unsure"
-  limit. The front view never sees the hips, spine and tail base, so its limit is lower.
+  limit. The front view never sees the hips, spine and tail base, so its limit is lower. The judged share takes each
+  joint's better camera (`detection_best_view`, owner ruling, 2026-11-01): a joint counts as seen if either camera
+  sees it. The side camera's own share is recorded as `detection_side`. It was the limit until the rabbit: its round
+  body hides the far legs and inner spine from that camera (0.75, the wolf 0.88) while its bone errors stay well inside
+  their limits. By the better camera the rabbit reads 0.91 and the wolf 0.93.
 - *Swap rate:* per left/right pair, the share of frames in which the fit puts the far limb near. Only frames where the
   true pair is more than 2 % of the height apart in the body's side plane count.
   The shoulder blades are left out of the judged rate (owner ruling, 2026-10-30): on B1's wolf they sit close together
