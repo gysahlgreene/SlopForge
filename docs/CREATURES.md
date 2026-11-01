@@ -3,8 +3,9 @@
 M5 (Creatures/Generic rigs) can generate a four-legged creature, rig it for review (package B1), and calibrate its
 video2rig views and render known motions (B2), train its joint reader and examine it on a known motion (B3). It
 generates walk clips with Wan 2.2 (B5), reads them onto the rig
-in place as looping animations for review (B6), computes a walk and an idle on the rig without video (B4), and delivers the approved ones to Unity as a Generic controller and
-prefab played in Play mode (B7). This page documents the creature asset type, its rig, and the creature-motion provider the track will
+in place as looping animations for review (B6), computes a walk, an idle and a hop on the rig without video (B4), and delivers the approved ones to Unity as a Generic controller and
+prefab played in Play mode (B7). Two animals have been through it, one run each: the wolf and
+[the rabbit](media/creature-rabbit-2026-11/README.md). The video route has passed on the wolf only. This page documents the creature asset type, its rig, and the creature-motion provider the track will
 use. The design and its packages are in the
 [AI motion sources plan](https://github.com/gysahlgreene/SlopForge/blob/docs/ai-motion-sources-plan/docs/superpowers/plans/2026-10-27-ai-motion-sources.md)
 (epic [#128](https://github.com/gysahlgreene/SlopForge/issues/128)).

@@ -28,7 +28,7 @@ SlopForge connects ComfyUI generation, Blender processing, human review, and Uni
 | [Structures and environments](#structures-and-environments) — buildings, ruins, modular kits | **Provisional** for modular kits on the H100 `final` tier: three kits, two independent runs each, passed every check through an assembled Unity scene. Standalone structures are generated at real size. Not yet Qualified | Stone, timber and sci-fi rooms assembled in Unity; three real-size structures and three ruin pieces as lit turntables |
 | [Scenes and natural environments](#scenes-and-natural-environments) — terrain, rocks, trees, ground cover, assembled showcases | **Experimental**: one moorland scene, approved by the owner, built from briefs and rendered in Unity with a flythrough; now a recipe and `scene-render`, rebuilt live from a fresh project | The flythrough above; six stills |
 | [Weapons](#weapons) — pistols, swords, crossbows | **Experimental**: a pistol, a longsword and a crossbow through the full pipeline, each from one brief with no manual repair; the owner accepted the look for now (2026-10-24). The pistol's slide and trigger publish as a Unity prefab whose parts move as declared, checked in Play mode. The protocol comes next | The pistol in motion; three weapons as lit turntables beside their concepts |
-| [Creatures](docs/CREATURES.md) — rigged quadrupeds with walk loops | **Experimental**: a generated wolf rigged automatically, its walk read from AI video (Wan 2.2, video2rig) into an in-place looping clip and played as a Unity Generic rig. The owner judged the latest walk better but not yet shippable (a front paw snaps, a patch under the chest). One creature, one motion | [The larger start frame and fit D](docs/media/creature-fit-d-2026-10/README.md); [reader exam](docs/media/creature-reader-b3-2026-10/README.md); [Unity delivery](docs/media/creature-unity-b7-2026-10/README.md) |
+| [Creatures](#creatures) — rigged quadrupeds with looping motions | **Experimental**: two generated animals rigged automatically and played as Unity Generic rigs. A wolf walks on a clip read from AI video (Wan 2.2, video2rig) and idles on a computed motion; the owner judged the walk better but not yet shippable (a front paw snaps, a patch under the chest). A rabbit hops and idles on computed motions the owner passed in Unity; AI video has not drawn it a hop that passes. Half the rabbit's models broke and one rig seed in eight passed. The protocol comes next | The rabbit's hop in Unity; [the rabbit, brief to Unity](docs/media/creature-rabbit-2026-11/README.md); [the wolf's fit](docs/media/creature-fit-d-2026-10/README.md); [reader exam](docs/media/creature-reader-b3-2026-10/README.md); [Unity delivery](docs/media/creature-unity-b7-2026-10/README.md) |
 
 Every 3D asset type shares the same [materials and textures](#materials-and-textures) stage. Generation is stochastic: candidates must pass checks and human review, or the pipeline reports failure. A successful export alone does not make an asset game-ready.
 
@@ -247,6 +247,18 @@ than drawn.
 [How they were made, evidence and limits →](docs/media/weapon-pipeline-2026-10/README.md) ·
 [Weapons guide →](docs/WEAPONS.md)
 
+## Creatures
+
+<p align="center"><img src="docs/media/creature-rabbit-2026-11/rabbit_hop_unity.gif" width="420" alt="A brown rabbit hopping on the spot in Unity: the front paws land one after the other, the back arches as the hind feet come through, and the ears trail behind"></p>
+
+**A second animal through the same pipeline** (2026-11-01): a rabbit from the brief "Wild brown rabbit", rigged
+automatically, its hop computed on the rig and played from a Unity prefab, in place. One run of one brief, and the hop's
+settings are measured on this rabbit only. [Evidence and limits →](docs/media/creature-rabbit-2026-11/README.md)
+
+Motion comes from two routes. **AI video** reads a clip onto the rig: the wolf's walk came this way, and the owner
+preferred it to a computed walk, but it has not yet passed on a second animal. **Computed motion** builds a walk, idle or
+hop on the rig with no video and no GPU. [How it works →](docs/CREATURES.md)
+
 ## Materials and textures
 
 ![Stone lantern: concept, base color, normal, roughness, metallic, emission and review renders](docs/media/material-showcase-2026-10/stone_lantern_v3.png)
@@ -306,6 +318,7 @@ No model weights are bundled; each is downloaded from its publisher. The default
 | Tiling material upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) x4plus | BSD-3-Clause |
 | Character rigging | [SkinTokens](https://github.com/VAST-AI-Research/SkinTokens), or Blender's Rigify | MIT; GPL-2.0+ |
 | Character motion | [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu/) | Free for any use, not resold |
+| Creature motion from video | [Wan 2.2](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B) image-to-video, read onto the rig by [video2rig](https://github.com/canitcode/video2rig), run as a separate program | Apache-2.0; AGPL-3.0 |
 | Inference server | [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your machine or a remote GPU | GPL-3.0 |
 | Mesh processing, UVs, normal bakes, review renders | [Blender](https://www.blender.org/) 5.1 | GPL-2.0+ |
 | Engine delivery, prefabs, Play-mode checks | [Unity](https://unity.com/) 6000.6.3f1, URP 17.6.0, Unity Test Framework | Unity's terms |
@@ -342,6 +355,7 @@ slopforge --project ~/UnityProjects/MyGame doctor
 | Material and texture generation | Declared non-metal, metal, emissive and glass regions, with baked normal maps at 4096² by default (2048² for kit modules). Candidates are checked for part count, concept fit, colour against the concept, glowing and glass parts, and metal. Metal decoded darker than its concept is brightened to it; weapons also have small parts' colours shifted to the concept, other types do not. |
 | Structures and modular kits | **Provisional** for the stone ruin, timber house and sci-fi corridor kits on `h100`/`final`, commit `5ceac3b`, Unity 6000.6.3f1 / URP 17.6.0: two independent runs each passed every owner-accepted M2 criterion through an assembled Unity scene ([criterion M2-v3](docs/media/kits-provisional-2026-10-v3/README.md)). Not Qualified, and the owner judged the kits' look below the props'. The stone kit's material step changed after that commit (#101) and has no protocol run. Standalone structures are generated at real size, one run each. The 2026-10-24 mesh-reduction change also applies to kits, with no protocol rerun. |
 | Weapons | **Experimental**: a pistol, a longsword and a crossbow, one run each through Blender on the H100 `final` tier ([evidence](docs/media/weapon-pipeline-2026-10/README.md)); the owner accepted the look for now. A pistol with a slide and trigger publishes to Unity as a prefab whose parts move as declared, with motion checks and Play mode passing on 4 of the last 5 seeds ([evidence](docs/media/moving-parts-2026-10/README.md)). No protocol; the sword and crossbow have no Unity render. |
+| Creatures | **Experimental**: a wolf and a rabbit, one brief each, through Unity Play mode with the owner's review at each gate ([rabbit](docs/media/creature-rabbit-2026-11/README.md), [wolf in Unity](docs/media/creature-unity-b7-2026-10/README.md)). The AI video route has passed on the wolf only. The three-brief protocol has not run. |
 | Scenes and natural environments | **Experimental**: one owner-approved moorland scene (prototype); `scene-render` and the `moorland_ruin` recipe rebuilt it once from a blank project ([live run](docs/media/natural-live-2026-10/README.md)). Rendering only: no Play mode or performance check. |
 | Mesh/material preparation and Unity delivery | 28 of the 30 protocol prop runs imported into Unity URP with materials assigned, rendered in editor batch mode (two stopped earlier). Every M2-v3 kit module and every moorland model was published with `approve-texture`; kit scenes are checked in Unity for grounding, colliders, static flags and seam gaps. Play mode is not run. |
 | Humanoid rigging | Four generated characters in four art styles rig automatically with SkinTokens and walk on retargeted motion capture (natural stride, clean feet and shoulders); not approved, and model quality is well below target. Humanoid test 1 has a valid Unity Humanoid Avatar and visible walk playback. A separate diagnostic rig has approved body deformation. |

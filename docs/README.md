@@ -33,7 +33,8 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Natural environments](NATURAL-ENVIRONMENTS.md): rocks, tiling ground and bark, foliage cut-outs, trees and shrubs, and `scene-render`
 - [Character readiness and rigging](CHARACTER-RIGGING.md)
 - [Character animation libraries](CHARACTER-ANIMATIONS.md)
-- [Creatures](CREATURES.md): the creature asset type and its rig (`creature rig`, B1), and video2rig as the creature-motion provider (install, preflight, what runs where, licence; M5)
+- [Creatures](CREATURES.md): the creature asset type and its rig (`creature rig`, B1), computed motions (`creature gait`: walk, idle, hop), and video2rig as the creature-motion provider (install, preflight, what runs where, licence; M5)
+- [The rabbit, brief to Unity](media/creature-rabbit-2026-11/README.md): M5's second creature in one run: every stage's result, the computed hop's three versions, why AI video did not draw the hop, and what went wrong
 - [Creature rig, live](media/creature-rig-b1-2026-10/README.md): a generated wolf rigged by `creature rig` three times; seed verdicts, the kept rig's names and `fit_bones`, and its contact sheet (deformation review pending)
 - [Creature views, live](media/creature-views-b2-2026-10/README.md): the generated wolf's start frame, training pictures and a known motion rendered through its cameras (B2)
 - [Creature walk, larger start frame and refit](media/creature-fit-d-2026-10/README.md): camera layouts and five fits of one wolf walk compared, and the fit the owner chose (M5)
