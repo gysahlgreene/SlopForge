@@ -162,3 +162,14 @@ procedural_motions:
     sway: 0.007
     look_deg: 7
     tail_deg: 4
+  # a rabbit's slow hop: 8 hops in 6 s, every foot off the floor for a moment, the body rising 10 % of the height and
+  # tipping 6 degrees each way, the back arching 12. The owner took these on the rabbit (2026-11-01, "good, keep it").
+  hop:
+    period_s: 0.75
+    duty: 0.36
+    stride: 0.4
+    lift: 0.08
+    rise: 0.10
+    pitch_deg: 6
+    flex_deg: 12
+    seconds: 6.0
