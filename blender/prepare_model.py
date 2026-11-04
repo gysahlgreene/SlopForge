@@ -469,7 +469,8 @@ if oriented:
     # 30 degrees about its length, since its outline barely changes with tilt. A weapon whose thinnest axis is nearer
     # vertical than horizontal lies flat in its concept, like that crossbow, and the axis is its top; a side-on
     # weapon's top is +Z. Its length is its longest axis across the top (the full 3D one leans 19-25 degrees towards
-    # a pistol's grip), pointed at the end the concept draws on the right. Of the two axes across the top, the length
+    # a pistol's grip), pointed at the end further from the grip, or with a grip near the middle at the end the concept
+    # draws on the right. Of the two axes across the top, the length
     # is the one whose line through the centre passes nearest the grip: a crossbow's bow can spread almost as far as
     # its stock (2026-10-24: variances 0.051 and 0.063).
     centred = samples - samples.mean(0)
@@ -509,7 +510,17 @@ if oriented:
         towards_tip = 1.0
         frame = "width to X, front to -Y, top to +Z"
     else:
-        forward, top = Vector(length * (1.0 if towards_tip >= 0 else -1.0)), Vector(top)
+        # The image edit flipped 3 of 6 weapon pictures (2026-11-04), which put a wrench's cap on the right, and only
+        # Unity's check that a weapon points away from its grip found it, after the whole build.
+        tip = 1.0 if towards_tip >= 0 else -1.0
+        if held.any():
+            along = world @ length
+            ahead, behind = along.max() - along[held].mean(), along[held].mean() - along.min()
+            if abs(ahead - behind) > 0.1 * (ahead + behind):
+                tip = 1.0 if ahead > behind else -1.0
+            if tip * towards_tip < 0:
+                print("Drawn with the tip on the left: the end further from the grip goes forward")
+        forward, top = Vector(length * tip), Vector(top)
         source = Matrix((forward, top, forward.cross(top))).transposed()
         target = Matrix(((0.0, -1.0, 0.0), (0.0, 0.0, 1.0), (-1.0, 0.0, 0.0))).transposed()
         obj.data.transform((target @ source.inverted()).to_4x4())

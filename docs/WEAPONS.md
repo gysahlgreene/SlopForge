@@ -38,8 +38,11 @@ bowstring feature is deferred: every crossbow so far kept its string.
       from above. That axis is its top.
     - A side-on weapon's top is +Z.
   - **Its length** is whichever of the two axes across the top passes nearest the grip: a crossbow's bow can spread
-    almost as far as its stock is long. It is pointed at the end the concept draws on the right, the tip or muzzle,
-    and turned to Blender −Y, which is forward once in Unity.
+    almost as far as its stock is long. It is pointed at the end further from the grip and turned to Blender −Y, which
+    is forward once in Unity. The image edit flipped 3 of 6 weapon pictures on 2026-11-04, and the end drawn on the
+    right was then a wrench's cap. Only when the grip is near the middle (the ends within 10% of the length of each
+    other) does the end drawn on the right decide. Ask for the tip on the right anyway: it's what that case relies on.
+  - **Rebuilding a mesh already seen:** `approve --force --mesh-seed <seed>` gives the first attempt that mesh's seed, read from its `generation.json`, after a fix in the route. Changing `prepare_model.py` reruns the mesh stage for a weapon, because `remove_hidden_faces` ties that stage to the tool. Back up the candidate first and compare the new mesh with the old. In one test (a wrench, 2026-11-04) the same seed and picture gave identical GLBs and an identical base colour map; that's one case, so compare every time.
   - **An unreadable view is retried.** Inspection records how far the length runs along the concept's right
     (`tip_alignment`). Below 0.25 the view looks along the weapon and the tip's end is a guess, so the candidate fails
     as the retryable `weapon_orientation`. A reconstruction of two crossed swords measured 0.0.
