@@ -1423,6 +1423,53 @@ print("KEEP", "".join("1" if k else "0" for k in keep))
 
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class BlenderUnwrapFoldTests(unittest.TestCase):
+    def test_an_overhang_joined_to_the_surface_below_unwraps_without_overlap(self):
+        # A lapel merges into the coat at its top and lies over it lower down. All its faces point the same way, so
+        # Smart UV Project flattens both layers onto the same texels, and both baked maps show one layer's colour on the
+        # other: dark marks on 2% of a coat's triangles, every overlap inside one island (2026-11-03). A ramp winding a
+        # little over one turn has that shape: every normal within a few degrees of up, and the ends overlap.
+        script = f'''import bpy, bmesh, math, sys
+sys.path.insert(0, {str(ROOT / "blender")!r})
+from mesh_cleanup import folded_uv_faces, unwrap_without_folds
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new()
+rings = []
+for step in range(113):
+    angle = math.radians(step * 3.75)
+    rings.append([bm.verts.new((radius * math.cos(angle), radius * math.sin(angle), step * 0.002)) for radius in (1.0, 2.0)])
+for inner, outer in zip(rings, rings[1:]):
+    bm.faces.new((inner[0], inner[1], outer[1], outer[0]))
+bmesh.ops.triangulate(bm, faces=bm.faces)
+mesh = bpy.data.meshes.new("ramp")
+bm.to_mesh(mesh)
+obj = bpy.data.objects.new("ramp", mesh)
+bpy.context.collection.objects.link(obj)
+bpy.context.view_layer.objects.active = obj
+obj.select_set(True)
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.select_all(action="SELECT")
+margin = 4 / 2048
+bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
+bpy.ops.object.mode_set(mode="OBJECT")
+print("BEFORE", len(folded_uv_faces(mesh)))
+bpy.ops.object.mode_set(mode="EDIT")
+bpy.ops.mesh.select_all(action="SELECT")
+unwrap_without_folds([obj], margin)
+print("AFTER", len(folded_uv_faces(mesh)), "MODE", obj.mode, "FACES", len(mesh.polygons))
+'''
+        result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        lines = {line.split()[0]: line.split() for line in result.stdout.splitlines()
+                 if line.startswith(("BEFORE", "AFTER"))}
+        self.assertGreater(int(lines["BEFORE"][1]), 20)  # the fixture does fold under the plain unwrap
+        self.assertEqual(int(lines["AFTER"][1]), 0)
+        self.assertEqual(lines["AFTER"][3], "OBJECT")
+        self.assertEqual(lines["AFTER"][5], str(112 * 2))
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderViewFitTests(unittest.TestCase):
     def test_an_elevation_is_taken_only_when_it_fits_clearly_better(self):
         # A side-profile pistol's silhouette barely changes when seen from a little above: three seeds fitted best at

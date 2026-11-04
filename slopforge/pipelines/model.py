@@ -1700,6 +1700,15 @@ def _shape_guide_image(root, config, asset_type, name, guide, aspect):
     return destination
 
 
+def _aspect_applies(asked, aspect, graph):
+    """An edit graph's canvas is its input image's, so a type's default aspect skips one; an aspect asked for by name
+    still reaches _with_concept_aspect and fails there."""
+    if asked:
+        return True
+    return bool(aspect) and any("Latent" in node.get("class_type", "") and {"width", "height"} <= node.get("inputs", {}).keys()
+                                for node in graph.values())
+
+
 def _with_concept_aspect(config, asset_type, workflow_path, aspect):
     """Config whose concept workflow renders on this canvas, set like a quality tier's node inputs so the
     concept identity records it; later stages keep the unchanged config."""
@@ -1728,11 +1737,11 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     workflow = pipeline["workflows"].get("image")
     if not workflow:
         raise ValueError("Configure asset_pipeline.workflows.image in ai/project.yaml")
-    aspect = aspect or asset_type.get("aspect")
+    asked_aspect, aspect = aspect, aspect or asset_type.get("aspect")
     guide_path = _shape_guide_image(root, config, asset_type, name, shape_guide, aspect) if shape_guide else None
     workflow, conditioning = concept_route(config, asset_type, conditioning, guide_path)
     workflow_path = resolve_workflow(root, workflow)
-    if aspect:
+    if _aspect_applies(asked_aspect, aspect, json.loads(workflow_path.read_text())):
         config = _with_concept_aspect(config, asset_type, workflow_path, aspect)
         pipeline = config["asset_pipeline"]
     prompt = generation_prompt or build_prompt(style, asset_type, description)

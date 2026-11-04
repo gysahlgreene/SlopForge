@@ -6,6 +6,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
+                          unwrap_without_folds,
                           gltf_name, motion_matrix, remove_hidden_faces, separate_part, separate_tagged,
                           sweep_penetration, tag_parts, visible_backfaces)
 from inspect_model import corner_profile, footprint_quadrants, topology_edge_counts
@@ -713,10 +714,7 @@ if not reuse_stage_mesh and not preserve_uvs:
     # a tree stump unwrapped into 10,600 islands used 4.4% of its map. 4 texels and a concave repack gave 19%, and a
     # crate 0.30 -> 0.55, a jug 0.54 -> 0.65, with unchanged stretch (2026-10-22).
     margin = 4 / texture_size
-    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
-    bpy.ops.uv.select_all(action="SELECT")
-    bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
-    bpy.ops.object.mode_set(mode="OBJECT")
+    unwrap_without_folds([obj], margin)
 if mesh_only:
     if detail_source is not None:
         material = bpy.data.materials.new("NormalBake")

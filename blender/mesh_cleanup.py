@@ -1,4 +1,5 @@
 import bmesh
+import bpy
 
 
 def remove_isolated_single_faces(mesh):
@@ -371,6 +372,70 @@ def remove_hidden_faces(mesh, size, directions=32):
     bm.free()
     mesh.update()
     return len(hidden)
+
+
+def folded_uv_faces(mesh, resolution=2048):
+    """Indices of the polygons with a texel in common with another polygon of this mesh."""
+    import numpy as np
+    uv = np.zeros(len(mesh.loops) * 2)
+    mesh.uv_layers.active.data.foreach_get("uv", uv)
+    uv = uv.reshape(-1, 2) * resolution
+    mesh.calc_loop_triangles()
+    owner = np.full((resolution, resolution), -1, np.int32)
+    folded = set()
+    for triangle in mesh.loop_triangles:
+        a, b, c = uv[list(triangle.loops)]
+        area = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+        if abs(area) < 1e-9:
+            continue
+        low = np.maximum(np.floor(np.minimum(np.minimum(a, b), c)).astype(int), 0)
+        high = np.minimum(np.ceil(np.maximum(np.maximum(a, b), c)).astype(int), resolution)
+        x, y = np.meshgrid(np.arange(low[0], high[0]) + 0.5, np.arange(low[1], high[1]) + 0.5)
+        first = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / area
+        second = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / area
+        inside = (first > 0) & (second > 0) & (first + second < 1)
+        cells = owner[low[1]:high[1], low[0]:high[0]]
+        others = cells[inside]
+        others = np.unique(others[(others >= 0) & (others != triangle.polygon_index)])
+        if others.size:
+            folded.add(triangle.polygon_index)
+            folded.update(others.tolist())
+        cells[inside] = triangle.polygon_index
+    return sorted(folded)
+
+
+def unwrap_without_folds(objects, margin, passes=3):
+    """Smart UV Project and pack the selected faces in edit mode, ending in object mode, with no two faces on the same
+    texels. It flattens faces that point the same way along one direction, even when one layer lies over another and
+    joins it further along, as a lapel does on a coat. Both baked maps then show one layer's colour on the other: dark
+    marks on 2% of a coat's triangles, all inside one island (2026-11-03). The overlapping faces on their own are no
+    longer joined, so a second unwrap of just those separates the layers. The islands are then scaled to match."""
+    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
+    bpy.ops.uv.select_all(action="SELECT")
+    bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.tool_settings.mesh_select_mode = (False, False, True)
+    for attempt in range(passes):
+        folded = {obj: folded_uv_faces(obj.data) for obj in objects}
+        total = sum(len(faces) for faces in folded.values())
+        print(f"UV folds, unwrap {attempt + 1}: {total} faces")
+        if not total:
+            return
+        for obj, faces in folded.items():
+            obj.data.vertices.foreach_set("select", [False] * len(obj.data.vertices))
+            obj.data.edges.foreach_set("select", [False] * len(obj.data.edges))
+            obj.data.polygons.foreach_set("select", [False] * len(obj.data.polygons))
+            for index in faces:
+                obj.data.polygons[index].select = True
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.select_all(action="SELECT")
+        bpy.ops.uv.average_islands_scale()
+        bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
+        bpy.ops.object.mode_set(mode="OBJECT")
+    left = sum(len(folded_uv_faces(obj.data)) for obj in objects)
+    print(f"UV folds, after {passes} more unwraps: {left} faces")
 
 
 def bridge_hidden_paths(bm, keep, rings=128):

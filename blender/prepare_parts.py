@@ -15,7 +15,7 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mesh_cleanup import remove_isolated_single_faces  # noqa: E402
+from mesh_cleanup import remove_isolated_single_faces, unwrap_without_folds  # noqa: E402
 
 MIN_SHARE = 0.02  # a trigger keeps at least this share of the budget whatever its area
 
@@ -85,10 +85,7 @@ def bake_atlases(objects, texture_size, basecolor_output, metallic_output, metal
     bpy.ops.object.mode_set(mode="EDIT")  # multi-object edit mode: the selected parts only
     bpy.ops.mesh.select_all(action="SELECT")
     margin = 4 / texture_size
-    bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=margin)
-    bpy.ops.uv.select_all(action="SELECT")
-    bpy.ops.uv.pack_islands(rotate=True, margin=margin, shape_method="CONCAVE")
-    bpy.ops.object.mode_set(mode="OBJECT")
+    unwrap_without_folds(objects, margin)
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 1
