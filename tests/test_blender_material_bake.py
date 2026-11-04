@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageStat
+from PIL import Image, ImageDraw, ImageOps, ImageStat
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -985,6 +985,25 @@ json.dump({"dims": list(obj.dimensions), "grip": [sum(c[i] for c in held) / len(
         self.assertGreater(fit, 0.7)  # boxes against a hand-drawn concept; generated weapons fit closer
         self.assertLessEqual(abs(abs(theta) - 30), 5)  # the fit searches in 5-degree steps
         self.assertGreater(alignment, 0.8)
+
+    def test_a_weapon_drawn_with_its_tip_on_the_left_still_points_its_tip_forward(self):
+        # The image edit flipped 3 of 6 weapon pictures (2026-11-04): the end on the right was then the wrench's cap, and
+        # only Unity's last check found it, after the whole build. The tip is the end further from the grip.
+        parts = {"blade": ((0.5, 0, 0), (1.0, 0.01, 0.08)), "guard": ((-0.015, 0, 0), (0.03, 0.06, 0.3)),
+                 "grip": ((-0.14, 0, 0), (0.22, 0.05, 0.05))}
+        concept, masks = _boxes_seen_from_front(parts, [], (512, 128), 377.6, (114.4, 64))
+        measured = self.orient(parts, [], ImageOps.mirror(concept), ImageOps.mirror(masks["grip"]))
+        self.assertAlmostEqual(measured["min_y"], -1.003, delta=0.03)  # the tip, forward
+        self.assertAlmostEqual(measured["max_y"], 0.097, delta=0.03)
+
+    def test_a_grip_at_the_middle_leaves_the_tip_to_the_end_drawn_on_the_right(self):
+        # Neither end is clearly the far one, as on a staff held at its middle: the concept's convention decides, and a
+        # grip a little nearer the head doesn't turn it round.
+        parts = {"head": ((0.47, 0, 0), (0.1, 0.1, 0.3)), "shaft": ((0, 0, 0), (0.9, 0.04, 0.04)), "cap": ((-0.45, 0, 0), (0.06, 0.06, 0.06)),
+                 "grip": ((0.03, 0, 0), (0.2, 0.05, 0.05))}
+        concept, masks = _boxes_seen_from_front(parts, [], (512, 128), 377.6, (256, 64))
+        measured = self.orient(parts, [], concept, masks["grip"])
+        self.assertLess(abs(measured["min_y"]), abs(measured["max_y"]))  # the head's end, nearer the grip, forward
 
     def test_a_weapon_rebuilt_facing_the_other_way_still_points_its_tip_forward(self):
         # TRELLIS.2 rebuilt three of four side-profile swords turned 180 degrees, so the concept's view is only

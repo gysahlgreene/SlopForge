@@ -2173,7 +2173,7 @@ def model_route(config, asset_type):
 
 
 def approve(project_root, config, asset_type, style, manifest, key, number, force=False, *,
-            material_prompt=None, material_count=None, quality_tier=None, resume=False, open_number=None):
+            material_prompt=None, material_count=None, quality_tier=None, resume=False, open_number=None, mesh_seed=None):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("candidates", {}).get("items", []) if item["number"] == number), None)
@@ -2227,6 +2227,10 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
     if material_count < 1 or attempts < 1:
         raise ValueError("Material and model candidate budgets must be at least 1")
     mesh_seeds = [secrets.randbits(32) for _ in range(attempts)]
+    if mesh_seed is not None:
+        if resume:
+            raise ValueError("--mesh-seed starts a new run; a resumed run keeps its own seeds")
+        mesh_seeds[0] = mesh_seed
     material_seeds = [] if workflow else [secrets.randbits(32) for _ in range(attempts * material_count)]
     view_seed = secrets.randbits(32) if view_slots else None
     concept_path = root / candidate["path"]

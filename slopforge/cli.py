@@ -93,6 +93,7 @@ def parser():
     approve.add_argument("--material-count", type=int, help="Number of material candidates to bake onto the saved mesh")
     approve.add_argument("--force", action="store_true")
     approve.add_argument("--resume", action="store_true", help="Resume an incomplete prop execution")
+    approve.add_argument("--mesh-seed", type=int, help="Seed for the first mesh attempt, to rebuild a mesh already seen after a fix in the route")
     approve.add_argument("--quality-tier", help="Override the selected candidate's tier for 3D processing")
     approve.add_argument("--part-box", action="append", default=[], dest="part_boxes",
                          help="Where a declared part lies on the approved concept: 'name=x0,y0,x1,y1' as fractions of "
@@ -1117,7 +1118,8 @@ def _run(args):
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),
                           quality_tier=getattr(args, "quality_tier", None),
-                          resume=getattr(args, "resume", False), open_number=getattr(args, "open_number", None))
+                          resume=getattr(args, "resume", False), open_number=getattr(args, "open_number", None),
+                          mesh_seed=getattr(args, "mesh_seed", None))
         save_manifest(manifest_path, manifest)
         return 0
 

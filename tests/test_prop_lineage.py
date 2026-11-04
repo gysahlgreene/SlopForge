@@ -86,7 +86,7 @@ avoid: [environment]
                               self.manifest, "prop:relay", generation_prompt="A copper relay")
 
     def _approve(self, generator, materializer=None, native_materializer=None, force=False, resume=False, material_count=1,
-                 open_number=None):
+                 open_number=None, mesh_seed=None):
         def commands(command, check):
             if "prepare_3d_input.py" in command[1]:
                 Image.new("RGBA", (32, 32), (120, 120, 120, 255)).save(command[command.index("--cutout") + 1])
@@ -101,7 +101,7 @@ avoid: [environment]
                 patch("slopforge.pipelines.model.subprocess.run", side_effect=commands):
             return approve_model(self.root, self.config, self.asset_type, self.style, self.manifest,
                                  "prop:relay", 2, force=force, material_count=material_count, resume=resume,
-                                 open_number=open_number)
+                                 open_number=open_number, mesh_seed=mesh_seed)
 
     def _materializer(self, root, config, asset_type, asset, number, prompt, _stage_mesh, lineage=None, seed=None):
         from slopforge.pipelines.model import material_candidate_paths
@@ -347,6 +347,19 @@ avoid: [environment]
             parents = {item["artifact_id"] for item in artifact["derived_from"]}
             self.assertIn("concept-candidate:2", parents)
             self.assertTrue(any(parent.startswith("mesh:") for parent in parents))
+
+    def test_a_rebuild_can_name_the_mesh_seed_of_its_first_attempt(self):
+        # A mesh the owner has seen is rebuilt from its own seed, not a fresh one, when a fix in the route needs a new run.
+        self._concept_candidates()
+        seeds = []
+        def generator(_root, _config, _image, _name, dest, metadata, seed):
+            seeds.append(seed)
+            dest.write_bytes(b"mesh")
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "output_rights": MESH_RIGHTS}))
+        self._approve(generator, mesh_seed=2157376309)
+        self.assertEqual(seeds[0], 2157376309)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        self.assertEqual(record["executions"][-1]["identity_inputs"]["mesh"]["seeds"][0], 2157376309)
 
     def test_native_candidate_without_its_declared_emitter_tries_the_next_mesh_seed(self):
         from slopforge.validation import apply_declared_emitter
