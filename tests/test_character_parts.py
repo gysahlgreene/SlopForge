@@ -117,6 +117,7 @@ class PartsTests(unittest.TestCase):
             flat = parts.body_normal(body, {"body_smooth": 20})
             self.assertEqual((flat.size, flat.getpixel((0, 0))), ((8, 8), (128, 128, 255)))
 
+    @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
     def test_smoothing_a_body_takes_out_small_lumps_keeps_its_size_and_seams(self):
         # Lit, the generator's small lumps read as a chewed coat, and cast the marks on its back, whatever the paint did (2026-11-04).
         script = f"""import sys
@@ -407,13 +408,14 @@ print("SMOOTHED", len(before), places)
 
     def test_a_build_reduces_from_the_detail_mesh_with_hidden_faces_gone(self):
         # Without these a body spent most of its faces and texture on a double skin's hidden wall, and at half the character budget.
-        command = parts.build_command(Path("in.png"), "body", Path("out"), 7)
+        with mock.patch.object(parts, "blender", return_value="blender"):
+            command = parts.build_command(Path("in.png"), "body", Path("out"), 7)
+            head = parts.build_command(Path("in.png"), "head", Path("out"), 7)
         self.assertIn("--remove-hidden-faces", command)
         self.assertNotIn("--require-manifold", command)
         self.assertEqual(command[command.index("--face-budget") + 1], "60000")
         inputs = json.loads(command[command.index("--workflow-inputs") + 1])
         self.assertEqual(inputs["shape_decimate"]["placement_mode"], "midpoint")
-        head = parts.build_command(Path("in.png"), "head", Path("out"), 7)
         self.assertEqual(head[head.index("--face-budget") + 1], "30000")
 
     @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
