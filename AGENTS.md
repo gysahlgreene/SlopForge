@@ -13,9 +13,9 @@ Before substantial work, read [Product contract](docs/PRODUCT_CONTRACT.md),
 [Current state](CURRENT_STATE.md). Follow the product contract's document precedence;
 expose and reconcile contradictions between peer contracts. AGENTS governs working
 behavior, not independent product direction. User instructions take precedence.
-Work on the active milestone; later work requires a dependency of its gate or
-explicit user direction. Tests/validation check contracts; implementation must
-satisfy them. Update current state with verified evidence and visible gaps.
+Work on the milestone the owner chose; later work requires a dependency of its gate
+or explicit user direction. Tests/validation check contracts; implementation must
+satisfy them.
 
 Before changing a generation or delivery stage, read its existing implementation
 and relevant guidance in [the documentation index](docs/README.md). For generation
@@ -24,6 +24,38 @@ settings and environment requirements, consult [Quality tiers](docs/QUALITY-TIER
 [Agent integration](docs/AGENT-INTEGRATION.md). Preserve the boundaries in
 [Architecture](docs/ARCHITECTURE.md). Follow [Contributing](CONTRIBUTING.md) for
 changes and public evidence.
+
+## Picking up
+
+1. Start at [issue #19](https://github.com/gysahlgreene/SlopForge/issues/19): each milestone's next step, the owner's open decisions, and the work ready to start. The owner chooses what comes next.
+2. Read `private/README.md` in the main checkout (the first line of `git worktree list`) before live GPU runs, Unity work, or anything about a game project. It holds this machine's server, projects, characters, worktrees and past evidence. Git ignores it, so those details stay out of the repo, issues and pull requests.
+3. Read [what's been explored](docs/EXPLORED.md) before trying an approach.
+4. Run `git worktree list`. Carry on parked work in the worktree its issue names, and start anything else in a new worktree off `origin/main`. The main checkout and other worktrees can hold parked uncommitted work.
+
+## Working with the owner
+
+- **Git:** commit, push and open pull requests when the owner asks, or when an approved plan says to. Push to a branch, so `main` only changes through a merged pull request, and merge `main` into a branch to update it. Merges, branch deletions and removing a worktree happen on the owner's word. After each push, wait for the checks: GitHub's runner has no Blender or Unity, so a local pass can't catch everything.
+- **GPU:** it's shared. Run jobs on it and leave the service, its nodes and weights, and its disk as they are unless the owner says otherwise.
+- **Questions:** ask in plain words, with what each option costs. On a vague verdict ("rough", "off"), ask straight away what it's about, with options and a request for a screenshot, before building again.
+- **Reviews:** send images and video into the chat with your tool's file sending, with exact questions, using real materials. Say what you measured and what you didn't. Let the owner call a result good.
+- **Stuck:** after a few rounds with no change in the verdict, stop and offer to park it.
+- **Quality:** fix the stage that caused a defect and regenerate from the brief. A generated asset stays as generated.
+- **Models:** open models the owner may ship in a commercial game, on our own hardware or a service they may use, with no paid clips or 3D APIs. Read each licence at its source, including a tool's default model. Anything excluding the EU is out.
+- **Public:** the repo holds what improves SlopForge. A game's characters, briefs and name stay out unless the owner says otherwise. Machine details stay in `private/`.
+
+## Finishing a piece of work
+
+Do these in order. It's done when a fresh session could carry on from #19 without this conversation.
+
+1. **Verify:** run `make verify`, and say what it doesn't cover.
+2. **Issue:** every piece of work has an issue, under an epic and a milestone. Create one if it doesn't. Comment what changed and the evidence. Close it only when its acceptance is met.
+3. **Issue #19:** update it if a next step, an owner decision or the local-only list changed. Update the epic's status too.
+4. **Status:** record verified evidence and visible gaps in `CURRENT_STATE.md`, and in its Summary if a status changed. Update `ROADMAP.md` if a milestone changed, and [the gallery](docs/SHOWCASE.md) if a result is worth showing.
+5. **Explored:** add a row to [what's been explored](docs/EXPLORED.md) for each thing tried, including failures and the owner's words.
+6. **Local:** record attempts in `private/<work>/LEDGER.md`, and new machine facts in `private/README.md`.
+7. **Uncommitted work:** name its worktree and branch in its issue, and list it in #19.
+8. **Your own memory:** save corrections and decisions there, if your tool has one. If every session needs a rule, add it to this file instead.
+9. **Hand over:** repo changes only reach a fresh session once merged, so propose them in a pull request when the owner has asked for one. Otherwise, tell the owner they're waiting.
 
 ## Turn discoveries into durable fixes
 

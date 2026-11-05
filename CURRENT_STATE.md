@@ -111,7 +111,7 @@ The guided workflow remains development work in the registered
 `feat/guided-character-to-unity` worktree, confirmed by `git worktree list` during
 this task. Preserve it; its existence is not integration or qualification evidence.
 
-## Active character quality work (bounded parallel follow-up)
+## Character quality work
 
 On 2026-10-16, the Aster-9 geometry-only review confirmed that material maps do
 not supply the missing modeled suit forms, while existing topology totals do not
