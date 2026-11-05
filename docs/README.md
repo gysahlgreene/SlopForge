@@ -12,6 +12,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 | --- | --- |
 | [Installation](INSTALL.md) | Python, Blender, ComfyUI, and Unity dependencies |
 | [Setup](SETUP.md) | Project initialization, defaults, and overrides |
+| [Gallery](SHOWCASE.md) | What SlopForge has made, with its evidence and limits |
 | [Examples](EXAMPLES.md) | Props, character candidates, variations, and environment recipes |
 | [Character pipeline demo](DEMO.md) | A live walk-through of the character recipe from a fresh project |
 | [ComfyUI](COMFYUI.md) | Local/remote service configuration and compatible models |
@@ -42,6 +43,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 
 ## Examples and qualification evidence
 
+- [A character built in parts](media/character-parts-2026-11/README.md): one character from the head-and-body route with generated hands, its measurements and limits.
 - [Character styles](media/character-styles-2026-10/README.md): four generated characters in four art styles, rigged automatically and walking, with how they were made and limits.
 - [Moorland scene, live run](media/natural-live-2026-10/README.md): the `moorland_ruin` recipe rebuilt from a blank project and rendered by `scene-render`, with its ruin pieces, interventions and limits. The owner-approved [prototype](media/natural-showcase-2026-10/README.md) came first.
 - [Modular kits, criterion M2-v3](media/kits-provisional-2026-10-v3/README.md): three kits, two runs each, all passing; kits are Provisional. Earlier rounds: [M2-v1](media/kits-provisional-2026-10/README.md) and [M2-v2](media/kits-provisional-2026-10-v2/README.md).

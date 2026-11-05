@@ -23,3 +23,33 @@ A weapon that declares a moving part is generated as separate parts by `processi
 Creature motion from video uses [video2rig](https://github.com/canitcode/video2rig) (AGPL-3.0, commit `55d51b3`), installed separately with its own environment by `scripts/install-video2rig.sh` and run by `slopforge/backends/video2rig.py` through its command line only: SlopForge never bundles or modifies it and no SlopForge module imports it (the install and preflight checks only ask the tool's own Python to load it), so its licence does not extend to SlopForge's MIT code. Running it asks nothing beyond keeping its licence and notices. Anyone who modifies it, or offers SlopForge as a service that runs it for others over a network, must offer those users the complete corresponding source of the video2rig they run, including any modification, under AGPL-3.0 (its section 13); SlopForge therefore runs an unmodified checkout at a pinned commit, and a needed fix goes upstream. Its joint reader is built on [DINOv2-small](https://huggingface.co/facebook/dinov2-small) (Apache-2.0), which the install script downloads at revision `ed25f3a3` and the tool reads offline. video2rig vendors BootsTAPIR (Apache-2.0) for an older tracking road that SlopForge does not use. Output rights: cleared. The AGPL covers the program, not its outputs, and the author's README states that the animations made with it are the user's, "commercial games included" (read 2026-10-27 at commit `55d51b3`); a clip's rights also depend on the video it was read from. No weights are bundled.
 
 The local Cesium Man rigging benchmark fixture comes from the Khronos [glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CesiumMan). The model and its metadata are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode); Cesium logos and trademarks have separate restrictions listed in the upstream [legal marks notice](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/LICENSES/LicenseRef-LegalMark-Cesium.txt). SlopForge’s MIT license does not replace those terms.
+
+## Models and tools
+
+No model weights are bundled; each is downloaded from its publisher. The default `h100` profiles use:
+
+| Stage | Model or tool | Licence |
+| --- | --- | --- |
+| Concept images | [Z-Image Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) with the [Qwen3 4B](https://huggingface.co/Qwen/Qwen3-4B) text encoder and [FLUX.1 [schnell]](https://huggingface.co/black-forest-labs/FLUX.1-schnell)'s autoencoder ([ComfyUI files](https://huggingface.co/Comfy-Org/z_image_turbo)) | Apache-2.0 |
+| Character poses, shape guides | [Z-Image-Turbo Fun ControlNet Union 2.1](https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1) | Apache-2.0 |
+| Background removal | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) general, through [rembg](https://github.com/danielgatis/rembg) | MIT |
+| Image to 3D mesh and PBR maps | [TRELLIS.2](https://huggingface.co/microsoft/TRELLIS.2-4B) ([ComfyUI files](https://huggingface.co/Comfy-Org/TRELLIS.2)), conditioned by [DINOv3 ViT-L](https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m) | MIT; DINOv3 License |
+| Multi-view 3D (experimental) | [Pixal3D](https://huggingface.co/Comfy-Org/Pixal3D) by TencentARC, conditioned by DINOv3 with the NAF upsampler; views by [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) and the [multiple-angles LoRA](https://huggingface.co/fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA) | MIT; DINOv3 License; Apache-2.0 |
+| Open pictures of a chest, characters' head and body pictures (experimental) | [Qwen-Image-Edit-2511](https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI) with [Qwen2.5-VL 7B](https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI) | Apache-2.0 |
+| Part masks | [Florence-2 large](https://huggingface.co/florence-community/Florence-2-large) and [SAM 2.1 Hiera large](https://huggingface.co/facebook/sam2.1-hiera-large) | MIT; Apache-2.0 |
+| Part layout for moving parts | [OmniPart](https://github.com/HKU-MMLab/OmniPart), built on [TRELLIS](https://github.com/microsoft/TRELLIS) | MIT; its NVIDIA FlexiCubes and nvdiffrast are non-commercial, so delivery refuses what it makes |
+| Tiling material upscale | [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) x4plus | BSD-3-Clause |
+| Character rigging | [SkinTokens](https://github.com/VAST-AI-Research/SkinTokens), or Blender's Rigify | MIT; GPL-2.0+ |
+| Character motion | [CMU Graphics Lab Motion Capture Database](http://mocap.cs.cmu.edu/) | Free for any use, not resold |
+| Character clips in Unity | [Quaternius Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html), downloaded separately | CC0 |
+| Creature motion from video | [Wan 2.2](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B) image-to-video, read onto the rig by [video2rig](https://github.com/canitcode/video2rig), run as a separate program | Apache-2.0; AGPL-3.0 |
+| Inference server | [ComfyUI](https://github.com/comfyanonymous/ComfyUI), on your machine or a remote GPU | GPL-3.0 |
+| Mesh processing, UVs, normal bakes, review renders | [Blender](https://www.blender.org/) 5.1 | GPL-2.0+ |
+| Engine delivery, prefabs, Play-mode checks | [Unity](https://unity.com/) 6000.6.3f1, URP 17.6.0, Unity Test Framework | Unity's terms |
+
+**Built with DINOv3.** Its licence allows commercial use, but it is Meta's own licence, not MIT or Apache: it
+requires this attribution and excludes military uses. Until 2026-10-26 the cut-outs used rembg's default model, BRIA
+RMBG-2.0, which is licensed for non-commercial use only. They now use BiRefNet, with near-identical cut-outs (alpha
+IoU 0.995–0.998). The legacy Hunyuan3D 2.0 route, used only when no model workflow is configured, is under Tencent's
+community licence; nothing shown here used it. Full model files, hashes and graphs:
+[workflow inventory](docs/WORKFLOWS.md) · [ComfyUI setup](docs/COMFYUI.md)
