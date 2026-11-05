@@ -13,6 +13,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 | [Installation](INSTALL.md) | Python, Blender, ComfyUI, and Unity dependencies |
 | [Setup](SETUP.md) | Project initialization, defaults, and overrides |
 | [Gallery](SHOWCASE.md) | What SlopForge has made, with its evidence and limits |
+| [What's been explored](EXPLORED.md) | What was tried, what happened, and where each thing stands |
 | [Examples](EXAMPLES.md) | Props, character candidates, variations, and environment recipes |
 | [Character pipeline demo](DEMO.md) | A live walk-through of the character recipe from a fresh project |
 | [ComfyUI](COMFYUI.md) | Local/remote service configuration and compatible models |

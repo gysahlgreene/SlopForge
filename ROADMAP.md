@@ -64,7 +64,7 @@ Core scope is production plumbing and review/recovery reliability. Props establi
 the first category quality claim. Do not close core with undefined acceptance gates
 or claim category qualification from a core smoke test.
 
-## Active character quality work (bounded parallel follow-up)
+## Early character quality work (historical)
 
 User-directed follow-up to M0; does not reorder milestones or claim qualification.
 The [historical session handoff](docs/SESSION-HANDOFF.md) records its 2026-10-18 worktrees.
