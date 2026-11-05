@@ -69,6 +69,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 ## Reliability planning
 
 - [Core 3D pipeline implementation audit](CORE-PIPELINE-AUDIT.md): evidence-backed M0 gaps and ordered implementation packages.
+- [AI motion sources](superpowers/plans/2026-10-27-ai-motion-sources.md): the plan behind M5's packages, with the owner's rulings. Their state is in [issue #128](https://github.com/gysahlgreene/SlopForge/issues/128).
 
 ## For contributors
 

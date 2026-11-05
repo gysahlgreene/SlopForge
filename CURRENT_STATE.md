@@ -30,8 +30,9 @@ M0 core reliability was closed by the owner on 2026-10-21 ([exit record](docs/M0
 M1 Props reached Provisional for static props; on 2026-10-22 the owner moved the focus to M2 Modular environments
 ([epic #89](https://github.com/gysahlgreene/SlopForge/issues/89)), on 2026-10-24 to M3 Weapons
 ([epic #107](https://github.com/gysahlgreene/SlopForge/issues/107)), and since 2026-10-27 the work has been M5 Creatures
-([epic #128](https://github.com/gysahlgreene/SlopForge/issues/128)). Historical
-humanoid work is bounded evidence, not the next production milestone.
+([epic #128](https://github.com/gysahlgreene/SlopForge/issues/128)), and from 2026-11-01 to 2026-11-05 M4 characters
+([epic #175](https://github.com/gysahlgreene/SlopForge/issues/175)), each by owner direction. No milestone is active now:
+[issue #19](https://github.com/gysahlgreene/SlopForge/issues/19) lists each one's next step for the owner to choose from.
 
 ## M0 package tracking
 

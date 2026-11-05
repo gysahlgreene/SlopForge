@@ -50,4 +50,5 @@ ai/styles/*/references/candidates/
 !/docs/superpowers/plans/
 /docs/superpowers/plans/*
 !/docs/superpowers/plans/2026-10-14-failure-classification-retries.md
+!/docs/superpowers/plans/2026-10-27-ai-motion-sources.md
 /.worktrees/
