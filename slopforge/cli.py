@@ -58,6 +58,13 @@ def parser():
     generate.add_argument("--shape-guide", metavar="SHAPE:H/W",
                           help="Hold a prop concept's main mass to a cylinder or box of this height/width, such as "
                                "cylinder:0.5, when the wording and --aspect do not")
+    generate.add_argument("--concept-image", action="append", default=[], dest="concept_images", metavar="PATH",
+                          help="Use an existing PNG as a concept candidate instead of generating one (repeatable, one "
+                               "candidate each); needs --concept-rights")
+    generate.add_argument("--concept-rights", metavar="FILE",
+                          help="JSON output-rights record for the --concept-image pictures: source (the model or person "
+                               "that made them), status, terms, terms_version, read_on, and notice or reason as the "
+                               "status requires (docs/COMFYUI.md, Providers and output rights)")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -1152,6 +1159,15 @@ def _run(args):
 
     # Model types generate concept images here; model_candidates bounds mesh attempts at approval.
     count = args.count or pipeline["defaults"]["image_candidates"]
+    concept_images = getattr(args, "concept_images", None) or []
+    concept_rights = None
+    if concept_images:
+        if recipe["pipeline"] != "model":
+            raise ValueError(f"--concept-image applies to 3D asset types; {asset_type} is a 2D type")
+        if not getattr(args, "concept_rights", None):
+            raise ValueError("--concept-image needs --concept-rights, a JSON output-rights record for the pictures")
+        concept_rights = json.loads(Path(args.concept_rights).expanduser().read_text())
+        count = len(concept_images)
     key = _asset_key(manifest, asset_type, args.name)
     if key in manifest["assets"]:
         record = manifest["assets"][key]
@@ -1205,7 +1221,8 @@ def _run(args):
                                     reference_paths=getattr(args, "reference_paths", None),
                                     reference_categories=getattr(args, "reference_categories", None),
                                     reference_entries=reference_entries, aspect=getattr(args, "aspect", None),
-                                    shape_guide=shape_guide))
+                                    shape_guide=shape_guide, concept_images=concept_images,
+                                    concept_rights=concept_rights))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"

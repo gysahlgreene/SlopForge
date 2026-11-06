@@ -7,6 +7,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from slopforge.config import load_project
+from slopforge.provenance import file_sha256
 from slopforge.providers import BUILTIN_RIGHTS
 from slopforge.manifest import load_manifest, new_record, save_manifest
 from slopforge.pipelines.image import generate as generate_concepts
@@ -896,6 +897,71 @@ avoid: [environment]
             generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Silver relay", 1,
                                    self.manifest, "prop:relay", generation_prompt="A silver relay")
         self.assertNotEqual(first, self.record["executions"][-1]["identity_sha256"])
+
+    KLEIN = {"source": "FLUX 3 Image Klein", "status": "attribution_required", "terms": "FLUX Kommunity License",
+             "terms_version": "v1.0", "read_on": "2026-11-05", "notice": "Made with FLUX 3 Image Klein."}
+
+    def test_an_existing_picture_becomes_a_concept_candidate_with_its_source_and_rights(self):
+        pictures = []
+        for index, colour in enumerate(("teal", "orange")):
+            path = Path(self.temp.name) / f"take-{index}.png"
+            Image.new("RGB", (512, 512), colour).save(path)
+            pictures.append(path)
+        with patch("slopforge.pipelines.model.generate_image", side_effect=AssertionError("must not generate")):
+            generated = generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay",
+                                               2, self.manifest, "prop:relay", concept_images=pictures,
+                                               concept_rights=self.KLEIN)
+        self.assertEqual([item["status"] for item in generated], ["candidate", "candidate"])
+        for item, picture in zip(generated, pictures):
+            self.assertEqual((self.root / item["path"]).read_bytes(), picture.read_bytes())
+            self.assertEqual(item["generator"]["imported_from"]["sha256"], file_sha256(picture))
+            self.assertEqual(item["generator"]["output_rights"], [self.KLEIN])
+        execution = self.record["executions"][-1]
+        self.assertEqual(execution["identity_inputs"]["workflow"]["sources"], [file_sha256(p) for p in pictures])
+        concept = [stage for stage in execution["stages"] if stage["name"] == "concept_generation"]
+        self.assertEqual([stage["provenance"]["output_rights"] for stage in concept], [[self.KLEIN], [self.KLEIN]])
+
+    def test_an_imported_concept_carries_its_rights_through_approval_to_the_mesh(self):
+        from slopforge.providers import SHIPPABLE, lineage_rights
+        pictures = []
+        for index, colour in enumerate(("teal", "orange")):
+            path = Path(self.temp.name) / f"take-{index}.png"
+            Image.new("RGB", (512, 512), colour).save(path)
+            pictures.append(path)
+        with patch("slopforge.pipelines.model.generate_image", side_effect=AssertionError("must not generate")):
+            generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay", 2,
+                                   self.manifest, "prop:relay", concept_images=pictures, concept_rights=self.KLEIN)
+        self._approve(lambda _root, _config, _image, _name, dest, metadata, seed: (
+            dest.write_bytes(b"mesh"),
+            metadata.write_text(json.dumps({"workflow": "model", "seed": seed, "output_rights": MESH_RIGHTS}))),
+            self._materializer)
+        record = load_manifest(self.root / self.config["asset_pipeline"]["manifest"])["assets"]["prop:relay"]
+        mesh = [stage for execution in record["executions"] for stage in execution["stages"]
+                if stage["name"] == "mesh_workflow_execution" and stage["status"] == "succeeded"][-1]
+        self.assertEqual(mesh["inputs"][0]["sha256"], file_sha256(pictures[1]))  # candidate 2 was approved
+        rights = lineage_rights(record, mesh["outputs"])
+        self.assertIn(self.KLEIN["notice"], rights["notices"])
+        self.assertIn(rights["status"], SHIPPABLE)
+
+    def test_imported_pictures_are_refused_before_anything_is_written(self):
+        picture = Path(self.temp.name) / "take.png"
+        Image.new("RGB", (512, 512), "teal").save(picture)
+        text = Path(self.temp.name) / "take.txt"
+        text.write_text("not a picture")
+        cases = {
+            "--concept-rights": ([picture], None),
+            "not a picture": ([text], self.KLEIN),
+            "does not exist": ([Path(self.temp.name) / "missing.png"], self.KLEIN),
+            "twice": ([picture, picture], self.KLEIN),
+            "source": ([picture], {key: value for key, value in self.KLEIN.items() if key != "source"}),
+            "notice": ([picture], {key: value for key, value in self.KLEIN.items() if key != "notice"}),
+        }
+        for message, (images, rights) in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                generate_prop_concepts(self.root, self.config, self.asset_type, self.style, "relay", "Copper relay",
+                                       len(images), self.manifest, "prop:relay", concept_images=images,
+                                       concept_rights=rights)
+        self.assertFalse((self.root / "ai/assets/candidates").exists())
 
     def test_concept_aspect_sets_the_canvas_and_is_part_of_the_concept_identity(self):
         from slopforge.config import workflow_node_inputs

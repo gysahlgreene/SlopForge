@@ -22,7 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
-from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable,
+from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable, validate_output_rights,
                          rights_of, write_notices)
 from ..provenance import generator_provenance, file_sha256, tool_sha256
 from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
@@ -1726,10 +1726,46 @@ def _with_concept_aspect(config, asset_type, workflow_path, aspect):
     return result
 
 
+def imported_concepts(paths, rights):
+    """Existing pictures to use as concept candidates, checked before anything is written: each a readable PNG, none
+    twice, and one output-rights record naming their source. Returns (files, sha256s, rights entry)."""
+    if not rights:
+        raise ValueError("Imported concept pictures need their output rights: pass --concept-rights with a JSON record "
+                         "{source, status, terms, terms_version, read_on, notice}")
+    rights = dict(rights)
+    source = rights.pop("source", None)
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("--concept-rights needs a source naming the model or person that made the pictures")
+    record = validate_output_rights(rights, "--concept-rights")
+    files, shas = [], []
+    for path in paths:
+        path = Path(path).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError(f"Concept picture {path} does not exist")
+        try:
+            with Image.open(path) as picture:
+                picture.verify()
+                kind = picture.format
+        except Exception as exc:
+            raise ValueError(f"Concept picture {path} is not a picture: {exc}") from exc
+        if kind != "PNG":
+            raise ValueError(f"Concept picture {path} is {kind}, not PNG")
+        files.append(path)
+        shas.append(file_sha256(path))
+    if len(set(shas)) != len(shas):
+        raise ValueError("The same concept picture is listed twice")
+    return files, shas, {"source": source, **record}
+
+
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
              reference_paths=None, reference_categories=None, reference_entries=None, variations=None, aspect=None,
-             shape_guide=None):
+             shape_guide=None, concept_images=None, concept_rights=None):
     root = Path(project_root).resolve()
+    if concept_images:
+        return _generate_imported(root, config, asset_type, style, name, description, manifest, key, concept_images,
+                                  concept_rights, generation_prompt=generation_prompt,
+                                  conflicts=reference_paths or reference_categories or reference_entries or variations
+                                  or aspect or shape_guide)
     conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
     ensure_supported(conditioning)
@@ -1769,6 +1805,36 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     record["generation_prompt"] = prompt
     record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
     record["generator"]["workflow"] = str(workflow)
+    return result
+
+
+def _generate_imported(root, config, asset_type, style, name, description, manifest, key, concept_images,
+                       concept_rights, *, generation_prompt=None, conflicts=None):
+    """Concept candidates copied from existing pictures (generate --concept-image): no image inference, and each
+    candidate records the picture's hash and the declared output rights, which then travel through its lineage."""
+    if conflicts:
+        raise ValueError("--concept-image uses the pictures as they are: drop --reference, --aspect, --shape-guide "
+                         "and variations")
+    files, shas, rights = imported_concepts(concept_images, concept_rights)
+    prompt = generation_prompt or build_prompt(style, asset_type, description)
+    pictures = iter(zip(files, shas))
+
+    def backend(prompt_text, destination, seed, metadata):
+        path, sha = next(pictures)
+        shutil.copyfile(path, destination)
+        metadata.write_text(json.dumps({"workflow": None, "model": rights["source"], "seed": None,
+                                        "imported_from": {"path": str(path), "sha256": sha},
+                                        "output_rights": [rights]}))
+
+    result = generate_candidates(root, config, asset_type, style, name, prompt, len(files), manifest, key, backend,
+                                 semantic_description=description,
+                                 identity_inputs={"asset_type": asset_type.get("name"), "brief": description,
+                                     "generation_prompt": prompt, "style": style_identity(style),
+                                     "workflow": {"identifier": "imported", "sources": shas, "rights": rights}})
+    record = manifest["assets"][key]
+    record["description"] = description
+    record["generation_prompt"] = prompt
+    record["generator"]["workflow"] = None
     return result
 
 
