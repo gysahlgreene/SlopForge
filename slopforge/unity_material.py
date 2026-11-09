@@ -269,6 +269,9 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
 COLOUR_CLUSTERS = 3  # non-metal colours told apart in a map: a pistol's grips came out as three wood tones
 MIN_CLUSTER_CELLS = 4  # concept-side cells a colour needs before its shift is measured
 MAX_CHROMA_SHIFT = 25.0  # CIELAB a*b* units; a larger drift is not a tint
+# Share of a colour's cells the concept must show coloured for a shift: 2026-11 failures had 0.22-0.56, the
+# colours shifted rightly 0.87-1.0 (docs/MATERIALS.md). Set from that evidence; the owner has not set it.
+MIN_COLOURED_SHARE = 0.7
 BORROW_DISTANCE = 20.0  # a colour too small to measure takes a measured colour's shift only if this close in CIELAB
 LIGHTNESS_SHARE = 0.5  # a lit concept is brighter than albedo, so lightness moves half way to it, and never down
 MAX_LIGHTNESS_RATIO = 3.0  # a texture decoded darker than a third of the concept's lightness is not a tint
@@ -321,14 +324,19 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
     shares = np.stack([cell_share((view_labels == k) & seen) for k in range(len(centres))])
     # A cell counts for its most common colour when it is mostly non-metal: one wood's grain tones each rarely cover
     # most of a cell alone (2026-10-24 pistol: 3, 0 and 2 cells by single-colour majority).
-    measurable = (concept_cover & texture_cover & (shares.sum(0) > 0.6)
-                  & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA))
+    lined_up = concept_cover & texture_cover & (shares.sum(0) > 0.6)
+    measurable = lined_up & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA)
     plurality = shares.argmax(0)
-    report, shifts = {}, {}
+    report, shifts, kept = {}, {}, set()
     for k in range(len(centres)):
-        cells = measurable & (plurality == k)
+        cells, all_cells = measurable & (plurality == k), lined_up & (plurality == k)
         report[k] = {"colour": [round(float(value), 1) for value in centres[k]], "cells": int(cells.sum())}
-        if cells.sum() >= MIN_CLUSTER_CELLS:
+        if all_cells.sum() >= MIN_CLUSTER_CELLS and cells.sum() < MIN_COLOURED_SHARE * all_cells.sum():
+            # The concept shows this colour grey in most of its cells, so its coloured cells are where it meets
+            # other parts: round 23's slate (22% coloured) came out brown, round 24's canopy iron (56%) maroon.
+            report[k]["coloured_share"] = round(float(cells.sum() / all_cells.sum()), 2)
+            kept.add(k)
+        elif cells.sum() >= MIN_CLUSTER_CELLS:
             shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
             shift *= min(1.0, MAX_CHROMA_SHIFT / max(float(np.hypot(*shift)), 1e-6))
             ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, MAX_LIGHTNESS_RATIO))
@@ -337,7 +345,7 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
     for k in report:
         # A colour borrows a shift only from one about as saturated: a grey within 20 of a pistol's walnut took its
         # +19.6 a*, +10.8 b* and came out pink (2026-10-25)
-        source = k if k in shifts else min(
+        source = k if k in shifts else None if k in kept else min(
             (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE
              and np.hypot(*centres[k][1:]) >= 0.5 * np.hypot(*centres[j][1:])),
             key=lambda j: np.linalg.norm(centres[j] - centres[k]), default=None)

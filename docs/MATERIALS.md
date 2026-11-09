@@ -197,6 +197,20 @@ result against that declaration before anyone reviews it.
      concept, never lowered, since a lit concept is brighter than albedo.
    - A colour with fewer than four cells borrows the nearest measured colour's shift, if it is
      within 20.
+   - **A colour the concept shows grey is kept as decoded.** If the concept is chromatic in fewer
+     than 70% of a colour's cells, the colour is neither shifted nor given another's shift, and its
+     report records `coloured_share`. Counting only the chromatic cells measured a grey material just
+     where it met other parts:
+     - Round 23's slate roof was coloured in 22% of its cells, where it met brick. It was shifted
+       +4.5 a*, +12.3 b* and came out brown (2026-11-08).
+     - Round 24's canopy iron was coloured in 56% of its cells and was shifted +16.9 a*, +13.1 b*,
+       which made the columns maroon (2026-11-09). The fitted view matched the outline (0.956), but it
+       put the iron roof top where the concept has its copper band.
+     - The colours that were shifted correctly were coloured in 87–100% of their cells: a coil cage's
+       pink-baked copper, and a booth's and a chamber's glass.
+     - Two other tests did not separate the bad cells: agreement among the per-cell offsets (canopy
+       iron 0.87 within 10 of the median) and the lightness ratio (18 of 23 cells within 3×).
+     - The 70% limit is set from these cases; the owner has not set it.
    - The shifts are recorded as `concept_colour_transfer`.
    - **Brightened metal keeps its hue's colour.** The metal brightening holds each hue to the chroma of
      the concept's lit metal of that hue (10° bands, at least 3 coloured cells within 30°), so brass keeps

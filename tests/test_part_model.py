@@ -507,6 +507,29 @@ class DerivedMapTests(unittest.TestCase):
         self.assertTrue((metal[8:120, 8:120] == 255).all(), "the brass lost its metal")
         self.assertLessEqual(float((metal[8:120, 136:248] > 127).mean()), 0.01, "the timber stayed metal")
 
+    def test_a_colour_the_concept_shows_mostly_grey_keeps_its_hue(self):
+        # Round 23's slate roof: the concept shows the slate grey in 78% of its cells; measured on the other 22%,
+        # where it met brick, the slate was shifted +4.5 a*, +12.3 b* and came out brown (2026-11-08). Round 24's
+        # canopy: dark iron shifted +16.9 a* from cells where the fitted view put the roof over the copper band.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (100, 100, 102)  # grey slate
+            cutout[:16, :, :3] = (150, 70, 50)  # brick along one edge: a quarter of the cells
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (60, 60, 62)  # decoded slate, all over
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255
+            Image.new("RGB", (32, 32), (60, 60, 62)).save(root / "base.png")
+            Image.new("L", (32, 32), 0).save(root / "metal.png")
+            report = match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal)
+            lab = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float).reshape(-1, 3))
+        self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 4.0)
+        self.assertFalse(any("shift_ab" in entry for entry in report.values()))
+
     def test_a_grey_colour_does_not_borrow_a_coloured_ones_shift(self):
         # A grey cluster within 20 CIELAB of the walnut's borrowed the walnut's a*b* shift (+19.6, +10.8) and steel
         # set to non-metal came out pink (2026-10-25). A colour borrows a shift only from one about as saturated.
