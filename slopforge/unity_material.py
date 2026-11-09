@@ -427,6 +427,21 @@ public static class {class_name}
         if (glass != null)
             importer.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), glassSource.name), glass);
         importer.SaveAndReimport();
+        if (importer.generateSecondaryUV && !HasLightmapUVs(fbxPath))
+        {{
+            // Unity's default margin (Calculate, 40 texels per metre) aborts the unwrap on a mesh of many small
+            // charts ("Could not pack uvs") and imports it empty; a fixed margin packs it (round-22 coal scuttle)
+            Debug.LogWarning("SLOPFORGE_LIGHTMAP_UV_FIXED_MARGIN " + fbxPath);
+            importer.secondaryUVMarginMethod = ModelImporterSecondaryUVMarginMethod.Manual;
+            importer.secondaryUVPackMargin = 4f;
+            importer.SaveAndReimport();
+        }}
+        var importedMeshes = AssetDatabase.LoadAllAssetsAtPath(fbxPath).OfType<Mesh>().ToArray();
+        if (importedMeshes.Length == 0 || importedMeshes.Any(mesh => mesh.vertexCount == 0))
+            throw new Exception("Unity imported the FBX with an empty mesh" +
+                (importer.generateSecondaryUV ? "; its lightmap UV unwrap failed even with a fixed 4-pixel margin" : ""));
+        if (importer.generateSecondaryUV && !HasLightmapUVs(fbxPath))
+            throw new Exception("Unity did not generate the lightmap UV set (uv2) for the FBX");
         var imported = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
         var assigned = imported == null ? null : imported.GetComponentsInChildren<Renderer>(true)
             .SelectMany(renderer => renderer.sharedMaterials).FirstOrDefault(candidate => candidate == mat);
@@ -447,6 +462,13 @@ public static class {class_name}
                 Reference(mat, "normal", "_BumpMap"), Reference(mat, "metallic_gloss", "_MetallicGlossMap"),
                 Reference(mat, "emission", "_EmissionMap") }} }}));
         {f"RenderViews(imported, {quote(str(Path(render).resolve()))});" if render else ""}
+    }}
+
+    static bool HasLightmapUVs(string fbxPath)
+    {{
+        var meshes = AssetDatabase.LoadAllAssetsAtPath(fbxPath).OfType<Mesh>().ToArray();
+        var uv2 = new System.Collections.Generic.List<Vector2>();
+        return meshes.Length > 0 && meshes.All(mesh => {{ mesh.GetUVs(1, uv2); return mesh.vertexCount > 0 && uv2.Count == mesh.vertexCount; }});
     }}
 
     static void RenderViews(GameObject model, string path)

@@ -467,6 +467,15 @@ The FBX import also generates **lightmap UVs** (`generateSecondaryUV`) for every
 props and other static assets get a uv2 set for baked lighting; held weapons never, because they move with the
 player. LODs are not generated (the mesh budget is the one LOD).
 
+Unity's default chart margin for that unwrap ("Calculate", sized for 40 lightmap texels per metre) cannot pack a
+mesh made of very many small charts. Unity then logs "Could not pack uvs, most likely Pack Margin is way too high"
+and imports the model with **an empty mesh**. The round-22 coal scuttle did this: 145 loose lumps of coal on a torn
+body. When the import comes back without a full uv2 set, the material builder reimports once with a fixed 4-pixel
+margin (`secondaryUVMarginMethod` Manual, logged as `SLOPFORGE_LIGHTMAP_UV_FIXED_MARGIN`). It then stops with
+"Unity imported the FBX with an empty mesh" if the mesh is still empty, instead of failing later on the material check.
+The opt-in live test (`SLOPFORGE_RUN_UNITY_IMPORT=1`) reproduces the failure with 4,000 tiny loose pieces on a box.
+Assets that pack the default way keep the default margin.
+
 After the prefab, the publication **plays it**: a play-mode test assembly is written into the project
 (`Assets/SlopForgeTests/PlayMode`, `slopforge/unity_playmode.py`), run with Unity's test runner and removed again. Each hinge or
 slide gets `PartPulses("<part>")`: the Animator's trigger is set, the part must have moved at mid-pulse and be back
