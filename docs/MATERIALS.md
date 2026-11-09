@@ -198,6 +198,14 @@ result against that declaration before anyone reviews it.
    - A colour with fewer than four cells borrows the nearest measured colour's shift, if it is
      within 20.
    - The shifts are recorded as `concept_colour_transfer`.
+   - **Brightened metal keeps its hue's colour.** The metal brightening holds each hue to the chroma of
+     the concept's lit metal of that hue (10° bands, at least 3 coloured cells within 30°), so brass keeps
+     its colour and a tint no metal in the concept shows (a pistol's pink serrations) is still removed.
+     Before, one limit, the median of all lit metal, applied to every hue: on iron-and-brass objects it
+     was the iron's, and round 22's bolt turret brass came out silver (2026-11-07). Moving metal colours
+     towards the concept's with this section's cell-by-cell shift was tried and dropped: on the bolt
+     turret its cells did not line up, the brass was shifted away from yellow and the darkest iron towards
+     it (b* +17.6).
    - Why: TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed (hue angle 43
      against 37), and the whole-object colour checks, ruled by its black steel, passed them. On one
      pistol the shift brought the grips to hue angle 35.5 and chroma 28 (concept 37.2 and 30).
@@ -297,7 +305,14 @@ and none are declared yet.
   go with it: HP10's walnut grips (65, 45, 34) had dark grain (49, 34, 24) outside the emitters'
   per-channel window of 48, which left 9.8% of the grips metal as grey flecks; by hue 3.9%, the
   screws among it (2026-10-26). Greys stay metal (dark steel within that window had turned pink
-  as walnut). Grey and pale declarations keep the emitters' rule. A coloured
+  as walnut). It claims nothing more than 1.15 times lighter than the declared colour: grain is
+  darker than its wood, but brass beside timber shares its hue and is lighter. Without that
+  ceiling, round 22's `timber=nonmetal#5a3a22` (hue 26°) zeroed brass trim decoded at hue 31°,
+  which TRELLIS.2 had rated 0.99 metal, and the brass rendered as beige plaster; with it, 98% of
+  the barricade's generated metal stays metal and all its generated non-metal is zeroed
+  (2026-11-06). Declare a coloured non-metal only on an asset that has it: on one without, the
+  rule finds the nearest same-hue metal instead. Grey and pale declarations keep the emitters' rule,
+  so a near-black one such as oil also takes dark iron; leave its colour off beside dark metal. A coloured
   non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
   An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including

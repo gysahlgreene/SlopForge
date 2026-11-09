@@ -155,6 +155,11 @@ def lift_nonmetal_roughness(roughness_path, metallic_path, basecolor_path, floor
     return float(raise_.mean())
 
 
+# A coloured non-metal claims texels up to this much lighter than its declared colour's brightest channel. At 1.15 the
+# round-22 barricade kept 91% of its brass metal and left 0.1% of its timber metal (1.25: 83%; 1.0: 0.9% timber).
+NONMETAL_LIGHTNESS_CEILING = 1.15
+
+
 def zero_metallic(basecolor_path, metallic_path, matches):
     """Zero the metallic map where the base colour matches a declared non-metal's colour; returns the share found.
 
@@ -165,8 +170,8 @@ def zero_metallic(basecolor_path, metallic_path, matches):
         base = image.convert("RGB")
     mask = Image.new("L", base.size, 0)
     red, green, blue = base.split()
-    saturation = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(red, green), blue),
-                                     ImageChops.darker(ImageChops.darker(red, green), blue))
+    value = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    saturation = ImageChops.subtract(value, ImageChops.darker(ImageChops.darker(red, green), blue))
     hue = base.convert("HSV").split()[0]
     closing = max(3, round(5 * base.width / 2048) | 1)
     for match in matches:
@@ -177,10 +182,14 @@ def zero_metallic(basecolor_path, metallic_path, matches):
             # too and came out pink as non-metal (2026-10-25); the generated walnut is duller than the concept's
             # (saturation 30 against 79), so a quarter of the declared saturation is the floor. Closed, not opened:
             # the darkest crevices inside the wood go with it, a screw head does not.
+            # Grain is darker than its wood, never much lighter: brass beside timber shares its hue but is lighter, so
+            # a ceiling above the declared colour keeps it metal (round-22 barricade, 2026-11-06; docs/MATERIALS.md).
             target = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))[0]
             floor = 0.25 * (max(match) - min(match))
+            ceiling = NONMETAL_LIGHTNESS_CEILING * max(match)
             near = hue.point(lambda value, target=target: 255 if min(abs(value - target), 256 - abs(value - target)) <= 21 else 0)
             found = ImageChops.multiply(near, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+            found = ImageChops.multiply(found, value.point(lambda value, ceiling=ceiling: 255 if value <= ceiling else 0))
             found = found.filter(ImageFilter.MaxFilter(closing)).filter(ImageFilter.MinFilter(closing))
         else:
             found = emitter_colour_mask(base, match)
@@ -195,6 +204,9 @@ def zero_metallic(basecolor_path, metallic_path, matches):
 METAL_LIGHTNESS_GRID = 16  # cells across the object, as one of the dark-texture check's grids
 MIN_LIT_METAL_CELLS = 6  # fewer lit metal cells than this is too little metal to judge from the concept's side
 MAX_METAL_GAIN = 8.0
+METAL_HUE_STEP = 10  # degrees: brightened metal's chroma limit is looked up per hue band of this width
+METAL_HUE_WINDOW = 30  # degrees: the concept's lit metal cells within this of a band set its limit
+MIN_COLOURED_METAL_CELLS = 3  # concept cells of one coloured metal needed before its chroma is allowed
 
 
 def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, metal_view):
@@ -229,13 +241,26 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
     # Brightening reveals tints the decoder left in dark metal (a pistol's serrations came up pink, 2026-10-25):
     # metal keeps no more chroma than the concept's lit metal shows
     concept_lab, _cover, _box = _lab_cells(cutout, METAL_LIGHTNESS_GRID)
-    chroma_limit = float(np.median(np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2]))) + 2.0
+    cell_chroma = np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2])
+    chroma_limit = float(np.median(cell_chroma)) + 2.0
     metal_texels = metallic > 0.5
     lab = _lab(pixels[..., :3][metal_texels] * 255)
     chroma = np.hypot(lab[:, 1], lab[:, 2])
+    # ... in its own hue: brass beside iron keeps the brass's chroma. Held to the iron's, the bolt turret's brass drum
+    # came out silver (2026-11-07); a hue no lit metal in the concept shows (the pink) keeps the median's limit.
+    limits = np.full(len(lab), chroma_limit)
+    cell_hue = np.degrees(np.arctan2(concept_lab[lit][:, 2], concept_lab[lit][:, 1]))
+    texel_hue = np.degrees(np.arctan2(lab[:, 2], lab[:, 1]))
+    for centre in range(0, 360, METAL_HUE_STEP):
+        near = lambda hue: np.abs((hue - centre + 180) % 360 - 180) <= METAL_HUE_WINDOW
+        coloured = near(cell_hue) & (cell_chroma > chroma_limit)
+        if coloured.sum() >= MIN_COLOURED_METAL_CELLS:
+            in_bin = np.abs((texel_hue - centre + 180) % 360 - 180) <= METAL_HUE_STEP / 2
+            limits[in_bin] = np.maximum(limits[in_bin], float(np.median(cell_chroma[coloured])) + 2.0)
+    chroma_limit = limits
     over = chroma > chroma_limit
     if over.any():
-        lab[over, 1:] *= (chroma_limit / chroma[over])[:, None]
+        lab[over, 1:] *= (chroma_limit[over] / chroma[over])[:, None]
         pixels[..., :3][metal_texels] = _srgb_from_lab(lab) / 255
     Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
     return gain
