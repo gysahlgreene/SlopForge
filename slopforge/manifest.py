@@ -113,13 +113,32 @@ def release_project_locks():
         _HELD_LOCKS.pop().close()  # closing the descriptor releases its flock
 
 
+def _without_edge_lists(value):
+    """A copy of the manifest whose validations keep a count of their open and non-manifold edges, not each edge.
+
+    Each edge stays in the candidate's validation.json, which the character check reads. Listed in the manifest, a
+    hero prop with hidden faces removed carried its 27,800 open edges three times, 33 MB an asset, and round 22's
+    manifest reached 2.2 GB, rewritten at every step (2026-11-06)."""
+    if isinstance(value, list):
+        return [_without_edge_lists(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    copied = {key: _without_edge_lists(item) for key, item in value.items()}
+    measured = copied.get("measured")
+    if isinstance(measured, dict) and isinstance(measured.get("topology_diagnostics"), list):
+        measured = dict(measured)
+        measured["topology_diagnostics_count"] = len(measured.pop("topology_diagnostics"))
+        copied["measured"] = measured
+    return copied
+
+
 def save_manifest(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as handle:
-            json.dump(data, handle, indent=2)
+            json.dump(_without_edge_lists(data), handle, indent=2)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())

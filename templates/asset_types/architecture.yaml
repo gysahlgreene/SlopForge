@@ -2,6 +2,9 @@ name: architecture
 pipeline: model
 output_folder: Models
 face_budget: architecture_faces
+# The hidden double skin and inner shells removed before reduction, as props do: round 23's roof_pitch_6 stalled
+# at its 60,000-face budget with them and reduced to 57,000 without, its concept fit unchanged (2026-11-08).
+remove_hidden_faces: true
 # The owner-accepted prop limits (2026-10-21/22). Every 2026-10-22 structure and kit module fitted its concept at
 # 0.92-0.97; their stone concepts are near grey, so the colour check skips them. No part limit is declared for
 # structures, which can have separate pieces; the owner's M2 criteria (issue #94) cover kit modules only.

@@ -411,6 +411,35 @@ class DerivedMapTests(unittest.TestCase):
             lab = _lab(np.asarray(Image.open(root / "base2.png").convert("RGB"), dtype=float)[8:16, 8:16].reshape(-1, 3))
             self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 6.0)
 
+    def test_brightened_brass_keeps_the_colour_the_concepts_brass_shows(self):
+        # Round 22's bolt turret: TRELLIS.2 decoded its brass drum (160, 132, 80); brightened 2.2 times, it was held to
+        # the chroma of the concept's lit metal, mostly grey iron, and came out silver (205, 190, 161) (2026-11-07).
+        # A hue the concept's metal shows keeps that metal's chroma; a hue it does not show (the pink) is still held.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_metal_lightness
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (110, 110, 112)  # lit iron
+            cutout[:, 40:, :3] = (196, 152, 72)  # and lit brass on a third of it
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (40, 40, 42); view[:, 40:, :3] = (90, 72, 44)
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255; metal[..., :3] = 255
+            base = Image.new("RGB", (32, 32), (40, 40, 42))
+            base.paste((90, 72, 44), (20, 0, 32, 32))  # decoded brass
+            base.paste((80, 50, 80), (2, 2, 8, 8))  # a purplish patch in the iron
+            base.save(root / "base.png")
+            Image.new("L", (32, 32), 255).save(root / "metal.png")
+            self.assertGreater(match_metal_lightness(root / "base.png", root / "metal.png", cutout, view, metal), 1.5)
+            pixels = np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float)
+            brass, patch = _lab(pixels[4:28, 24:30].reshape(-1, 3)), _lab(pixels[2:8, 2:8].reshape(-1, 3))
+            concept_brass = _lab(np.array([[196, 152, 72]], float))[0]
+        self.assertGreater(float(np.median(np.hypot(brass[:, 1], brass[:, 2]))),
+                           0.75 * float(np.hypot(concept_brass[1], concept_brass[2])), "the brass went grey")
+        self.assertLess(float(np.median(np.hypot(patch[:, 1], patch[:, 2]))), 6.0, "the pink came back")
+
     def test_a_dark_brown_non_metal_does_not_take_the_grey_steel_beside_it(self):
         # Walnut grips declared #622513: the colour rule (every channel within 48) also took dark grey steel (51, 51,
         # 51) as walnut, 6.8% of a pistol's texels; set to non-metal, the colour transfer then tinted them like the
@@ -455,6 +484,51 @@ class DerivedMapTests(unittest.TestCase):
         self.assertEqual(int(metal[64, 192]), 255)  # the screw head stays metal
         grip = np.concatenate([metal[:, 128:176], metal[:, 216:]], axis=1)[8:120]
         self.assertLessEqual(float((grip > 127).mean()), 0.01, "the grain stayed metal")
+
+    def test_a_coloured_non_metal_leaves_lighter_brass_of_its_hue_metal(self):
+        # Round-22 barricade: timber declared #5a3a22 (hue 26°) decoded as (62, 48, 36) with grain (51, 40, 30), and its
+        # brass trim as (140, 118, 95), hue 31°. TRELLIS.2 rated the brass 0.99 metal, and the hue rule zeroed it with
+        # the timber: the brass rendered as beige plaster (2026-11-06). Grain is darker than its wood, not lighter.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import zero_metallic
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 128), (140, 118, 95))  # brass on the left half
+            for x in range(128, 256, 8):
+                base.paste((62, 48, 36), (x, 0, x + 5, 128))  # timber
+                base.paste((51, 40, 30), (x + 5, 0, x + 8, 128))  # grain
+            base.save(root / "base.png")
+            Image.new("L", (256, 128), 255).save(root / "metal.png")
+            zero_metallic(root / "base.png", root / "metal.png", [(0x5a, 0x3a, 0x22)])
+            metal = np.asarray(Image.open(root / "metal.png").convert("L"))
+        self.assertTrue((metal[8:120, 8:120] == 255).all(), "the brass lost its metal")
+        self.assertLessEqual(float((metal[8:120, 136:248] > 127).mean()), 0.01, "the timber stayed metal")
+
+    def test_a_colour_the_concept_shows_mostly_grey_keeps_its_hue(self):
+        # Round 23's slate roof: the concept shows the slate grey in 78% of its cells; measured on the other 22%,
+        # where it met brick, the slate was shifted +4.5 a*, +12.3 b* and came out brown (2026-11-08). Round 24's
+        # canopy: dark iron shifted +16.9 a* from cells where the fitted view put the roof over the copper band.
+        import tempfile
+        from pathlib import Path
+        import numpy as np
+        from PIL import Image
+        from slopforge.unity_material import match_concept_colours
+        from slopforge.validation import _lab
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cutout = np.zeros((64, 64, 4)); cutout[..., 3] = 255; cutout[..., :3] = (100, 100, 102)  # grey slate
+            cutout[:16, :, :3] = (150, 70, 50)  # brick along one edge: a quarter of the cells
+            view = np.zeros((64, 64, 4)); view[..., 3] = 255; view[..., :3] = (60, 60, 62)  # decoded slate, all over
+            metal = np.zeros((64, 64, 4)); metal[..., 3] = 255
+            Image.new("RGB", (32, 32), (60, 60, 62)).save(root / "base.png")
+            Image.new("L", (32, 32), 0).save(root / "metal.png")
+            report = match_concept_colours(root / "base.png", root / "metal.png", cutout, view, metal)
+            lab = _lab(np.asarray(Image.open(root / "base.png").convert("RGB"), dtype=float).reshape(-1, 3))
+        self.assertLess(float(np.median(np.hypot(lab[:, 1], lab[:, 2]))), 4.0)
+        self.assertFalse(any("shift_ab" in entry for entry in report.values()))
 
     def test_a_grey_colour_does_not_borrow_a_coloured_ones_shift(self):
         # A grey cluster within 20 CIELAB of the walnut's borrowed the walnut's a*b* shift (+19.6, +10.8) and steel

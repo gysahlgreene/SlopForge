@@ -639,6 +639,145 @@ json.dump(list(obj.dimensions) + [obj.get("slopforge_axis_stretch")], open(sys.a
             # The face (1.0 x 0.9 scaled to 3 x 3) stretched 1.11; the thin depth axis does not count.
             self.assertAlmostEqual(stretch, 1.111, places=2)
 
+    def test_a_square_footprint_is_not_turned(self):
+        """Round 24's chamber (2026-11-09): declared 3.2 x 3.2, built a little deeper than wide, and turned a quarter
+        turn onto its "long" side, which put its entrance at the side. A square footprint has no long side."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend = root / "booth.glb", root / "booth.blend"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            fixture = root / "fixture.py"
+            fixture.write_text("""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, 0.5))
+bpy.context.object.scale = (0.9, 1.0, 0.9)
+bpy.ops.mesh.primitive_cube_add(size=1, location=(0, -0.6, 0.5))  # a porch at the front, -Y
+bpy.context.object.scale = (0.2, 0.3, 0.3)
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.transform_apply(scale=True)
+bpy.ops.object.join()
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "booth.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(_swatch(maps[0])),
+                            "--target-size", "2,2,3"], check=True, capture_output=True, text=True)
+            result = root / "front.json"
+            probe = root / "probe.py"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+coords = [obj.matrix_world @ v.co for v in obj.data.vertices]
+front = min(co.y for co in coords)
+json.dump([max(abs(co.x) for co in coords if co.y < front + 0.01), obj.dimensions.x], open(sys.argv[-1], 'w'))
+""")
+            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
+                           check=True, capture_output=True, text=True)
+            front_half_width, width = json.loads(result.read_text())
+            self.assertLess(front_half_width, 0.25 * width)  # the narrow porch is still the front face
+
+    def test_a_turned_kit_piece_keeps_its_concept_side_at_the_front(self):
+        """Round-23 stair_flight_3 (2026-11-08): generated lengthwise along X, drawn from front-right with its foot
+        towards the viewer, and turned onto its 3 x 6 footprint the way that put its foot at +Y (Unity -Z)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend, concept = root / "stair.glb", root / "stair.blend", root / "concept.png"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            # A ramp 2 long on X, foot (height 0) at +X, top (height 1) at -X, 1 wide on Y.
+            corners = [(1, -0.5, 0), (1, 0.5, 0), (-1, -0.5, 0), (-1, 0.5, 0), (-1, -0.5, 1), (-1, 0.5, 1)]
+            faces = [(0, 2, 3, 1), (2, 4, 5, 3), (0, 1, 5, 4), (0, 4, 2), (1, 3, 5)]
+            fixture = root / "fixture.py"
+            fixture.write_text(f"""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("ramp")
+mesh.from_pydata({corners}, [], {faces})
+bpy.context.collection.objects.link(bpy.data.objects.new("ramp", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            # The concept: the ramp's faces drawn orthographically from theta 45, phi 20 (concept_view.view_axes),
+            # front-right and above, so its foot and its -Y side face the viewer.
+            theta, phi = math.radians(45), math.radians(20)
+            right = (math.cos(theta), math.sin(theta), 0.0)
+            towards = (math.sin(theta) * math.cos(phi), -math.cos(theta) * math.cos(phi), math.sin(phi))
+            up = (towards[1] * right[2] - towards[2] * right[1], towards[2] * right[0] - towards[0] * right[2],
+                  towards[0] * right[1] - towards[1] * right[0])
+            cutout = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(cutout)
+            for face in faces:
+                draw.polygon([(128 + 50 * sum(a * b for a, b in zip(corners[i], right)),
+                               150 - 50 * sum(a * b for a, b in zip(corners[i], up))) for i in face],
+                             fill=(120, 60, 40, 255))
+            cutout.save(concept)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "stair.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(_swatch(maps[0])),
+                            "--target-size", "1,2,-", "--facing-concept", str(concept)],
+                           check=True, capture_output=True, text=True)
+            result = root / "ramp.json"
+            probe = root / "probe.py"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+top = max(v.co.z for v in obj.data.vertices)
+json.dump([list(obj.dimensions), [list(v.co) for v in obj.data.vertices if v.co.z > top - 0.01]], open(sys.argv[-1], 'w'))
+""")
+            subprocess.run([BLENDER, "--background", str(blend), "--python", str(probe), "--", str(result)],
+                           check=True, capture_output=True, text=True)
+            dimensions, high = json.loads(result.read_text())
+            self.assertAlmostEqual(dimensions[0], 1.0, places=3)  # turned onto its footprint
+            self.assertAlmostEqual(dimensions[1], 2.0, places=3)
+            self.assertTrue(high and all(y > 0.9 for _x, y, _z in high), high)  # top at +Y, so the foot is at -Y
+
+    def test_turn_around_puts_a_kit_pieces_back_at_the_front(self):
+        """Round 23 (2026-11-08): the roof walkway and the pitched roof came out back to front and no automatic measure
+        told; the reviewer's --turn-around turns the sized piece 180 degrees, kept in the stage mesh for reuse."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            glb, blend, stage = root / "ramp.glb", root / "ramp.blend", root / "processed_mesh.blend"
+            maps = [root / f"{name}.png" for name in ("basecolor", "normal", "roughness", "metallic", "emission")]
+            for path in maps:
+                Image.new("RGB", (16, 16), (128, 128, 128)).save(path)
+            # A ramp 2 long on Y, foot (height 0) at -Y, the front, and top (height 1) at +Y, 1 wide on X.
+            corners = [(-0.5, -1, 0), (0.5, -1, 0), (-0.5, 1, 0), (0.5, 1, 0), (-0.5, 1, 1), (0.5, 1, 1)]
+            faces = [(0, 2, 3, 1), (2, 4, 5, 3), (0, 1, 5, 4), (0, 4, 2), (1, 3, 5)]
+            fixture = root / "fixture.py"
+            fixture.write_text(f"""import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+mesh = bpy.data.meshes.new("ramp")
+mesh.from_pydata({corners}, [], {faces})
+bpy.context.collection.objects.link(bpy.data.objects.new("ramp", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python", str(fixture), "--", str(glb)],
+                           check=True, capture_output=True, text=True)
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                            str(ROOT / "blender/prepare_model.py"), "--", str(glb), str(root / "ramp.fbx"), str(blend),
+                            *map(str, maps), "--face-budget", "1000", "--surface-source", str(_swatch(maps[0])),
+                            "--target-size", "1,2,-", "--turn-around", "--stage-mesh-output", str(stage)],
+                           check=True, capture_output=True, text=True)
+            probe = root / "probe.py"
+            probe.write_text("""import bpy, json, sys
+obj = [o for o in bpy.data.objects if o.type == 'MESH'][0]
+top = max(v.co.z for v in obj.data.vertices)
+json.dump([list(obj.dimensions), [list(v.co) for v in obj.data.vertices if v.co.z > top - 0.01],
+           bool(obj.get("slopforge_turned_around"))], open(sys.argv[-1], 'w'))
+""")
+            for saved in (blend, stage):
+                result = root / f"{saved.stem}.json"
+                subprocess.run([BLENDER, "--background", str(saved), "--python", str(probe), "--", str(result)],
+                               check=True, capture_output=True, text=True)
+                dimensions, high, marked = json.loads(result.read_text())
+                self.assertAlmostEqual(dimensions[0], 1.0, places=3)  # still on its declared footprint
+                self.assertAlmostEqual(dimensions[1], 2.0, places=3)
+                self.assertTrue(high and all(y < -0.9 for _x, y, _z in high), (saved.name, high))  # top now at -Y
+                self.assertTrue(marked, saved.name)
+
     def test_declared_pivot_places_the_origin_and_inspection_reads_real_scale_and_footprint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

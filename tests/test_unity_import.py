@@ -75,6 +75,11 @@ class UnityImportReportTests(unittest.TestCase):
                 build_unity_material(root, root / "Assets/Relic/relic.fbx", root / "Assets/Relic/relic.mat", maps,
                                      lightmap_uvs=True)
             self.assertIn("importer.generateSecondaryUV = true", scripts[0])
+            # Unity's default (Calculate) margin aborts the unwrap on a mesh of many small charts and imports it
+            # empty (the round-22 coal scuttle); the script then retries with a fixed margin and checks the mesh
+            self.assertIn("ModelImporterSecondaryUVMarginMethod.Manual", scripts[0])
+            self.assertIn("importer.secondaryUVPackMargin = 4f", scripts[0])
+            self.assertIn("Unity imported the FBX with an empty mesh", scripts[0])
 
     def test_report_records_guid_importer_and_file_hash_per_role(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -205,6 +210,33 @@ class UnityImportIdentityLiveTests(unittest.TestCase):
         renamed = self._publish(self.test_root / "relic_copy", 1.0, (40, 40, 200, 255))
         self.assertFalse({entry["guid"] for entry in renamed["assets"].values()} & set(guids.values()))
         self.assertEqual(self._metas(self.test_root / "relic"), metas)
+
+    def test_a_mesh_the_default_lightmap_unwrap_cannot_pack_still_imports_with_lightmap_uvs(self):
+        # Round 22's coal scuttle (145 loose lumps on a torn body): Unity's Calculate margin aborted the lightmap
+        # unwrap ("Could not pack uvs") and imported an empty mesh. 4,000 tiny loose pieces on a box do the same.
+        folder = self.test_root / "lumps"
+        folder.mkdir(parents=True)
+        script = ("import bpy, bmesh, random\nrandom.seed(1); bpy.ops.wm.read_factory_settings(use_empty=True)\n"
+                  "mesh = bpy.data.meshes.new('lumps'); bm = bmesh.new(); bmesh.ops.create_cube(bm, size=0.8)\n"
+                  "for i in range(4000):\n"
+                  "    piece = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.008)\n"
+                  "    bmesh.ops.translate(bm, verts=piece['verts'], vec=(random.uniform(-0.38, 0.38), random.uniform(-0.38, 0.38), 0.41))\n"
+                  "bm.to_mesh(mesh); obj = bpy.data.objects.new('lumps', mesh); bpy.context.collection.objects.link(obj)\n"
+                  "mesh.materials.append(bpy.data.materials.new('lumps_PBR')); mesh.uv_layers.new()\n"
+                  "bpy.context.view_layer.objects.active = obj; obj.select_set(True)\n"
+                  f"bpy.ops.export_scene.fbx(filepath={str(folder / 'lumps.fbx')!r}, use_selection=True)")
+        subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python-expr", script], check=True, capture_output=True)
+        for role in ROLES:
+            Image.new("RGBA", (8, 8), (90, 90, 90, 255)).save(folder / f"{role}.png")
+        record = build_unity_material(self.root, folder / "lumps.fbx", folder / "lumps_PBR.mat",
+                                      {role: folder / f"{role}.png" for role in ROLES}, lightmap_uvs=True)
+        model = record["assets"]["fbx"]["path"]
+        counts = self._editor(f'var meshes = AssetDatabase.LoadAllAssetsAtPath("{model}").OfType<Mesh>().ToArray(); '
+                              'var uv2 = new System.Collections.Generic.List<Vector2>(); meshes[0].GetUVs(1, uv2); '
+                              'result = meshes.Length + "|" + meshes[0].vertexCount + "|" + uv2.Count;').split("|")
+        self.assertEqual(counts[0], "1")
+        self.assertGreater(int(counts[1]), 0)
+        self.assertEqual(counts[2], counts[1])  # every vertex has a lightmap UV
 
     def test_glass_faces_get_a_transparent_material_and_the_rest_stays_opaque(self):
         # Issue #44: Blender puts declared glass faces on a _Glass material; Unity makes that one transparent.

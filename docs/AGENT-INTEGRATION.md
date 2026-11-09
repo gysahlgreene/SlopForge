@@ -14,6 +14,20 @@ slopforge --project /path/to/unity-project candidates inventory_key
 slopforge --project /path/to/unity-project approve inventory_key 1
 ```
 
+## Building from an existing picture
+
+A 3D asset can start from concept pictures made elsewhere, such as a concept-art round, instead of generated ones. Each `--concept-image` becomes one concept candidate, copied as it is with no image inference. `--concept-rights` names a JSON file with the pictures' output rights: a `source` (the model or person that made them) plus the fields of the record in [Providers and output rights](COMFYUI.md#providers-and-output-rights). The rights then travel through the asset's lineage like any provider's, so a notice ships with the asset and `restricted` or `unknown` pictures can't be delivered.
+
+```sh
+slopforge --project /path/to/unity-project generate prop boiler_trap "A boiler-plate steam trap" \
+  --material "boiler=metal: riveted brass" \
+  --concept-image round/boiler-trap-1.png --concept-image round/boiler-trap-2.png \
+  --concept-rights round/rights.json
+slopforge --project /path/to/unity-project approve boiler_trap 2
+```
+
+The pictures must be PNGs, each listed once. Everything is checked before a file is written. Pictures are used as they are, so `--reference`, `--aspect` and `--shape-guide` are refused with them. The pictures still need SlopForge's reconstruction rules: one object, centred with a margin, a plain light background, even light and no cast shadow.
+
 ## Failure and resume
 
 When prop processing fails, the CLI reports the failed stage, failure category, message, retry state, configured candidate budget, and remedy. The manifest retains the structured failure and any completed upstream artifacts. Inspect those records before changing inputs or resuming.

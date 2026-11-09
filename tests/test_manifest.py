@@ -135,6 +135,29 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(loaded_stage["failure"], failure)
         self.assertEqual(loaded["assets"]["prop:coin"]["executions"][0]["failure"], failure)
 
+    def test_saved_validations_keep_a_count_of_open_edges_not_each_edge(self):
+        # Round 22 (2026-11-06): with hidden faces removed, a hero prop's validation listed all of its 27,800 open edges,
+        # copied three times into its record; at 33 MB an asset the manifest reached 2.2 GB and each step spent minutes
+        # rewriting it. Each edge stays in the candidate's validation.json, which the character check reads.
+        edge = {"object_name": "Mesh_0", "kind": "boundary_edge", "midpoint": [0.0, 0.0, 0.0]}
+        validation = {"status": "passed", "measured": {"boundary_edges": 2, "topology_diagnostics": [edge, edge]}}
+        asset = {**self.make_asset("coin"), "validation": validation,
+                 "material_candidates": {"items": [{"number": 1, "validation": validation}]}}
+        manifest = {"schema_version": 4, "assets": {"prop:coin": asset}}
+        before = copy.deepcopy(manifest)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            save_manifest(path, manifest)
+            loaded = json.loads(path.read_text())
+
+        self.assertEqual(manifest, before, "saving changed the caller's data")
+        saved = loaded["assets"]["prop:coin"]
+        for measured in (saved["validation"]["measured"], saved["material_candidates"]["items"][0]["validation"]["measured"]):
+            self.assertNotIn("topology_diagnostics", measured)
+            self.assertEqual(measured["topology_diagnostics_count"], 2)
+            self.assertEqual(measured["boundary_edges"], 2)
+
     def test_manifest_rejects_failure_metadata_on_successful_stage(self):
         execution = manifest_module.start_execution(self.make_asset("coin"), {"brief": "coin"})
         stage = manifest_module.start_stage(execution, "concept_generation", 1, [], {}, {})

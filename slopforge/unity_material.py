@@ -57,6 +57,15 @@ def emitter_colour_mask(base, match):
         distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
         mask = ImageChops.lighter(ImageChops.lighter(*distance.split()[:2]), distance.split()[2])
         mask = mask.point(lambda v: 255 if v <= 48 else 0)
+        from .emitters import HUE_TOLERANCE, MIN_SATURATION
+        tint = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))
+        if tint[1] >= MIN_SATURATION * 255:
+            # A coloured emitter keeps its hue in shade; within the distance alone, round 24's copper coils
+            # (hue 13) glowed as its raspberry glass (#ad3f64, hue 340) on 22% of the map (docs/MATERIALS.md).
+            hsv = np.asarray(base.convert("HSV"), dtype=float)
+            hue = np.abs((hsv[..., 0] - tint[0] + 128) % 256 - 128) * 360 / 256
+            same = (hue <= HUE_TOLERANCE) & (hsv[..., 1] >= MIN_SATURATION * 255)
+            mask = ImageChops.multiply(mask, Image.fromarray(same.astype(np.uint8) * 255))
     return mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
 
 
@@ -124,6 +133,42 @@ def apply_glass(basecolor_path, roughness_path, metallic_path, matches):
     return sum(mask.histogram()[128:]) / (base.width * base.height)
 
 
+# Brass the metallic map marks non-metal keeps its sheen under a non-metal roughness floor: hue (degrees),
+# saturation and value of round 22's decoded brass (a cabinet's handles at about hue 32, saturation 0.62, value 0.58)
+# above its dark woods and leathers. Copper (hue about 20) can't be told from those by colour, so it is not spared.
+BRASS_HUE, BRASS_MIN_SATURATION, BRASS_MIN_VALUE = (28, 60), 0.45, 0.45
+
+
+def lift_nonmetal_roughness(roughness_path, metallic_path, basecolor_path, floor):
+    """Raise non-metal roughness to at least `floor`, keeping variation above it; returns the share of texels raised.
+
+    A type sets the floor when its art direction wants matte non-metals: round 22's woods, leathers and paints
+    decoded at roughness 0.38-0.64, and the studio light turned their tops white (2026-11-08). Metal (metallic above
+    0.5), glass (base colour alpha below opaque, apply_glass) and brass-coloured texels keep their roughness.
+    """
+    with Image.open(roughness_path) as image:
+        mode, size = image.mode, image.size
+        roughness = np.asarray(image.convert("L")).astype(np.float32) / 255
+    with Image.open(metallic_path) as image:
+        metal = np.asarray(image.convert("L").resize(size)) > 127
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGBA").resize(size)
+    glass = np.asarray(base.getchannel("A")) < 255
+    hsv = np.asarray(base.convert("RGB").convert("HSV")).astype(np.float32) / 255
+    hue = hsv[..., 0] * 360
+    brass = ((hue >= BRASS_HUE[0]) & (hue <= BRASS_HUE[1]) & (hsv[..., 1] >= BRASS_MIN_SATURATION)
+             & (hsv[..., 2] >= BRASS_MIN_VALUE))
+    raise_ = ~(metal | glass | brass) & (roughness < floor)
+    roughness[raise_] = floor
+    Image.fromarray(np.round(roughness * 255).astype(np.uint8)).convert(mode).save(roughness_path)
+    return float(raise_.mean())
+
+
+# A coloured non-metal claims texels up to this much lighter than its declared colour's brightest channel. At 1.15 the
+# round-22 barricade kept 91% of its brass metal and left 0.1% of its timber metal (1.25: 83%; 1.0: 0.9% timber).
+NONMETAL_LIGHTNESS_CEILING = 1.15
+
+
 def zero_metallic(basecolor_path, metallic_path, matches):
     """Zero the metallic map where the base colour matches a declared non-metal's colour; returns the share found.
 
@@ -134,8 +179,8 @@ def zero_metallic(basecolor_path, metallic_path, matches):
         base = image.convert("RGB")
     mask = Image.new("L", base.size, 0)
     red, green, blue = base.split()
-    saturation = ImageChops.subtract(ImageChops.lighter(ImageChops.lighter(red, green), blue),
-                                     ImageChops.darker(ImageChops.darker(red, green), blue))
+    value = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    saturation = ImageChops.subtract(value, ImageChops.darker(ImageChops.darker(red, green), blue))
     hue = base.convert("HSV").split()[0]
     closing = max(3, round(5 * base.width / 2048) | 1)
     for match in matches:
@@ -146,10 +191,14 @@ def zero_metallic(basecolor_path, metallic_path, matches):
             # too and came out pink as non-metal (2026-10-25); the generated walnut is duller than the concept's
             # (saturation 30 against 79), so a quarter of the declared saturation is the floor. Closed, not opened:
             # the darkest crevices inside the wood go with it, a screw head does not.
+            # Grain is darker than its wood, never much lighter: brass beside timber shares its hue but is lighter, so
+            # a ceiling above the declared colour keeps it metal (round-22 barricade, 2026-11-06; docs/MATERIALS.md).
             target = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))[0]
             floor = 0.25 * (max(match) - min(match))
+            ceiling = NONMETAL_LIGHTNESS_CEILING * max(match)
             near = hue.point(lambda value, target=target: 255 if min(abs(value - target), 256 - abs(value - target)) <= 21 else 0)
             found = ImageChops.multiply(near, saturation.point(lambda value, floor=floor: 255 if value >= floor else 0))
+            found = ImageChops.multiply(found, value.point(lambda value, ceiling=ceiling: 255 if value <= ceiling else 0))
             found = found.filter(ImageFilter.MaxFilter(closing)).filter(ImageFilter.MinFilter(closing))
         else:
             found = emitter_colour_mask(base, match)
@@ -164,6 +213,9 @@ def zero_metallic(basecolor_path, metallic_path, matches):
 METAL_LIGHTNESS_GRID = 16  # cells across the object, as one of the dark-texture check's grids
 MIN_LIT_METAL_CELLS = 6  # fewer lit metal cells than this is too little metal to judge from the concept's side
 MAX_METAL_GAIN = 8.0
+METAL_HUE_STEP = 10  # degrees: brightened metal's chroma limit is looked up per hue band of this width
+METAL_HUE_WINDOW = 30  # degrees: the concept's lit metal cells within this of a band set its limit
+MIN_COLOURED_METAL_CELLS = 3  # concept cells of one coloured metal needed before its chroma is allowed
 
 
 def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, metal_view):
@@ -198,13 +250,26 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
     # Brightening reveals tints the decoder left in dark metal (a pistol's serrations came up pink, 2026-10-25):
     # metal keeps no more chroma than the concept's lit metal shows
     concept_lab, _cover, _box = _lab_cells(cutout, METAL_LIGHTNESS_GRID)
-    chroma_limit = float(np.median(np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2]))) + 2.0
+    cell_chroma = np.hypot(concept_lab[lit][:, 1], concept_lab[lit][:, 2])
+    chroma_limit = float(np.median(cell_chroma)) + 2.0
     metal_texels = metallic > 0.5
     lab = _lab(pixels[..., :3][metal_texels] * 255)
     chroma = np.hypot(lab[:, 1], lab[:, 2])
+    # ... in its own hue: brass beside iron keeps the brass's chroma. Held to the iron's, the bolt turret's brass drum
+    # came out silver (2026-11-07); a hue no lit metal in the concept shows (the pink) keeps the median's limit.
+    limits = np.full(len(lab), chroma_limit)
+    cell_hue = np.degrees(np.arctan2(concept_lab[lit][:, 2], concept_lab[lit][:, 1]))
+    texel_hue = np.degrees(np.arctan2(lab[:, 2], lab[:, 1]))
+    for centre in range(0, 360, METAL_HUE_STEP):
+        near = lambda hue: np.abs((hue - centre + 180) % 360 - 180) <= METAL_HUE_WINDOW
+        coloured = near(cell_hue) & (cell_chroma > chroma_limit)
+        if coloured.sum() >= MIN_COLOURED_METAL_CELLS:
+            in_bin = np.abs((texel_hue - centre + 180) % 360 - 180) <= METAL_HUE_STEP / 2
+            limits[in_bin] = np.maximum(limits[in_bin], float(np.median(cell_chroma[coloured])) + 2.0)
+    chroma_limit = limits
     over = chroma > chroma_limit
     if over.any():
-        lab[over, 1:] *= (chroma_limit / chroma[over])[:, None]
+        lab[over, 1:] *= (chroma_limit[over] / chroma[over])[:, None]
         pixels[..., :3][metal_texels] = _srgb_from_lab(lab) / 255
     Image.fromarray((pixels * 255).round().astype(np.uint8), "RGBA").convert(mode).save(basecolor_path)
     return gain
@@ -213,6 +278,9 @@ def match_metal_lightness(basecolor_path, metallic_path, cutout, base_view, meta
 COLOUR_CLUSTERS = 3  # non-metal colours told apart in a map: a pistol's grips came out as three wood tones
 MIN_CLUSTER_CELLS = 4  # concept-side cells a colour needs before its shift is measured
 MAX_CHROMA_SHIFT = 25.0  # CIELAB a*b* units; a larger drift is not a tint
+# Share of a colour's cells the concept must show coloured for a shift: 2026-11 failures had 0.22-0.56, the
+# colours shifted rightly 0.87-1.0 (docs/MATERIALS.md). Set from that evidence; the owner has not set it.
+MIN_COLOURED_SHARE = 0.7
 BORROW_DISTANCE = 20.0  # a colour too small to measure takes a measured colour's shift only if this close in CIELAB
 LIGHTNESS_SHARE = 0.5  # a lit concept is brighter than albedo, so lightness moves half way to it, and never down
 MAX_LIGHTNESS_RATIO = 3.0  # a texture decoded darker than a third of the concept's lightness is not a tint
@@ -265,14 +333,19 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
     shares = np.stack([cell_share((view_labels == k) & seen) for k in range(len(centres))])
     # A cell counts for its most common colour when it is mostly non-metal: one wood's grain tones each rarely cover
     # most of a cell alone (2026-10-24 pistol: 3, 0 and 2 cells by single-colour majority).
-    measurable = (concept_cover & texture_cover & (shares.sum(0) > 0.6)
-                  & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA))
+    lined_up = concept_cover & texture_cover & (shares.sum(0) > 0.6)
+    measurable = lined_up & (np.hypot(concept[..., 1], concept[..., 2]) > MIN_CONCEPT_CHROMA)
     plurality = shares.argmax(0)
-    report, shifts = {}, {}
+    report, shifts, kept = {}, {}, set()
     for k in range(len(centres)):
-        cells = measurable & (plurality == k)
+        cells, all_cells = measurable & (plurality == k), lined_up & (plurality == k)
         report[k] = {"colour": [round(float(value), 1) for value in centres[k]], "cells": int(cells.sum())}
-        if cells.sum() >= MIN_CLUSTER_CELLS:
+        if all_cells.sum() >= MIN_CLUSTER_CELLS and cells.sum() < MIN_COLOURED_SHARE * all_cells.sum():
+            # The concept shows this colour grey in most of its cells, so its coloured cells are where it meets
+            # other parts: round 23's slate (22% coloured) came out brown, round 24's canopy iron (56%) maroon.
+            report[k]["coloured_share"] = round(float(cells.sum() / all_cells.sum()), 2)
+            kept.add(k)
+        elif cells.sum() >= MIN_CLUSTER_CELLS:
             shift = np.median(concept[cells][:, 1:] - texture[cells][:, 1:], 0)
             shift *= min(1.0, MAX_CHROMA_SHIFT / max(float(np.hypot(*shift)), 1e-6))
             ratio = float(np.clip(np.median(concept[cells][:, 0] / np.maximum(texture[cells][:, 0], 1)), 1, MAX_LIGHTNESS_RATIO))
@@ -281,7 +354,7 @@ def match_concept_colours(basecolor_path, metallic_path, cutout, base_view, meta
     for k in report:
         # A colour borrows a shift only from one about as saturated: a grey within 20 of a pistol's walnut took its
         # +19.6 a*, +10.8 b* and came out pink (2026-10-25)
-        source = k if k in shifts else min(
+        source = k if k in shifts else None if k in kept else min(
             (j for j in shifts if np.linalg.norm(centres[j] - centres[k]) <= BORROW_DISTANCE
              and np.hypot(*centres[k][1:]) >= 0.5 * np.hypot(*centres[j][1:])),
             key=lambda j: np.linalg.norm(centres[j] - centres[k]), default=None)
@@ -427,6 +500,21 @@ public static class {class_name}
         if (glass != null)
             importer.AddRemap(new AssetImporter.SourceAssetIdentifier(typeof(Material), glassSource.name), glass);
         importer.SaveAndReimport();
+        if (importer.generateSecondaryUV && !HasLightmapUVs(fbxPath))
+        {{
+            // Unity's default margin (Calculate, 40 texels per metre) aborts the unwrap on a mesh of many small
+            // charts ("Could not pack uvs") and imports it empty; a fixed margin packs it (round-22 coal scuttle)
+            Debug.LogWarning("SLOPFORGE_LIGHTMAP_UV_FIXED_MARGIN " + fbxPath);
+            importer.secondaryUVMarginMethod = ModelImporterSecondaryUVMarginMethod.Manual;
+            importer.secondaryUVPackMargin = 4f;
+            importer.SaveAndReimport();
+        }}
+        var importedMeshes = AssetDatabase.LoadAllAssetsAtPath(fbxPath).OfType<Mesh>().ToArray();
+        if (importedMeshes.Length == 0 || importedMeshes.Any(mesh => mesh.vertexCount == 0))
+            throw new Exception("Unity imported the FBX with an empty mesh" +
+                (importer.generateSecondaryUV ? "; its lightmap UV unwrap failed even with a fixed 4-pixel margin" : ""));
+        if (importer.generateSecondaryUV && !HasLightmapUVs(fbxPath))
+            throw new Exception("Unity did not generate the lightmap UV set (uv2) for the FBX");
         var imported = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
         var assigned = imported == null ? null : imported.GetComponentsInChildren<Renderer>(true)
             .SelectMany(renderer => renderer.sharedMaterials).FirstOrDefault(candidate => candidate == mat);
@@ -447,6 +535,13 @@ public static class {class_name}
                 Reference(mat, "normal", "_BumpMap"), Reference(mat, "metallic_gloss", "_MetallicGlossMap"),
                 Reference(mat, "emission", "_EmissionMap") }} }}));
         {f"RenderViews(imported, {quote(str(Path(render).resolve()))});" if render else ""}
+    }}
+
+    static bool HasLightmapUVs(string fbxPath)
+    {{
+        var meshes = AssetDatabase.LoadAllAssetsAtPath(fbxPath).OfType<Mesh>().ToArray();
+        var uv2 = new System.Collections.Generic.List<Vector2>();
+        return meshes.Length > 0 && meshes.All(mesh => {{ mesh.GetUVs(1, uv2); return mesh.vertexCount > 0 && uv2.Count == mesh.vertexCount; }});
     }}
 
     static void RenderViews(GameObject model, string path)

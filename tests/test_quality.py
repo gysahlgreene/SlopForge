@@ -177,6 +177,29 @@ asset_pipeline:
         self.assertFalse(_removes_hidden_faces({"remove_hidden_faces": True, "max_nonmanifold_edges": 0}, {}))
         self.assertFalse(_removes_hidden_faces({}, {}))
 
+    def test_hero_props_keep_the_prop_mesh_checks(self):
+        # Round 22's scrap hopper (hero_prop) came back from TRELLIS.2 as its bin alone, no legs or base, and passed
+        # every hero_prop check until the reduction stalled at 91,553 faces on its hidden inner shells (2026-11-06).
+        # A hero prop is a bigger prop: it removes hidden faces and is held to the concept's outline like one.
+        import yaml
+        from slopforge.paths import tool_root
+        from slopforge.pipelines.model import _removes_hidden_faces
+        types = tool_root() / "templates/asset_types"
+        prop = yaml.safe_load((types / "prop.yaml").read_text())
+        hero = yaml.safe_load((types / "hero_prop.yaml").read_text())
+        self.assertTrue(_removes_hidden_faces(hero, {"materials": [{"region": "frame", "class": "metal"}]}))
+        self.assertEqual(hero.get("min_concept_fit"), prop["min_concept_fit"])
+
+    def test_architecture_removes_hidden_faces(self):
+        # Round 23's roof_pitch_6 (architecture) stalled reducing its 3.8M-face mesh to the 60,000-face budget, as the
+        # scrap hopper did; with its 2.7M hidden faces removed it reduced to 57,000 and fitted its concept as before
+        # (0.84) (2026-11-08).
+        import yaml
+        from slopforge.paths import tool_root
+        from slopforge.pipelines.model import _removes_hidden_faces
+        architecture = yaml.safe_load((tool_root() / "templates/asset_types/architecture.yaml").read_text())
+        self.assertTrue(_removes_hidden_faces(architecture, {}))
+
     def test_character_types_project_their_front_concept(self):
         from slopforge.paths import tool_root
 

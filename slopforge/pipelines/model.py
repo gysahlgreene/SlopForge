@@ -22,7 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
-from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable,
+from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable, validate_output_rights,
                          rights_of, write_notices)
 from ..provenance import generator_provenance, file_sha256, tool_sha256
 from ..open_state import hinged_part, open_choice, open_paths, prepare_open_conditioning
@@ -30,8 +30,8 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
-                              unity_cli, zero_metallic, concept_part_colours)
+                              finish_word, lift_nonmetal_roughness, make_metallic_gloss, match_concept_colours,
+                              match_metal_lightness, unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
@@ -1129,7 +1129,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
                       target_size=asset.get("target_size"), pivot=asset.get("pivot"),
-                      arm_thickness=asset.get("arm_thickness"))
+                      arm_thickness=asset.get("arm_thickness"),
+                      facing_concept=_facing_concept(asset, lineage))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
                                    real_scale=bool(asset.get("target_size")))
@@ -1243,6 +1244,11 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                 # the parts route's textures are dark all over, so lightness moves the whole way to the concept's
                 colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays,
                                                         **({"lightness_share": 1.0} if mesh_info.get("part_model") == "omnipart" else {}))
+    nonmetal_floor = None
+    if asset_type.get("min_nonmetal_roughness"):  # after glass, metal and colour, which decide what stays smooth
+        floor = float(asset_type["min_nonmetal_roughness"])
+        nonmetal_floor = {"floor": floor, "raised_share": round(
+            lift_nonmetal_roughness(paths["roughness"], paths["metallic"], paths["basecolor"], floor), 4)}
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1282,6 +1288,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
+                  facing_concept=None if framed else _facing_concept(asset, lineage),
+                  turn_around=bool(asset.get("turn_around")),
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
                   motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared
@@ -1315,6 +1323,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
     if colour_transfer is not None:
         validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
+    if nonmetal_floor is not None:
+        validation.setdefault("measured", {})["nonmetal_roughness_floor"] = nonmetal_floor
     if held:
         validation = apply_weapon_orientation(validation)
     if moving:
@@ -1500,7 +1510,8 @@ def _fit_texture_size(maps, size):
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size")
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size",
+                                        "turn_around")
             if asset.get(key)}
 
 
@@ -1533,6 +1544,12 @@ def concept_route(config, asset_type, conditioning, shape_guide=None):
     return workflows["character_image"], {**conditioning,
                                           "references": [reference] + conditioning["references"],
                                           "workflow_inputs": [CONTROL_SLOT] + conditioning["workflow_inputs"]}
+
+
+def _facing_concept(asset, lineage):
+    """The concept cutout a sized kit piece is turned by, so the side its concept shows stays in front."""
+    cutout = (lineage or {}).get("concept_cutout")
+    return cutout if asset.get("target_size") and cutout and Path(cutout).is_file() else None
 
 
 def _concept_view(root, config, cutout, mesh_path, paths, name, **options):
@@ -1589,7 +1606,8 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
 def _emitter_targets(materials, material_class="emissive"):
     """Declared regions of one class as colour-rule targets: region -> (match_rgb or None for pale, glow_rgb)."""
     rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-    return {item["region"]: (rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
+    return {item["region"]: (rgb(item["color"]), rgb(item.get("glow") or item["color"])) if item.get("color")
+            else (None, (255, 178, 102))
             for item in materials or [] if item.get("class") == material_class}
 
 
@@ -1726,10 +1744,46 @@ def _with_concept_aspect(config, asset_type, workflow_path, aspect):
     return result
 
 
+def imported_concepts(paths, rights):
+    """Existing pictures to use as concept candidates, checked before anything is written: each a readable PNG, none
+    twice, and one output-rights record naming their source. Returns (files, sha256s, rights entry)."""
+    if not rights:
+        raise ValueError("Imported concept pictures need their output rights: pass --concept-rights with a JSON record "
+                         "{source, status, terms, terms_version, read_on, notice}")
+    rights = dict(rights)
+    source = rights.pop("source", None)
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("--concept-rights needs a source naming the model or person that made the pictures")
+    record = validate_output_rights(rights, "--concept-rights")
+    files, shas = [], []
+    for path in paths:
+        path = Path(path).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError(f"Concept picture {path} does not exist")
+        try:
+            with Image.open(path) as picture:
+                picture.verify()
+                kind = picture.format
+        except Exception as exc:
+            raise ValueError(f"Concept picture {path} is not a picture: {exc}") from exc
+        if kind != "PNG":
+            raise ValueError(f"Concept picture {path} is {kind}, not PNG")
+        files.append(path)
+        shas.append(file_sha256(path))
+    if len(set(shas)) != len(shas):
+        raise ValueError("The same concept picture is listed twice")
+    return files, shas, {"source": source, **record}
+
+
 def generate(project_root, config, asset_type, style, name, description, count, manifest, key, *, generation_prompt=None,
              reference_paths=None, reference_categories=None, reference_entries=None, variations=None, aspect=None,
-             shape_guide=None):
+             shape_guide=None, concept_images=None, concept_rights=None):
     root = Path(project_root).resolve()
+    if concept_images:
+        return _generate_imported(root, config, asset_type, style, name, description, manifest, key, concept_images,
+                                  concept_rights, generation_prompt=generation_prompt,
+                                  conflicts=reference_paths or reference_categories or reference_entries or variations
+                                  or aspect or shape_guide)
     conditioning = resolve_conditioning(root, config, style, reference_paths=reference_paths,
                                         reference_categories=reference_categories, reference_entries=reference_entries)
     ensure_supported(conditioning)
@@ -1769,6 +1823,36 @@ def generate(project_root, config, asset_type, style, name, description, count, 
     record["generation_prompt"] = prompt
     record["conditioning"] = {"strategy": conditioning["strategy"], "references_used": conditioning["references"]}
     record["generator"]["workflow"] = str(workflow)
+    return result
+
+
+def _generate_imported(root, config, asset_type, style, name, description, manifest, key, concept_images,
+                       concept_rights, *, generation_prompt=None, conflicts=None):
+    """Concept candidates copied from existing pictures (generate --concept-image): no image inference, and each
+    candidate records the picture's hash and the declared output rights, which then travel through its lineage."""
+    if conflicts:
+        raise ValueError("--concept-image uses the pictures as they are: drop --reference, --aspect, --shape-guide "
+                         "and variations")
+    files, shas, rights = imported_concepts(concept_images, concept_rights)
+    prompt = generation_prompt or build_prompt(style, asset_type, description)
+    pictures = iter(zip(files, shas))
+
+    def backend(prompt_text, destination, seed, metadata):
+        path, sha = next(pictures)
+        shutil.copyfile(path, destination)
+        metadata.write_text(json.dumps({"workflow": None, "model": rights["source"], "seed": None,
+                                        "imported_from": {"path": str(path), "sha256": sha},
+                                        "output_rights": [rights]}))
+
+    result = generate_candidates(root, config, asset_type, style, name, prompt, len(files), manifest, key, backend,
+                                 semantic_description=description,
+                                 identity_inputs={"asset_type": asset_type.get("name"), "brief": description,
+                                     "generation_prompt": prompt, "style": style_identity(style),
+                                     "workflow": {"identifier": "imported", "sources": shas, "rights": rights}})
+    record = manifest["assets"][key]
+    record["description"] = description
+    record["generation_prompt"] = prompt
+    record["generator"]["workflow"] = None
     return result
 
 
@@ -1971,6 +2055,14 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 shutil.copy2(root / mesh_source, paths["glb"])
             write_notices(paths["directory"], asset["name"], rights)
             type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
+            floor = type_record.get("min_nonmetal_roughness")
+            published_floor = None
+            if floor and "nonmetal_roughness_floor" not in candidate.get("validation", {}).get("measured", {}):
+                # A candidate made before its type set the floor gets it here, so finished models need no rebuild
+                # (round 22's 89, 2026-11-08); its previews were rendered before it.
+                published_floor = {"floor": float(floor), "applied_at": "publication", "raised_share": round(
+                    lift_nonmetal_roughness(paths["roughness"], paths["metallic"], paths["basecolor"], float(floor)), 4)}
+                make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
             # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
@@ -1982,6 +2074,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            if published_floor:
+                validation["measured"]["nonmetal_roughness_floor"] = published_floor
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
             if moving or type_record.get("unity_prefab"):
                 # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a

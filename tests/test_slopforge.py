@@ -735,6 +735,26 @@ class SlopForgeTests(unittest.TestCase):
                                        "--aspect", "portrait"]), 1)
         self.assertIn("--aspect applies to 3D asset types", error.getvalue())
 
+    def test_generate_passes_existing_pictures_with_their_rights_for_3d_types_only(self):
+        picture = Path(self.temp.name) / "take.png"
+        Image.new("RGB", (16, 16), "teal").save(picture)
+        rights = Path(self.temp.name) / "rights.json"
+        rights.write_text(json.dumps({"source": "FLUX 3 Image Klein", "status": "cleared", "terms": "Licence",
+                                      "terms_version": "v1", "read_on": "2026-11-05"}))
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]) as generate, \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "crate", "A crate",
+                                       "--concept-image", str(picture), "--concept-rights", str(rights)]), 0)
+        self.assertEqual(generate.call_args.kwargs["concept_images"], [str(picture)])
+        self.assertEqual(generate.call_args.kwargs["concept_rights"]["source"], "FLUX 3 Image Klein")
+        self.assertEqual(generate.call_args.args[6], 1)  # one candidate per picture
+        for argv, message in ((["prop", "crate", "A crate", "--concept-image", str(picture)], "needs --concept-rights"),
+                              (["concept", "badge", "A badge", "--concept-image", str(picture), "--concept-rights",
+                                str(rights)], "applies to 3D asset types")):
+            with self.subTest(message), redirect_stderr(StringIO()) as error:
+                self.assertEqual(cli_main(["--project", str(self.root), "generate", *argv]), 1)
+            self.assertIn(message, error.getvalue())
+
     def test_generate_refuses_a_slide_without_the_models_real_size(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
                 redirect_stdout(StringIO()), redirect_stderr(StringIO()) as error:
@@ -760,6 +780,24 @@ class SlopForgeTests(unittest.TestCase):
             self.assertEqual(cli_main(["--project", str(self.root), "generate", "concept", "badge", "A badge",
                                        "--shape-guide", "box:1"]), 1)
         self.assertIn("--shape-guide applies to 3D asset types", error.getvalue())
+
+    def test_approve_keeps_a_reviewers_turn_around_on_the_asset(self):
+        # Round 23 (2026-11-08): two kit pieces came out back to front; the reviewer turns them, and rebuilds keep it.
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "walkway",
+                                       "A roof walkway", "--target-size", "3,1.5,1.1"]), 0)
+        manifest = self.root / "ai/assets/manifest.json"
+        with patch("slopforge.pipelines.model.approve") as approve, redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1",
+                                       "--turn-around"]), 0)
+            self.assertTrue(load_manifest(manifest)["assets"]["prop:walkway"]["turn_around"])
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1"]), 0)
+            self.assertTrue(load_manifest(manifest)["assets"]["prop:walkway"]["turn_around"])  # kept
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1",
+                                       "--no-turn-around"]), 0)
+        self.assertNotIn("turn_around", load_manifest(manifest)["assets"]["prop:walkway"])
+        self.assertEqual(approve.call_count, 3)
 
     def test_generate_gives_a_3d_asset_a_real_size_standing_on_its_base(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \

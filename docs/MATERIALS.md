@@ -24,6 +24,20 @@ result against that declaration before anyone reviews it.
    colour, the region is found as the map's pale near-neutral area (clear glass, pale paper). Declarations are stored on the asset
    record and apply to every later stage.
 
+   An emitter glows in its declared colour unless it adds a glow colour: `emissive#ad3f64@ec1fc6` is found where the
+   concept shows `#ad3f64` and glows `#ec1fc6`. Declare the colour as drawn, not as wanted. Round 24's teleporter glass was
+   declared `#EC1FC6`, but FLUX drew it raspberry, about `#ad3f64`. The emitter check found it in none of the five
+   concepts and stopped each build before any mesh work (2026-11-09). Glass shaded inside a hollow is darker than the
+   same glass in light. On the chamber `#ad3f64` found only the portholes; `#82284a` found the portholes and most of
+   the lining; darker matches also caught the dark iron.
+
+   On the baked map, a coloured emitter must match its hue as well as its colour: within 15° of its
+   hue, at a saturation of at least 0.35. Grey and pale declared colours are matched on colour alone.
+   Before 2026-11-09 colour alone was used, and copper baked about #a8503a was close enough to the
+   raspberry glass (#ad3f64) to pass: the coil cage's coils glowed on 22% of its map. Their median hue
+   was 7°, against the glass's 340°. With the hue check, 1.5% of the map glows, and the booth keeps its
+   glass panels (10.1% against 12.0% before).
+
 2. **Concept.** SlopForge appends reconstruction rules and the declared regions to every
    3D concept prompt, including agent-authored and recipe prompts: complete centred
    object, soft even studio lighting with no baked highlights, distinct material regions,
@@ -48,7 +62,7 @@ result against that declaration before anyone reviews it.
    object inside it, with more shells inside, all connected, so the enclosed-shell removal keeps them.
    Of the faces of delivered weapons and props only 9–24% could be seen from outside (2026-10-25: a
    pistol 9% and 24%, a chest 20%), and the reduction and the texture went mostly to the rest. A type
-   with `remove_hidden_faces: true` (weapon and prop) has Blender delete the faces no ray from
+   with `remove_hidden_faces: true` (weapon, prop, hero_prop and creature) has Blender delete the faces no ray from
    outside reaches before it reduces (`mesh_cleanup.remove_hidden_faces`: 32 evenly spread rays per
    face, a face beside a seen one and facing within 60° of it kept): on a pistol's 1.26
    million-face detail mesh 28% were seen, in 40 s, and at the same 24,000-face budget its slide's
@@ -62,7 +76,14 @@ result against that declaration before anyone reviews it.
    hidden faces (a crevice's walls) were cut loose: one pistol went from 1 piece to 71, failed the
    component budget, and a patch at its muzzle stayed with the body while the slide moved. The hidden
    faces on the shortest path from each seen piece to the largest now stay (within 128 faces of it:
-   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden).
+   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden). `hero_prop` lacked
+   it until round 22's scrap hopper (2026-11-06): its 7.4 million-face detail mesh had 10,392 edges
+   shared by three or more faces, which Blender's collapse will not remove, and the reduction stalled
+   at 91,553 faces against a 60,000 budget. 70% of the faces were hidden; the remaining 2.25 million
+   reduced to 56,999 in under 6 minutes. That mesh had also lost the hopper's legs and base in TRELLIS.2
+   itself (not in the GPU remesh: with `drop_small_components` at 0 they were still missing), so
+   `hero_prop` now also checks the concept's outline (`min_concept_fit: 0.8`, as `prop`), and a lost
+   part retries the next seed.
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto
@@ -104,6 +125,19 @@ result against that declaration before anyone reviews it.
    - keeps the largest matching blob for a declared colour, which drops glints on parts of a similar hue;
    - grows that blob over connected pixels of the declared hue;
    - maps it onto the render through the silhouettes' bounding boxes, and marks the texels the render shows there.
+
+   Known limit: only one emitter blob per declared colour is projected. A concept with several separate emitters
+   of one colour (round 24's canopy: 12 lenses and a floor disc, 2026-11-09) gets only the largest; the others
+   glow only where the bake kept their colour, and the canopy's bake had its lenses dark red, so they stayed dark.
+   Keeping every blob was tried and reverted: through the bounding-box registration the canopy's lenses landed on
+   its roof and a column, and the booth's and chamber's frames picked up glow. The causes:
+   - the fitted render is orthographic, while the concept is a perspective picture from about mid-height (roof
+     from below, floor from above), so the best orthographic fit looks down on the roof (overlap 0.955);
+   - a perspective search (2.5 object extents, eye level) fitted better (0.971) and put the lenses on the lens
+     band, but the model's lenses are spaced differently from the concept's, so they still sat half off;
+   - so several emitters need the projection snapped to the bake's own parts, not a better global view only.
+   The relay's copper glints, the reason for the largest-blob rule, measured hue 19–22° against its amber lens at
+   38°, so the colour rule's hue check now drops them before this step. Evidence in private round-24 notes.
 
    A texel glows when either way finds it. The candidate records `emission_projection` (status, view, overlap, texture
    fraction per target). A candidate
@@ -190,11 +224,51 @@ result against that declaration before anyone reviews it.
      concept, never lowered, since a lit concept is brighter than albedo.
    - A colour with fewer than four cells borrows the nearest measured colour's shift, if it is
      within 20.
+   - **A colour the concept shows grey is kept as decoded.** If the concept is chromatic in fewer
+     than 70% of a colour's cells, the colour is neither shifted nor given another's shift, and its
+     report records `coloured_share`. Counting only the chromatic cells measured a grey material just
+     where it met other parts:
+     - Round 23's slate roof was coloured in 22% of its cells, where it met brick. It was shifted
+       +4.5 a*, +12.3 b* and came out brown (2026-11-08).
+     - Round 24's canopy iron was coloured in 56% of its cells and was shifted +16.9 a*, +13.1 b*,
+       which made the columns maroon (2026-11-09). The fitted view matched the outline (0.956), but it
+       put the iron roof top where the concept has its copper band.
+     - The colours that were shifted correctly were coloured in 87–100% of their cells: a coil cage's
+       pink-baked copper, and a booth's and a chamber's glass.
+     - Two other tests did not separate the bad cells: agreement among the per-cell offsets (canopy
+       iron 0.87 within 10 of the median) and the lightness ratio (18 of 23 cells within 3×).
+     - The 70% limit is set from these cases; the owner has not set it.
    - The shifts are recorded as `concept_colour_transfer`.
+   - **Brightened metal keeps its hue's colour.** The metal brightening holds each hue to the chroma of
+     the concept's lit metal of that hue (10° bands, at least 3 coloured cells within 30°), so brass keeps
+     its colour and a tint no metal in the concept shows (a pistol's pink serrations) is still removed.
+     Before, one limit, the median of all lit metal, applied to every hue: on iron-and-brass objects it
+     was the iron's, and round 22's bolt turret brass came out silver (2026-11-07). Moving metal colours
+     towards the concept's with this section's cell-by-cell shift was tried and dropped: on the bolt
+     turret its cells did not line up, the brass was shifted away from yellow and the darkest iron towards
+     it (b* +17.6).
    - Why: TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed (hue angle 43
      against 37), and the whole-object colour checks, ruled by its black steel, passed them. On one
      pistol the shift brought the grips to hue angle 35.5 and chroma 28 (concept 37.2 and 30).
-   - Weapons opt in; props do not yet.
+   - The packaged weapon and prop types opt in.
+
+   **Matte non-metals (types that opt in, `min_nonmetal_roughness`).** Non-metal texels below the
+   floor are raised to it, after glass, metal and colours are settled, and recorded as
+   `nonmetal_roughness_floor` (the floor and the share raised).
+   - Kept as decoded: metal (metallic over 0.5), glass (base colour alpha below opaque), and
+     brass the map marks non-metal (hue 28-60°, saturation and value at least 0.45, such as a
+     cabinet's handles). Copper (hue about 20°) can't be told from dark wood or leather by colour,
+     so copper the map marks non-metal is made matte with them.
+   - A candidate made before its type set the floor gets it at `approve-texture`: the published
+     roughness and metallic-gloss maps are raised, the candidate's own files are left alone, and the
+     record says `"applied_at": "publication"`. Its previews were rendered before the floor.
+   - Why: round 22's woods, leathers and paints decoded at roughness 0.38-0.64 (2026-11-08). Their
+     base colour on top faces was no paler than on the sides (top/side lightness 0.87-1.07 on five
+     props), yet the tops rendered white: the studio's overhead light on a semi-glossy surface. With
+     non-metals at 0.75 or more the glare went from a parts cabinet and a luggage trolley; a coal
+     scuttle's coal stayed pale, because its colour itself is pale. The game's art direction asks
+     for non-metals at 0.75 or more, so the game project's prop and character types set 0.75. The floor is a
+     style choice, not a default.
 
 9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
@@ -272,7 +346,14 @@ and none are declared yet.
   go with it: HP10's walnut grips (65, 45, 34) had dark grain (49, 34, 24) outside the emitters'
   per-channel window of 48, which left 9.8% of the grips metal as grey flecks; by hue 3.9%, the
   screws among it (2026-10-26). Greys stay metal (dark steel within that window had turned pink
-  as walnut). Grey and pale declarations keep the emitters' rule. A coloured
+  as walnut). It claims nothing more than 1.15 times lighter than the declared colour: grain is
+  darker than its wood, but brass beside timber shares its hue and is lighter. Without that
+  ceiling, round 22's `timber=nonmetal#5a3a22` (hue 26°) zeroed brass trim decoded at hue 31°,
+  which TRELLIS.2 had rated 0.99 metal, and the brass rendered as beige plaster; with it, 98% of
+  the barricade's generated metal stays metal and all its generated non-metal is zeroed
+  (2026-11-06). Declare a coloured non-metal only on an asset that has it: on one without, the
+  rule finds the nearest same-hue metal instead. Grey and pale declarations keep the emitters' rule,
+  so a near-black one such as oil also takes dark iron; leave its colour off beside dark metal. A coloured
   non-metal with no matching region fails as `nonmetal_missing`, and the next seed is tried.
   An uncoloured non-metal next to declared metal keeps the generator's values.
 - **Mac route:** on the local Mac (MPS) route, every observed metallic map was zero, including

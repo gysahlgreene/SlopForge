@@ -58,6 +58,13 @@ def parser():
     generate.add_argument("--shape-guide", metavar="SHAPE:H/W",
                           help="Hold a prop concept's main mass to a cylinder or box of this height/width, such as "
                                "cylinder:0.5, when the wording and --aspect do not")
+    generate.add_argument("--concept-image", action="append", default=[], dest="concept_images", metavar="PATH",
+                          help="Use an existing PNG as a concept candidate instead of generating one (repeatable, one "
+                               "candidate each); needs --concept-rights")
+    generate.add_argument("--concept-rights", metavar="FILE",
+                          help="JSON output-rights record for the --concept-image pictures: source (the model or person "
+                               "that made them), status, terms, terms_version, read_on, and notice or reason as the "
+                               "status requires (docs/COMFYUI.md, Providers and output rights)")
     generate.add_argument("--count", type=int)
     generate.add_argument("--auto-approve", action="store_true")
     generate.add_argument("--force", action="store_true")
@@ -103,6 +110,10 @@ def parser():
                               "open from it and its hinged part closed (docs/WEAPONS.md, Props generated open)")
     approve.add_argument("--open-part-box", action="append", default=[], dest="open_part_boxes",
                          help="Where a declared part lies on the open picture: 'name=x0,y0,x1,y1' as for --part-box")
+    approve.add_argument("--turn-around", action=argparse.BooleanOptionalAction,
+                         help="The built model faces the wrong way: turn it 180 degrees about its vertical axis when "
+                              "assembled. Kept on the asset for later rebuilds; --no-turn-around clears it "
+                              "(docs/ENVIRONMENT-KITS.md)")
     open_parser = sub.add_parser("open", help="Edit a concept candidate to show its hinged part open, for approval")
     open_parser.add_argument("name")
     open_parser.add_argument("candidate", type=int, help="The concept candidate to open")
@@ -1114,6 +1125,12 @@ def _run(args):
                 record["parts"] = set_part_boxes(set_part_boxes(record.get("parts") or [], boxes), open_boxes,
                                                  key="open_box")
                 save_manifest(manifest_path, manifest)
+            if getattr(args, "turn_around", None) is not None:  # a reviewer's decision, saved before approval reloads
+                if args.turn_around:
+                    record["turn_around"] = True
+                else:
+                    record.pop("turn_around", None)
+                save_manifest(manifest_path, manifest)
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),
                           material_count=getattr(args, "material_count", None),
@@ -1152,6 +1169,15 @@ def _run(args):
 
     # Model types generate concept images here; model_candidates bounds mesh attempts at approval.
     count = args.count or pipeline["defaults"]["image_candidates"]
+    concept_images = getattr(args, "concept_images", None) or []
+    concept_rights = None
+    if concept_images:
+        if recipe["pipeline"] != "model":
+            raise ValueError(f"--concept-image applies to 3D asset types; {asset_type} is a 2D type")
+        if not getattr(args, "concept_rights", None):
+            raise ValueError("--concept-image needs --concept-rights, a JSON output-rights record for the pictures")
+        concept_rights = json.loads(Path(args.concept_rights).expanduser().read_text())
+        count = len(concept_images)
     key = _asset_key(manifest, asset_type, args.name)
     if key in manifest["assets"]:
         record = manifest["assets"][key]
@@ -1205,7 +1231,8 @@ def _run(args):
                                     reference_paths=getattr(args, "reference_paths", None),
                                     reference_categories=getattr(args, "reference_categories", None),
                                     reference_entries=reference_entries, aspect=getattr(args, "aspect", None),
-                                    shape_guide=shape_guide))
+                                    shape_guide=shape_guide, concept_images=concept_images,
+                                    concept_rights=concept_rights))
         save_manifest(manifest_path, manifest)
     except Exception as exc:
         record["status"] = "failed"
