@@ -11,13 +11,14 @@ AMBER = (224, 160, 48)
 
 def _concept():
     # rembg keeps the backdrop colour under transparent pixels; the object is a graphite box with a lens whose
-    # body is a darker amber than declared and whose highlight matches it, plus a copper glint on another part.
+    # body is a darker amber than declared and whose highlight matches it, plus a copper glint on another part in
+    # the colour measured on the relay concept's glints (mean 184, 122, 93: within the colour distance, hue 20).
     image = Image.new("RGBA", (200, 200), (215, 215, 215, 0))
     draw = ImageDraw.Draw(image)
     draw.rectangle((40, 50, 160, 150), fill=(60, 60, 60, 255))
     draw.ellipse((80, 80, 120, 120), fill=(170, 110, 20, 255))
     draw.ellipse((86, 86, 104, 104), fill=(226, 162, 50, 255))
-    draw.rectangle((44, 56, 52, 64), fill=(220, 150, 60, 255))
+    draw.rectangle((44, 56, 52, 64), fill=(184, 122, 93, 255))
     return image
 
 
@@ -26,7 +27,7 @@ class EmitterProjectionTests(unittest.TestCase):
         concept = _concept()
         flat = Image.alpha_composite(Image.new("RGBA", concept.size, (0, 0, 0, 255)), concept).convert("RGB")
         seed = np.asarray(emitter_colour_mask(flat, AMBER)) > 127
-        self.assertTrue(seed[60, 48])  # the colour rule alone also takes the copper glint
+        self.assertFalse(seed[60, 48])  # the colour rule's hue check drops the copper glint
         emitter = concept_emitter_mask(concept, AMBER, seed)
         # A render that shows the concept's view one to one, with UVs that address a 200 x 200 texture likewise.
         y, x = np.mgrid[0:200, 0:200]
@@ -37,6 +38,22 @@ class EmitterProjectionTests(unittest.TestCase):
         self.assertGreater(texture[lens_mask].mean(), 0.9)
         self.assertFalse(texture[56:65, 44:53].any())
         self.assertFalse(texture[~alpha].any())
+
+    @unittest.expectedFailure  # known limit: only the largest blob is projected (docs/MATERIALS.md)
+    def test_every_emitter_of_a_declared_colour_is_projected(self):
+        # Round 24's canopy: 12 lenses and a floor disc of one declared colour, foreshortened lenses down to 0.03 of
+        # the largest; keeping only the largest blob left 12 dark (2026-11-09). Keeping every blob put the glow on
+        # its roof instead, through the bounding-box registration, so it waits for better registration.
+        image = Image.new("RGBA", (200, 200), (215, 215, 215, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((20, 40, 180, 160), fill=(60, 60, 60, 255))
+        lenses = [(60, 100, 20), (120, 100, 9), (160, 100, 5)]
+        for x, y, r in lenses:
+            draw.ellipse((x - r, y - r, x + r, y + r), fill=(173, 63, 100, 255))
+        flat = Image.alpha_composite(Image.new("RGBA", image.size, (0, 0, 0, 255)), image).convert("RGB")
+        emitter = concept_emitter_mask(image, (173, 63, 100), np.asarray(emitter_colour_mask(flat, (173, 63, 100))) > 127)
+        for x, y, r in lenses:
+            self.assertTrue(emitter[y, x], (x, y, r))
 
     def test_nothing_is_projected_when_the_concept_has_no_emitter(self):
         concept = _concept()

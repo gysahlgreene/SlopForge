@@ -932,6 +932,21 @@ class DeclaredMaterialTests(unittest.TestCase):
             with Image.open(root / "emission.png") as emission:
                 self.assertGreater(max(emission.getpixel((85, 85))), 150)  # the found lens still glows
 
+    def test_a_coloured_emitter_does_not_glow_on_a_near_colour_of_another_hue(self):
+        from slopforge.unity_material import derive_emission
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # Round 24's coil cage: raspberry glass declared #ad3f64 (hue 340) beside copper coils baked about
+            # #a8503a (hue 13), which is within the colour distance; the copper glowed on 22% of the map.
+            base = Image.new("RGB", (256, 256), (60, 58, 56))
+            base.paste((168, 80, 58), (0, 0, 256, 120))       # copper
+            base.paste((170, 66, 104), (40, 160, 120, 240))   # the glass, lightly shaded
+            base.save(root / "basecolor.png")
+            derive_emission(root / "basecolor.png", root / "emission.png", [((0xad, 0x3f, 0x64), (0xec, 0x1f, 0xc6))])
+            with Image.open(root / "emission.png") as emission:
+                self.assertLess(max(emission.getpixel((128, 60))), 20)    # the copper stays dark
+                self.assertGreater(max(emission.getpixel((80, 200))), 150)  # the glass glows
+
     def test_declared_emitter_missing_from_base_color_is_a_retryable_candidate_failure(self):
         from slopforge.failures import should_retry
         materials = [{"region": "body", "class": "nonmetal", "description": ""},
@@ -994,6 +1009,25 @@ class DeclaredMaterialTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "--material must be"):
             parse_material_spec("housing=metal#ffffff")  # metal has no colour rule
         self.assertEqual(parse_material_spec("grip=nonmetal#5a3a22: leather")["color"], "#5a3a22")
+
+    def test_an_emitter_found_by_its_drawn_colour_glows_in_a_declared_glow_colour(self):
+        # Round 24 (2026-11-09): the teleporter's glass must glow #EC1FC6, but the concepts drew it raspberry, about
+        # (173, 63, 100), so matching #EC1FC6 found no glass in any of the five and every build stopped.
+        from slopforge.style import parse_material_spec
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (256, 256), (40, 40, 45))
+            base.paste((173, 63, 100), (100, 100, 160, 160))  # the glass as drawn
+            glass = parse_material_spec("panels=emissive#ad3f64@ec1fc6: opaque magenta glass")
+            self.assertEqual((glass["color"], glass["glow"]), ("#ad3f64", "#ec1fc6"))
+            candidate = self._candidate(root, [{"region": "frame", "class": "nonmetal", "description": ""}, glass], 0, base)
+            self.assertGreater(candidate["validation"]["measured"]["emissive_fraction"], 0.04)
+            with Image.open(root / candidate["outputs"]["emission"]) as emission:
+                self.assertEqual(emission.getpixel((130, 130)), (236, 31, 198))
+                self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
+        for spec in ("panels=emissive@ec1fc6", "panels=emissive#ad3f64@ec1fc", "panels=glass#ad3f64@ec1fc6"):
+            with self.assertRaisesRegex(ValueError, "--material must be"):
+                parse_material_spec(spec)  # a glow needs the drawn colour, six hex digits, and an emitter
 
     def test_a_coloured_nonmetal_beside_declared_metal_loses_its_false_metal(self):
         # A sword declares a steel blade, so the generator's metallic map is kept; its leather grip must not shine.

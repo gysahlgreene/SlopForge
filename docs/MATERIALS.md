@@ -24,6 +24,20 @@ result against that declaration before anyone reviews it.
    colour, the region is found as the map's pale near-neutral area (clear glass, pale paper). Declarations are stored on the asset
    record and apply to every later stage.
 
+   An emitter glows in its declared colour unless it adds a glow colour: `emissive#ad3f64@ec1fc6` is found where the
+   concept shows `#ad3f64` and glows `#ec1fc6`. Declare the colour as drawn, not as wanted. Round 24's teleporter glass was
+   declared `#EC1FC6`, but FLUX drew it raspberry, about `#ad3f64`. The emitter check found it in none of the five
+   concepts and stopped each build before any mesh work (2026-11-09). Glass shaded inside a hollow is darker than the
+   same glass in light. On the chamber `#ad3f64` found only the portholes; `#82284a` found the portholes and most of
+   the lining; darker matches also caught the dark iron.
+
+   On the baked map, a coloured emitter must match its hue as well as its colour: within 15° of its
+   hue, at a saturation of at least 0.35. Grey and pale declared colours are matched on colour alone.
+   Before 2026-11-09 colour alone was used, and copper baked about #a8503a was close enough to the
+   raspberry glass (#ad3f64) to pass: the coil cage's coils glowed on 22% of its map. Their median hue
+   was 7°, against the glass's 340°. With the hue check, 1.5% of the map glows, and the booth keeps its
+   glass panels (10.1% against 12.0% before).
+
 2. **Concept.** SlopForge appends reconstruction rules and the declared regions to every
    3D concept prompt, including agent-authored and recipe prompts: complete centred
    object, soft even studio lighting with no baked highlights, distinct material regions,
@@ -111,6 +125,19 @@ result against that declaration before anyone reviews it.
    - keeps the largest matching blob for a declared colour, which drops glints on parts of a similar hue;
    - grows that blob over connected pixels of the declared hue;
    - maps it onto the render through the silhouettes' bounding boxes, and marks the texels the render shows there.
+
+   Known limit: only one emitter blob per declared colour is projected. A concept with several separate emitters
+   of one colour (round 24's canopy: 12 lenses and a floor disc, 2026-11-09) gets only the largest; the others
+   glow only where the bake kept their colour, and the canopy's bake had its lenses dark red, so they stayed dark.
+   Keeping every blob was tried and reverted: through the bounding-box registration the canopy's lenses landed on
+   its roof and a column, and the booth's and chamber's frames picked up glow. The causes:
+   - the fitted render is orthographic, while the concept is a perspective picture from about mid-height (roof
+     from below, floor from above), so the best orthographic fit looks down on the roof (overlap 0.955);
+   - a perspective search (2.5 object extents, eye level) fitted better (0.971) and put the lenses on the lens
+     band, but the model's lenses are spaced differently from the concept's, so they still sat half off;
+   - so several emitters need the projection snapped to the bake's own parts, not a better global view only.
+   The relay's copper glints, the reason for the largest-blob rule, measured hue 19–22° against its amber lens at
+   38°, so the colour rule's hue check now drops them before this step. Evidence in private round-24 notes.
 
    A texel glows when either way finds it. The candidate records `emission_projection` (status, view, overlap, texture
    fraction per target). A candidate

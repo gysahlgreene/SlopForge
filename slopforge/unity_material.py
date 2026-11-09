@@ -57,6 +57,15 @@ def emitter_colour_mask(base, match):
         distance = ImageChops.difference(base, Image.new("RGB", base.size, tuple(match)))
         mask = ImageChops.lighter(ImageChops.lighter(*distance.split()[:2]), distance.split()[2])
         mask = mask.point(lambda v: 255 if v <= 48 else 0)
+        from .emitters import HUE_TOLERANCE, MIN_SATURATION
+        tint = Image.new("RGB", (1, 1), tuple(match)).convert("HSV").getpixel((0, 0))
+        if tint[1] >= MIN_SATURATION * 255:
+            # A coloured emitter keeps its hue in shade; within the distance alone, round 24's copper coils
+            # (hue 13) glowed as its raspberry glass (#ad3f64, hue 340) on 22% of the map (docs/MATERIALS.md).
+            hsv = np.asarray(base.convert("HSV"), dtype=float)
+            hue = np.abs((hsv[..., 0] - tint[0] + 128) % 256 - 128) * 360 / 256
+            same = (hue <= HUE_TOLERANCE) & (hsv[..., 1] >= MIN_SATURATION * 255)
+            mask = ImageChops.multiply(mask, Image.fromarray(same.astype(np.uint8) * 255))
     return mask.filter(ImageFilter.MinFilter(size)).filter(ImageFilter.MaxFilter(size))
 
 

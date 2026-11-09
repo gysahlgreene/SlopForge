@@ -1606,7 +1606,8 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
 def _emitter_targets(materials, material_class="emissive"):
     """Declared regions of one class as colour-rule targets: region -> (match_rgb or None for pale, glow_rgb)."""
     rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-    return {item["region"]: (rgb(item["color"]), rgb(item["color"])) if item.get("color") else (None, (255, 178, 102))
+    return {item["region"]: (rgb(item["color"]), rgb(item.get("glow") or item["color"])) if item.get("color")
+            else (None, (255, 178, 102))
             for item in materials or [] if item.get("class") == material_class}
 
 
