@@ -16,7 +16,7 @@ slopforge --project ~/UnityProjects/MyGame recipe resume lunar_refinery
 slopforge --project ~/UnityProjects/MyGame environment-check lunar_refinery
 ```
 
-Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See [criterion M2-v3](media/kits-provisional-2026-10-v3/README.md) for three five-module kits.
+Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot; `--tiles`, `--walk-height` and `--clear-opening` declare how it is used, and are checked (see "How a sized piece is used" under the kit checks below). A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See [criterion M2-v3](media/kits-provisional-2026-10-v3/README.md) for three five-module kits.
 
 That quarter turn goes whichever way keeps the concept's side at the front (-Y in Blender, +Z in Unity). It is
 decided by the concept's fitted view (`blender/concept_view.py`) and recorded on the model as `slopforge_kit_facing`
@@ -163,6 +163,48 @@ A corner's open side is read from the placed mesh, so it needs no assumption abo
     1.49 times wider than tall.
   - **Measure the mesh instead:** compare a change on fixed seeds through TRELLIS's detailed shape, built from the
     RGBA cut-out the pipeline sends ([evidence](media/kits-provisional-2026-10-v2/QUALIFICATION-RECORD.md)).
+
+**How a sized piece is used ([#189](https://github.com/gysahlgreene/SlopForge/issues/189)):**
+- **Why:** sizing fits a piece's outer bounds exactly, but a game uses dimensions inside them. Round 23's
+  25-piece street kit (2026-11-09) had exact bounds everywhere and these faults in the game:
+  - plinths and cornices set the walls' widths, so rows of them left 0.09–0.43 m gaps;
+  - a stair's parapets and a wall across its head set its height, so its landing ended 0.58 m low;
+  - a 9 m tunnel mouth had a 2.7 m wide opening where 5 × 5 m was wanted;
+  - a gate arch was modelled with its gates shut.
+- **Declaring it:** `generate` takes, with `--target-size`:
+  - `--tiles` for a piece placed in rows along its width;
+  - `--walk-height=4.5` for the height its walking surface must have;
+  - `--clear-opening=5,5` for the passage it must leave straight through, front to back.
+
+  They are kept on the asset and join its assembly-stage settings, as `max_stretch` does.
+- **Measuring it:** inspection casts rays 0.1 m apart across every sized model's bounds
+  (`slopforge/module_use.py`) and records three things:
+  - `row_gap`: the bounds width less the median width of its height bands;
+  - `walk_levels`: the flat surfaces that hold a 0.8 m square, so parapet tops and copings don't count;
+  - `clear_opening`: how tall the clearest passage of each width is, starting within 0.3 m of the ground.
+
+  On round 23's delivered pieces these reproduced the game's measurements: gaps of 0.425/0.215/0.137/0.163/0.091 m,
+  the landing at 3.92 m, and deck heights of 0.67/0.36/0.30/0.49 m.
+- **The limits:** these are set from that kit, not by the owner.
+  - A declared piece fails as `module_row_gap` above 0.05 m. The gaps seen in the game were 0.091 m and up; an
+    unreported shopfront measured 0.031.
+  - It fails as `module_walk_height` when no walking surface lies within 0.1 m of the declared height. A thick
+    parapet's top can count as walkable (the gate tower's 1 m parapet top at 13.45 m over its roof at 12.51), so
+    the check looks for the declared height among the surfaces rather than taking the highest.
+  - It fails as `module_opening` when the passage at the declared width is more than 0.05 m short.
+- **No retry:** the concept drew the plinth, the head wall or the small opening, so another seed would draw it
+  again. Approval stops and asks for a concept closer to the module's declared size and use.
+- **When it runs:** with the stretch check, at the model's final validation. On the native-texture route TRELLIS.2
+  makes the shape and the texture in one GPU step, so the check runs after it. It still stops the candidate before
+  review and delivery.
+- **Writing the brief for a kit piece:**
+  - a wall that tiles runs to both ends, with its plinth, cornice and coping flush with them, not returned or
+    inset;
+  - a stair's or a landing's walking surface is its top, open at its head, with parapets along its sides only;
+  - an opening or gateway gives its size in the description, and gates that must open are drawn open, or as a
+    separate piece.
+- **Not yet:** a pivot at a deck. Decks stand 0.3–0.68 m above a bottom-centre pivot, and `top_center` would put
+  the origin at the top of a rail.
 
 **Budgets:**
 - **Declaring them:** a module rule can declare `face_budget`, the faces it is decimated to on the GPU and in

@@ -817,6 +817,22 @@ class SlopForgeTests(unittest.TestCase):
                                        "--target-size", "1,1,1"]), 1)
         self.assertIn("--target-size applies to 3D asset types", error.getvalue())
 
+    def test_generate_records_how_a_sized_piece_is_used(self):
+        # Round 23's kit (issue #189): walls that tile in a row, a stair's walking height and a tunnel's opening.
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "tunnel", "A tunnel mouth",
+                                       "--target-size=9,3,7.5", "--tiles", "--walk-height=7.5",
+                                       "--clear-opening=5,5"]), 0)
+        record = load_manifest(self.root / "ai/assets/manifest.json")["assets"]["prop:tunnel"]
+        self.assertEqual((record["tiles"], record["walk_height"], record["clear_opening"]), (True, 7.5, [5.0, 5.0]))
+        for flags, message in ((["--tiles"], "need --target-size"), (["--target-size=3,1,3", "--clear-opening=5"],
+                                                                     "two positive sizes")):
+            with redirect_stderr(StringIO()) as error:
+                self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "wall", "A wall",
+                                           *flags]), 1)
+            self.assertIn(message, error.getvalue())
+
     def test_architecture_uses_the_owner_accepted_concept_fit_and_colour_limits(self):
         templates = Path(__file__).resolve().parents[1] / "templates/asset_types"
         architecture, prop = (yaml.safe_load((templates / f"{name}.yaml").read_text()) for name in ("architecture", "prop"))
