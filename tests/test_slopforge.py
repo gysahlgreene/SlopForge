@@ -781,6 +781,24 @@ class SlopForgeTests(unittest.TestCase):
                                        "--shape-guide", "box:1"]), 1)
         self.assertIn("--shape-guide applies to 3D asset types", error.getvalue())
 
+    def test_approve_keeps_a_reviewers_turn_around_on_the_asset(self):
+        # Round 23 (2026-11-08): two kit pieces came out back to front; the reviewer turns them, and rebuilds keep it.
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "walkway",
+                                       "A roof walkway", "--target-size", "3,1.5,1.1"]), 0)
+        manifest = self.root / "ai/assets/manifest.json"
+        with patch("slopforge.pipelines.model.approve") as approve, redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1",
+                                       "--turn-around"]), 0)
+            self.assertTrue(load_manifest(manifest)["assets"]["prop:walkway"]["turn_around"])
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1"]), 0)
+            self.assertTrue(load_manifest(manifest)["assets"]["prop:walkway"]["turn_around"])  # kept
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:walkway", "1",
+                                       "--no-turn-around"]), 0)
+        self.assertNotIn("turn_around", load_manifest(manifest)["assets"]["prop:walkway"])
+        self.assertEqual(approve.call_count, 3)
+
     def test_generate_gives_a_3d_asset_a_real_size_standing_on_its_base(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
                 redirect_stdout(StringIO()):

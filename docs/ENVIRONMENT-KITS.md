@@ -18,6 +18,32 @@ slopforge --project ~/UnityProjects/MyGame environment-check lunar_refinery
 
 Each module can declare `target_size: [x, y, z]` in metres, with `null` for an axis that keeps its generated proportion (a wall is `[3, null, 3]`, a floor `[3, 3, null]`, a column `[null, null, 3]`). Mesh preparation turns the long horizontal side onto the declared axis, scales declared axes exactly, scales free axes by the mean of the declared factors, and prints the axis stretch ratio; modules without a target are normalised to a largest side of 1.0 like other assets. A standalone structure or prop gets the same real sizing with `generate --target-size=-,-,3.2` (3.2 m tall, other axes in proportion), and then stands on a bottom-centre pivot. A stretch ratio well above 1 means the concept's proportions did not match the module, so revise the concept instead of accepting a distorted module. See [criterion M2-v3](media/kits-provisional-2026-10-v3/README.md) for three five-module kits.
 
+That quarter turn goes whichever way keeps the concept's side at the front (-Y in Blender, +Z in Unity). It is
+decided by the concept's fitted view (`blender/concept_view.py`) and recorded on the model as `slopforge_kit_facing`
+(fit, theta, phi, turn). Before 2026-11-08 the turn was always +90 degrees, which put the round-23 stair flight's foot,
+drawn towards the viewer, at the back. A concept drawn straight at the long side (theta near 0) cannot tell which end
+is the front, so check that piece's front preview. A piece that needs no turn keeps the generator's orientation, and
+so does a square footprint (equal declared width and depth), which has no long side. Before 2026-11-09 a square
+piece was turned whenever its mesh came out slightly deeper than wide. Round 24's 3.2 x 3.2 m chamber was turned -90
+degrees and its entrance went to the side, so check the facing of square pieces built before that date.
+Nothing checks that orientation front to back, so review every kit piece's front and side previews. TRELLIS.2 built
+round 23's roof walkway (2026-11-08) with its riveted upstand at the front, where the concept has it at the back.
+Three measures, each computed for the model as built and turned 180 degrees, failed to tell the two apart:
+- Silhouette fit: 0.703 as built, 0.699 turned.
+- Mean CIELAB difference over a 16 x 16 grid of cells: 13.1 as built, 12.6 turned.
+- Lightness correlation over the same cells: 0.44 as built, 0.41 turned. On this measure the tunnel mouth, whose front
+  is right, scored better turned (0.22 against -0.12).
+
+The model's outline overlaps the concept's by only 0.70, so its cells line up poorly with the concept's.
+
+When review finds a piece back to front, rebuild it from the same mesh seed with the reviewer's turn:
+`slopforge approve <type>:<name> <candidate> --force --mesh-seed <seed> --turn-around`. The assembly pass turns the
+sized model 180 degrees about its vertical axis before it saves the stage mesh. The model records the turn as
+`slopforge_turned_around`, and the assembly stage's settings record it as `turn_around`. The asset keeps the setting
+for later rebuilds; `--no-turn-around` clears it.
+On the round-23 pieces checked so far, that put the concept's side at -Y, but nothing checks it automatically: the
+fit searches the front half only, and TRELLIS.2 has rebuilt weapons facing backwards (see [Weapons](WEAPONS.md)).
+
 A module's `pivot` (or the kit's default `pivot`) places its origin in the exported FBX:
 - `bottom_center` for walls, doorways, corners and columns, which stand on their origin;
 - `top_center` for floors, whose walkable top sits at it;

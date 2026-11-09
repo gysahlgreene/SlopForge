@@ -556,12 +556,24 @@ if not reuse_stage_mesh and not mesh_only:
         coords = [vertex.co for vertex in obj.data.vertices]
         size = Vector([max(co[axis] for co in coords) - min(co[axis] for co in coords) for axis in range(3)])
         # A declared horizontal size marks the long side when the other is free (a wall is 3,-,3).
-        x_long = None if target[0] is None and target[1] is None else (
-            target[1] is None or (target[0] is not None and target[0] >= target[1]))
+        # A square footprint has none: round 24's 3.2 x 3.2 chamber, built a little deeper than wide, was turned onto
+        # its "long" side and its entrance went to the side (2026-11-09).
+        x_long = None if target[0] == target[1] else (
+            target[1] is None or (target[0] is not None and target[0] > target[1]))
         # Not for a weapon already oriented from its concept: a crossbow whose bow spread wider than its stock was long
         # was turned 90 degrees, putting the bow along its length (2026-10-24).
         if not oriented and x_long is not None and x_long != (size.x >= size.y):
-            obj.data.transform(Matrix.Rotation(math.pi / 2, 4, "Z"))
+            turn = math.pi / 2
+            if "--facing-concept" in sys.argv:
+                # Turned the way that keeps the concept's camera in front (-Y, Unity +Z): a quarter turn the fixed way
+                # put round-23 stair_flight_3's foot, drawn towards the viewer, at the back (2026-11-08).
+                from concept_view import fit_view, image_mask, surface_samples
+                _world, samples = surface_samples(obj)
+                fit, theta, phi = fit_view(samples, image_mask(sys.argv[sys.argv.index("--facing-concept") + 1]))
+                turn = -math.pi / 2 if theta > 0 else math.pi / 2  # a camera at theta lands at theta -/+ 90
+                obj["slopforge_kit_facing"] = [round(fit, 4), theta, phi, round(math.degrees(turn))]
+                print(f"Concept view theta {theta} phi {phi} (fit {fit:.3f}): turned {math.degrees(turn):+.0f} degrees")
+            obj.data.transform(Matrix.Rotation(turn, 4, "Z"))
             size = Vector((size.y, size.x, size.z))
         factors = [None if value is None else value / max(size[axis], 1e-6) for axis, value in enumerate(target)]
         fixed = [factor for factor in factors if factor is not None]
@@ -611,6 +623,15 @@ if not reuse_stage_mesh and not mesh_only:
                     vertex.co.y = outer[1] + oy * rescale(abs(vertex.co.y - outer[1]), arm_y, spans[1])
                 obj.data.update()
                 print(f"Corner arms {arm_x:.3f} and {arm_y:.3f} set to {wanted:g}")
+    if "--turn-around" in sys.argv:
+        # A reviewer found the piece built back to front, which no automatic measure caught (round 23's roof walkway
+        # and pitched roof, 2026-11-08; docs/ENVIRONMENT-KITS.md). Turned before the stage mesh is saved, so reuse keeps it.
+        coords = [vertex.co for vertex in obj.data.vertices]
+        centre = Vector([(min(co[axis] for co in coords) + max(co[axis] for co in coords)) / 2 for axis in (0, 1)] + [0.0])
+        obj.data.transform(Matrix.Translation(centre) @ Matrix.Rotation(math.pi, 4, "Z") @ Matrix.Translation(-centre))
+        obj.data.update()
+        obj["slopforge_turned_around"] = True
+        print("Turned around: 180 degrees about the vertical axis, as the reviewer set")
 
 
 # -------------------------------------------------

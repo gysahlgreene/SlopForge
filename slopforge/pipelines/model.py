@@ -1129,7 +1129,8 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
                       stage_mesh=mesh_path,
                       reuse_stage_mesh=bool((lineage or {}).get("processed_mesh_reusable")),
                       target_size=asset.get("target_size"), pivot=asset.get("pivot"),
-                      arm_thickness=asset.get("arm_thickness"))
+                      arm_thickness=asset.get("arm_thickness"),
+                      facing_concept=_facing_concept(asset, lineage))
         make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
         inspection = inspect_model(root, config, paths["blend"], paths["validation"], face_budget,
                                    real_scale=bool(asset.get("target_size")))
@@ -1287,6 +1288,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   stage_mesh=root / asset["source"]["processed_mesh"], target_size=asset.get("target_size"),
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
+                  facing_concept=None if framed else _facing_concept(asset, lineage),
+                  turn_around=bool(asset.get("turn_around")),
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
                   motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared
@@ -1507,7 +1510,8 @@ def _fit_texture_size(maps, size):
 def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
-    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size")
+    return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size",
+                                        "turn_around")
             if asset.get(key)}
 
 
@@ -1540,6 +1544,12 @@ def concept_route(config, asset_type, conditioning, shape_guide=None):
     return workflows["character_image"], {**conditioning,
                                           "references": [reference] + conditioning["references"],
                                           "workflow_inputs": [CONTROL_SLOT] + conditioning["workflow_inputs"]}
+
+
+def _facing_concept(asset, lineage):
+    """The concept cutout a sized kit piece is turned by, so the side its concept shows stays in front."""
+    cutout = (lineage or {}).get("concept_cutout")
+    return cutout if asset.get("target_size") and cutout and Path(cutout).is_file() else None
 
 
 def _concept_view(root, config, cutout, mesh_path, paths, name, **options):

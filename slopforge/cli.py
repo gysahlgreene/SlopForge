@@ -110,6 +110,10 @@ def parser():
                               "open from it and its hinged part closed (docs/WEAPONS.md, Props generated open)")
     approve.add_argument("--open-part-box", action="append", default=[], dest="open_part_boxes",
                          help="Where a declared part lies on the open picture: 'name=x0,y0,x1,y1' as for --part-box")
+    approve.add_argument("--turn-around", action=argparse.BooleanOptionalAction,
+                         help="The built model faces the wrong way: turn it 180 degrees about its vertical axis when "
+                              "assembled. Kept on the asset for later rebuilds; --no-turn-around clears it "
+                              "(docs/ENVIRONMENT-KITS.md)")
     open_parser = sub.add_parser("open", help="Edit a concept candidate to show its hinged part open, for approval")
     open_parser.add_argument("name")
     open_parser.add_argument("candidate", type=int, help="The concept candidate to open")
@@ -1120,6 +1124,12 @@ def _run(args):
             if boxes or open_boxes:  # saved first: approval reloads the manifest from disk
                 record["parts"] = set_part_boxes(set_part_boxes(record.get("parts") or [], boxes), open_boxes,
                                                  key="open_box")
+                save_manifest(manifest_path, manifest)
+            if getattr(args, "turn_around", None) is not None:  # a reviewer's decision, saved before approval reloads
+                if args.turn_around:
+                    record["turn_around"] = True
+                else:
+                    record.pop("turn_around", None)
                 save_manifest(manifest_path, manifest)
             model.approve(root, config, recipe, style, manifest, key, args.candidate, args.force,
                           material_prompt=getattr(args, "material_prompt", None),

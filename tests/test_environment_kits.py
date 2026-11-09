@@ -40,6 +40,34 @@ class EnvironmentKitTests(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--target-size") + 1], "3,-,3.5")
 
+    def test_process_model_passes_a_kit_pieces_concept_for_its_facing(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        with patch("slopforge.backends.blender.subprocess.run") as run, \
+                patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+            blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, target_size=[3, 6, None],
+                                  facing_concept="cutout.png")
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--facing-concept") + 1], "cutout.png")
+        self.assertNotIn("--concept", command)  # not the weapon orientation
+
+    def test_a_reviewers_turn_around_reaches_blender_and_the_assembly_settings(self):
+        from unittest.mock import patch
+        from slopforge.backends import blender
+        from slopforge.pipelines.model import _placement
+        commands = []
+        for turned in (True, False):
+            with patch("slopforge.backends.blender.subprocess.run") as run, \
+                    patch("slopforge.backends.blender.blender_executable", return_value="blender"):
+                blender.process_model("/tmp", {}, "in.glb", "out.fbx", "out.blend", [], 1000, target_size=[3, 1.5, 1.1],
+                                      turn_around=turned)
+            commands.append(run.call_args.args[0])
+        self.assertIn("--turn-around", commands[0])
+        self.assertNotIn("--turn-around", commands[1])
+        # In the assembly stage's settings, so turning a piece reruns its assembly instead of reusing the old one.
+        self.assertTrue(_placement({"target_size": [3, 1.5, 1.1], "turn_around": True})["turn_around"])
+        self.assertNotIn("turn_around", _placement({"target_size": [3, 1.5, 1.1]}))
+
     def test_validation_checks_grid_bounds_pivots_and_pending_children(self):
         recipe = {
             "name": "station",
