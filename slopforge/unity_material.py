@@ -124,6 +124,37 @@ def apply_glass(basecolor_path, roughness_path, metallic_path, matches):
     return sum(mask.histogram()[128:]) / (base.width * base.height)
 
 
+# Brass the metallic map marks non-metal keeps its sheen under a non-metal roughness floor: hue (degrees),
+# saturation and value of round 22's decoded brass (a cabinet's handles at about hue 32, saturation 0.62, value 0.58)
+# above its dark woods and leathers. Copper (hue about 20) can't be told from those by colour, so it is not spared.
+BRASS_HUE, BRASS_MIN_SATURATION, BRASS_MIN_VALUE = (28, 60), 0.45, 0.45
+
+
+def lift_nonmetal_roughness(roughness_path, metallic_path, basecolor_path, floor):
+    """Raise non-metal roughness to at least `floor`, keeping variation above it; returns the share of texels raised.
+
+    A type sets the floor when its art direction wants matte non-metals: round 22's woods, leathers and paints
+    decoded at roughness 0.38-0.64, and the studio light turned their tops white (2026-11-08). Metal (metallic above
+    0.5), glass (base colour alpha below opaque, apply_glass) and brass-coloured texels keep their roughness.
+    """
+    with Image.open(roughness_path) as image:
+        mode, size = image.mode, image.size
+        roughness = np.asarray(image.convert("L")).astype(np.float32) / 255
+    with Image.open(metallic_path) as image:
+        metal = np.asarray(image.convert("L").resize(size)) > 127
+    with Image.open(basecolor_path) as image:
+        base = image.convert("RGBA").resize(size)
+    glass = np.asarray(base.getchannel("A")) < 255
+    hsv = np.asarray(base.convert("RGB").convert("HSV")).astype(np.float32) / 255
+    hue = hsv[..., 0] * 360
+    brass = ((hue >= BRASS_HUE[0]) & (hue <= BRASS_HUE[1]) & (hsv[..., 1] >= BRASS_MIN_SATURATION)
+             & (hsv[..., 2] >= BRASS_MIN_VALUE))
+    raise_ = ~(metal | glass | brass) & (roughness < floor)
+    roughness[raise_] = floor
+    Image.fromarray(np.round(roughness * 255).astype(np.uint8)).convert(mode).save(roughness_path)
+    return float(raise_.mean())
+
+
 def zero_metallic(basecolor_path, metallic_path, matches):
     """Zero the metallic map where the base colour matches a declared non-metal's colour; returns the share found.
 

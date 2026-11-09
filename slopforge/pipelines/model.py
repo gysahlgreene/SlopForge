@@ -30,8 +30,8 @@ from .reuse import _valid_sha256, artifact_integrity, stage_reuse_decision
 from ..style import build_prompt, style_identity
 from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
-                              finish_word, make_metallic_gloss, match_concept_colours, match_metal_lightness,
-                              unity_cli, zero_metallic, concept_part_colours)
+                              finish_word, lift_nonmetal_roughness, make_metallic_gloss, match_concept_colours,
+                              match_metal_lightness, unity_cli, zero_metallic, concept_part_colours)
 from ..emitters import concept_emitter_mask, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
@@ -1243,6 +1243,11 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                 # the parts route's textures are dark all over, so lightness moves the whole way to the concept's
                 colour_transfer = match_concept_colours(paths["basecolor"], paths["metallic"], *arrays,
                                                         **({"lightness_share": 1.0} if mesh_info.get("part_model") == "omnipart" else {}))
+    nonmetal_floor = None
+    if asset_type.get("min_nonmetal_roughness"):  # after glass, metal and colour, which decide what stays smooth
+        floor = float(asset_type["min_nonmetal_roughness"])
+        nonmetal_floor = {"floor": floor, "raised_share": round(
+            lift_nonmetal_roughness(paths["roughness"], paths["metallic"], paths["basecolor"], floor), 4)}
     make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
     shutil.copy2(paths["basecolor"], paths["surface"])
     emissive_fraction = projection = None
@@ -1315,6 +1320,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
     if colour_transfer is not None:
         validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
+    if nonmetal_floor is not None:
+        validation.setdefault("measured", {})["nonmetal_roughness_floor"] = nonmetal_floor
     if held:
         validation = apply_weapon_orientation(validation)
     if moving:
@@ -2037,6 +2044,14 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 shutil.copy2(root / mesh_source, paths["glb"])
             write_notices(paths["directory"], asset["name"], rights)
             type_record = load_taxonomy(root).get(asset.get("type") or asset_type) or {}  # asset_type is its name here
+            floor = type_record.get("min_nonmetal_roughness")
+            published_floor = None
+            if floor and "nonmetal_roughness_floor" not in candidate.get("validation", {}).get("measured", {}):
+                # A candidate made before its type set the floor gets it here, so finished models need no rebuild
+                # (round 22's 89, 2026-11-08); its previews were rendered before it.
+                published_floor = {"floor": float(floor), "applied_at": "publication", "raised_share": round(
+                    lift_nonmetal_roughness(paths["roughness"], paths["metallic"], paths["basecolor"], float(floor)), 4)}
+                make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
             # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs
             unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
@@ -2048,6 +2063,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
             validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            if published_floor:
+                validation["measured"]["nonmetal_roughness_floor"] = published_floor
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
             if moving or type_record.get("unity_prefab"):
                 # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a

@@ -1093,6 +1093,33 @@ class DeclaredMaterialTests(unittest.TestCase):
                     self.assertEqual(grip, (96, 58, 30))
                     self.assertNotIn("concept_colour_transfer", measured)
 
+    def test_a_type_floor_makes_nonmetal_matte_and_leaves_metal(self):
+        # Round 22's woods and leathers decoded at roughness 0.38-0.64 and read white on top under the studio light
+        # (2026-11-08); a type that sets min_nonmetal_roughness raises them, and its metal keeps its sheen.
+        from slopforge.style import parse_material_spec
+        pistol = [parse_material_spec("slide=metal: steel"), parse_material_spec("grips=nonmetal: wood")]
+        for floor in (0.9, None):
+            with self.subTest(floor=floor), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                base = Image.new("RGB", (64, 64), (60, 60, 64))
+                base.paste((75, 52, 36), (0, 0, 24, 64))  # dark wood
+                metallic = Image.new("L", (64, 64), 255)
+                metallic.paste(0, (0, 0, 24, 64))
+                candidate = self._candidate(root, pistol, 0, base, metallic_map=metallic,
+                                            limits={"min_nonmetal_roughness": floor} if floor else {})
+                with Image.open(root / candidate["outputs"]["roughness"]) as result:
+                    wood, steel = result.convert("L").getpixel((10, 32)), result.convert("L").getpixel((50, 32))
+                measured = candidate["validation"]["measured"]
+                self.assertEqual(steel, 200)
+                if floor:
+                    self.assertEqual(wood, round(0.9 * 255))
+                    self.assertEqual(measured["nonmetal_roughness_floor"]["floor"], 0.9)
+                    with Image.open(root / candidate["outputs"]["metallic_gloss"]) as packed:
+                        self.assertEqual(packed.getpixel((10, 32))[3], 255 - round(0.9 * 255))
+                else:
+                    self.assertEqual(wood, 200)
+                    self.assertNotIn("nonmetal_roughness_floor", measured)
+
     def test_too_little_lit_metal_is_left_as_decoded(self):
         from slopforge.unity_material import match_metal_lightness
         with tempfile.TemporaryDirectory() as temporary:

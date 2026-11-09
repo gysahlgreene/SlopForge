@@ -201,7 +201,25 @@ result against that declaration before anyone reviews it.
    - Why: TRELLIS.2 decoded a pistol's rosewood grips orange-brown on every seed (hue angle 43
      against 37), and the whole-object colour checks, ruled by its black steel, passed them. On one
      pistol the shift brought the grips to hue angle 35.5 and chroma 28 (concept 37.2 and 30).
-   - Weapons opt in; props do not yet.
+   - The packaged weapon and prop types opt in.
+
+   **Matte non-metals (types that opt in, `min_nonmetal_roughness`).** Non-metal texels below the
+   floor are raised to it, after glass, metal and colours are settled, and recorded as
+   `nonmetal_roughness_floor` (the floor and the share raised).
+   - Kept as decoded: metal (metallic over 0.5), glass (base colour alpha below opaque), and
+     brass the map marks non-metal (hue 28-60°, saturation and value at least 0.45, such as a
+     cabinet's handles). Copper (hue about 20°) can't be told from dark wood or leather by colour,
+     so copper the map marks non-metal is made matte with them.
+   - A candidate made before its type set the floor gets it at `approve-texture`: the published
+     roughness and metallic-gloss maps are raised, the candidate's own files are left alone, and the
+     record says `"applied_at": "publication"`. Its previews were rendered before the floor.
+   - Why: round 22's woods, leathers and paints decoded at roughness 0.38-0.64 (2026-11-08). Their
+     base colour on top faces was no paler than on the sides (top/side lightness 0.87-1.07 on five
+     props), yet the tops rendered white: the studio's overhead light on a semi-glossy surface. With
+     non-metals at 0.75 or more the glare went from a parts cabinet and a luggage trolley; a coal
+     scuttle's coal stayed pale, because its colour itself is pale. The game's art direction asks
+     for non-metals at 0.75 or more, so the game project's prop and character types set 0.75. The floor is a
+     style choice, not a default.
 
 9. **Assembly and review.** Blender wires the maps into a Principled BSDF, exports FBX
    and renders front, side, rear and three-quarter previews. Flat props are viewed from
