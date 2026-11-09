@@ -37,6 +37,9 @@ The owner judges by eye: "good results that look right". It isn't a style rule, 
 | Concept proportions by rewording | No wording made a stump wider than tall, 0 to 2 of 6 seeds. An opt-in depth guide made 12 of 12. | In use, opt-in | [Proportions](media/concept-proportion-2026-10/README.md), #65 |
 | Per-texel projection of the concept | First A/B said to test further, not adopt. | Parked | #152 |
 | Normals after the H100 graphs | Shipped normals differ from those the normal map was baked against, by about 10 degrees. | Parked | #156 |
+| Projecting every concept emitter blob, not only the largest (several emitters of one colour) | A canopy's 12 lenses got their glow on its roof and a column; booth and chamber frames picked up glow. The bounding-box registration can't place many blobs. Reverted, 2026-11-09. | Rejected until registration improves | [Materials](MATERIALS.md) known limit |
+| A perspective camera for the concept-view fit | Offline on one canopy: fit 0.971 against 0.955 orthographic, and the lenses landed on their band, but still half off because the model spaced them differently. | Parked, prototype only | [Materials](MATERIALS.md) known limit |
+| Telling a wrong colour shift by offset agreement or lightness ratio | Neither separated the bad cells (iron 0.87 agreement; 18 of 23 cells within 3×). The share of coloured cells did. | Rejected | [Materials](MATERIALS.md) |
 
 ## Kits and scenes
 
