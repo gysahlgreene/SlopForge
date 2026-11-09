@@ -593,6 +593,58 @@ def apply_module_stretch(validation, stretch, maximum):
     return validation
 
 
+# Metres. Round 23's walls left 0.09-0.43 m gaps that showed in the game; its shopfront's 0.031 m went unreported.
+# Set between the two, not by the owner.
+MAX_ROW_GAP = 0.05
+MODULE_USE_CODES = ("module_row_gap", "module_walk_height", "module_opening")
+WALK_HEIGHT_TOLERANCE = 0.1  # metres; round 23's stair landing ended 0.58 m low
+OPENING_TOLERANCE = 0.05  # metres; round 23's tunnel opening was 2.7 x 3.7 m against 5 x 5 m
+
+
+def apply_module_use(validation, asset):
+    """Fail a sized piece that cannot be used as declared (issue #189): `tiles` in a row along its width, its
+    `walk_height`, or its `clear_opening` [width, height] straight through it from front to back.
+
+    Not retryable: the concept drew the plinth, the head wall or the small opening, so another seed repeats them.
+    """
+    measured, limits = validation.get("measured", {}), validation.setdefault("limits", {})
+    problems = []
+    if asset.get("tiles"):
+        gap = measured.get("row_gap")
+        limits["max_row_gap"] = MAX_ROW_GAP
+        if gap is None:
+            problems.append(("module_row_gap", "the gap a row of the piece leaves was not measured"))
+        elif gap > MAX_ROW_GAP:
+            problems.append(("module_row_gap", f"a row of it leaves {gap:g} m gaps (limit {MAX_ROW_GAP:g}): a plinth, "
+                             "cornice or pier sets its width and its body stops short of both ends"))
+    if asset.get("walk_height") is not None:
+        wanted, levels = float(asset["walk_height"]), measured.get("walk_levels")
+        limits["walk_height_tolerance"] = WALK_HEIGHT_TOLERANCE
+        if levels is None:
+            problems.append(("module_walk_height", "its walking surfaces were not measured"))
+        elif not any(abs(level - wanted) <= WALK_HEIGHT_TOLERANCE for level in levels):
+            found = ", ".join(f"{level:g}" for level in levels) or "none"
+            problems.append(("module_walk_height", f"it has no walking surface at the declared {wanted:g} m (it has them "
+                             f"at {found} m): something above it, such as a parapet or a wall across its head, set "
+                             "its height"))
+    if asset.get("clear_opening"):
+        from .module_use import opening_height
+        width, wanted = (float(value) for value in asset["clear_opening"])
+        profile = measured.get("clear_opening")
+        limits["opening_tolerance"] = OPENING_TOLERANCE
+        if profile is None:
+            problems.append(("module_opening", "its clear opening was not measured"))
+        elif opening_height(profile, width - OPENING_TOLERANCE) < wanted - OPENING_TOLERANCE:
+            problems.append(("module_opening", f"its clearest passage {width:g} m wide is "
+                             f"{opening_height(profile, width - OPENING_TOLERANCE):g} m tall, "
+                             f"against the declared {width:g} x {wanted:g} m opening"))
+    for code, message in problems:
+        validation["errors"] = [*validation.get("errors", []), message]
+        validation["failure_codes"] = [*validation.get("failure_codes", []), code]
+        validation["status"] = "failed"
+    return validation
+
+
 MIN_CONCEPT_CHROMA = 10  # CIELAB chroma below this is near-grey: the concept has no hue to keep
 DARKENED_GRIDS = (8, 12, 16, 24)  # cell grids the darkened share is averaged over
 DARKENED_LIT = 30  # CIELAB L* above which a concept cell is lit enough to judge

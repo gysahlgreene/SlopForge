@@ -37,11 +37,11 @@ from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
-from ..validation import (MIN_EMISSIVE_FRACTION, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
+from ..validation import (MIN_EMISSIVE_FRACTION, MODULE_USE_CODES, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
                           apply_part_penetration, apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
-                          apply_module_stretch, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
+                          apply_module_stretch, apply_module_use, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
                           concept_colour_fidelity, concept_thin_recall,
                           is_placeholder_normal, measure_material_maps, validate_image,
                           validate_model_outputs)
@@ -875,6 +875,8 @@ def _validation_failure(validation, *, stage, attempt):
         remedy = "generate another mesh candidate within the configured budget"
     elif validation.get("failure_codes") == ["module_stretch"]:
         remedy = "approve a concept closer to the module's proportions"  # the stretch comes from the concept
+    elif set(validation.get("failure_codes") or []) <= {"module_stretch", *MODULE_USE_CODES}:
+        remedy = "approve a concept closer to the module's declared size and use"  # drawn by the concept too
     else:
         remedy = "inspect the validation report and correct the deterministic failure"
     failure = StageFailure(
@@ -1141,6 +1143,7 @@ def _generate_material_candidate(root, config, asset_type, asset, number, prompt
             max_components=asset_type.get("max_components"),
             max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
             max_boundary_edges=asset_type.get("max_boundary_edges"), min_uv_area=asset_type.get("min_uv_area"))
+        candidate["validation"] = apply_module_use(candidate["validation"], asset)
         paths["validation"].write_text(json.dumps(candidate["validation"], indent=2) + "\n")
         candidate["status"] = "candidate" if candidate["validation"]["status"] != "failed" else "failed"
         candidate["failure"] = _validation_failure(candidate["validation"],
@@ -1348,6 +1351,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                                         asset.get("footprint"))
     validation = apply_module_stretch(validation, validation.get("measured", {}).get("axis_stretch"),
                                       asset.get("max_stretch"))
+    validation = apply_module_use(validation, asset)
     with Image.open(paths["basecolor"]) as image:
         validation.setdefault("measured", {})["texture_size"] = list(image.size)
     colour_limits = (asset_type.get("max_concept_hue_difference"), asset_type.get("min_concept_chroma_ratio"),
@@ -1511,7 +1515,7 @@ def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
     return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size",
-                                        "turn_around")
+                                        "turn_around", "tiles", "walk_height", "clear_opening")
             if asset.get(key)}
 
 
@@ -1645,6 +1649,29 @@ SHAPE_GUIDES = ("cylinder", "box")
 # Stump concepts, 2026-10-22 (docs/media/concept-proportion-2026-10): at 0.5 most trunks stayed taller than wide;
 # at 0.8 the concept copied the primitive and lost the brief's roots.
 SHAPE_GUIDE_STRENGTH = 0.65
+
+
+def parse_module_use(args, target_size):
+    """How a sized piece is used, from generate's --tiles, --walk-height and --clear-opening (issue #189)."""
+    use = {}
+    if getattr(args, "tiles", False):
+        use["tiles"] = True
+    if getattr(args, "walk_height", None) is not None:
+        if not (math.isfinite(args.walk_height) and args.walk_height > 0):
+            raise ValueError(f"--walk-height must be a positive height in metres, got {args.walk_height!r}")
+        use["walk_height"] = args.walk_height
+    if getattr(args, "clear_opening", None):
+        try:
+            opening = [float(part) for part in str(args.clear_opening).split(",")]
+        except ValueError:
+            opening = []
+        if len(opening) != 2 or not all(math.isfinite(value) and value > 0 for value in opening):
+            raise ValueError(f"--clear-opening needs two positive sizes in metres, width and height, such as 5,5; "
+                             f"got {args.clear_opening!r}")
+        use["clear_opening"] = opening
+    if use and not target_size:
+        raise ValueError("--tiles, --walk-height and --clear-opening need --target-size: they are checked in metres")
+    return use
 
 
 def parse_target_size(spec):

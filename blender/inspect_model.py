@@ -14,6 +14,7 @@ from mathutils.kdtree import KDTree
 
 sys.path.append(os.environ.get("SLOPFORGE_PACKAGE_ROOT", str(Path(__file__).resolve().parents[1])))
 from slopforge.character_readiness import classify_character_readiness
+from slopforge import module_use
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import solid_component_count  # noqa: E402
 
@@ -249,6 +250,47 @@ def arm_taper(points, signs, minimum, maximum):
     return ratios
 
 
+def use_measurements(objects, minimum, maximum, cell=module_use.CELL):
+    """How a piece sized in metres can be used: the gap a row of it leaves, its walking height and its clear opening
+    front to back (slopforge/module_use.py), from rays cast on grids `cell` apart across its bounds."""
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    vertices, polygons = [], []
+    for obj in objects:
+        offset = len(vertices)
+        vertices += [obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+        polygons += [[offset + index for index in polygon.vertices] for polygon in obj.data.polygons]
+    tree = BVHTree.FromPolygons(vertices, polygons)
+    low, high = Vector(minimum), Vector(maximum)
+    span = high - low
+
+    def samples(axis):
+        count = max(1, int(span[axis] / cell))
+        return [low[axis] + (index + 0.5) * span[axis] / count for index in range(count)]
+    xs, ys, zs = samples(0), samples(1), samples(2)
+    reach = max(span) + 2.0
+    # Each height band's outermost surface from either end of the width.
+    left, right = [], []
+    for z in zs:
+        hits = [[tree.ray_cast(Vector((start, y, z)), Vector((direction, 0, 0)), reach)[0]
+                 for y in ys] for start, direction in ((low.x - 1, 1), (high.x + 1, -1))]
+        left.append(min((hit.x for hit in hits[0] if hit is not None), default=float("nan")))
+        right.append(max((hit.x for hit in hits[1] if hit is not None), default=float("nan")))
+    # The first surface met looking down, and whether it faces up.
+    heights, flat = np.full((len(ys), len(xs)), np.nan), np.zeros((len(ys), len(xs)), bool)
+    for row, y in enumerate(ys):
+        for column, x in enumerate(xs):
+            hit, normal, _index, _distance = tree.ray_cast(Vector((x, y, high.z + 1)), Vector((0, 0, -1)), reach)
+            if hit is not None:
+                heights[row, column], flat[row, column] = hit.z, abs(normal.z) >= 0.9
+    # Rays from the front (-Y) that pass straight through, rows from the ground up.
+    through = np.array([[tree.ray_cast(Vector((x, low.y - 1, z)), Vector((0, 1, 0)), reach)[0] is None
+                         for x in xs] for z in zs])
+    return {"row_gap": module_use.row_gap(left, right, span.x),
+            "walk_levels": module_use.walk_levels(heights, flat, max(span.x / len(xs), span.y / len(ys))),
+            "clear_opening": module_use.clear_opening(through, span.x / len(xs), span.z / len(zs))}
+
+
 def inspect(source, face_budget, real_scale=False):
     errors, warnings = [], []
     extension = source.suffix.lower()
@@ -381,6 +423,8 @@ def inspect(source, face_budget, real_scale=False):
     corner = corner_profile(points, measured["footprint_quadrants"], minimum, maximum)
     measured["arm_thickness"] = corner[1] if corner else None
     measured["arm_taper"] = arm_taper(points, corner[0], minimum, maximum) if corner else None
+    if real_scale and points:
+        measured.update(use_measurements(objects, minimum, maximum))
     stretches = [float(obj["slopforge_axis_stretch"]) for obj in objects if "slopforge_axis_stretch" in obj]
     measured["axis_stretch"] = max(stretches) if stretches else None
     views = [list(obj["slopforge_concept_view"]) for obj in objects if "slopforge_concept_view" in obj]

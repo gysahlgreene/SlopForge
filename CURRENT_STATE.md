@@ -1177,3 +1177,14 @@ Production fixes from asset rounds 22-24 (2026-11-06 to 2026-11-09; private evid
 - **Emitters:** a coloured emitter must match its hue, which stopped copper glowing as raspberry glass. `emissive#drawn@glow` glows in a colour other than the one drawn.
 
 The rounds were delivered into the game project on the owner's word. The five structures were accepted as placeholders with faults still visible: one has a streak the generator painted that glows, and one has windows that don't glow. **Known limit:** only the largest emitter blob in the concept is projected. Keeping every blob was tried and reverted, because the orthographic fit against a perspective concept put the glow on a canopy's roof. Not verified: repeatability, and rebuilding earlier assets with these fixes. `make verify`: 1464 passed, 22 skipped, 1 expected failure (the known limit).
+
+Kit pieces' use checked (2026-11-09, [#189](https://github.com/gysahlgreene/SlopForge/issues/189)). Round 23's street
+kit went into the game with exact bounds, and the game found faults inside them: rows of walls left 0.09-0.43 m gaps,
+a stair's landing ended 0.58 m low, a tunnel's opening was 2.7 m wide where 5 m was wanted, and a gate arch was shut.
+`generate --tiles`, `--walk-height` and `--clear-opening` now declare how a sized piece is used. Inspection measures
+`row_gap`, `walk_levels` and `clear_opening` from ray grids on every sized model, and the final validation fails a
+declared piece that does not fit its use, without a retry. It runs after the GPU step, not before it. On the 25
+delivered pieces the measurements reproduced the game's numbers, and the check would have failed every reported fault
+while passing the gate tower and the open arch. The limits (0.05 m gap, 0.1 m walk height, 0.05 m opening) were set
+from that one kit, not by the owner. Not verified: a rebuild of those pieces with new concepts; whether briefs written
+to the new rules draw flush wall ends. A deck pivot is still open ([environment kits](docs/ENVIRONMENT-KITS.md)).
