@@ -48,7 +48,7 @@ result against that declaration before anyone reviews it.
    object inside it, with more shells inside, all connected, so the enclosed-shell removal keeps them.
    Of the faces of delivered weapons and props only 9–24% could be seen from outside (2026-10-25: a
    pistol 9% and 24%, a chest 20%), and the reduction and the texture went mostly to the rest. A type
-   with `remove_hidden_faces: true` (weapon and prop) has Blender delete the faces no ray from
+   with `remove_hidden_faces: true` (weapon, prop, hero_prop and creature) has Blender delete the faces no ray from
    outside reaches before it reduces (`mesh_cleanup.remove_hidden_faces`: 32 evenly spread rays per
    face, a face beside a seen one and facing within 60° of it kept): on a pistol's 1.26
    million-face detail mesh 28% were seen, in 40 s, and at the same 24,000-face budget its slide's
@@ -62,7 +62,14 @@ result against that declaration before anyone reviews it.
    hidden faces (a crevice's walls) were cut loose: one pistol went from 1 piece to 71, failed the
    component budget, and a patch at its muzzle stayed with the body while the slide moved. The hidden
    faces on the shortest path from each seen piece to the largest now stay (within 128 faces of it:
-   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden).
+   at 8, 50 pieces were left; at 128, one, keeping 1.4% more faces, all hidden). `hero_prop` lacked
+   it until round 22's scrap hopper (2026-11-06): its 7.4 million-face detail mesh had 10,392 edges
+   shared by three or more faces, which Blender's collapse will not remove, and the reduction stalled
+   at 91,553 faces against a 60,000 budget. 70% of the faces were hidden; the remaining 2.25 million
+   reduced to 56,999 in under 6 minutes. That mesh had also lost the hopper's legs and base in TRELLIS.2
+   itself (not in the GPU remesh: with `drop_small_components` at 0 they were still missing), so
+   `hero_prop` now also checks the concept's outline (`min_concept_fit: 0.8`, as `prop`), and a lost
+   part retries the next seed.
 
 4. **Normal map.** The H100 TRELLIS.2 workflows save the full-detail remeshed shape
    (`save_detail`), and Blender's Cycles bake writes a tangent-space normal map from it onto

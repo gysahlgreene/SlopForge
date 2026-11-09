@@ -8,3 +8,10 @@ requirements:
   - isolated concept for reconstruction on white
   - detail may exceed a standard prop while preserving a game-ready mesh
 avoid: [environment, concept sheets, multiple variants, cast shadow]
+# The same mesh checks as a prop (prop.yaml): round 22's scrap hopper came back from TRELLIS.2 as its bin alone and
+# passed every hero_prop check until the reduction stalled on its hidden inner shells (2026-11-06).
+# A mesh that no longer fits the concept's outline (a lost part) is retried with another seed (concept_fit).
+min_concept_fit: 0.8
+# Faces no ray from outside reaches are deleted before the reduction: 70% of the scrap hopper's 7.4M, after which the
+# rest reduced to the budget; on props they took 76-91% of the faces (docs/MATERIALS.md).
+remove_hidden_faces: true
