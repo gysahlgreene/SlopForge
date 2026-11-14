@@ -744,6 +744,46 @@ class HybridBackendTests(unittest.TestCase):
             self.assertEqual(info["outputs"][0]["sha256"], file_sha256(surface))
             self.assertEqual(info["outputs"][-1]["kind"], "mesh.whole")
 
+    def test_masks_only_splits_without_omnipart_and_keeps_rights_clear(self):
+        # part_model: masks: OmniPart's code is non-commercial, so delivery refuses what it touches; the concept
+        # masks alone split a side-profile weapon (its view votes through the thickness).
+        import json, tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from slopforge.backends import hybrid
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            surface = root / "mesh_01/rifle.glb"
+            surface.parent.mkdir()
+            surface.write_bytes(b"whole")
+            metadata = root / "mesh_01/generation.json"
+            metadata.write_text(json.dumps({"outputs": [{"path": "rifle.glb", "sha256": "old"}],
+                                            "output_rights": [{"source": "trellis_2_bf16.safetensors"}]}))
+            lever = {"name": "lever", "kind": "hinge", "axis": "x", "min": 0.0, "max": 40.0}
+            seen = {}
+
+            def split(root_, config, surface_, parts_glb, cutout, masks_, parts_, work_dir):
+                seen["split"] = (parts_glb, sorted(masks_))
+                surface_.with_name("rifle_whole.glb").write_bytes(b"whole")
+                surface_.write_bytes(b"nodes")
+                return {"alignment_error": 0.0, "shares": {"body": 0.9, "lever": 0.1}, "cut_length": 1.2,
+                        "masks_dropped": [], "parts": {"body": {"kind": "body", "id": 1}, "lever": {"kind": "hinge", "id": 2}},
+                        "tools": {}, "view": {"through": True}}
+            with patch.object(hybrid, "run_omnipart", side_effect=lambda *a, **k: self.fail("OmniPart is not run")), \
+                    patch.object(hybrid, "split_surface", side_effect=split):
+                hybrid.generate_hybrid_parts(root, {}, root / "cutout.png", surface, metadata, 7, [lever],
+                                             root / "masks", masks_only=True)
+            self.assertEqual(seen["split"], (None, ["lever"]))
+            info = json.loads(metadata.read_text())
+            self.assertEqual(info["part_model"], "masks")
+            self.assertNotIn("part_generator", info)
+            self.assertEqual([item["source"] for item in info["output_rights"]], ["trellis_2_bf16.safetensors"])
+
+    def test_masks_only_split_fails_a_view_that_did_not_vote_on_every_face(self):
+        from slopforge.validation import apply_mask_split
+        self.assertNotIn("failure_codes", apply_mask_split({}, True))
+        self.assertEqual(apply_mask_split({}, False)["failure_codes"], ["part_missing"])
+
     def test_an_open_picture_is_split_by_its_masks_alone_then_closed(self):
         # The open picture's lid stands clear of the body, so its mask alone splits it cleanly (OPEN1: the cut ran
         # only along the hinge line); OmniPart is not run. The part is then closed before the final pass.

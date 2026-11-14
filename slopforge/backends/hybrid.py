@@ -129,17 +129,18 @@ def close_open_part(project_root, config, surface, part, work_dir, max_stretch=M
 
 
 def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed, parts, masks_dir,
-                          texture_size=2048, steps=25, cfg=7.5, open_part=None):
+                          texture_size=2048, steps=25, cfg=7.5, open_part=None, masks_only=False):
     """After TRELLIS.2 has written `surface` and `metadata` (generation.json): OmniPart's parts for the same
     concept, the split, and the record of both in generation.json and parts/parts.json for the final pass.
     open_part: the hinged part, when the surface was generated open from an open picture: split by its masks
-    alone, then closed (close_open_part)."""
+    alone, then closed (close_open_part). masks_only (part_model: masks): split by the concept masks alone, without
+    OmniPart, whose code is non-commercial (docs/WEAPONS.md, Parts split by their masks)."""
     surface, metadata, masks_dir = Path(surface), Path(metadata), Path(masks_dir)
     out = surface.parent / "parts"
     out.mkdir(parents=True, exist_ok=True)
-    omnipart = None if open_part else run_omnipart(config, cutout, parts, masks_dir, out, seed, texture_size, steps, cfg)
+    omnipart = None if open_part or masks_only else run_omnipart(config, cutout, parts, masks_dir, out, seed, texture_size, steps, cfg)
     masks = {part["name"]: masks_dir / f"{part['name']}.png" for part in parts if part["kind"] in ("hinge", "slide")}
-    report = split_surface(project_root, config, surface, None if open_part else out / "parts.glb", cutout, masks,
+    report = split_surface(project_root, config, surface, None if omnipart is None else out / "parts.glb", cutout, masks,
                            parts, out, **({"rim_part": open_part["name"]} if open_part else {}))
     closed = close_open_part(project_root, config, surface, open_part, out) if open_part else None
     # the final pass reads the part table from parts.json (prepare_model.py --parts-json) and closes the openings
@@ -148,7 +149,7 @@ def generate_hybrid_parts(project_root, config, cutout, surface, metadata, seed,
         **({"open_state": {"part": open_part["name"], "hinge": closed["hinge"]["point"]}} if closed else {})},
         indent=2) + "\n")
     info = json.loads(metadata.read_text())
-    info["part_model"] = "hybrid"
+    info["part_model"] = "masks" if masks_only else "hybrid"
     info["parts"] = report["parts"]
     info["hybrid"] = {key: report[key] for key in ("alignment_error", "shares", "cut_length", "masks_dropped", "tools",
                                                    "view", "rim") if key in report}

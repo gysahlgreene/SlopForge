@@ -39,7 +39,7 @@ from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, MIN_SMALL_EMISSIVE_FRACTION, MODULE_USE_CODES, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
+                          apply_hybrid_alignment, apply_mask_split, apply_mesh_folds, apply_part_coverage, apply_part_fit,
                           apply_part_penetration, apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_module_use, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
@@ -1341,8 +1341,12 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     hybrid_info = mesh_info.get("hybrid") or {}
     # OmniPart decides labels where the mask did not vote: faces the concept's view did not see, or a dropped mask
     decisive = not ((hybrid_info.get("view") or {}).get("through") and not hybrid_info.get("masks_dropped"))
-    validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
-                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
+    if mesh_info.get("part_model") == "masks" and not mesh_info.get("open_state"):
+        # no OmniPart: a face no mask voted on has no evidence for its part (an open part stands clear of the body)
+        validation = apply_mask_split(validation, not decisive)
+    else:
+        validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
+                                            float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
     validation = apply_part_fit(validation, (mesh_info.get("open_state") or {}).get("close"), MAX_OPEN_PART_STRETCH)
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
@@ -1504,7 +1508,7 @@ def _reduction_budget(face_budget, asset, asset_type=None):
     cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
     if not cut_later:
         return face_budget
-    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") == "hybrid" else 0.9))
+    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") in ("hybrid", "masks") else 0.9))
 
 
 def _fit_texture_size(maps, size):
@@ -2463,8 +2467,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             raise ValueError("Cannot resume: the approved open picture changed; approve without --resume")
         open_number = recorded_open
     open_candidate = open_choice(asset, number, open_number) if open_number is not None else None
-    if open_candidate and part_backend(asset_type, asset) != "hybrid":
-        raise ValueError("An open picture is split by the hybrid parts route: set part_model: hybrid on the type")
+    if open_candidate and part_backend(asset_type, asset) not in ("hybrid", "masks"):
+        raise ValueError("An open picture is split by the hybrid parts route: set part_model: hybrid or masks on the type")
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     try:
         python = python_executable(root, config)
@@ -2749,7 +2753,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         "hybrid_apply.py": tool_sha256(tool_root() / "blender/hybrid_apply.py"),
                         "part_split.py": file_sha256(tool_root() / "slopforge/part_split.py"),
                         "hybrid.py": file_sha256(tool_root() / "slopforge/backends/hybrid.py")}
-                       if part_backend(asset_type, asset) == "hybrid" else
+                       if part_backend(asset_type, asset) in ("hybrid", "masks") else
                        {"prepare_parts.py": tool_sha256(tool_root() / "blender/prepare_parts.py")})}
                 mesh_settings["part_sampler"] = _part_sampler(asset_type)
             if open_artifact:  # the open part is closed in this stage (blender/close_part.py) within the bound
@@ -2839,12 +2843,14 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     else:
                         generate_model(root, config, mesh_paths["input_3d"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed)
-                    if part_backend(asset_type, asset) == "hybrid":
-                        # The generated surface, split by OmniPart's parts (docs/WEAPONS.md, Hybrid parts)
+                    if part_backend(asset_type, asset) in ("hybrid", "masks"):
+                        # The generated surface, split by OmniPart's parts and the masks, or the masks alone
+                        # (docs/WEAPONS.md, Hybrid parts)
                         generate_hybrid_parts(root, config, mesh_paths["cutout"], source_mesh, model_metadata, mesh_seed,
                                               asset["parts"], mesh_paths["part_masks"],
                                               texture_size=asset.get("texture_size") or asset_type.get("texture_size")
                                               or pipeline.get("texture_size", 2048), **_part_sampler(asset_type),
+                                              masks_only=part_backend(asset_type, asset) == "masks",
                                               **({"open_part": hinged_part(asset)} if open_artifact else {}))
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)
