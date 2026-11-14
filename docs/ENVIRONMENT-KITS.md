@@ -40,7 +40,9 @@ When review finds a piece back to front, rebuild it from the same mesh seed with
 `slopforge approve <type>:<name> <candidate> --force --mesh-seed <seed> --turn-around`. The assembly pass turns the
 sized model 180 degrees about its vertical axis before it saves the stage mesh. The model records the turn as
 `slopforge_turned_around`, and the assembly stage's settings record it as `turn_around`. The asset keeps the setting
-for later rebuilds; `--no-turn-around` clears it.
+for later rebuilds; `--no-turn-around` clears it. A model built facing sideways takes `--turn 90`, `180` or `270`, a turn anticlockwise seen
+from above after any turn-around (round 25's brute, built from a three-quarter back view, faced +X); `--turn 0`
+clears it.
 On the round-23 pieces checked so far, that put the concept's side at -Y, but nothing checks it automatically: the
 fit searches the front half only, and TRELLIS.2 has rebuilt weapons facing backwards (see [Weapons](WEAPONS.md)).
 

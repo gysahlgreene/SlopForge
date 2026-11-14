@@ -22,6 +22,7 @@ from ..failures import StageFailure, candidate_quality_rejection, failure_record
 from ..manifest import (save_manifest, load_manifest, start_execution, start_stage, begin_stage,
                         finish_stage, finish_execution, record_reuse_decision, execution_identity)
 from ..paths import blender_executable, resolve_workflow, tool_root
+from ..unreal import engine, export_unreal, unreal_maps
 from ..providers import (NOTICES_FILE, combine_rights, lineage_rights, merge_rights, require_shippable, validate_output_rights,
                          rights_of, write_notices)
 from ..provenance import generator_provenance, file_sha256, tool_sha256
@@ -37,7 +38,7 @@ from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
-from ..validation import (MIN_EMISSIVE_FRACTION, MODULE_USE_CODES, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
+from ..validation import (MIN_EMISSIVE_FRACTION, MIN_SMALL_EMISSIVE_FRACTION, MODULE_USE_CODES, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
                           apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
                           apply_part_penetration, apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
@@ -1212,7 +1213,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         with Image.open(paths["metallic"]) as image:
             generator_metallic = ImageStat.Stat(image.convert("L")).mean[0] / 255
             Image.new("RGB", image.size).save(paths["metallic"])
-    coloured_nonmetals = [match for match, _glow in _emitter_targets(declared, "nonmetal").values() if match]
+    coloured_nonmetals = [match for match, _glow, _small in _emitter_targets(declared, "nonmetal").values() if match]
     nonmetal_fraction = (zero_metallic(paths["basecolor"], paths["metallic"], coloured_nonmetals)
                          if declares_metal and coloured_nonmetals else None)
     kit = kit_texture(root, context["manifest"], asset) if asset.get("kit_material") else None
@@ -1223,7 +1224,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if kit_roughness is not None:
         match_roughness(paths["roughness"], kit_roughness)
         kit_settings["kit_roughness"] = kit_roughness
-    glass = [match for match, _glow in _emitter_targets(declared, "glass").values()]
+    glass = [match for match, _glow, _small in _emitter_targets(declared, "glass").values()]
     glass_fraction = apply_glass(paths["basecolor"], paths["roughness"], paths["metallic"], glass) if glass else None
     metal_gain = colour_transfer = None
     cutout = (lineage or {}).get("concept_cutout")
@@ -1292,7 +1293,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   pivot=asset.get("pivot"), arm_thickness=asset.get("arm_thickness"),
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
                   facing_concept=None if framed else _facing_concept(asset, lineage),
-                  turn_around=bool(asset.get("turn_around")),
+                  turn_around=bool(asset.get("turn_around")), turn=int(asset.get("turn") or 0),
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
                   motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared
@@ -1317,7 +1318,10 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     if maps["warnings"] and validation["status"] == "passed":
         validation["status"] = "passed_with_warnings"
     if emissive_fraction is not None:
-        validation = apply_declared_emitter(validation, emissive_fraction)
+        # shortcut: one minimum for all emitters, the small one's when any is small; per-emitter minimums if a large
+        # emitter beside small eyes ever passes on a sliver
+        validation = apply_declared_emitter(validation, emissive_fraction, MIN_SMALL_EMISSIVE_FRACTION if any(
+            small for _match, _glow, small in targets) else MIN_EMISSIVE_FRACTION)
     if glass_fraction is not None:
         validation = apply_declared_glass(validation, glass_fraction)
     if nonmetal_fraction is not None:
@@ -1515,7 +1519,7 @@ def _placement(asset):
     """A kit module's declared size and pivot: they shape the assembled model, so they join its stage settings.
     Absent for other assets, whose settings (and so their identities) stay as before."""
     return {key: asset[key] for key in ("target_size", "pivot", "arm_thickness", "max_stretch", "texture_size",
-                                        "turn_around", "tiles", "walk_height", "clear_opening")
+                                        "turn_around", "turn", "tiles", "walk_height", "clear_opening")
             if asset.get(key)}
 
 
@@ -1582,7 +1586,8 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
     rule on a concept also takes stone highlights (live lantern, 2026-10-21: 90% of the projected texels were
     granite), while pale paper bakes pale enough for the colour rule on the bake.
     """
-    if all(match is None for match, _glow in targets):
+    targets = [(*target, False)[:3] for target in targets]  # (match, glow[, small])
+    if all(match is None for match, _glow, _small in targets):
         return None, {"status": "skipped", "reason": "pale emitters use the colour rule on the bake only"}
     if cutout is None or not Path(cutout).is_file():
         return None, {"status": "skipped", "reason": "approved concept cutout is missing"}
@@ -1598,7 +1603,8 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
         with Image.open(paths["basecolor"]) as image:
             size = image.size
         masks = [None if match is None else project_to_texture(concept, concept_emitter_mask(concept, match, np.asarray(
-                     emitter_colour_mask(flat, match)) > 127), view, uv, size) for match, _glow in targets]
+                     emitter_colour_mask(flat, match, small)) > 127, every_blob=small), view, uv, size)
+                 for match, _glow, small in targets]
     finally:
         uv_path.unlink(missing_ok=True)  # 64 MB float pass; the base render and report stay as evidence
         Path(f"{prefix}_uv.exr").unlink(missing_ok=True)
@@ -1608,10 +1614,10 @@ def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
 
 
 def _emitter_targets(materials, material_class="emissive"):
-    """Declared regions of one class as colour-rule targets: region -> (match_rgb or None for pale, glow_rgb)."""
+    """Declared regions of one class as colour-rule targets: region -> (match_rgb or None for pale, glow_rgb, small)."""
     rgb = lambda value: tuple(int(value[i:i + 2], 16) for i in (1, 3, 5))
-    return {item["region"]: (rgb(item["color"]), rgb(item.get("glow") or item["color"])) if item.get("color")
-            else (None, (255, 178, 102))
+    return {item["region"]: (rgb(item["color"]), rgb(item.get("glow") or item["color"]), bool(item.get("small")))
+            if item.get("color") else (None, (255, 178, 102), False)
             for item in materials or [] if item.get("class") == material_class}
 
 
@@ -1632,7 +1638,8 @@ def check_emitters_in_concept(materials, cutout):
         source = Path(temporary) / "concept.png"
         flat.save(source)
         missing = [region for region, target in targets.items()
-                   if derive_emission(source, Path(temporary) / "emission.png", [target]) < MIN_EMISSIVE_FRACTION]
+                   if derive_emission(source, Path(temporary) / "emission.png", [target])
+                   < (MIN_SMALL_EMISSIVE_FRACTION if target[2] else MIN_EMISSIVE_FRACTION)]
     if missing:
         raise StageFailure(
             "configuration", f"Declared emissive region(s) {', '.join(missing)} are not visible in the approved concept, "
@@ -1986,7 +1993,7 @@ def retexture(project_root, config, asset_type, style, manifest, key, *, materia
 
 
 def approve_texture(project_root, config, manifest, key, number, force=False, *, asset_type="prop",
-                    allow_placeholder_normal=False):
+                    allow_placeholder_normal=False, break_parts=None):
     root = Path(project_root).resolve()
     asset = manifest["assets"][key]
     candidate = next((item for item in asset.get("material_candidates", {}).get("items", [])
@@ -1998,14 +2005,25 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
         # `generate` replaces the record with concept-stage provenance; this material belongs to the earlier mesh.
         raise ValueError(f"Concept candidates for {asset['name']} were regenerated after material {number} was made; "
                          "approve a concept again before publishing a material")
+    unreal = engine(config) == "unreal"  # Unreal delivery: no Unity material, metadata or prefab (docs/UNREAL.md)
+    if break_parts and not unreal:
+        raise ValueError("--break-parts is delivered to Unreal only: set project.engine: unreal (docs/UNREAL.md)")
     try:
-        unity_cli(root)
+        if not unreal:
+            unity_cli(root)
     except StageFailure as exc:
         asset["last_failure"] = failure_record(exc, stage="preflight", attempt=None,
                                                operation=exc.operation)
         save_manifest(root / config["asset_pipeline"]["manifest"], manifest)
         raise
+    if break_parts and (load_taxonomy(root).get(asset.get("type") or "") or {}).get("remove_hidden_faces"):
+        # The generator's mesh is closed; removing the faces no ray reaches opened round 25's hand to 22,734 open
+        # edges, and its chest showed a hole where the head had sat once broken apart.
+        raise ValueError(f"{asset['name']}'s type removes hidden faces, so its parts would show holes where they "
+                         "part: build it with a type that sets remove_hidden_faces: false (docs/UNREAL.md)")
     paths = model_paths(root, config, asset["name"], asset_type)
+    paths.update({"orm": paths["metallic"].with_name(f"{asset['name']}_orm.png"),
+                  "parts_dir": paths["directory"] / "Parts", "unreal_report": paths["directory"] / "unreal.json"})
     candidate_paths = material_candidate_paths(root, config, asset["name"], number, asset_type)
     candidate.setdefault("outputs", {})
     metallic = root / candidate["outputs"].get("metallic", candidate_paths["metallic"].relative_to(root).as_posix())
@@ -2017,6 +2035,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     candidate["outputs"]["metallic_gloss"] = packed.relative_to(root).as_posix()
     final_keys = ("surface", "fbx", "blend", "basecolor", "normal", "roughness", "metallic", "metallic_gloss", "emission",
                   "preview_front", "preview_side", "preview_rear", "preview_three_quarter")
+    if unreal:  # Unity's smoothness-in-alpha map; Unreal gets its ORM map instead
+        final_keys = tuple(name for name in final_keys if name != "metallic_gloss")
     existing = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material") if paths[name].exists()]
     if existing and not (force or config["asset_pipeline"].get("overwrite_existing")):
         raise FileExistsError(f"Approved model outputs exist; pass --force to replace: {existing[0]}")
@@ -2054,7 +2074,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     from .. import SCHEMA_VERSION
     manifest.setdefault("schema_version", SCHEMA_VERSION)
     save_manifest(root / pipeline["manifest"], manifest)
-    publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material", "validation")]
+    publication_paths = [paths[name] for name in (*final_keys, "glb", "unity_material", "unity_glass_material", "validation",
+                                                  "orm", "unreal_report")]
     publication_paths.append(paths["directory"] / NOTICES_FILE)
     publication_paths += [path.with_suffix(path.suffix + ".meta") for path in publication_paths]
     with tempfile.TemporaryDirectory(prefix="slopforge-texture-backup-") as backup_dir:
@@ -2089,22 +2110,34 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 # (round 22's 89, 2026-11-08); its previews were rendered before it.
                 published_floor = {"floor": float(floor), "applied_at": "publication", "raised_share": round(
                     lift_nonmetal_roughness(paths["roughness"], paths["metallic"], paths["basecolor"], float(floor)), 4)}
-                make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
+                if not unreal:  # Unity's smoothness map; Unreal's ORM below reads the floored roughness
+                    make_metallic_gloss(paths["metallic"], paths["roughness"], paths["metallic_gloss"])
+            if unreal:
+                with tempfile.TemporaryDirectory(prefix="slopforge-unreal-") as work:
+                    shutil.rmtree(paths["parts_dir"], ignore_errors=True)  # a part dropped from the declaration goes
+                    report = export_unreal(config, blender_executable(config, root), sources["blend"], asset["name"],
+                                           paths["directory"], work, break_parts)
+                unreal_maps(sources["normal"], paths["roughness"], paths["metallic"], paths["orm"], paths["normal"])
+                paths["unreal_report"].write_text(json.dumps(report, indent=2) + "\n")
             # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs
-            unity_import = build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
+            unity_import = None if unreal else build_unity_material(root, paths["fbx"], paths["directory"] / "Materials" /
                                                 f"{asset['name']}_preview_PBR.mat",
                                                 {name: paths[name] for name in ("basecolor", "normal", "metallic_gloss", "emission")},
                                                 lightmap_uvs=asset.get("pivot") != "grip"
                                                 and type_record.get("lightmap_uvs", True))
-            _require_stable_unity_identity(asset.get("unity_import"), unity_import)
+            if not unreal:
+                _require_stable_unity_identity(asset.get("unity_import"), unity_import)
             validation = dict(candidate["validation"])
             validation["measured"] = dict(validation.get("measured", {}))
             validation["measured"].update({name: paths[name].relative_to(root).as_posix() for name in final_keys})
-            validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
+            if unreal:
+                validation["measured"]["unreal"] = report
+            else:
+                validation["measured"]["unity_material"] = paths["unity_material"].relative_to(root).as_posix()
             if published_floor:
                 validation["measured"]["nonmetal_roughness_floor"] = published_floor
             moving = [part for part in asset.get("parts") or [] if part["kind"] in ("hinge", "slide")]
-            if moving or type_record.get("unity_prefab"):
+            if not unreal and (moving or type_record.get("unity_prefab")):
                 # A prefab a game can use: colliders, a Rigidbody, sockets, and for moving parts a clip each and a
                 # motion check (unity_weapon). Types that opt in get one for static assets too.
                 motion = build_weapon_prefab(root, asset["name"], paths["fbx"], moving,
@@ -2125,7 +2158,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 validation["measured"]["play_mode"] = verify_play_mode(
                     root, play_mode_script(motion["prefab"], moving), results=paths["directory"] / f"{asset['name']}_playmode.xml")
             paths["validation"].write_text(json.dumps(validation, indent=2) + "\n")
-            outputs = _relative_outputs(root, paths, (*final_keys, "glb", "unity_material", "validation"))
+            outputs = _relative_outputs(root, paths, (*final_keys, "glb", "validation",
+                                                      *(("orm", "unreal_report") if unreal else ("unity_material",))))
             published = _published_artifacts(root, paths, candidate, execution["id"])
         except (Exception, KeyboardInterrupt) as exc:
             rollback_failure = None
@@ -2164,7 +2198,8 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
     finish_execution(execution, "succeeded")
     asset["published_artifacts"] = published
     asset["output_rights"] = rights  # what registered artifacts made from it (a rig, a clip) read
-    asset["unity_import"] = {"logical_id": key, **unity_import}
+    if unity_import is not None:
+        asset["unity_import"] = {"logical_id": key, **unity_import}
     save_manifest(root / pipeline["manifest"], manifest)
     return validation
 
@@ -2260,19 +2295,23 @@ def _published_artifacts(root, paths, candidate, execution_id):
                     "emission": "texture.emission", "preview_front": "preview.front", "preview_side": "preview.side",
                     "preview_rear": "preview.rear", "preview_three_quarter": "preview.three_quarter",
                     "unity_material": "material.unity", "unity_glass_material": "material.unity_glass",
-                    "validation": "validation.json", "glb": "mesh.glb"}
+                    "validation": "validation.json", "glb": "mesh.glb", "orm": "texture.orm",
+                    "unreal_report": "data.unreal_export"}
     for key_name, kind in output_types.items():
-        path = paths[key_name]
+        path = paths.get(key_name)
         parents = by_type.get(kind, [])
         if key_name == "glb" and mesh_ref:
             parents = [mesh_ref]
-        if key_name in ("unity_material", "unity_glass_material"):
+        if key_name in ("unity_material", "unity_glass_material", "orm"):
             parents = [item for item in candidate_refs if item["type"].startswith("texture.")]
         if key_name == "validation":
             parents = candidate_refs
-        if path.is_file():
+        if path is not None and path.is_file():
             published.append(_artifact_ref(root, path, f"{execution_id}:published:{key_name}", kind,
                                            "final_publication", 1, parents))
+    for part in sorted(paths["parts_dir"].glob("*.fbx")) if paths.get("parts_dir") else []:  # Unreal's rigid parts
+        published.append(_artifact_ref(root, part, f"{execution_id}:published:part:{part.stem}", "mesh.fbx_part",
+                                       "final_publication", 1, by_type.get("mesh.fbx", [])))
     return published
 
 
@@ -2546,6 +2585,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             conditioning_settings["views"] = {**execution["identity_inputs"]["views"], "tool": "prepare_views.py"}
         if asset.get("parts"):
             conditioning_settings["parts"] = part_settings(config, asset["parts"])
+        if asset.get("erase_boxes"):
+            conditioning_settings["erase"] = asset["erase_boxes"]
         conditioning_inputs = [selected_artifact, *([open_artifact] if open_artifact else [])]
         conditioning_refs = _adopt_stage(context, "conditioning_preparation", 1,
                                          conditioning_inputs, conditioning_settings)
@@ -2566,7 +2607,9 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             asset = manifest["assets"][key]
             print("3D stage: background removal and isolated reconstruction input...", flush=True)
             subprocess.run([python, str(tool_root() / "processing/prepare_3d_input.py"), "--input", str(paths["concept"]),
-                            "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"])], check=True)
+                            "--cutout", str(paths["cutout"]), "--output", str(paths["input_3d"]),
+                            *[argument for box in asset.get("erase_boxes") or []
+                              for argument in ("--erase", ",".join(str(value) for value in box))]], check=True)
             cutout_check = validate_image(paths["cutout"], expected_format="PNG", require_alpha=True, report_path=paths["cutout"].relative_to(root))
             input_check = validate_image(paths["input_3d"], expected_format="PNG", report_path=paths["input_3d"].relative_to(root))
             if cutout_check["status"] == "failed" or input_check["status"] == "failed":

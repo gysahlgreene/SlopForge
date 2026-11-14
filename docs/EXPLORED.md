@@ -40,6 +40,7 @@ The owner judges by eye: "good results that look right". It isn't a style rule, 
 | Projecting every concept emitter blob, not only the largest (several emitters of one colour) | A canopy's 12 lenses got their glow on its roof and a column; booth and chamber frames picked up glow. The bounding-box registration can't place many blobs. Reverted, 2026-11-09. | Rejected until registration improves | [Materials](MATERIALS.md) known limit |
 | A perspective camera for the concept-view fit | Offline on one canopy: fit 0.971 against 0.955 orthographic, and the lenses landed on their band, but still half off because the model spaced them differently. | Parked, prototype only | [Materials](MATERIALS.md) known limit |
 | Telling a wrong colour shift by offset agreement or lightness ratio | Neither separated the bad cells (iron 0.87 agreement; 18 of 23 cells within 3×). The share of coloured cells did. | Rejected | [Materials](MATERIALS.md) |
+| Small emitters (`emissive#..@../small`) for automaton eyes, 2026-11-13 | The fleck filter removed eyes ~6 px across on every concept; with `/small` the hand's eyes glow. The rifleman's eyes were lost by the bake itself on 3 of 3 seeds, and the concept projection is gated at fit 0.90 (0.85-0.88 there; offline it landed below the eye). | In use | [Materials](MATERIALS.md) |
 
 ## Kits and scenes
 
@@ -61,6 +62,8 @@ The owner judges by eye: "good results that look right". It isn't a style rule, 
 | TRELLIS.2 surface split by OmniPart labels and masks | The look held on a pistol, but it runs OmniPart, so #134 applies. | Blocked | [Moving parts](media/moving-parts-2026-10/README.md) |
 | Chest closed, cut along its seam | 0 of 3 seeds: the cut wanders, and there's nothing real inside. | Rejected | [Moving parts](media/moving-parts-2026-10/README.md) |
 | Chest generated open from an edited open picture | Rated "perfect", one run. Needs no OmniPart. | In use | [Moving parts](media/moving-parts-2026-10/README.md) |
+| Break-apart rigid parts from SAM masks on the approved 3/4 concept, 2026-11-13 | Patchy arms and legs on the hand: the orthographic fit of a perspective concept was 0.88, and a forearm hid a leg. Eroding the masks helped but did not fix it. | Rejected | [Unreal delivery](UNREAL.md) |
+| Break-apart parts from SAM masks on the model's own orthographic front and back renders, 2026-11-13 | 13 clean parts on the hand and the rifleman (plus its rifle, from several boxes and `over`), joints on the parent seam, verified as Unreal 5.8 static meshes. Needs a type that keeps hidden faces: removal had opened the hand to 22,734 edges. Boxes are drawn by hand per model. | In use | [Unreal delivery](UNREAL.md) |
 
 ## Characters
 

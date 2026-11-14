@@ -9,20 +9,21 @@ from . import __version__
 from .config import load_project, select_quality_tier
 from .backends.comfyui import ComfyUIClient
 from .manifest import acquire_project_lock, asset_key, release_project_locks, find_asset, load_manifest, new_record, register_artifact, save_manifest
-from .paths import comfy_url, discover_project_root, resolve_project_root
+from .paths import blender_executable, comfy_url, discover_project_root, resolve_project_root
 from .pipelines import image, model
 from . import recipes
 from .exploration import parse_variations, promote_candidate
 from .environment import validate_environment_kit
 from .character_rigging import run_character_rigging
 from .open_state import generate_open_candidates
+from .unreal import load_break_parts
 from .parts import check_slide_scale, parse_part_box, parse_part_spec, set_part_boxes, validate_parts
 from .style import build_prompt, load_style, parse_material_spec, reconstruction_rules
 from .taxonomy import canonical_type, load_taxonomy, output_path, validate_asset_name
 
 
 READ_ONLY_COMMANDS = {"candidates", "inspect", "styles", "assets", "prompt"}
-COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "open", "approve", "reject", "review", "retexture", "approve-texture", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "creature", "environment-check", "environment-scene", "vegetation", "scene-render"}
+COMMANDS = {"init", "make", "generate", "explore", "promote", "candidates", "open", "approve", "reject", "review", "retexture", "approve-texture", "break-views", "unity-preview", "inspect", "doctor", "styles", "assets", "prompt", "recipe", "library", "animation", "character", "creature", "environment-check", "environment-scene", "vegetation", "scene-render"}
 
 
 def parser():
@@ -119,6 +120,14 @@ def parser():
                               "open from it and its hinged part closed (docs/WEAPONS.md, Props generated open)")
     approve.add_argument("--open-part-box", action="append", default=[], dest="open_part_boxes",
                          help="Where a declared part lies on the open picture: 'name=x0,y0,x1,y1' as for --part-box")
+    approve.add_argument("--erase-box", action="append", default=[], dest="erase_boxes", metavar="X0,Y0,X1,Y1",
+                         help="Leave this box of the approved concept out of the model, as fractions of its width and "
+                              "height from the top left: something drawn beside the object only for scale "
+                              "(repeatable; kept on the asset; docs/WORKFLOWS.md)")
+    approve.add_argument("--turn", type=int, choices=(0, 90, 180, 270), metavar="DEGREES",
+                         help="The built model faces sideways: turn it 90, 180 or 270 degrees anticlockwise seen from "
+                              "above when assembled (0 clears it). Kept on the asset, added to --turn-around "
+                              "(docs/ENVIRONMENT-KITS.md)")
     approve.add_argument("--turn-around", action=argparse.BooleanOptionalAction,
                          help="The built model faces the wrong way: turn it 180 degrees about its vertical axis when "
                               "assembled. Kept on the asset for later rebuilds; --no-turn-around clears it "
@@ -146,6 +155,13 @@ def parser():
     approve_texture.add_argument("--force", action="store_true")
     approve_texture.add_argument("--allow-placeholder-normal", action="store_true",
                                  help="waive the 1x1 placeholder normal-map check")
+    approve_texture.add_argument("--break-parts", metavar="FILE",
+                                 help="Unreal only: break the model into rigid parts boxed on break-views' renders "
+                                      "(JSON: body, parents, views; docs/UNREAL.md)")
+    break_views = sub.add_parser("break-views", help="Render a material candidate's front and back, to box the "
+                                                     "parts it breaks into (docs/UNREAL.md)")
+    break_views.add_argument("name")
+    break_views.add_argument("candidate", type=int)
     unity_preview = sub.add_parser("unity-preview", help="Import and render a material candidate in Unity without approving it")
     unity_preview.add_argument("name")
     unity_preview.add_argument("candidate", type=int)
@@ -1083,7 +1099,7 @@ def _run(args):
         print(f"Rejected {args.name} candidate {args.candidate}.")
         return 0
 
-    if args.command in {"retexture", "approve-texture", "unity-preview"}:
+    if args.command in {"retexture", "approve-texture", "unity-preview", "break-views"}:
         record = find_asset(manifest, args.name)
         asset_type = "prop" if record.get("type") == "model" else record.get("type")
         recipe = types[canonical_type(asset_type, types)]
@@ -1103,6 +1119,12 @@ def _run(args):
                 print(f"  {item['number']}: {item.get('outputs', {}).get('preview_front', item.get('path'))} ({item['status']})")
             if not any(item["status"] == "candidate" for item in generated):
                 raise RuntimeError(f"No valid material candidates generated for {record['name']}; failures are saved in the manifest")
+        elif args.command == "break-views":
+            from .unreal import render_break_views
+            candidate = model.material_candidate_paths(root, config, record["name"], args.candidate, recipe)
+            for view in render_break_views(blender_executable(config, root), candidate["blend"], record["name"],
+                                           candidate["directory"] / "break_views"):
+                print(view)
         elif args.command == "unity-preview":
             try:
                 result = model.unity_preview(root, config, manifest, key, args.candidate, asset_type=recipe)
@@ -1112,7 +1134,9 @@ def _run(args):
         else:
             result = model.approve_texture(root, config, manifest, key, args.candidate, args.force,
                                            asset_type=recipe,
-                                           allow_placeholder_normal=getattr(args, "allow_placeholder_normal", False))
+                                           allow_placeholder_normal=getattr(args, "allow_placeholder_normal", False),
+                                           break_parts=load_break_parts(args.break_parts)
+                                           if getattr(args, "break_parts", None) else None)
             save_manifest(manifest_path, manifest)
             print(json.dumps(result, indent=2))
         return 0
@@ -1133,6 +1157,15 @@ def _run(args):
             if boxes or open_boxes:  # saved first: approval reloads the manifest from disk
                 record["parts"] = set_part_boxes(set_part_boxes(record.get("parts") or [], boxes), open_boxes,
                                                  key="open_box")
+                save_manifest(manifest_path, manifest)
+            if getattr(args, "erase_boxes", None):
+                record["erase_boxes"] = [parse_part_box(f"erase={spec}")[1] for spec in args.erase_boxes]
+                save_manifest(manifest_path, manifest)
+            if getattr(args, "turn", None) is not None:
+                if args.turn:
+                    record["turn"] = args.turn
+                else:
+                    record.pop("turn", None)
                 save_manifest(manifest_path, manifest)
             if getattr(args, "turn_around", None) is not None:  # a reviewer's decision, saved before approval reloads
                 if args.turn_around:

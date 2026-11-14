@@ -228,12 +228,13 @@ def apply_concept_silhouette(validation, projection, limit=MAX_CONCEPT_ASPECT_ER
     return validation
 
 
-MIN_EMISSIVE_FRACTION = 0.0001  # the smallest fraction the report records (4 decimals): any emitter found
+MIN_EMISSIVE_FRACTION = 0.0001  # any emitter found: about 420 texels of a 2048 map
+MIN_SMALL_EMISSIVE_FRACTION = 0.00001  # a declared small emitter: two eyes of about 20 texels each on a 2048 map
 
 
 def apply_declared_emitter(validation, fraction, minimum=MIN_EMISSIVE_FRACTION):
     """Fail a candidate whose base color has no region for the brief's declared emitter (retryable quality code)."""
-    measured = round(fraction, 4)
+    measured = round(fraction, 6)
     validation.setdefault("measured", {})["emissive_fraction"] = measured
     validation.setdefault("limits", {})["min_emissive_fraction"] = minimum
     if measured < minimum:

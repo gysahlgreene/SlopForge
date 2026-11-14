@@ -1029,6 +1029,27 @@ class DeclaredMaterialTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "--material must be"):
                 parse_material_spec(spec)  # a glow needs the drawn colour, six hex digits, and an emitter
 
+    def test_small_eyes_declared_as_a_small_emitter_glow_and_pass_the_emitter_check(self):
+        # Round 25 (2026-11-13): an automaton's eyes, two spots of about 20 texels, glow Eye Red #A80F1C. The fleck
+        # filter took them out of the bake and the share fell under the emitter check's minimum.
+        from slopforge.style import parse_material_spec
+        eyes = parse_material_spec("eyes=emissive#8c1406@a80f1c/small: small dim red eyes")
+        self.assertEqual((eyes["color"], eyes["glow"], eyes.get("small")), ("#8c1406", "#a80f1c", True))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = Image.new("RGB", (512, 512), (70, 100, 90))
+            for x in (200, 240):
+                base.paste((140, 20, 6), (x, 100, x + 5, 105))
+            candidate = self._candidate(root, [{"region": "body", "class": "nonmetal", "description": ""}, eyes], 0, base)
+            self.assertNotIn("emitter_missing", candidate["validation"].get("failure_codes", []))
+            self.assertGreater(candidate["validation"]["measured"]["emissive_fraction"], 0)
+            with Image.open(root / candidate["outputs"]["emission"]) as emission:
+                self.assertGreater(emission.getpixel((202, 102))[0], 120)
+                self.assertEqual(emission.getpixel((20, 20)), (0, 0, 0))
+        for spec in ("eyes=emissive#8c1406/tiny", "eyes=nonmetal#8c1406/small"):
+            with self.assertRaisesRegex(ValueError, "--material must be"):
+                parse_material_spec(spec)
+
     def test_a_coloured_nonmetal_beside_declared_metal_loses_its_false_metal(self):
         # A sword declares a steel blade, so the generator's metallic map is kept; its leather grip must not shine.
         from slopforge.failures import candidate_quality_rejection

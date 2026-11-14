@@ -25,6 +25,12 @@ graphs rebuilt the backdrop as a card or box around the object (2026-10-24,
 [weapon graph comparison](media/weapon-graph-2026-10/README.md)), so `processing/comfy_generate_3d.py` refuses an
 image without an alpha channel before inference.
 
+**Leaving a scale object out.** A concept may draw something beside the object only for scale: round 25's boss
+stands beside a street lamp. BiRefNet keeps it as part of the subject, so the model would include it. `approve
+--erase-box x0,y0,x1,y1` (fractions from the top left, repeatable, kept on the asset) makes that box of the cut-out
+transparent before the 3D input is made; the boxes join the conditioning stage's identity. The same run's
+barricade and smoke were already removed by BiRefNet.
+
 The Z-Image graph uses ComfyUI core nodes. TRELLIS graphs use ComfyUI's TRELLIS.2 node set (`Trellis2*`, `VaeDecode*`, `BakeTextureFromVoxel`, `ApplyTextureToMesh`, `SaveGLB`, and related nodes). Pixal3D adds `Pixal3DConditioning` and uses ComfyUI's mesh remeshing and UV unwrap nodes. On 2026-10-04 the four TRELLIS API graph files passed `ComfyUIClient.validate_workflow()` against the live H100 `/object_info` response; Pixal3D ran successfully on the H100 on 2026-10-08.
 
 The model and node versions installed in a ComfyUI service can differ from these workflows. Check upstream model and custom-node requirements before running a graph.

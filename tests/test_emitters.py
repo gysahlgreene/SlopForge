@@ -55,6 +55,40 @@ class EmitterProjectionTests(unittest.TestCase):
         for x, y, r in lenses:
             self.assertTrue(emitter[y, x], (x, y, r))
 
+    def test_a_small_emitter_keeps_its_spots_and_every_one_of_them(self):
+        # Round 25's automata: two red eyes of about 25 pixels each on an 832-wide concept. The fleck filter
+        # (a 7-pixel opening there) removed both, and only the largest blob was kept, so no eye could glow
+        # (round 22 refused emissive eyes on all 26 takes). A small emitter is opened by 3 pixels and keeps each blob.
+        image = Image.new("RGBA", (832, 400), (215, 215, 215, 0))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((300, 100, 520, 300), fill=(70, 100, 90, 255))  # a verdigris head
+        draw.rectangle((383, 176, 410, 190), fill=(76, 40, 22, 255))  # dark rust near the eye's hue, touching it
+        for x in (380, 440):
+            draw.ellipse((x - 3, 180, x + 3, 186), fill=(140, 20, 10, 255))
+        flat = Image.alpha_composite(Image.new("RGBA", image.size, (0, 0, 0, 255)), image).convert("RGB")
+        eye = (132, 16, 3)
+        self.assertFalse((np.asarray(emitter_colour_mask(flat, eye)) > 127).any())
+        seed = np.asarray(emitter_colour_mask(flat, eye, small=True)) > 127
+        emitter = concept_emitter_mask(image, eye, seed, every_blob=True)
+        self.assertTrue(emitter[183, 380] and emitter[183, 440])
+        self.assertFalse(emitter[250, 400])
+        self.assertFalse(emitter[183, 400])  # not grown over the rust beside it (round 25's furnace heart)
+
+    def test_a_low_resolution_concept_covers_its_emitter_on_a_larger_texture(self):
+        # Round 25's brute: its firebox, ~100 concept pixels across, reached a 4096 texture as scattered dim specks
+        # (0.045% of the map), one texel per concept pixel. Here a 50 px concept, a 100 px render and a 400 texture.
+        concept = Image.new("RGBA", (50, 50), (0, 0, 0, 0))
+        ImageDraw.Draw(concept).rectangle((5, 5, 44, 44), fill=(60, 60, 60, 255))
+        emitter = np.zeros((50, 50), bool)
+        emitter[15:35, 15:35] = True
+        render = concept.resize((100, 100), Image.NEAREST)
+        y, x = np.mgrid[0:100, 0:100]
+        alpha = np.asarray(render)[..., 3] > 127
+        uv = np.stack([(x + 0.5) / 100, 1 - (y + 0.5) / 100, np.zeros_like(x, float), alpha.astype(float)], -1)
+        texture = np.asarray(project_to_texture(concept, emitter, render, uv, (400, 400))) > 127
+        self.assertGreater(texture[130:270, 130:270].mean(), 0.95)
+        self.assertFalse(texture[:100].any())
+
     def test_nothing_is_projected_when_the_concept_has_no_emitter(self):
         concept = _concept()
         empty = np.zeros((200, 200), bool)
