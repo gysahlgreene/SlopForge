@@ -2,6 +2,20 @@ import bmesh
 import bpy
 
 
+def split_nonmanifold_edges(mesh):
+    """Give each sheet meeting at an edge of three or more faces its own copy of the edge; the shape is unchanged.
+    Collapse decimation will not collapse across such edges: a TRELLIS.2 springboard with 7448 of them stalled at
+    65559 faces of a 60000 budget (2026-11-14). Returns the number of edges split."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    edges = [edge for edge in bm.edges if not edge.is_manifold and not edge.is_boundary]
+    if edges:
+        bmesh.ops.split_edges(bm, edges=edges)
+        bm.to_mesh(mesh)
+    bm.free()
+    return len(edges)
+
+
 def remove_isolated_single_faces(mesh):
     """Drop detached one-face fragments while keeping multi-face islands. The other faces keep their orientation:
     recomputing it turned half of a pistol inside out on the open surface hidden-face removal leaves (2026-10-26)."""

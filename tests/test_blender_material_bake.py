@@ -106,6 +106,43 @@ assert len(mesh.loop_triangles)<=10000, len(mesh.loop_triangles)
                            check=True, capture_output=True)
 
 
+    def test_a_reduction_blocked_by_non_manifold_edges_still_reaches_its_budget(self):
+        # TRELLIS.2 meshes with thousands of edges shared by three or more faces stalled the collapse short of the
+        # budget (springboard and mender, 2026-11-14); a fin on every grid edge blocks it the same way.
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source, target, blend = folder / "fins.glb", folder / "prepared.glb", folder / "prepared.blend"
+            fixture = folder / "fins.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new(); grid = {}
+n = 30
+for i in range(n + 1):
+    for j in range(n + 1):
+        grid[i, j] = bm.verts.new((i / n, j / n, 0))
+for i in range(n):
+    for j in range(n):
+        bm.faces.new((grid[i, j], grid[i + 1, j], grid[i + 1, j + 1], grid[i, j + 1]))
+for i in range(n):
+    for j in range(1, n):
+        bm.faces.new((grid[i, j], grid[i + 1, j], bm.verts.new(((i + 0.5) / n, j / n, 0.5 / n))))
+for face in bm.faces:
+    face.smooth = True  # shared vertices survive the glTF export, as in a TRELLIS.2 mesh
+mesh = bpy.data.meshes.new("fins"); bm.to_mesh(mesh)
+bpy.context.collection.objects.link(bpy.data.objects.new("fins", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(source)], check=True, capture_output=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(source), str(target), str(blend),
+                                     "--mesh-only", "--no-voxel-repair", "--face-budget", "800"],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("Split non-manifold edges blocking the reduction", result.stdout)
+            self.assertIn("Output faces: ", result.stdout)
+            self.assertLessEqual(int(result.stdout.split("Output faces: ")[1].split()[0]), 800)
+
     def test_removes_only_single_face_islands(self):
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "check_cleanup.py"

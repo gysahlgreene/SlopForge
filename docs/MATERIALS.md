@@ -66,6 +66,10 @@ result against that declaration before anyone reviews it.
    out sharper, and a lantern's inner shell no longer spends half its budget (2026-10-24,
    [evidence](media/mesh-reduction-2026-10/README.md)). A graph without `save_detail`, or one
    whose own reduction is crease-preserving QEM (the character graph), still hands Blender its `save_raw`.
+   Collapse decimation will not collapse across an edge shared by three or more faces, so a shape with
+   thousands of them stalls short of its budget; when a pass removes under half of what it was asked to,
+   Blender splits those edges once (the shape is unchanged) and carries on. A springboard with 7,448 such
+   edges stalled at 65,559 faces of 60,000 and reached 57,000 after the split (2026-11-14).
    The final tier uses a 1536 shape upsample and 4096² maps.
 
    The remeshed shape is a double skin: an outer face and an inner one about half a percent of the
