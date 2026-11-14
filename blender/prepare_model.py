@@ -403,10 +403,38 @@ if oriented:
     # A weapon is drawn tip or muzzle right. Turn its tip to -Y (forward in Unity once exported) and its top to +Z,
     # and mark the faces under the grip mask, seen from the view that best fits the concept.
     import numpy as np
-    from concept_view import (area_samples, fit_view, footprint_axes, image_mask, surface_samples, to_concept_pixels,
-                              upright_axis, view_axes)
+    from concept_view import (area_samples, fit_view, footprint_axes, image_mask, silhouette, surface_samples,
+                              to_concept_pixels, upright_axis, view_axes)
     concept = image_mask(sys.argv[sys.argv.index("--concept") + 1])
     world, samples = surface_samples(obj)
+    if "--side-concept" in sys.argv:
+        # Drawn side-on, a weapon's thinnest axis is the concept's line of sight, so it lies across, not up. TRELLIS.2
+        # built a sabre and a wrench rolled flat (2026-11-14: 25 and 20 cm wide, 11 and 8 cm tall), which a turn
+        # about the vertical cannot undo and the crossbow rule below keeps flat. Stood on its edge as seen along that
+        # axis: the in-plane direction and side whose silhouette fits the concept give its right and up (the length
+        # axis alone leans with a hook or a grip, and stood the profile up tilted in its own plane).
+        centred = samples - samples.mean(0)
+        principal = np.linalg.eigh(centred.T @ centred)[1]
+        thin = principal[:, 0]
+        if abs(thin[2]) > math.sqrt(0.5):
+            rows, columns = np.nonzero(concept)
+            target = silhouette(np.stack([columns, rows], 1).astype(float))
+            best = (-1.0, None, None)
+            for degrees in range(360):  # a degree: the 128-cell silhouette's own step
+                right = math.cos(math.radians(degrees)) * principal[:, 2] + math.sin(math.radians(degrees)) * principal[:, 1]
+                for up in (np.cross(thin, right), np.cross(right, thin)):  # seen from either side
+                    fitted = silhouette(np.stack([centred @ right, centred @ up], 1))
+                    iou = float((fitted & target).sum() / max((fitted | target).sum(), 1))
+                    if iou > best[0]:
+                        best = (iou, right, up)
+            iou, right, up = best
+            level = Vector((right[0], right[1], 0.0)).normalized()
+            source = Matrix((Vector(right), Vector(up), Vector(np.cross(right, up)))).transposed()
+            stood = Matrix((level, Vector((0.0, 0.0, 1.0)), level.cross(Vector((0.0, 0.0, 1.0))))).transposed()
+            obj.data.transform((stood @ source.inverted()).to_4x4())  # about the origin: rotation and scale applied
+            obj.data.update()
+            world, samples = surface_samples(obj)
+            print(f"Stood on its edge: built lying flat, drawn side-on (profile fit {iou:.3f})")
     fit, theta, phi = fit_view(samples, concept, full_turn=True)  # a weapon can be rebuilt facing the other way
     _, right, up = view_axes(math.radians(theta), math.radians(phi))
     pixels = to_concept_pixels(np.stack([world @ np.array(right), world @ np.array(up)], 1), concept)

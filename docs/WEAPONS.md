@@ -37,6 +37,13 @@ bowstring feature is deferred: every crossbow so far kept its string.
     - A weapon whose thinnest axis is nearer vertical than horizontal lies flat in its concept, like a crossbow drawn
       from above. That axis is its top.
     - A side-on weapon's top is +Z.
+    - **Built lying flat, drawn side-on.** A type with `concept_projection: side` (weapons) says its concepts are
+      side views, so a thinnest axis near vertical means the mesh came out rolled flat: TRELLIS.2 built a sabre and
+      a wrench that way on 2026-11-14 (25 and 20 cm wide, 11 and 8 cm tall), and a turn about the vertical could not
+      undo it. The final pass (`--side-concept`) stands it on its edge first: seen along that axis, it tries every
+      in-plane direction in 1° steps from both sides and takes the one whose silhouette fits the concept. The length
+      axis alone leans with a hook or a grip and stood a test blade up tilted. A degree of residual tilt moves an end
+      of a 1.1 m weapon by about 2 cm.
   - **Its length** is whichever of the two axes across the top passes nearest the grip: a crossbow's bow can spread
     almost as far as its stock is long. It is pointed at the end further from the grip and turned to Blender −Y, which
     is forward once in Unity. The image edit flipped 3 of 6 weapon pictures on 2026-11-04, and the end drawn on the

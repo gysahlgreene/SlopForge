@@ -1297,6 +1297,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
                   facing_concept=None if framed else _facing_concept(asset, lineage),
                   turn_around=bool(asset.get("turn_around")), turn=int(asset.get("turn") or 0),
+                  side_concept=asset_type.get("concept_projection") == "side",
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
                   motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared

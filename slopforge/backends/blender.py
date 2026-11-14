@@ -16,7 +16,7 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
                   surface_source=None, preview_dir=None, material_scale=3.0,
                   stage_mesh=None, reuse_stage_mesh=False, preserve_uvs=False, target_size=None, pivot=None,
                   arm_thickness=None, concept=None, grip_mask=None, parts=(), parts_json=None, anchors=None,
-                  motions=None, facing_concept=None, turn_around=False, turn=0):
+                  motions=None, facing_concept=None, turn_around=False, turn=0, side_concept=False):
     root = Path(project_root).resolve()
     script = tool_root() / "blender/prepare_model.py"
     command = [blender_executable(config, root), "--background", "--python-exit-code", "1", "--python", str(script), "--",
@@ -43,6 +43,8 @@ def process_model(project_root, config, glb, fbx, blend, textures, face_budget, 
         command.extend(("--turn", str(int(turn))))
     if concept:  # weapons: oriented from the concept, held at the grip mask
         command.extend(("--concept", str(concept)))
+        if side_concept:  # drawn side-on: a weapon built lying flat is rolled up onto its edge
+            command.append("--side-concept")
         if grip_mask:
             command.extend(("--grip-mask", str(grip_mask)))
         for name, kind, mask in parts:  # moving parts split from the mesh along their concept masks
