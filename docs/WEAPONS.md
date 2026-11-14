@@ -13,7 +13,7 @@ for now (2026-10-24, [evidence](media/weapon-pipeline-2026-10/README.md)).
 - the thin-part measure;
 - coloured non-metals, metal brightened to the concept, and concept colours for small parts;
 - moving parts split from the mesh, with pivots and a hierarchy in the FBX, and a Unity prefab with a checked
-  motion clip per part.
+  motion clip per part, or parts on their pivots for Unreal ([Unreal](UNREAL.md#a-weapons-moving-parts)).
 
 **Still planned** (listed in the epic): the W-v1 protocol, and the owner's decisions it needs. The
 bowstring feature is deferred: every crossbow so far kept its string.
@@ -190,6 +190,23 @@ A pistol's slide and trigger were split this way on three live runs
 
 The travel check caught a real fault on its first run: the imported FBX root is scaled 100 under Unity's 0.01 file
 scale, so a slide moved 3 m until its travel was taken through the parent's scale.
+
+## Parts split by their masks
+
+`part_model: masks` is the weapon type's default since 2026-11-14. It is the hybrid route below without OmniPart:
+TRELLIS.2 generates the surface and the concept's part masks alone label its faces (`generate_hybrid_parts`
+with `masks_only`), then the openings are closed by their interfaces as on the hybrid route. OmniPart's part
+synthesis runs NVIDIA code licensed for non-commercial use only, so anything it touches is `restricted` and delivery
+refuses it ([output rights](COMFYUI.md#providers-and-output-rights)); the masks route records only the surface's
+models.
+
+It needs the concept's fitted view to look through the weapon's thickness (a side profile), so every face gets a
+mask's vote. A view that does not, or a mask dropped because it landed on too little of the surface, fails as the
+retryable `part_missing` (`apply_mask_split`): with no OmniPart parts, the faces the view did not see would take a
+part from their neighbours alone. The open route (a part generated open) is exempt: its part stands clear of the
+body.
+
+`hybrid` and `omnipart` stay for experiments.
 
 ## Moving parts from part-level generation
 
