@@ -13,7 +13,7 @@ class UnrealPublicationTests(unittest.TestCase):
     def test_an_unreal_project_publishes_without_unity_and_with_unreal_maps(self):
         exports, seen = [], {}
 
-        def export(config, blender, blend, name, out_dir, work, break_parts):
+        def export(config, blender, blend, name, out_dir, work, break_parts, moving=None, keep_origin=False):
             exports.append((name, break_parts))
             (out_dir / f"{name}.fbx").write_bytes(b"unreal fbx")
             return {"name": name, "size_m": [1, 1, 1]}
