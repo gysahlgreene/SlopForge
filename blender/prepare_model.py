@@ -632,6 +632,17 @@ if not reuse_stage_mesh and not mesh_only:
         obj.data.update()
         obj["slopforge_turned_around"] = True
         print("Turned around: 180 degrees about the vertical axis, as the reviewer set")
+    if "--turn" in sys.argv:
+        # A model built sideways (round 25's brute, from a three-quarter back view, faced +X): a reviewer's quarter turn
+        # anticlockwise seen from above, after any turn-around.
+        degrees = int(sys.argv[sys.argv.index("--turn") + 1])
+        coords = [vertex.co for vertex in obj.data.vertices]
+        centre = Vector([(min(co[axis] for co in coords) + max(co[axis] for co in coords)) / 2 for axis in (0, 1)] + [0.0])
+        obj.data.transform(Matrix.Translation(centre) @ Matrix.Rotation(math.radians(degrees), 4, "Z")
+                           @ Matrix.Translation(-centre))
+        obj.data.update()
+        obj["slopforge_turned"] = degrees
+        print(f"Turned {degrees} degrees anticlockwise about the vertical axis, as the reviewer set")
 
 
 # -------------------------------------------------

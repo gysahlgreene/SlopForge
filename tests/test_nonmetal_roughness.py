@@ -59,12 +59,13 @@ class PublicationFloorTests(unittest.TestCase):
     """A candidate made before its type set the floor gets it when published, so round 22's 89 objects need no
     rebuild; its packed metallic-gloss map is made again from the raised roughness."""
 
-    def publish(self, measured):
+    def publish(self, measured, engine="unity", inspect=None, stubs=()):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "Assets").mkdir()
             init_project(root)
             config = load_project(root)
+            config.setdefault("project", {})["engine"] = engine
             candidate = model.material_candidate_paths(root, config, "relic", 1)
             candidate["basecolor"].parent.mkdir(parents=True, exist_ok=True)
             maps = write_maps(candidate["basecolor"].parent)
@@ -96,13 +97,16 @@ class PublicationFloorTests(unittest.TestCase):
                            return_value={"errors": [], "motions": []}),
                      patch("slopforge.pipelines.model.verify_play_mode", return_value={"passed": [], "failed": []}),
                      patch("slopforge.pipelines.model.load_taxonomy",
-                           return_value={"prop": {"min_nonmetal_roughness": 0.75}})]
+                           return_value={"prop": {"min_nonmetal_roughness": 0.75}}), *stubs]
             for stub in stubs:
                 stub.start()
                 self.addCleanup(stub.stop)
             model.approve_texture(root, config, manifest, "prop:relic", 1)
             final = model.model_paths(root, config, "relic")
-            return (quadrants(final["roughness"]), np.asarray(Image.open(final["metallic_gloss"]))[0, 0, 3],
+            if inspect:
+                inspect(final, asset)
+            return (quadrants(final["roughness"]), np.asarray(Image.open(final["metallic_gloss"]))[0, 0, 3]
+                    if final["metallic_gloss"].is_file() else None,
                     asset)
 
     def test_older_candidate_is_floored_at_publication(self):

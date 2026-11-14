@@ -65,25 +65,31 @@ def parse_material_spec(spec):
     generated base colour map (emitters glow in it, glass turns see-through there, and a coloured non-metal next to
     declared metal has its metallic zeroed there). Without one, an emitter or glass is found as the map's pale
     near-neutral area. An emitter's '@rrggbb' is a glow colour other than its drawn one: round 24's teleporter glass glows
-    #EC1FC6 but was drawn about #AD3F64 (2026-11-09).
+    #EC1FC6 but was drawn about #AD3F64 (2026-11-09). '/small' marks spots a few pixels across (an automaton's eyes,
+    round 25), which the fleck filter would remove: see unity_material.emitter_colour_mask.
     """
     region, separator, rest = spec.partition("=")
     material_class, _, detail = rest.partition(":")
-    material_class, _, color = material_class.strip().lower().partition("#")
+    material_class, slash, size = material_class.strip().lower().partition("/")
+    material_class, _, color = material_class.partition("#")
     material_class, at, _ = material_class.partition("@")
     color, _, glow = color.partition("@")
     region, detail = region.strip(), detail.strip()
     hex6 = lambda value: len(value) == 6 and all(c in "0123456789abcdef" for c in value)
     valid_color = not color or (material_class in ("emissive", "glass", "nonmetal") and hex6(color))
     valid_glow = not (at or glow) or (material_class == "emissive" and color and hex6(glow))
-    if not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color or not valid_glow:
-        raise ValueError("--material must be 'region=nonmetal[#rrggbb]|metal|emissive[#rrggbb[@rrggbb]]|glass[#rrggbb]"
+    valid_size = not slash or (material_class == "emissive" and color and size == "small")
+    if (not separator or not region or material_class not in MATERIAL_CLASSES or not valid_color or not valid_glow
+            or not valid_size):
+        raise ValueError("--material must be 'region=nonmetal[#rrggbb]|metal|emissive[#rrggbb[@rrggbb][/small]]|glass[#rrggbb]"
                          f"[: description]', got {spec!r}")
     item = {"region": region, "class": material_class, "description": detail}
     if color:
         item["color"] = "#" + color
     if glow:
         item["glow"] = "#" + glow
+    if slash:
+        item["small"] = True
     return item
 
 

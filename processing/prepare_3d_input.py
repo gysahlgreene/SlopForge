@@ -10,12 +10,25 @@ from PIL import Image
 from background import remove_background
 
 
+def erase(cutout, boxes):
+    """The cutout with each box (fractions x0,y0,x1,y1 from the top left) made transparent: things a concept shows
+    beside the object only for scale (round 25's street lamp beside the boss), which background removal keeps."""
+    alpha = cutout.getchannel("A")
+    for x0, y0, x1, y1 in boxes:
+        alpha.paste(0, (round(x0 * cutout.width), round(y0 * cutout.height),
+                        round(x1 * cutout.width), round(y1 * cutout.height)))
+    cutout.putalpha(alpha)
+    return cutout
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--cutout", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--size", type=int, default=1024)
+    parser.add_argument("--erase", action="append", default=[], metavar="X0,Y0,X1,Y1",
+                        help="Remove this box of the concept (fractions) from the cutout (repeatable)")
     args = parser.parse_args()
 
     src = Path(args.input).expanduser().resolve()
@@ -31,7 +44,7 @@ def main():
     print(f"Removing background: {src}")
 
     image = Image.open(src).convert("RGBA")
-    cutout = remove_background(image)
+    cutout = erase(remove_background(image), [[float(value) for value in box.split(",")] for box in args.erase])
 
     cutout.save(cutout_path)
 

@@ -31,6 +31,16 @@ result against that declaration before anyone reviews it.
    same glass in light. On the chamber `#ad3f64` found only the portholes; `#82284a` found the portholes and most of
    the lining; darker matches also caught the dark iron.
 
+   A small emitter adds `/small`: `eyes=emissive#8c211a@a80f1c/small`. Its colour rule drops only 3-pixel flecks
+   instead of 15 px at 2048, every spot of its colour in the concept is kept ungrown (two eyes are two blobs), and the emitter
+   check needs 0.001% of the map instead of 0.01%. Without it, an automaton's eyes (about 6 pixels across on an
+   832-wide concept) were removed on all 26 of round 22's takes and all of round 25's concepts. Limit: when the bake
+   loses the eyes' colour and the concept fits under 0.90, nothing finds them, and the candidate fails
+   `emitter_missing` (round 25's rifleman: the concept projection, allowed at 0.88, landed below the eye).
+   A glow drawn as a gradient (round 25's furnace heart, colours wider apart than the colour rule's distance) is
+   fragmented by the colour rule and opened away; `/small` finds its brightest spots. Growing them over pixels of the
+   same hue spread the heart over the bronze chest beside it, so a small emitter is not grown.
+
    On the baked map, a coloured emitter must match its hue as well as its colour: within 15° of its
    hue, at a saturation of at least 0.35. Grey and pale declared colours are matched on colour alone.
    Before 2026-11-09 colour alone was used, and copper baked about #a8503a was close enough to the

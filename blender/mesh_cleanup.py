@@ -315,7 +315,7 @@ def separate_part(obj, name, kind, smoothing=4, min_faces=8, basecolor=None):
     mesh = bpy.data.meshes.new(name)
     piece.to_mesh(mesh)
     piece.free()
-    if kind == "hinge":
+    if kind in ("hinge", "rigid"):  # a rigid part (one a model breaks into) sits on its joint, as a hinge does
         pivot = sum(cut, Vector()) / len(cut) if cut else Vector()
     else:
         low = Vector([min(vertex.co[axis] for vertex in mesh.vertices) for axis in range(3)])
@@ -1413,3 +1413,128 @@ def separate_tagged(obj, table, contact, anchors=None, close=False, basecolor=No
     bm.free()
     obj.data.update()
     return children
+
+
+def rigid_labels(world, edges, visible, seeds):
+    """Each vertex's part, for a model broken into rigid parts: the seeds (part index, or -1) of the vertices the
+    concept's fitted view sees under a part's mask, grown over the surface by distance, so a part takes the back and
+    sides the view cannot see. A vertex no seed reaches over the surface (a loose piece) takes its nearest seed's part.
+
+    A part's mask projects straight through the model, so a straight projection gave an arm the torso behind it;
+    only the seen vertices are seeded (round 25 automata, 2026-11-13). world: (n, 3) positions; edges: (m, 2) vertex
+    pairs, already welded across UV seams; visible, seeds: (n,) arrays. Returns (n,) labels, -1 when nothing is seeded.
+    """
+    import heapq
+    import numpy as np
+    from mathutils import kdtree
+    labels = np.where(visible, seeds, -1)
+    distance = np.full(len(world), np.inf)
+    seeded = np.flatnonzero(labels >= 0)
+    if not len(seeded):
+        return labels
+    distance[seeded] = 0.0
+    neighbours = [[] for _ in range(len(world))]
+    lengths = np.linalg.norm(world[edges[:, 0]] - world[edges[:, 1]], axis=1)
+    for (a, b), length in zip(edges.tolist(), lengths.tolist()):
+        neighbours[a].append((b, length))
+        neighbours[b].append((a, length))
+    queue = [(0.0, int(index)) for index in seeded]
+    heapq.heapify(queue)
+    while queue:
+        reached, vertex = heapq.heappop(queue)
+        if reached > distance[vertex]:
+            continue
+        for other, length in neighbours[vertex]:
+            if reached + length < distance[other]:
+                distance[other] = reached + length
+                labels[other] = labels[vertex]
+                heapq.heappush(queue, (reached + length, other))
+    lost = np.flatnonzero(labels < 0)
+    if len(lost):
+        tree = kdtree.KDTree(len(seeded))
+        for index in seeded:
+            tree.insert(world[index], int(index))
+        tree.balance()
+        labels[lost] = [labels[tree.find(world[index])[1]] for index in lost]
+    return labels
+
+
+def peel_order(labels, edges, body, parents=None):
+    """The order to cut parts off a body, each with the part it hangs from: the part touching only one other part
+    goes first (a hand before its forearm), so each cut is one joint and a part's pivot sits on it. A part in a loop
+    (a rifle held in a hand and against the chest) goes when no end is left, smallest first, hung from the part it
+    shares most edges with. body stays. parents ({part: parent}) declares the tree instead: a hand resting on a
+    thigh touches it, and the thigh then hung from the forearm (round 25's hand). Returns [(part, parent), ...]."""
+    import numpy as np
+    if parents:
+        order, left = [], set(parents)
+        while left:
+            ends = [part for part in left if not any(parents.get(other) == part for other in left)]
+            if not ends:
+                raise ValueError(f"declared parts form a loop: {sorted(left)}")
+            for part in sorted(ends):
+                order.append((part, parents[part]))
+                left.remove(part)
+        return order
+    pairs = labels[edges]
+    pairs = pairs[(pairs[:, 0] != pairs[:, 1]) & (pairs >= 0).all(1)]
+    shared = {}
+    for a, b in pairs.tolist():
+        key = (min(a, b), max(a, b))
+        shared[key] = shared.get(key, 0) + 1
+    sizes = {int(label): int((labels == label).sum()) for label in np.unique(labels[labels >= 0])}
+    left, order = set(sizes) - {body}, []
+    while left:
+        touching = {part: {other: count for (a, b), count in shared.items() for part_, other in ((a, b), (b, a))
+                           if part_ == part and (other in left or other == body)} for part in left}
+        ends = [part for part in left if len(touching[part]) <= 1]
+        part = min(ends or left, key=lambda item: sizes[item])
+        parent = max(touching[part], key=touching[part].get) if touching[part] else body
+        order.append((part, parent))
+        left.remove(part)
+    return order
+
+
+def merge_stray_islands(labels, edges, share=0.25):
+    """A part's connected pieces other than its largest, under `share` of it, join the part they touch most: a
+    mask's edge leaves slivers of one part inside another, which fly off as debris when the model breaks apart (round
+    25's hand: chips of the pelvis on the thighs). A piece touching no other part (a loose piece of its own) stays."""
+    import numpy as np
+    labels = labels.copy()
+    for _ in range(3):
+        same = edges[labels[edges[:, 0]] == labels[edges[:, 1]]]
+        parent = np.arange(len(labels))
+
+        def find(index):
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+        for a, b in same.tolist():
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+        roots = np.array([find(index) for index in range(len(labels))])
+        sizes = np.bincount(roots, minlength=len(labels))
+        largest = {}
+        for root in np.unique(roots[labels >= 0]):
+            label = labels[root]
+            if sizes[root] > sizes[largest.get(label, root)] or label not in largest:
+                largest[label] = root
+        cross = edges[labels[edges[:, 0]] != labels[edges[:, 1]]]
+        moved = False
+        for root in np.unique(roots[labels >= 0]):
+            label = labels[root]
+            if root == largest[label] or sizes[root] >= share * sizes[largest[label]]:
+                continue
+            touching = {}
+            for a, b in cross.tolist():
+                for here, there in ((a, b), (b, a)):
+                    if roots[here] == root and labels[there] >= 0:
+                        touching[labels[there]] = touching.get(labels[there], 0) + 1
+            if touching:
+                labels[roots == root] = max(touching, key=touching.get)
+                moved = True
+        if not moved:
+            break
+    return labels

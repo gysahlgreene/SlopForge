@@ -70,3 +70,21 @@ class BackgroundRemovalExitTests(unittest.TestCase):
                                "--cutout", "c.png", "--output", "o.png")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Input image missing", result.stderr)
+
+
+class EraseBoxTests(unittest.TestCase):
+    _run = BackgroundRemovalExitTests._run
+
+    def test_an_erase_box_leaves_a_scale_object_out_of_the_cutout_and_the_3d_input(self):
+        # Round 25's boss concepts draw a street lamp beside it for scale; background removal keeps the lamp, so
+        # TRELLIS.2 would build it into the boss. The stub's object spans x 8-40 of 64; the box takes its right half.
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "concept.png"
+            Image.new("RGB", (64, 64), "white").save(image)
+            out = Path(temporary) / "out"
+            result = self._run(temporary, str(ROOT / "processing/prepare_3d_input.py"), "--input", str(image),
+                               "--cutout", str(out / "cutout.png"), "--output", str(out / "input.png"),
+                               "--erase", "0.4,0,1,1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with Image.open(out / "cutout.png") as cutout:
+                self.assertEqual(cutout.getchannel("A").getbbox(), (8, 8, 26, 57))

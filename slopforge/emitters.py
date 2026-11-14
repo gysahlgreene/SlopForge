@@ -20,18 +20,23 @@ def _flat(concept):
     return np.asarray(Image.alpha_composite(Image.new("RGBA", concept.size, (0, 0, 0, 255)), concept).convert("RGB"))
 
 
-def concept_emitter_mask(concept, match, seed_mask):
+def concept_emitter_mask(concept, match, seed_mask, every_blob=False):
     """Concept pixels of one emitter declared with a colour (match).
 
     seed_mask is the pipeline's colour rule on the concept (emitter_colour_mask), which catches only the
     emitter's brightest pixels plus glints elsewhere. Only the largest blob is kept and grown over connected
     pixels of its hue, so the shaded body is covered; a kept glint would grow over a whole part of similar hue
-    (copper caps next to an amber lens).
+    (copper caps next to an amber lens). every_blob keeps each one ungrown, for a small emitter of several spots (two
+    eyes, a flickering glow).
     """
     labels, count = ndimage.label(seed_mask)
     if not count:
         return seed_mask
     sizes = ndimage.sum(seed_mask, labels, range(1, count + 1))
+    if every_blob:
+        # A small emitter is its spots alone: grown, round 25's furnace heart spread over the bronze chest around it
+        # (2,240 heart pixels grew to 21,343).
+        return seed_mask
     seed = labels == 1 + int(np.argmax(sizes))
     rgb = _flat(concept).astype(float) / 255
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
@@ -60,14 +65,20 @@ def project_to_texture(concept, emitter, view_base, view_uv, texture_size):
     ry, rx = np.nonzero(render_alpha)
     sx = (rx.max() - rx.min()) / max(cx.max() - cx.min(), 1)
     sy = (ry.max() - ry.min()) / max(cy.max() - cy.min(), 1)
-    ey, ex = np.nonzero(emitter)
-    px = np.clip(np.round(rx.min() + (ex - cx.min()) * sx).astype(int), 0, render_alpha.shape[1] - 1)
-    py = np.clip(np.round(ry.min() + (ey - cy.min()) * sy).astype(int), 0, render_alpha.shape[0] - 1)
-    seen = render_alpha[py, px] & (view_uv[py, px, 3] > 0.5)
+    # Every render pixel looks up the concept pixel it shows, so the emitter is covered without gaps however the
+    # concept, render and texture sizes compare: one texel per concept pixel left round 25's firebox as dim specks on
+    # a 4096 texture (0.045% of the map).
+    py, px = np.nonzero(render_alpha & (view_uv[..., 3] > 0.5))
+    ex = np.round(cx.min() + (px - rx.min()) / sx).astype(int)
+    ey = np.round(cy.min() + (py - ry.min()) / sy).astype(int)
+    inside = (ex >= 0) & (ex < emitter.shape[1]) & (ey >= 0) & (ey < emitter.shape[0])
+    seen = np.zeros(len(px), bool)
+    seen[inside] = emitter[ey[inside], ex[inside]]
     width, height = texture_size
     u = np.clip((view_uv[py[seen], px[seen], 0] * width).astype(int), 0, width - 1)
     v = np.clip(((1 - view_uv[py[seen], px[seen], 1]) * height).astype(int), 0, height - 1)
     mask = np.zeros((height, width), np.uint8)
     mask[v, u] = 255
     # A render pixel covers a few texels; close the gaps without reaching across UV chart seams.
-    return Image.fromarray(mask).filter(ImageFilter.MaxFilter(3))
+    size = max(3, 2 * int(np.ceil(texture_size[0] / render_alpha.shape[1])) + 1)
+    return Image.fromarray(mask).filter(ImageFilter.MaxFilter(size))

@@ -799,6 +799,20 @@ class SlopForgeTests(unittest.TestCase):
         self.assertNotIn("turn_around", load_manifest(manifest)["assets"]["prop:walkway"])
         self.assertEqual(approve.call_count, 3)
 
+    def test_approve_keeps_a_reviewers_quarter_turn_and_erase_boxes_on_the_asset(self):
+        # Round 25 (2026-11-14): the brute faced sideways; the boss's concepts show a street lamp for scale.
+        with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
+                redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "generate", "prop", "brute", "A brute"]), 0)
+        manifest = self.root / "ai/assets/manifest.json"
+        with patch("slopforge.pipelines.model.approve"), redirect_stdout(StringIO()):
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:brute", "1", "--turn", "90",
+                                       "--erase-box", "0.1,0.5,0.3,1"]), 0)
+            record = load_manifest(manifest)["assets"]["prop:brute"]
+            self.assertEqual((record["turn"], record["erase_boxes"]), (90, [[0.1, 0.5, 0.3, 1.0]]))
+            self.assertEqual(cli_main(["--project", str(self.root), "approve", "prop:brute", "1", "--turn", "0"]), 0)
+        self.assertNotIn("turn", load_manifest(manifest)["assets"]["prop:brute"])
+
     def test_generate_gives_a_3d_asset_a_real_size_standing_on_its_base(self):
         with patch("slopforge.pipelines.model.generate", return_value=[{"number": 1, "status": "candidate"}]), \
                 redirect_stdout(StringIO()):

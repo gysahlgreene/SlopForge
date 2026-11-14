@@ -41,6 +41,7 @@ define required behavior and evidence; [current state](../CURRENT_STATE.md) reco
 - [Creature views, live](media/creature-views-b2-2026-10/README.md): the generated wolf's start frame, training pictures and a known motion rendered through its cameras (B2)
 - [Creature walk, larger start frame and refit](media/creature-fit-d-2026-10/README.md): camera layouts and five fits of one wolf walk compared, and the fit the owner chose (M5)
 - [Unity delivery](UNITY.md)
+- [Unreal delivery](UNREAL.md): FBX in Unreal's axes, an ORM map, and models broken into rigid parts (`break-views`, `--break-parts`)
 
 ## Examples and qualification evidence
 
