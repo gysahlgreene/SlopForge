@@ -111,13 +111,16 @@ def render_break_views(blender, blend, name, directory):
     return [directory / f"view_{view}.png" for view in VIEWS]
 
 
-def export_unreal(config, blender, blend, name, out_dir, work_dir, break_parts=None):
+def export_unreal(config, blender, blend, name, out_dir, work_dir, break_parts=None, moving=None, keep_origin=False):
     """<out_dir>/<name>.fbx, and with break_parts (load_break_parts) its parts in <out_dir>/Parts; returns the report.
+    moving: the declared hinges and slides a weapon's final pass split off, each written to Parts with its origin on
+    its pivot and its axis and range in Unreal's frame. keep_origin: a held weapon keeps its grip as its origin.
 
     The part masks are cut by SAM 2.1 on the views' renders from the declared boxes (slopforge.parts), then the cut
     is made on the same renders' camera (blender/export_unreal.py)."""
     work_dir = Path(work_dir)
-    request = {"blend": str(blend), "name": name, "out_dir": str(out_dir), "report": str(work_dir / "unreal.json")}
+    request = {"blend": str(blend), "name": name, "out_dir": str(out_dir), "report": str(work_dir / "unreal.json"),
+               "moving": moving or [], "keep_origin": keep_origin}
     if break_parts:
         render_break_views(blender, blend, name, work_dir / "views")
         masks = mask_views(config, work_dir / "views", break_parts, work_dir)

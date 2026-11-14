@@ -2120,7 +2120,10 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 with tempfile.TemporaryDirectory(prefix="slopforge-unreal-") as work:
                     shutil.rmtree(paths["parts_dir"], ignore_errors=True)  # a part dropped from the declaration goes
                     report = export_unreal(config, blender_executable(config, root), sources["blend"], asset["name"],
-                                           paths["directory"], work, break_parts)
+                                           paths["directory"], work, break_parts,
+                                           moving=[part for part in asset.get("parts") or []
+                                                   if part["kind"] in ("hinge", "slide")],
+                                           keep_origin=type_record.get("pivot") == "grip")
                 unreal_maps(sources["normal"], paths["roughness"], paths["metallic"], paths["orm"], paths["normal"])
                 paths["unreal_report"].write_text(json.dumps(report, indent=2) + "\n")
             # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs

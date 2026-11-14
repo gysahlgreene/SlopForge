@@ -105,6 +105,61 @@ class UnrealExportTests(unittest.TestCase):
                     self.assertAlmostEqual(read["high"][2], 0.2, delta=0.03)
 
 
+# A weapon as the final pass leaves it: a body (grip at its origin, the object moved 1 m along X) with a trigger child
+# whose origin is its pivot, 0.1 m forward (Blender -Y) and 0.05 m down from the grip.
+WEAPON = """import bpy, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bpy.ops.mesh.primitive_cube_add(size=1)
+body = bpy.context.object
+body.scale = (0.04, 0.6, 0.1)
+bpy.ops.object.transform_apply(scale=True)
+body.location = (1, 0, 0)
+bpy.ops.mesh.primitive_cube_add(size=0.02, location=(1, -0.1, -0.08))
+trigger = bpy.context.object
+trigger.name = "trigger"
+trigger.data.transform(__import__("mathutils").Matrix.Translation((0, 0, -0.01)))
+trigger.location = (1, -0.1, -0.05)
+trigger.parent = body
+trigger.matrix_parent_inverse = body.matrix_world.inverted()
+trigger["slopforge_part"] = "hinge"
+bpy.ops.wm.save_as_mainfile(filepath=sys.argv[-1])
+"""
+
+
+@unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
+class UnrealWeaponTests(unittest.TestCase):
+    def test_a_weapons_moving_parts_keep_their_pivots_and_the_grip_stays_the_origin(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "weapon.py").write_text(WEAPON)
+            self.assertEqual(_blender("--python", str(root / "weapon.py"), "--", str(root / "w.blend")).returncode, 0)
+            trigger = {"name": "trigger", "kind": "hinge", "axis": "x", "min": 0.0, "max": 20.0}
+            request = {"blend": str(root / "w.blend"), "name": "gun", "out_dir": str(root / "out"),
+                       "report": str(root / "report.json"), "moving": [trigger], "keep_origin": True}
+            (root / "request.json").write_text(json.dumps(request))
+            result = _blender("--python", str(ROOT / "blender/export_unreal.py"), "--", str(root / "request.json"))
+            self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+            report = json.loads((root / "report.json").read_text())
+            (part,) = report["moving_parts"]
+            # 0.1 m forward of the grip (the body's origin, 1 m along X in the file) and 0.05 m down: Unreal (0, 10, -5)
+            self.assertEqual(part["pivot_unreal_cm"], [0.0, 10.0, -5.0])
+            self.assertEqual((part["axis_unreal"], part["range"], part["range_unit"]), ([-1, 0, 0], [0.0, 20.0], "degrees"))
+            (root / "read.py").write_text(READ)
+            for name, objects in (("gun", 2), ("Parts/gun_trigger", 1), ("Parts/gun_body", 1)):
+                self.assertEqual(_blender("--python", str(root / "read.py"), "--", str(root / "out" / f"{name}.fbx"),
+                                          str(root / "r.json")).returncode, 0)
+                read = json.loads((root / "r.json").read_text())
+                self.assertEqual(len(read["objects"]), objects, name)
+                if name == "Parts/gun_trigger":  # its origin on its pivot: the cube hangs 0.02 m below it
+                    self.assertAlmostEqual(read["high"][2], 0.0, delta=0.002)
+                    self.assertAlmostEqual(read["low"][2], -0.02, delta=0.002)
+            # An undeclared child is refused: the game would not know how it moves
+            request["moving"] = []
+            (root / "request.json").write_text(json.dumps(request))
+            result = _blender("--python", str(ROOT / "blender/export_unreal.py"), "--", str(root / "request.json"))
+            self.assertNotEqual(result.returncode, 0)
+
+
 class UnrealMapTests(unittest.TestCase):
     def test_unreal_gets_an_orm_map_and_a_directx_normal(self):
         from slopforge.unreal import unreal_maps
