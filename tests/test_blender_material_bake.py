@@ -1543,6 +1543,25 @@ print("TAGS", json.dumps({{o.name: sorted(set(a.value for a in o.data.attributes
         self.assertLess(measured["min_y"], -0.7)  # the tip, 0.75 ahead of the grip at 1.1 scale, is forward
         self.assertGreater(measured["max_z"], -measured["min_z"])  # the stock sits above the grip
 
+    def test_a_side_drawn_weapon_built_lying_flat_is_rolled_onto_its_edge(self):
+        # A hooked blade drawn side-on, built rolled flat as TRELLIS.2 built a sabre and a wrench (2026-11-14): its
+        # profile lies across, 3 cm thin upright. With --side-concept it comes out as the same blade built upright
+        # does, hook up and grip down (not upside down); without it the crossbow rule keeps it flat.
+        parts = {"blade": ((0, 0, 0), (1.0, 0.03, 0.1)), "hook": ((0.47, 0, 0.125), (0.06, 0.03, 0.15)),
+                 "grip": ((-0.38, 0, -0.1), (0.08, 0.03, 0.12))}
+        concept, masks = _boxes_seen_from_front(parts, [], (512, 256), 400, (256, 128))
+        dense = {"cuts": 10, "budget": 20000}  # 12 triangles a box are too few samples for a silhouette fit
+        built_upright = self.orient(parts, [], concept, masks["grip"], extra=("--side-concept",), **dense)
+        rolled = self.orient(parts, [("X", 90)], concept, masks["grip"], extra=("--side-concept",), **dense)
+        for key in ("max_z", "min_z", "min_y"):
+            # within the silhouette's degree: a degree of tilt moves an end of 1.1 m by 2 cm
+            self.assertAlmostEqual(rolled[key], built_upright[key], delta=0.02, msg=key)
+        for axis in range(3):
+            self.assertAlmostEqual(rolled["dims"][axis], built_upright["dims"][axis], delta=0.02)
+        self.assertGreater(rolled["dims"][2], 5 * rolled["dims"][0])  # on its edge
+        flat = self.orient(parts, [("X", 90)], concept, masks["grip"], **dense)
+        self.assertLess(flat["dims"][2], rolled["dims"][0] * 2)
+
 
 @unittest.skipUnless(Path(BLENDER).is_file(), "Blender is not installed")
 class BlenderHiddenFacesTests(unittest.TestCase):

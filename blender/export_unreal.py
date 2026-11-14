@@ -38,6 +38,23 @@ def to_unreal(point):
     return [round(point[0] * 100, 3), round(-point[1] * 100, 3), round(point[2] * 100, 3)]
 
 
+# A declared axis in the Unity frame the --part ranges use (docs/WEAPONS.md, Axes) as a vector in Unreal's: Unity
+# (x, y, z) -> Unreal (-x, z, y), through Blender (-x, -z, y) and the export's mirrored y. Its determinant is +1 and
+# both engines are left-handed, so a positive angle keeps its sense: FQuat(axis, angle) turns a part as Unity's
+# Quaternion.AngleAxis did, and a slide moves the same way.
+UNITY_TO_UNREAL = {"x": [-1, 0, 0], "y": [0, 0, 1], "z": [0, 1, 0]}
+
+
+def moving_record(part, pivot, path):
+    """A declared hinge or slide as the game reads it: axis in Unreal's frame, range in degrees (hinge) or
+    centimetres (slide), pivot in Unreal centimetres, and its FBX."""
+    scale = 1 if part["kind"] == "hinge" else 100
+    return {"name": part["name"], "kind": part["kind"], "axis_unreal": UNITY_TO_UNREAL[part["axis"]],
+            "range": [round(part["min"] * scale, 4), round(part["max"] * scale, 4)],
+            "range_unit": "degrees" if part["kind"] == "hinge" else "cm",
+            "pivot_unreal_cm": to_unreal(pivot), "fbx": path}
+
+
 def export(objects, path):
     bpy.ops.object.select_all(action="DESELECT")
     for item in objects:
@@ -189,14 +206,34 @@ def main():
     if not roots:
         raise SystemExit("The blend has no mesh")
     obj = max(roots, key=lambda item: len(item.data.polygons))
-    if obj.children:
-        raise SystemExit("The model already has parts (a weapon's moving parts); Unreal delivery of those is not built")
-    # The model's own frame, on its floor: the transform into the mesh, then the bottom centre to the origin.
+    moving = {part["name"]: part for part in request.get("moving") or []}
+    children = list(obj.children)
+    if children and request.get("parts"):
+        raise SystemExit("The model already has moving parts; it cannot also be broken apart")
+    if set(child.name for child in children) - set(moving):
+        raise SystemExit(f"Parts {sorted(set(child.name for child in children) - set(moving))} are in the model but "
+                         "not declared as hinges or slides")
+    # The model's own frame: the transforms into the meshes, each moving part's origin kept on its pivot.
+    worlds = {child.name: child.matrix_world.copy() for child in children}
+    grip = obj.matrix_world.to_translation()  # a held weapon's origin is its grip (prepare_model.py)
+    for child in children:
+        child.parent = None
     obj.data.transform(obj.matrix_world)
     obj.matrix_world = Matrix.Identity(4)
-    corners = np.array([vertex.co for vertex in obj.data.vertices])
+    for child in children:
+        pivot = worlds[child.name].to_translation()
+        child.data.transform(Matrix.Translation(-pivot) @ worlds[child.name])
+        child.matrix_world = Matrix.Translation(pivot)
+    corners = np.array([item.matrix_world @ vertex.co for item in [obj, *children] for vertex in item.data.vertices])
     low, high = corners.min(0), corners.max(0)
-    obj.data.transform(Matrix.Translation(-Vector(((low[0] + high[0]) / 2, (low[1] + high[1]) / 2, low[2]))))
+    # on its floor, the bottom centre at the origin; a held weapon keeps its grip there
+    origin = grip if request.get("keep_origin") else Vector(((low[0] + high[0]) / 2, (low[1] + high[1]) / 2, low[2]))
+    shift = Matrix.Translation(-origin)
+    obj.data.transform(shift)
+    for child in children:
+        child.matrix_world = shift @ child.matrix_world
+    for child in children:
+        child.parent = obj  # obj is at the identity, so the child stays where it is
     obj.data.update()
     report = {"name": request["name"], "size_m": [round(float(value), 4) for value in high - low]}
     out = Path(request["out_dir"])
@@ -208,6 +245,21 @@ def main():
         report.update(cut_parts(obj, request))
     export([obj, *obj.children], out / f"{request['name']}.fbx")
     report["fbx"] = f"{request['name']}.fbx"
+    if moving:
+        files = {"body": f"Parts/{request['name']}_body.fbx"}
+        report["moving_parts"] = []
+        for child in list(obj.children):
+            pivot = child.matrix_world.to_translation()
+            child.parent = None
+            child.matrix_world = Matrix.Identity(4)
+            path = f"Parts/{request['name']}_{child.name}.fbx"
+            export([child], out / path)
+            report["moving_parts"].append(moving_record(moving[child.name], pivot, path))
+        export([obj], out / files["body"])
+        report["body_fbx"] = files["body"]
+        missing = sorted(set(moving) - {part["name"] for part in report["moving_parts"]})
+        if missing:
+            raise SystemExit(f"Declared moving part(s) {missing} are not in the model")
     if request.get("parts"):
         files = {}
         for child in list(obj.children):

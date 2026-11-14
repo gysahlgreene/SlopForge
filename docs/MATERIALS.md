@@ -119,6 +119,23 @@ result against that declaration before anyone reviews it.
    strand can land on the forehead. A gate that kept the voxel color where it disagreed with a
    blurred concept removed those strands but also the eyes the voxel bake had lost, so it was dropped.
 
+   **Side projection (weapons).** `concept_projection: side` (the `weapon` type) carries a side-profile concept's
+   colour onto both flat sides of the base colour: the concept on the side its fitted view shows, mirrored on the
+   far one (`concept_view.py` renders both, the far one with `view`). Each texel a render shows takes the concept's
+   hue and chroma, and its lightness moves half way to the concept's (the concept is lit), all the way where the two
+   differ by over 25 L*. Declared glass is kept. It runs before the metal and colour shifts, which then measure the
+   projected map, and is recorded as `concept_side_projection`. On 2026-11-14 round 25's lightning gun had baked its
+   walnut stock and leather bands tan on both seeds: projected, its hue difference from the concept went from 4.34 to
+   0.11 and its chroma ratio from 2.27 to 1.15, and the stock, bands and coils read as drawn.
+   It runs only from a flat side view (fitted within 5° of level) that fits at 0.9 or better, as the emitters'
+   projection. In the offline A/B a pike fitted at 0.84 had its middle band painted 20% along its shaft from where
+   the model has it, and a lever rifle fitted from 25° above had its stock's wood smeared over its barrels. Limits:
+   - a thin part the model places differently from the concept is not reached: the lever rifle's loop lever, baked
+     white from the background showing through it in the concept, stayed white;
+   - top and bottom faces keep the voxel colour, so a part whose bake is far off shows a seam along its edges;
+   - parts drawn in front of others in the concept (a revolver's cylinder over its frame) colour only what the
+     render shows at that pixel.
+
 6. **Emission.** When a region is declared `emissive`, the material stage builds the
    emission map from the base color: texels near a declared `#rrggbb` colour glow in that
    colour, and undeclared-colour emitters use large pale near-neutral regions (pale paper or glass:

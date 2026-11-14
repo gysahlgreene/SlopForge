@@ -33,13 +33,13 @@ from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               finish_word, lift_nonmetal_roughness, make_metallic_gloss, match_concept_colours,
                               match_metal_lightness, unity_cli, zero_metallic, concept_part_colours)
-from ..emitters import concept_emitter_mask, project_to_texture
+from ..emitters import concept_emitter_mask, project_side_colours, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
 from ..parts import check_part_masks, check_slide_scale, make_part_masks, part_settings
 from ..validation import (MIN_EMISSIVE_FRACTION, MIN_SMALL_EMISSIVE_FRACTION, MODULE_USE_CODES, apply_concept_colour, apply_concept_silhouette, apply_declared_emitter,
-                          apply_hybrid_alignment, apply_mesh_folds, apply_part_coverage, apply_part_fit,
+                          apply_hybrid_alignment, apply_mask_split, apply_mesh_folds, apply_part_coverage, apply_part_fit,
                           apply_part_penetration, apply_visible_backfaces,
                           apply_concept_fit, apply_declared_glass, apply_declared_nonmetal, apply_module_footprint,
                           apply_module_stretch, apply_module_use, apply_moving_parts, apply_thin_features, apply_weapon_orientation,
@@ -1230,6 +1230,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     cutout = (lineage or {}).get("concept_cutout")
     # A held weapon's views search the full turn: TRELLIS.2 can rebuild it facing the other way (concept_view.py).
     turn = {"full_turn": True} if asset.get("pivot") == "grip" else {}
+    side_projection = None
+    if asset_type.get("concept_projection") == "side" and cutout and Path(cutout).is_file():
+        side_projection = _project_side_concept(root, config, cutout, mesh_path, paths, turn)
     transfer = bool(asset_type.get("concept_colour_transfer"))
     if (declares_metal or transfer) and cutout and Path(cutout).is_file():
         # The base colour and metallic maps seen from the concept's side: metal drawn lighter than decoded is
@@ -1294,6 +1297,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
                   concept=(lineage or {}).get("concept_cutout") if framed else None,
                   facing_concept=None if framed else _facing_concept(asset, lineage),
                   turn_around=bool(asset.get("turn_around")), turn=int(asset.get("turn") or 0),
+                  side_concept=asset_type.get("concept_projection") == "side",
                   grip_mask=Path(masks) / f"{grip['name']}.png" if held and grip and masks else None, parts=moving,
                   parts_json=parts_json, anchors={part["name"]: part["anchor"] for part in declared if part.get("anchor")},
                   motions={part["name"]: (part["axis"], float(part["min"]), float(part["max"])) for part in declared
@@ -1306,7 +1310,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"), min_uv_area=asset_type.get("min_uv_area"))
-    if asset_type.get("concept_projection"):
+    if asset_type.get("concept_projection") == "front":
         validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
     if declares_metal or generator_metallic is not None:  # the brief explains the metallic map
@@ -1330,6 +1334,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
     if colour_transfer is not None:
         validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
+    if side_projection is not None:
+        validation.setdefault("measured", {})["concept_side_projection"] = side_projection
     if nonmetal_floor is not None:
         validation.setdefault("measured", {})["nonmetal_roughness_floor"] = nonmetal_floor
     if held:
@@ -1341,8 +1347,12 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     hybrid_info = mesh_info.get("hybrid") or {}
     # OmniPart decides labels where the mask did not vote: faces the concept's view did not see, or a dropped mask
     decisive = not ((hybrid_info.get("view") or {}).get("through") and not hybrid_info.get("masks_dropped"))
-    validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
-                                        float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
+    if mesh_info.get("part_model") == "masks" and not mesh_info.get("open_state"):
+        # no OmniPart: a face no mask voted on has no evidence for its part (an open part stands clear of the body)
+        validation = apply_mask_split(validation, not decisive)
+    else:
+        validation = apply_hybrid_alignment(validation, hybrid_info.get("alignment_error"),
+                                            float(asset_type.get("max_hybrid_alignment_error", 0.03)), decisive=decisive)
     validation = apply_part_fit(validation, (mesh_info.get("open_state") or {}).get("close"), MAX_OPEN_PART_STRETCH)
     if mesh_info.get("part_model"):
         validation = apply_part_coverage(validation, validation.get("measured", {}).get("part_coverage") or {},
@@ -1504,7 +1514,7 @@ def _reduction_budget(face_budget, asset, asset_type=None):
     cut_later = any(part["kind"] in ("hinge", "slide") for part in asset.get("parts") or [])
     if not cut_later:
         return face_budget
-    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") == "hybrid" else 0.9))
+    return int(face_budget * (0.85 if (asset_type or {}).get("part_model") in ("hybrid", "masks") else 0.9))
 
 
 def _fit_texture_size(maps, size):
@@ -1576,6 +1586,36 @@ def _concept_view(root, config, cutout, mesh_path, paths, name, **options):
             {"status": "failed", "error": (result.stdout + result.stderr)[-500:]})
     view.pop("traceback", None)
     return view
+
+
+SIDE_PROJECTION_MIN_FIT = 0.9  # as the emitters' projection: below it a pike's band landed 20% along its shaft
+SIDE_PROJECTION_MAX_ELEVATION = 5  # degrees: a rifle fitted from 25 above smeared its stock's wood over the barrels
+
+
+def _project_side_concept(root, config, cutout, mesh_path, paths, turn):
+    """A side-profile concept's colours carried onto both sides of the base colour (emitters.project_side_colours);
+    returns its report. Only from a flat side view that fits the concept closely: a poorer fit paints parts where the
+    model does not have them (2026-11-14 A/B on round 25's weapons)."""
+    near = _concept_view(root, config, cutout, mesh_path, paths, "side_near", min_iou=SIDE_PROJECTION_MIN_FIT, **turn)
+    report = {key: near.get(key) for key in ("status", "theta", "phi", "silhouette_iou", "reason")
+              if near.get(key) is not None}
+    if near.get("status") != "rendered":
+        return report
+    if abs(near["phi"]) > SIDE_PROJECTION_MAX_ELEVATION:
+        return {**report, "status": "skipped", "reason": f"fitted from {near['phi']} degrees above the side"}
+    concept = Image.open(cutout).convert("RGBA")
+    mirrored = paths["directory"] / "side_far_concept.png"
+    concept.transpose(Image.FLIP_LEFT_RIGHT).save(mirrored)
+    far = _concept_view(root, config, mirrored, mesh_path, paths, "side_far", view=[near["theta"] + 180, near["phi"]])
+    if far.get("status") != "rendered":
+        return {**report, "status": "failed", "reason": f"far side: {far.get('error') or far.get('reason')}"}
+    views = []
+    for name, image in (("side_near", concept), ("side_far", Image.open(mirrored).convert("RGBA"))):
+        prefix = paths["directory"] / name
+        views.append((np.asarray(image, dtype=float), np.asarray(Image.open(f"{prefix}_base.png").convert("RGBA")),
+                      np.load(f"{prefix}_uv.npy")))
+        Path(f"{prefix}_uv.npy").unlink()  # 64 MB of floats at 2048; the base render stays as evidence
+    return {**report, "status": "projected", "changed_share": project_side_colours(paths["basecolor"], views)}
 
 
 def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):
@@ -2116,7 +2156,10 @@ def approve_texture(project_root, config, manifest, key, number, force=False, *,
                 with tempfile.TemporaryDirectory(prefix="slopforge-unreal-") as work:
                     shutil.rmtree(paths["parts_dir"], ignore_errors=True)  # a part dropped from the declaration goes
                     report = export_unreal(config, blender_executable(config, root), sources["blend"], asset["name"],
-                                           paths["directory"], work, break_parts)
+                                           paths["directory"], work, break_parts,
+                                           moving=[part for part in asset.get("parts") or []
+                                                   if part["kind"] in ("hinge", "slide")],
+                                           keep_origin=type_record.get("pivot") == "grip")
                 unreal_maps(sources["normal"], paths["roughness"], paths["metallic"], paths["orm"], paths["normal"])
                 paths["unreal_report"].write_text(json.dumps(report, indent=2) + "\n")
             # held weapons and types that deform (creatures, lit by probes) get no lightmap UVs
@@ -2463,8 +2506,8 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
             raise ValueError("Cannot resume: the approved open picture changed; approve without --resume")
         open_number = recorded_open
     open_candidate = open_choice(asset, number, open_number) if open_number is not None else None
-    if open_candidate and part_backend(asset_type, asset) != "hybrid":
-        raise ValueError("An open picture is split by the hybrid parts route: set part_model: hybrid on the type")
+    if open_candidate and part_backend(asset_type, asset) not in ("hybrid", "masks"):
+        raise ValueError("An open picture is split by the hybrid parts route: set part_model: hybrid or masks on the type")
     model_workflow_path = resolve_workflow(root, workflow) if workflow else None
     try:
         python = python_executable(root, config)
@@ -2749,7 +2792,7 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                         "hybrid_apply.py": tool_sha256(tool_root() / "blender/hybrid_apply.py"),
                         "part_split.py": file_sha256(tool_root() / "slopforge/part_split.py"),
                         "hybrid.py": file_sha256(tool_root() / "slopforge/backends/hybrid.py")}
-                       if part_backend(asset_type, asset) == "hybrid" else
+                       if part_backend(asset_type, asset) in ("hybrid", "masks") else
                        {"prepare_parts.py": tool_sha256(tool_root() / "blender/prepare_parts.py")})}
                 mesh_settings["part_sampler"] = _part_sampler(asset_type)
             if open_artifact:  # the open part is closed in this stage (blender/close_part.py) within the bound
@@ -2839,12 +2882,14 @@ def approve(project_root, config, asset_type, style, manifest, key, number, forc
                     else:
                         generate_model(root, config, mesh_paths["input_3d"], asset["name"], source_mesh, model_metadata,
                                        mesh_seed)
-                    if part_backend(asset_type, asset) == "hybrid":
-                        # The generated surface, split by OmniPart's parts (docs/WEAPONS.md, Hybrid parts)
+                    if part_backend(asset_type, asset) in ("hybrid", "masks"):
+                        # The generated surface, split by OmniPart's parts and the masks, or the masks alone
+                        # (docs/WEAPONS.md, Hybrid parts)
                         generate_hybrid_parts(root, config, mesh_paths["cutout"], source_mesh, model_metadata, mesh_seed,
                                               asset["parts"], mesh_paths["part_masks"],
                                               texture_size=asset.get("texture_size") or asset_type.get("texture_size")
                                               or pipeline.get("texture_size", 2048), **_part_sampler(asset_type),
+                                              masks_only=part_backend(asset_type, asset) == "masks",
                                               **({"open_part": hinged_part(asset)} if open_artifact else {}))
                     config.pop("_journal_context", None)
                 _reload_manifest(root, pipeline, manifest)

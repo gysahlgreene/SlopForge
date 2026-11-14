@@ -60,5 +60,23 @@ and the concept hid one leg behind a forearm. On round 25's hand both versions l
 model's own front and back cut all 13 parts cleanly (2026-11-13).
 
 **Limits:** checked on one generated humanoid and a test figure. A part neither view sees (between the legs, inside an
-arm) is filled from its neighbours. The cut follows the surface, not a plane, so a cap can be uneven. Moving parts
-(a weapon's hinges and slides) are not delivered to Unreal yet; `approve-texture` refuses such a model.
+arm) is filled from its neighbours. The cut follows the surface, not a plane, so a cap can be uneven.
+
+## A weapon's moving parts
+
+A weapon's hinges and slides are split off in its final pass ([Weapons](WEAPONS.md#parts)), so delivery only
+writes them out (`blender/export_unreal.py`):
+- A held weapon (type `pivot: grip`) keeps its **grip as the origin**, not the bottom centre, so it attaches to a
+  hand socket as it is. Its tip points along Unreal +Y, as Blender's -Y.
+- `<name>.fbx` holds the body with each moving part as a child at its pivot. `Parts/<name>_body.fbx` and
+  `Parts/<name>_<part>.fbx` are the same pieces alone, each part's origin on its pivot.
+- `unreal.json` lists them under `moving_parts`: `kind`, `axis_unreal` (a unit vector), `range` with `range_unit`
+  (degrees for a hinge, centimetres for a slide) and `pivot_unreal_cm` from the weapon's origin.
+- The `--part` axes are declared in Unity's frame (x right, y up, z forward). Unreal's axis is Unity's (x, y, z) as
+  (-x, z, y). That map is a proper rotation and both engines are left-handed, so a range keeps its sign: turn a
+  hinge by `FQuat(axis_unreal, angle)` and move a slide by `axis_unreal * distance`.
+- A child that is not a declared hinge or slide is refused, as is a model with moving parts and `--break-parts`.
+
+No Animator, prefab, colliders or play-mode check are made for Unreal: the game drives the parts from
+`unreal.json`. Checked on a test model (`tests/test_unreal_blender.py`); the axis map is reasoned from the two
+engines' conventions and not yet checked by playing a part in Unreal.

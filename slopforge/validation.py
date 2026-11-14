@@ -451,6 +451,25 @@ def apply_visible_backfaces(validation, shares, maximum):
     return validation
 
 
+def apply_mask_split(validation, voted_everywhere):
+    """Fail a masks-only split (part_model: masks) unless the concept's view voted on every face and no mask was
+    dropped: with no OmniPart parts, the faces the view did not see would take their part from their neighbours
+    alone (a pistol's slide went to the body over the unseen half of its rear, 2026-10-25). Another seed is tried
+    (part_missing). voted_everywhere is the negation of apply_hybrid_alignment's decisive."""
+    measured, limits = validation.setdefault("measured", {}), validation.setdefault("limits", {})
+    measured["mask_split_voted_everywhere"] = bool(voted_everywhere)
+    if voted_everywhere:
+        return validation
+    validation["errors"] = [*validation.get("errors", []),
+        "The concept's masks did not vote on every face (the fitted view does not look through the weapon's "
+        "thickness, or a mask missed its part), and the masks-only split has nothing else to go on, so another "
+        "seed is tried"]
+    validation["failure_codes"] = [*validation.get("failure_codes", []), "part_missing"]
+    measured["moving_parts_missing"] = max(measured.get("moving_parts_missing", 0), 1)
+    limits["max_moving_parts_missing"] = 0
+    return validation
+
+
 def apply_hybrid_alignment(validation, error, maximum, decisive=True):
     """Fail a hybrid-parts candidate whose OmniPart parts did not land on the TRELLIS.2 surface they vote on: mean
     distance after alignment, as a share of the surface's size (generation.json hybrid.alignment_error). Two
