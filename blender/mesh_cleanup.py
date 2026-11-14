@@ -2,6 +2,20 @@ import bmesh
 import bpy
 
 
+def split_nonmanifold_edges(mesh):
+    """Give each sheet meeting at an edge of three or more faces its own copy of the edge; the shape is unchanged.
+    Collapse decimation will not collapse across such edges: a TRELLIS.2 springboard with 7448 of them stalled at
+    65559 faces of a 60000 budget (2026-11-14). Returns the number of edges split."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    edges = [edge for edge in bm.edges if not edge.is_manifold and not edge.is_boundary]
+    if edges:
+        bmesh.ops.split_edges(bm, edges=edges)
+        bm.to_mesh(mesh)
+    bm.free()
+    return len(edges)
+
+
 def remove_isolated_single_faces(mesh):
     """Drop detached one-face fragments while keeping multi-face islands. The other faces keep their orientation:
     recomputing it turned half of a pistol inside out on the open surface hidden-face removal leaves (2026-10-26)."""
@@ -769,6 +783,7 @@ def _cap_cut(bm, basecolor=None):
         bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=left)
     caps = [face for face in bm.faces if face not in before]
     caps = bmesh.ops.triangulate(bm, faces=caps)["faces"]
+    caps = _drop_twin_caps(bm, caps, before)
     left = sum(edge.is_valid and edge.is_boundary for edge in edges)
     if left:
         print(f"Cut left {left} open edges that the caps could not close")
@@ -778,6 +793,8 @@ def _cap_cut(bm, basecolor=None):
         for cap in _face_pieces(caps):  # each opening takes its own texel
             loops = [loop for face in cap for vertex in face.verts for loop in vertex.link_loops
                      if loop.face not in cap_set]
+            if not loops:  # a cap with no surface around it (a floor spikes cut, 2026-11-14) keeps its own UVs
+                continue
             source = _typical_texel(loops, uv, basecolor)
             for face in cap:
                 for loop in face.loops:
@@ -785,6 +802,16 @@ def _cap_cut(bm, basecolor=None):
     for face in caps:
         face.smooth = False
     return caps
+
+
+def _drop_twin_caps(bm, caps, before):
+    """Delete the caps lying on the same corners as a face already there. A cut of a flyer's body capped six
+    triangles that way, facing the other way, and Blender's FBX import crashed on the pairs (2026-11-14)."""
+    kept = {frozenset(face.verts) for face in before if face.is_valid}
+    twins = [face for face in caps if frozenset(face.verts) in kept]
+    if twins:
+        bmesh.ops.delete(bm, geom=twins, context="FACES_ONLY")
+    return [face for face in caps if face.is_valid]
 
 
 _PIXELS = {}

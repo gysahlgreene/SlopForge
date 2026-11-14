@@ -106,6 +106,43 @@ assert len(mesh.loop_triangles)<=10000, len(mesh.loop_triangles)
                            check=True, capture_output=True)
 
 
+    def test_a_reduction_blocked_by_non_manifold_edges_still_reaches_its_budget(self):
+        # TRELLIS.2 meshes with thousands of edges shared by three or more faces stalled the collapse short of the
+        # budget (springboard and mender, 2026-11-14); a fin on every grid edge blocks it the same way.
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source, target, blend = folder / "fins.glb", folder / "prepared.glb", folder / "prepared.blend"
+            fixture = folder / "fins.py"
+            fixture.write_text("""import bpy, bmesh, sys
+bpy.ops.wm.read_factory_settings(use_empty=True)
+bm = bmesh.new(); grid = {}
+n = 30
+for i in range(n + 1):
+    for j in range(n + 1):
+        grid[i, j] = bm.verts.new((i / n, j / n, 0))
+for i in range(n):
+    for j in range(n):
+        bm.faces.new((grid[i, j], grid[i + 1, j], grid[i + 1, j + 1], grid[i, j + 1]))
+for i in range(n):
+    for j in range(1, n):
+        bm.faces.new((grid[i, j], grid[i + 1, j], bm.verts.new(((i + 0.5) / n, j / n, 0.5 / n))))
+for face in bm.faces:
+    face.smooth = True  # shared vertices survive the glTF export, as in a TRELLIS.2 mesh
+mesh = bpy.data.meshes.new("fins"); bm.to_mesh(mesh)
+bpy.context.collection.objects.link(bpy.data.objects.new("fins", mesh))
+bpy.ops.export_scene.gltf(filepath=sys.argv[-1], export_format='GLB')
+""")
+            subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(fixture),
+                            "--", str(source)], check=True, capture_output=True)
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python",
+                                     str(ROOT / "blender/prepare_model.py"), "--", str(source), str(target), str(blend),
+                                     "--mesh-only", "--no-voxel-repair", "--face-budget", "800"],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
+            self.assertIn("Split non-manifold edges blocking the reduction", result.stdout)
+            self.assertIn("Output faces: ", result.stdout)
+            self.assertLessEqual(int(result.stdout.split("Output faces: ")[1].split()[0]), 800)
+
     def test_removes_only_single_face_islands(self):
         with tempfile.TemporaryDirectory() as temporary:
             script = Path(temporary) / "check_cleanup.py"
@@ -120,6 +157,27 @@ assert removed == 1, removed
 assert len(mesh.polygons) == 2, len(mesh.polygons)
 ''')
             subprocess.run([BLENDER, "--background", "--python", str(script)], check=True, capture_output=True)
+
+    def test_a_cap_on_the_corners_of_an_existing_face_is_dropped(self):
+        # A flyer's body was capped with six triangles on the corners of faces already there, facing the other way,
+        # and Blender's FBX import crashed on the pairs (2026-11-14).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "check_caps.py"
+            script.write_text(f"""import bpy, bmesh, runpy
+cleanup = runpy.run_path({str(ROOT / "blender/mesh_cleanup.py")!r})
+mesh = bpy.data.meshes.new("caps")  # bmesh refuses a second face on the same corners; a mesh keeps it
+mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1)], [],
+                 [(0, 1, 2), (1, 3, 2), (0, 2, 1), (0, 1, 4)])
+bm = bmesh.new(); bm.from_mesh(mesh); bm.faces.ensure_lookup_table()
+before = set(bm.faces[:2])
+caps = cleanup["_drop_twin_caps"](bm, list(bm.faces[2:]), before)
+corners = [frozenset(face.verts) for face in bm.faces]
+assert len(corners) == len(set(corners)), len(corners)
+assert len(caps) == 1 and len(bm.faces) == 3, (len(caps), len(bm.faces))
+""")
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-1500:] + result.stderr[-1500:])
 
     def test_removing_a_stray_face_leaves_the_others_facing_as_they_were(self):
         # Deleting a face reorients nothing. The cleanup recomputed every face's orientation, which on the open

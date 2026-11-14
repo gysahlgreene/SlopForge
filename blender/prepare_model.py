@@ -6,6 +6,7 @@ from pathlib import Path
 from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mesh_cleanup import (remove_enclosed_components, remove_isolated_single_faces, repair_manifold_locally,
+                          split_nonmanifold_edges,
                           unwrap_without_folds,
                           gltf_name, motion_matrix, remove_hidden_faces, separate_part, separate_tagged,
                           sweep_penetration, tag_parts, visible_backfaces)
@@ -733,17 +734,22 @@ if any(len(polygon.vertices) > 3 for polygon in obj.data.polygons):
     bpy.ops.object.modifier_apply(modifier=modifier.name)
 face_count = len(obj.data.polygons)
 print(f"Input faces: {face_count}")
+split_edges = False
 while face_count > target_faces:
     modifier = obj.modifiers.new(name="GameReadyDecimate", type="DECIMATE")
     modifier.decimate_type = "COLLAPSE"
     # Collapse ratios are approximate on reconstructed meshes; check the result.
-    modifier.ratio = 0.95 * target_faces / face_count
+    ratio = modifier.ratio = 0.95 * target_faces / face_count
     modifier.use_collapse_triangulate = True
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.modifier_apply(modifier=modifier.name)
     reduced_count = len(obj.data.polygons)
-    if reduced_count >= face_count:
-        raise SystemExit(f"Cannot reduce this mesh to its {target_faces}-face budget")
+    # Removing under half of what was asked means the collapse is blocked, so split the edges blocking it, once.
+    if not split_edges and face_count - reduced_count < 0.5 * (1 - ratio) * face_count:
+        split_edges = True
+        print(f"Split non-manifold edges blocking the reduction: {split_nonmanifold_edges(obj.data)}")
+    elif reduced_count >= face_count:
+        raise SystemExit(f"Cannot reduce this mesh to its {target_faces}-face budget: collapse left {reduced_count} of {face_count} faces")
     face_count = reduced_count
 print(f"Output faces: {face_count}")
 
