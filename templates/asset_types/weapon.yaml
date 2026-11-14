@@ -17,6 +17,10 @@ max_concept_darkened_share: 0.4
 # Small coloured regions (grips, stocks) are shifted towards the concept's colours from its side: the whole-object
 # checks passed a pistol's rosewood grips decoded orange-brown on every seed (docs/MATERIALS.md).
 concept_colour_transfer: true
+# Weapons are drawn flat side-on, so the concept's colours are projected onto both sides of the base colour when its
+# side view fits the model at 0.9 or better: the voxel bake drifts per region (a walnut stock and leather bands baked
+# tan), which the shift above cannot reach (docs/MATERIALS.md, Concept projection).
+concept_projection: side
 min_concept_fit: 0.8
 # Replaces the props' "no thin parts" rule, which a blade or a bowstring cannot follow.
 reconstruction_rule: >-

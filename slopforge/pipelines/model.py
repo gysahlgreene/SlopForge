@@ -33,7 +33,7 @@ from ..taxonomy import load_taxonomy, output_path
 from ..unity_material import (apply_glass, build_unity_material, derive_emission, emitter_colour_mask, glass_material_path,
                               finish_word, lift_nonmetal_roughness, make_metallic_gloss, match_concept_colours,
                               match_metal_lightness, unity_cli, zero_metallic, concept_part_colours)
-from ..emitters import concept_emitter_mask, project_to_texture
+from ..emitters import concept_emitter_mask, project_side_colours, project_to_texture
 from ..unity_weapon import build_weapon_prefab
 from ..unity_playmode import play_mode_script, verify_play_mode
 from ..kit_material import kit_texture, match_hue, match_roughness
@@ -1230,6 +1230,9 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
     cutout = (lineage or {}).get("concept_cutout")
     # A held weapon's views search the full turn: TRELLIS.2 can rebuild it facing the other way (concept_view.py).
     turn = {"full_turn": True} if asset.get("pivot") == "grip" else {}
+    side_projection = None
+    if asset_type.get("concept_projection") == "side" and cutout and Path(cutout).is_file():
+        side_projection = _project_side_concept(root, config, cutout, mesh_path, paths, turn)
     transfer = bool(asset_type.get("concept_colour_transfer"))
     if (declares_metal or transfer) and cutout and Path(cutout).is_file():
         # The base colour and metallic maps seen from the concept's side: metal drawn lighter than decoded is
@@ -1306,7 +1309,7 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         max_components=asset_type.get("max_components"),
         max_nonmanifold_edges=asset_type.get("max_nonmanifold_edges"),
         max_boundary_edges=asset_type.get("max_boundary_edges"), min_uv_area=asset_type.get("min_uv_area"))
-    if asset_type.get("concept_projection"):
+    if asset_type.get("concept_projection") == "front":
         validation = apply_concept_silhouette(validation, mesh_info.get("concept_projection"))
     maps = measure_material_maps({key: paths[key] for key in ("basecolor", "roughness", "metallic")})
     if declares_metal or generator_metallic is not None:  # the brief explains the metallic map
@@ -1330,6 +1333,8 @@ def _native_material_candidate(root, config, context, asset_type, asset, number,
         validation.setdefault("measured", {})["metal_lightness_gain"] = metal_gain
     if colour_transfer is not None:
         validation.setdefault("measured", {})["concept_colour_transfer"] = colour_transfer
+    if side_projection is not None:
+        validation.setdefault("measured", {})["concept_side_projection"] = side_projection
     if nonmetal_floor is not None:
         validation.setdefault("measured", {})["nonmetal_roughness_floor"] = nonmetal_floor
     if held:
@@ -1580,6 +1585,36 @@ def _concept_view(root, config, cutout, mesh_path, paths, name, **options):
             {"status": "failed", "error": (result.stdout + result.stderr)[-500:]})
     view.pop("traceback", None)
     return view
+
+
+SIDE_PROJECTION_MIN_FIT = 0.9  # as the emitters' projection: below it a pike's band landed 20% along its shaft
+SIDE_PROJECTION_MAX_ELEVATION = 5  # degrees: a rifle fitted from 25 above smeared its stock's wood over the barrels
+
+
+def _project_side_concept(root, config, cutout, mesh_path, paths, turn):
+    """A side-profile concept's colours carried onto both sides of the base colour (emitters.project_side_colours);
+    returns its report. Only from a flat side view that fits the concept closely: a poorer fit paints parts where the
+    model does not have them (2026-11-14 A/B on round 25's weapons)."""
+    near = _concept_view(root, config, cutout, mesh_path, paths, "side_near", min_iou=SIDE_PROJECTION_MIN_FIT, **turn)
+    report = {key: near.get(key) for key in ("status", "theta", "phi", "silhouette_iou", "reason")
+              if near.get(key) is not None}
+    if near.get("status") != "rendered":
+        return report
+    if abs(near["phi"]) > SIDE_PROJECTION_MAX_ELEVATION:
+        return {**report, "status": "skipped", "reason": f"fitted from {near['phi']} degrees above the side"}
+    concept = Image.open(cutout).convert("RGBA")
+    mirrored = paths["directory"] / "side_far_concept.png"
+    concept.transpose(Image.FLIP_LEFT_RIGHT).save(mirrored)
+    far = _concept_view(root, config, mirrored, mesh_path, paths, "side_far", view=[near["theta"] + 180, near["phi"]])
+    if far.get("status") != "rendered":
+        return {**report, "status": "failed", "reason": f"far side: {far.get('error') or far.get('reason')}"}
+    views = []
+    for name, image in (("side_near", concept), ("side_far", Image.open(mirrored).convert("RGBA"))):
+        prefix = paths["directory"] / name
+        views.append((np.asarray(image, dtype=float), np.asarray(Image.open(f"{prefix}_base.png").convert("RGBA")),
+                      np.load(f"{prefix}_uv.npy")))
+        Path(f"{prefix}_uv.npy").unlink()  # 64 MB of floats at 2048; the base render stays as evidence
+    return {**report, "status": "projected", "changed_share": project_side_colours(paths["basecolor"], views)}
 
 
 def _project_concept_emitters(root, config, cutout, mesh_path, paths, targets):

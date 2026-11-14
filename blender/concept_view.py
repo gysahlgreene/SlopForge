@@ -4,7 +4,8 @@ Usage: blender --background --python concept_view.py -- request.json
 
 request.json: {"model": textured.glb, "basecolor": texture.png, "concept": cutout.png (RGBA),
                "prefix": output path prefix, "report": report.json, "size": optional render size (2048),
-               "full_turn": optional, also search views from behind (weapons)}
+               "full_turn": optional, also search views from behind (weapons),
+               "view": optional [theta, phi] degrees to render from instead of fitting (no fit check)}
 
 TRELLIS.2 rebuilds a prop facing front, not posed as its three-quarter concept shows it, so the view is found by
 comparing the concept silhouette with orthographic silhouettes of surface samples over the front half of the view
@@ -206,11 +207,14 @@ def run(request):
         bpy.ops.object.join()
     obj = bpy.context.view_layer.objects.active
     world, samples = surface_samples(obj)
-    iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
-    report = {"theta": theta, "phi": phi, "silhouette_iou": round(iou, 4)}
+    if "view" in request:  # a given view (theta, phi in degrees), not fitted: the far side of a fitted one
+        (theta, phi), iou = request["view"], None
+    else:
+        iou, theta, phi = fit_view(samples, image_mask(request["concept"]), request.get("full_turn", False))
+    report = {"theta": theta, "phi": phi, "silhouette_iou": None if iou is None else round(iou, 4)}
     # Colour comparison only needs the concept's side of the model, not texel registration.
     min_iou = float(request.get("min_iou", MIN_SILHOUETTE_IOU))
-    if iou < min_iou:
+    if iou is not None and iou < min_iou:
         return {**report, "status": "skipped", "reason": f"best silhouette fit {iou:.3f} is below {min_iou}"}
 
     towards, right, up = view_axes(math.radians(theta), math.radians(phi))

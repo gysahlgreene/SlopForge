@@ -224,3 +224,39 @@ class ConceptEmitterBlenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SideColourProjectionTests(unittest.TestCase):
+    def test_a_side_concepts_colour_reaches_both_sides_and_glass_is_kept(self):
+        import tempfile
+        from pathlib import Path
+        from slopforge.emitters import project_side_colours
+        from slopforge.validation import _lab
+        # A stock drawn walnut (left half) and an iron barrel (right half), baked tan and pale grey. The near render
+        # shows the texture's left half, the far one its right half mirrored, so each side has its own texels.
+        concept = np.zeros((100, 200, 4), float)
+        concept[30:70, 10:100] = (74, 38, 24, 255)
+        concept[30:70, 100:190] = (40, 40, 44, 255)
+        y, x = np.mgrid[0:100, 0:200]
+        inside = (concept[..., 3] > 0).astype(float)
+        near_uv = np.stack([(x + 0.5) / 400, 1 - (y + 0.5) / 100, np.zeros_like(x, float), inside], -1)
+        far_uv = np.stack([1 - (x + 0.5) / 400, 1 - (y + 0.5) / 100, np.zeros_like(x, float), inside], -1)
+        mirrored = concept[:, ::-1]
+        texture = np.zeros((100, 400, 4), np.uint8)
+        texture[30:70, :] = (170, 130, 90, 255)
+        texture[30:70, 190:200] = (170, 130, 90, 90)  # see-through glass at the near side's end
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "basecolor.png"
+            Image.fromarray(texture, "RGBA").save(path)
+            changed = project_side_colours(path, [(concept, concept, near_uv), (mirrored, mirrored, far_uv)])
+            result = np.asarray(Image.open(path).convert("RGBA")).astype(float)
+        self.assertGreater(changed, 0.7)
+        walnut, iron = _lab(np.array([[74, 38, 24], [40, 40, 44]], float))
+        for column in (50, 250):  # the stock on both sides (the far side mirrored onto texels 210-300)
+            stock = _lab(result[50:51, column, :3])[0]
+            self.assertLess(np.hypot(*(stock[1:] - walnut[1:])), 3)
+            self.assertLess(abs(stock[0] - walnut[0]), abs(_lab(np.array([[170, 130, 90]], float))[0][0] - walnut[0]))
+        for column in (150, 350):
+            self.assertLess(np.hypot(*(_lab(result[50:51, column, :3])[0][1:] - iron[1:])), 3)
+        self.assertEqual(tuple(result[50, 195]), (170, 130, 90, 90))  # glass untouched
+        self.assertEqual(result[10, 50, 3], 0)  # nothing painted outside the object
