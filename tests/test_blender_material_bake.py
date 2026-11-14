@@ -158,6 +158,27 @@ assert len(mesh.polygons) == 2, len(mesh.polygons)
 ''')
             subprocess.run([BLENDER, "--background", "--python", str(script)], check=True, capture_output=True)
 
+    def test_a_cap_on_the_corners_of_an_existing_face_is_dropped(self):
+        # A flyer's body was capped with six triangles on the corners of faces already there, facing the other way,
+        # and Blender's FBX import crashed on the pairs (2026-11-14).
+        with tempfile.TemporaryDirectory() as temporary:
+            script = Path(temporary) / "check_caps.py"
+            script.write_text(f"""import bpy, bmesh, runpy
+cleanup = runpy.run_path({str(ROOT / "blender/mesh_cleanup.py")!r})
+mesh = bpy.data.meshes.new("caps")  # bmesh refuses a second face on the same corners; a mesh keeps it
+mesh.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1)], [],
+                 [(0, 1, 2), (1, 3, 2), (0, 2, 1), (0, 1, 4)])
+bm = bmesh.new(); bm.from_mesh(mesh); bm.faces.ensure_lookup_table()
+before = set(bm.faces[:2])
+caps = cleanup["_drop_twin_caps"](bm, list(bm.faces[2:]), before)
+corners = [frozenset(face.verts) for face in bm.faces]
+assert len(corners) == len(set(corners)), len(corners)
+assert len(caps) == 1 and len(bm.faces) == 3, (len(caps), len(bm.faces))
+""")
+            result = subprocess.run([BLENDER, "--background", "--python-exit-code", "1", "--python", str(script)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout[-1500:] + result.stderr[-1500:])
+
     def test_removing_a_stray_face_leaves_the_others_facing_as_they_were(self):
         # Deleting a face reorients nothing. The cleanup recomputed every face's orientation, which on the open
         # surface hidden-face removal leaves turned half of a pistol inside out (HP8 seed 1, 2026-10-26: backs of

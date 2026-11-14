@@ -49,6 +49,9 @@ How the cut is made (`blender/export_unreal.py`):
   part left inside another by a mask's edge do not fly off as debris (`mesh_cleanup.merge_stray_islands`).
 - Parts are cut off from the ends of the declared tree inwards, and both sides of each cut are closed with flat caps
   in the colour beside them (`mesh_cleanup.separate_part`).
+- A cap on the corners of a face already there is dropped, and that opening stays open: a flyer's and a saboteur's
+  bodies were capped with such twins, facing the other way, and Blender's FBX import crashed on them (2026-11-14).
+  A cap with no surface around it keeps its own UVs instead of crashing the cut.
 - A part's joint, its origin, is the middle of its seam with its parent alone, so a hand resting on a thigh does not
   move the forearm's joint. A part that only touches its parent takes the middle of their closest points.
 - Every part, and the body, is also written alone as `Parts/<name>_<part>.fbx` with its origin on its joint;

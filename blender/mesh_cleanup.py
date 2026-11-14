@@ -783,6 +783,7 @@ def _cap_cut(bm, basecolor=None):
         bmesh.ops.triangle_fill(bm, use_beauty=True, use_dissolve=False, edges=left)
     caps = [face for face in bm.faces if face not in before]
     caps = bmesh.ops.triangulate(bm, faces=caps)["faces"]
+    caps = _drop_twin_caps(bm, caps, before)
     left = sum(edge.is_valid and edge.is_boundary for edge in edges)
     if left:
         print(f"Cut left {left} open edges that the caps could not close")
@@ -792,6 +793,8 @@ def _cap_cut(bm, basecolor=None):
         for cap in _face_pieces(caps):  # each opening takes its own texel
             loops = [loop for face in cap for vertex in face.verts for loop in vertex.link_loops
                      if loop.face not in cap_set]
+            if not loops:  # a cap with no surface around it (a floor spikes cut, 2026-11-14) keeps its own UVs
+                continue
             source = _typical_texel(loops, uv, basecolor)
             for face in cap:
                 for loop in face.loops:
@@ -799,6 +802,16 @@ def _cap_cut(bm, basecolor=None):
     for face in caps:
         face.smooth = False
     return caps
+
+
+def _drop_twin_caps(bm, caps, before):
+    """Delete the caps lying on the same corners as a face already there. A cut of a flyer's body capped six
+    triangles that way, facing the other way, and Blender's FBX import crashed on the pairs (2026-11-14)."""
+    kept = {frozenset(face.verts) for face in before if face.is_valid}
+    twins = [face for face in caps if frozenset(face.verts) in kept]
+    if twins:
+        bmesh.ops.delete(bm, geom=twins, context="FACES_ONLY")
+    return [face for face in caps if face.is_valid]
 
 
 _PIXELS = {}
