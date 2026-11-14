@@ -27,7 +27,8 @@ class UnrealPublicationTests(unittest.TestCase):
                                    *final["directory"].rglob("*metallic_gloss*")]
 
         never = AssertionError("an Unreal project does not use Unity")
-        stubs = [patch("slopforge.pipelines.model.export_unreal", side_effect=export)]
+        stubs = [patch("slopforge.pipelines.model.export_unreal", side_effect=export),
+                 patch("slopforge.pipelines.model.blender_executable", return_value="blender")]  # CI has no Blender
         with patch("slopforge.pipelines.model.unity_cli", side_effect=never):
             _roughness, _alpha, asset = PublicationFloorTests.publish(
                 self, {}, engine="unreal", inspect=inspect, stubs=stubs + [
